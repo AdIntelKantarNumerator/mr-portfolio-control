@@ -1,0 +1,46 @@
+# Production-shaped local stack: the app against a real Postgres.
+#
+#   cp .env.example .env      # fill in LINEAR_API_KEY etc.
+#   docker compose up --build
+#   docker compose exec app node_modules/.bin/tsx scripts/migrate.ts
+#   docker compose exec app node_modules/.bin/tsx scripts/seed.ts   # optional
+#
+# For the zero-install prototype you do not need any of this — `npm run setup`
+# uses an embedded Postgres instead.
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: pcr
+      POSTGRES_PASSWORD: pcr
+      POSTGRES_DB: pcr
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pcr -d pcr']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://pcr:pcr@db:5432/pcr
+      APP_URL: http://localhost:3000
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+      LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:-}
+      SYNC_TOKEN: ${SYNC_TOKEN:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SHEETS_SOURCES: ${SHEETS_SOURCES:-}
+    ports:
+      - '3000:3000'
+
+volumes:
+  pgdata:

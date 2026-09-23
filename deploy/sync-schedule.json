@@ -1,0 +1,108 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "comments": [
+      "A Consumption Logic App that calls the app's Linear sync endpoint on a timer.",
+      "",
+      "This is the pull half of the Linear integration. The webhook — the push half —",
+      "needs a Linear admin to create it; this does not, which makes it the part you",
+      "can set up yourself. Run it often enough and the difference is not noticeable.",
+      "",
+      "The token is a securestring: it is stored encrypted, is not returned by a",
+      "template read, and does not appear in the workflow definition in the portal.",
+      "",
+      "Deployed by deploy/azure-up.ps1. Redeploying replaces the definition in place,",
+      "so the schedule can be changed by re-running with a different interval."
+    ]
+  },
+  "parameters": {
+    "name": {
+      "type": "string",
+      "metadata": { "description": "Logic App name." }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
+    "syncUrl": {
+      "type": "string",
+      "metadata": { "description": "Full URL of the sync endpoint." }
+    },
+    "syncToken": {
+      "type": "securestring",
+      "metadata": { "description": "Value of the app's SYNC_TOKEN setting." }
+    },
+    "intervalHours": {
+      "type": "int",
+      "defaultValue": 1,
+      "minValue": 1,
+      "maxValue": 24
+    },
+    "state": {
+      "type": "string",
+      "defaultValue": "Enabled",
+      "allowedValues": ["Enabled", "Disabled"],
+      "metadata": {
+        "description": "Created Disabled when no Linear API key is configured yet, so it does not fail on a schedule against an app that cannot sync."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('name')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "state": "[parameters('state')]",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "syncUrl": { "type": "String" },
+            "syncToken": { "type": "SecureString" }
+          },
+          "triggers": {
+            "Recurrence": {
+              "type": "Recurrence",
+              "recurrence": {
+                "frequency": "Hour",
+                "interval": "[parameters('intervalHours')]"
+              }
+            }
+          },
+          "actions": {
+            "Sync_Linear": {
+              "type": "Http",
+              "runAfter": {},
+              "inputs": {
+                "method": "POST",
+                "uri": "@parameters('syncUrl')",
+                "headers": {
+                  "Authorization": "@{concat('Bearer ', parameters('syncToken'))}"
+                },
+                "retryPolicy": {
+                  "type": "exponential",
+                  "count": 3,
+                  "interval": "PT1M"
+                }
+              }
+            }
+          },
+          "outputs": {}
+        },
+        "parameters": {
+          "syncUrl": { "value": "[parameters('syncUrl')]" },
+          "syncToken": { "value": "[parameters('syncToken')]" }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "workflowName": {
+      "type": "string",
+      "value": "[parameters('name')]"
+    }
+  }
+}

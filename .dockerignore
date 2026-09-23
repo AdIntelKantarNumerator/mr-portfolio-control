@@ -1,0 +1,26 @@
+# Everything here is either rebuilt inside the image or must never enter it.
+#
+# The builder stage does `COPY . .`, so without this file a local `.env` — real
+# client secret, real session secret — is copied into the build context and
+# read by `next build`, which can inline values into the compiled output. The
+# runner stage would not carry the file itself, but the values could survive
+# inside the bundle. Keep this list ahead of anything you add to the repo root.
+.env
+.env.*
+!.env.example
+
+node_modules
+.next
+.data
+.git
+.gitignore
+*.log
+
+# Not needed to build or run the server.
+tests
+README.md
+AGENTS.md
+CLAUDE.md
+docker-compose.yml
+Dockerfile
+.dockerignore
