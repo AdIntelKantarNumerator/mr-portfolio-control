@@ -83,6 +83,35 @@ citing the transcripts it came from; per-source opt-in, off by default.
 - [ ] **Cost ceiling.** Nothing caps how often briefs are regenerated. Worth a
       per-day limit before this is open to the whole team.
 
+## Yaara (the agent)
+
+Built here: `agent_observations` table; `authored_by` / `reviewed_by` /
+`reviewed_at` on assessments; `GET /api/agent/portfolio` and
+`POST /api/agent/observations` (both SYNC_TOKEN); the Yaara card on the
+initiative and project pages, with mark-as-reviewed. Migration `0003`.
+
+- [ ] **Apply migration 0003 to Azure.** Until then the agent endpoints 500 on
+      the missing table. Same routine as before: set `$env:DATABASE_URL` in the
+      shell, then `npm run db:migrate`.
+- [ ] **Decide who reviews machine-written assessments.** Marking one reviewed
+      is a person putting their name to it. If nobody does, the card stays
+      amber — which is honest, and also means the health data is an agent's
+      unchecked opinion. This is the same unanswered question as the weekly
+      assessment pass, now with a deadline attached.
+- [ ] **Roles matter more again.** Anyone who can sign in can mark an agent
+      assessment reviewed. That is a signature with no check on who signed.
+- [ ] **Let `conversation_sources` link code repositories too.** The table
+      already maps Slack channels, meeting series and documents to initiatives
+      and projects. Adding `github_repo` (and later `azure_repo`,
+      `bitbucket_repo`) to the vocabulary is a `src/lib/domain.ts` change and a
+      form option, not a migration — and it replaces both the guessing-by-name
+      that attaches repo evidence today and the second list of repos kept in
+      Yaara's config.
+- [ ] **`GET /api/agent/sources`** so Yaara can read those links instead of
+      being told the same thing twice in two places.
+- [ ] **Rate-limit `/api/agent/observations`.** Nothing stops a misconfigured
+      loop from writing every minute and burying the history.
+
 ## Gaps in the tool
 
 

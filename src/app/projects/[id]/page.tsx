@@ -11,6 +11,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { Brief } from '@/components/brief'
+import { Observations } from '@/components/observations'
 import {
   Card,
   CardHeading,
@@ -31,6 +32,7 @@ import {
 import { label } from '@/lib/domain'
 import { overdueMilestones } from '@/lib/util'
 import { getBriefs, getSources, getTranscripts } from '@/lib/briefs'
+import { getAgentAssessments, getObservations } from '@/lib/observations'
 import { getPortfolio, personLoads } from '@/lib/portfolio'
 import {
   getReadiness,
@@ -71,12 +73,15 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
-  const [p, readiness, sources, transcripts, briefs] = await Promise.all([
+  const [p, readiness, sources, transcripts, briefs, observations, agentAssessments] =
+    await Promise.all([
     getPortfolio(),
     getReadiness(),
     getSources(),
     getTranscripts(),
     getBriefs(),
+    getObservations(),
+    getAgentAssessments(),
   ])
 
   const project = p.projects.find((x) => x.id === id)
@@ -218,6 +223,14 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           work did not happen.
         </SectionNote>
       ) : null}
+
+      {/* Yaara first: she reads continuously, so this is the newest thing on
+          the page — and the one place where a machine's reading is on record. */}
+      <Observations
+        observation={observations.get(`project:${project.id}`) ?? null}
+        assessment={agentAssessments.get(`project:${project.id}`) ?? null}
+        canReview
+      />
 
       <Card>
         <CardHeading

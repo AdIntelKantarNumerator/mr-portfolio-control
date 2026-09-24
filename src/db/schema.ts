@@ -275,6 +275,21 @@ export const assessments = pgTable(
     evidence: text('evidence'),
     asOf: timestamp('as_of', { withTimezone: true }).notNull().defaultNow(),
     assessorId: text('assessor_id').references(() => people.id, { onDelete: 'set null' }),
+
+    /**
+     * Who wrote this: 'human' or an agent name such as 'yaara'.
+     *
+     * The app's whole claim is that what it says can be checked, and a
+     * machine-written judgement that looks like a person's breaks that claim
+     * silently. So the writer is recorded at the point of writing, every read
+     * carries it, and the UI says so. Defaulting to 'human' is correct for
+     * every row that existed before agents did.
+     */
+    authoredBy: text('authored_by').notNull().default('human'),
+    /** Set when a person has read a machine-written assessment and stands behind it. */
+    reviewedBy: text('reviewed_by').references(() => people.id, { onDelete: 'set null' }),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+
     /** Superseded assessments are kept, not deleted — the history is the point. */
     current: boolean('current').notNull().default(true),
     createdAt: createdAt(),
@@ -917,3 +932,76 @@ export const transcriptsRelations = relations(transcripts, ({ one }) => ({
     references: [conversationSources.id],
   }),
 }))
+
+/**
+ * What an agent observed, and what it read to observe it.
+ *
+ * Kept apart from `briefs` on purpose. A brief summarises conversations a
+ * person chose to attach; this is an agent's continuous reading of Linear,
+ * GitHub, Slack and meeting notes, with two audiences and a wider vocabulary of
+ * kinds. Merging them would mean one table where half the rows have meanings
+ * the other half cannot express.
+ *
+ * `evidence` is the row's reason for existing. A bullet cites evidence ids, and
+ * those ids resolve against this JSON — so a claim made by a machine three
+ * weeks ago still points at what it was reading, even though the agent keeps no
+ * database of its own.
+ */
+export const agentObservations = pgTable(
+  'agent_observations',
+  {
+    id: id(),
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    /** Which agent. There is exactly one today; there will not always be. */
+    agent: text('agent').notNull().default('yaara'),
+
+    /** JSON: [{ kind, audience, text, citations: [evidenceId] }] */
+    items: text('items').notNull(),
+    /** JSON: [{ id, source, title, url, occurredAt }] — what the bullets cite. */
+    evidence: text('evidence').notNull(),
+
+    /** The model, and which provider served it — the residency answer, recorded. */
+    model: text('model').notNull(),
+    servedBy: text('served_by'),
+
+    generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Only the newest observation per entity is shown; the rest are history. */
+    supersededAt: timestamp('superseded_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index('agent_observations_entity_idx').on(t.entityType, t.entityId, t.supersededAt)],
+)
+
+/**
+ * Every date this system has ever seen for a thing, as it saw it.
+ *
+ * "What did we originally commit to, and where is it now?" is unanswerable
+ * unless somebody wrote the first answer down. Nothing did. Sync overwrites
+ * `target_date` in place, so the day a date moves, the old one stops existing
+ * — and no amount of later cleverness reconstructs it.
+ *
+ * So this is append-only and deliberately dumb: one row each time an observed
+ * date differs from the last one recorded for that field. The earliest row is
+ * the original commitment, the latest is where it stands, and the rows between
+ * are the movement — which is usually the more interesting story, because three
+ * small slips read very differently from one big one.
+ *
+ * Cheap to keep: a project whose date never moves has exactly one row forever.
+ */
+export const dateObservations = pgTable(
+  'date_observations',
+  {
+    id: id(),
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    /** target_date | start_date — which date moved. */
+    field: text('field').notNull(),
+    /** Null is a real observation: a date was removed. */
+    value: timestamp('value', { withTimezone: true }),
+    /** linear | manual | agent — who noticed. */
+    source: text('source').notNull().default('linear'),
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('date_observations_entity_idx').on(t.entityType, t.entityId, t.field, t.observedAt)],
+)

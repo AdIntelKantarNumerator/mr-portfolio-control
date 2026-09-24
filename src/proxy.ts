@@ -15,7 +15,7 @@
  *
  *   /api/webhooks/linear   HMAC signature over the raw body
  *   /api/slack/*           Slack's v0 request signature
- *   /api/sync/*, /api/digest   SYNC_TOKEN bearer
+ *   /api/sync/*, /api/digest, /api/agent/*   SYNC_TOKEN bearer
  */
 import { NextResponse, type NextRequest } from 'next/server'
 import { jwtVerify } from 'jose'
@@ -32,20 +32,22 @@ import { SESSION_COOKIE } from '@/lib/auth/config'
  *   /api/slack/*           Slack v0 request signature, plus a replay window
  *   /api/sync/*            SYNC_TOKEN bearer; refuses in production if unset
  *   /api/digest            SYNC_TOKEN bearer; refuses in production if unset
+ *   /api/agent/*           SYNC_TOKEN bearer; the agent's read and write path
  *   /api/health            the one genuinely open endpoint — returns {ok:true}
  *                          and nothing else, so a load balancer can probe it
  */
-const PUBLIC_PREFIXES = [
+export const PUBLIC_PREFIXES = [
   '/signin',
   '/api/auth/',
   '/api/webhooks/',
   '/api/slack/',
   '/api/sync/',
   '/api/digest',
+  '/api/agent/',
   '/api/health',
 ]
 
-function isPublic(pathname: string): boolean {
+export function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))
 }
 

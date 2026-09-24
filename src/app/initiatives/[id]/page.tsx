@@ -15,6 +15,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { Brief } from '@/components/brief'
+import { Observations } from '@/components/observations'
 import {
   Card,
   CardHeading,
@@ -34,6 +35,7 @@ import {
 } from '@/components/ui'
 import { label } from '@/lib/domain'
 import { getBriefs, getSources, getTranscripts } from '@/lib/briefs'
+import { getAgentAssessments, getObservations } from '@/lib/observations'
 import { getPortfolio, personLoads, type ProjectView } from '@/lib/portfolio'
 import { getReadiness, scoreItems } from '@/lib/readiness'
 import { getScoringContext, scoreForRequest } from '@/lib/scoring'
@@ -65,13 +67,16 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function InitiativePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
-  const [p, readiness, scoring, sources, transcripts, briefs] = await Promise.all([
+  const [p, readiness, scoring, sources, transcripts, briefs, observations, agentAssessments] =
+    await Promise.all([
     getPortfolio(),
     getReadiness(),
     getScoringContext(),
     getSources(),
     getTranscripts(),
     getBriefs(),
+    getObservations(),
+    getAgentAssessments(),
   ])
 
   const i = p.initiatives.find((x) => x.id === id)
@@ -200,8 +205,16 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
         </SectionNote>
       ) : null}
 
-      {/* Conversations first: it is the newest information on the page, and
-          the one thing here that is not already visible somewhere else. */}
+      {/* Yaara first: she reads continuously, so this is the newest thing on
+          the page — and the one place where a machine's reading is on record. */}
+      <Observations
+        observation={observations.get(`initiative:${i.id}`) ?? null}
+        assessment={agentAssessments.get(`initiative:${i.id}`) ?? null}
+        canReview
+      />
+
+      {/* Conversations next: newest human-attached information, and the one
+          thing here that is not already visible somewhere else. */}
       <Card>
         <CardHeading
           title="Conversations"

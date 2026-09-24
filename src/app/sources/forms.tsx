@@ -61,7 +61,13 @@ export function AddSourceForm({ entities }: { entities: EntityOption[] }) {
       ? 'The channel ID (starts with C), from Slack → channel → About → bottom of the panel.'
       : kind === 'meeting_series'
         ? 'The Google Calendar event ID of the recurring meeting — not the meet.google.com link, which identifies a room and grants no access.'
-        : 'Optional. Anything that identifies the document to you.'
+        : kind === 'github_repo'
+          ? 'owner/name, exactly as it appears in the GitHub URL — e.g. AdIntelKantarNumerator/clickhouse-serving.'
+          : kind === 'azure_repo'
+            ? 'organisation/project/repository, as in the Azure DevOps URL.'
+            : kind === 'bitbucket_repo'
+              ? 'workspace/repository, as in the Bitbucket URL.'
+              : 'Optional. Anything that identifies the document to you.'
 
   return (
     <form action={action} className="grid grid-cols-1 gap-3 sm:grid-cols-2">

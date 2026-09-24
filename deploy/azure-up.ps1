@@ -1,4 +1,4 @@
-<#
+﻿<#
   Creates the whole Azure deployment from nothing, in one run.
 
   What it makes:
@@ -35,8 +35,8 @@ param(
   [string]$Location      = 'eastus',
 
   # Postgres can live in a different region from everything else. Subscriptions
-  # are often restricted per resource type — a region that happily takes a
-  # resource group and a registry can still refuse a database server — and
+  # are often restricted per resource type  -  a region that happily takes a
+  # resource group and a registry can still refuse a database server  -  and
   # policy sometimes allows only a specific list. Latency between two US
   # regions is a few milliseconds, which this app will never notice.
   [string]$PgLocation    = '',
@@ -67,14 +67,14 @@ param(
   [switch]$NoSyncSchedule,
 
   # Reuse the image already in the registry instead of building again. For
-  # picking up after a run that failed somewhere past the build — it saves the
+  # picking up after a run that failed somewhere past the build  -  it saves the
   # several minutes a rebuild costs when the code has not changed.
   [switch]$SkipBuild
 )
 
 # Deliberately NOT 'Stop'. Windows PowerShell turns anything a native command
 # writes to stderr into an error record, and the Azure CLI writes ordinary
-# progress and deprecation notices there — with 'Stop' the script dies on a
+# progress and deprecation notices there  -  with 'Stop' the script dies on a
 # warning. Every az call below is checked by its exit code instead, which is
 # the only signal that actually means failure.
 $ErrorActionPreference = 'Continue'
@@ -246,7 +246,7 @@ if (Test-Az postgres flexible-server show -g $ResourceGroup -n $PgServer -o none
   if ($LASTEXITCODE -ne 0) {
     $said = ($created | Out-String)
     # "The location is restricted" means this subscription may not create THIS
-    # resource type in THIS region — a separate thing from whether the region
+    # resource type in THIS region  -  a separate thing from whether the region
     # works at all, which is why the resource group and registry went in fine.
     # Rather than leave you guessing, ask Azure which regions will take it.
     if ($said -match 'location is restricted|not available in location|LocationNotAvailable|RegionIsOfferRestricted') {
@@ -404,7 +404,7 @@ if ($pgPassword) {
   if ($databaseUrl) {
     Note 'Reusing the existing DATABASE_URL.'
   } else {
-    # The server exists but nothing recorded its password — which is what a run
+    # The server exists but nothing recorded its password  -  which is what a run
     # that died between creating the server and writing the app settings leaves
     # behind. The password was generated in memory and is gone, so set a new
     # one. Safe here precisely because no DATABASE_URL was ever stored: nothing
@@ -447,7 +447,7 @@ if (-not (Test-Az webapp update -g $ResourceGroup -n $App --set siteConfig.healt
 }
 
 # Without this, `az webapp log tail` shows platform events and none of the
-# container's own stdout — which is where the app explains why a sign-in failed.
+# container's own stdout  -  which is where the app explains why a sign-in failed.
 if (-not (Test-Az webapp log config -g $ResourceGroup -n $App --docker-container-logging filesystem -o none)) {
   Note 'Could not enable container logging - turn it on under Monitoring > App Service logs.'
 }

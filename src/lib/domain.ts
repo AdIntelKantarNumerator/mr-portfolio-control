@@ -98,6 +98,13 @@ export const LABELS = {
     slack_channel: 'Slack channel',
     meeting_series: 'Meeting series',
     document: 'Document',
+    // Code hosts. Same table on purpose: "which things out there are this
+    // project" is one question, and answering it in two places is how the two
+    // answers drift. Adding a host here is a vocabulary change, not a
+    // migration — the column is text.
+    github_repo: 'GitHub repository',
+    azure_repo: 'Azure DevOps repository',
+    bitbucket_repo: 'Bitbucket repository',
   },
   rag: { green: 'On track', amber: 'At risk', red: 'In trouble', unknown: 'Needs input' },
   projectStatus: {
@@ -375,8 +382,27 @@ export const allocationInput = z.object({
 // Conversation sources and briefs
 // ---------------------------------------------------------------------------
 
-export const SOURCE_KIND = ['slack_channel', 'meeting_series', 'document'] as const
+export const SOURCE_KIND = [
+  'slack_channel',
+  'meeting_series',
+  'document',
+  'github_repo',
+  'azure_repo',
+  'bitbucket_repo',
+] as const
 export type SourceKind = (typeof SOURCE_KIND)[number]
+
+/**
+ * The kinds that are a code repository.
+ *
+ * Grouped because the agent asks "which repos belong to this?" rather than
+ * "which GitHub repos", and because the answer should not change shape the day
+ * a team moves from Bitbucket to GitHub.
+ */
+export const REPO_SOURCE_KIND = ['github_repo', 'azure_repo', 'bitbucket_repo'] as const
+export function isRepoKind(kind: string): boolean {
+  return (REPO_SOURCE_KIND as readonly string[]).includes(kind)
+}
 
 export const TRANSCRIPT_KIND = ['slack', 'meeting', 'document'] as const
 export type TranscriptKind = (typeof TRANSCRIPT_KIND)[number]

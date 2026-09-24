@@ -211,6 +211,110 @@ you are in.
 
 ---
 
+## Shipping a schema change to a running deployment
+
+Different from a first deploy in one way that matters: **migrate before you
+deploy, not after.** The new code queries tables the old database does not have,
+so deploying first gives you a working-looking app with 500s on whichever pages
+touch the new tables. Migrating first is harmless — the old code simply ignores
+tables it does not know about.
+
+### 1. Check the new code is actually on disk
+
+Sounds unnecessary; is not. Half an hour has been lost to building the old code
+twice because an unzip went somewhere unexpected.
+
+```powershell
+cd <repo>
+Select-String -Path .\src\db\schema.ts -Pattern 'agent_observations' -Quiet   # expect True
+Get-ChildItem .\drizzle\*.sql | Select-Object -Last 3                          # expect the new ones
+```
+
+```powershell
+npm install
+npm run typecheck
+```
+
+`npm install` first: a missing `node_modules/.bin` is what produces
+`'tsx' is not recognized`, which looks like a broken script and is not.
+
+### 2. Let this machine reach the database
+
+Needed only while migrating, and only if the rule was removed.
+
+```powershell
+$ip = (Invoke-RestMethod https://api.ipify.org?format=json).ip
+az postgres flexible-server firewall-rule create -g rg-mr-portfolio-control `
+  -s mr-portfolio-control-pg --rule-name admin-laptop `
+  --start-ip-address $ip --end-ip-address $ip
+```
+
+If `--rule-name` is rejected, the CLI is older: use `-n admin-laptop`. If `-s` is
+rejected, use `--name` for the server and `-n` for the rule — the two flags
+swapped meanings between versions.
+
+### 3. Migrate
+
+Two variables, not one. `DATABASE_SSL` is what turns TLS on; without it the
+scripts connect unencrypted and Azure refuses with `no pg_hba.conf entry for
+host ... no encryption`, which reads like a firewall problem and is not — a real
+firewall block times out instead of answering.
+
+**`-AsSecureString` is not optional.** A plain `Read-Host` echoes what you type,
+so the password ends up on screen, in the scrollback, and in any screenshot of
+that window.
+
+```powershell
+$sec = Read-Host "DATABASE_URL" -AsSecureString
+$env:DATABASE_URL = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
+  [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+$env:DATABASE_SSL = 'require'
+
+npm.cmd run db:migrate
+```
+
+`npm.cmd` rather than `npm`: the execution policy on a managed Windows machine
+blocks npm's PowerShell shim, and the `.cmd` entry point skips it.
+
+**Read the last line before continuing.** It says which database it touched:
+
+- `Migrated Postgres at postgresql://...@mr-portfolio-control-pg...` — correct.
+- `Migrated embedded Postgres (PGlite) at ./.data/pcr` — it migrated the local
+  prototype database and Azure is untouched. `$env:DATABASE_URL` was not set in
+  *this* shell. This failure is silent and looks like success.
+
+Confirm the tables landed:
+
+```powershell
+az postgres flexible-server execute -n mr-portfolio-control-pg -d pcr `
+  -u pcradmin -q "\dt" --output table
+```
+
+### 4. Build and deploy
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\azure-up.ps1 `
+  -App mr-portfolio-control -ResourceGroup rg-mr-portfolio-control
+```
+
+Idempotent: it re-uses everything that exists, builds the image in ACR and
+restarts the web app. It does not need any new settings for this change — the
+agent endpoints authenticate with the `SYNC_TOKEN` that is already there.
+
+### 5. Check it, then tidy up
+
+Open any initiative. The Yaara card should be present and say she has not
+published anything yet — that is the correct state before she is running, and it
+proves the new table is readable.
+
+```powershell
+Remove-Item env:DATABASE_URL, env:DATABASE_SSL -ErrorAction SilentlyContinue
+az postgres flexible-server firewall-rule delete -g rg-mr-portfolio-control `
+  -s mr-portfolio-control-pg --rule-name admin-laptop --yes
+```
+
+Then commit and push, so the deployed image and the repository agree.
+
 ## When it does not work
 
 `az webapp log tail -g $rg -n $app` streams the container's stdout, which is
