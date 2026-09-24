@@ -21,7 +21,7 @@ const NAV = [
   { href: '/applications', label: 'By application' },
   { href: '/contention', label: 'Contention & people' },
   { href: '/dependencies', label: 'Dependencies' },
-  { href: '/decisions', label: 'Decisions' },
+  { href: '/decisions', label: 'Decisions / Blockers' },
   { href: '/sources', label: 'Conversations' },
   { href: '/intake', label: 'Intake' },
   { href: '/prioritization', label: 'Prioritization' },

@@ -64,10 +64,8 @@ export function AddSourceForm({ entities }: { entities: EntityOption[] }) {
         : kind === 'github_repo'
           ? 'owner/name, exactly as it appears in the GitHub URL — e.g. AdIntelKantarNumerator/clickhouse-serving.'
           : kind === 'azure_repo'
-            ? 'organisation/project/repository, as in the Azure DevOps URL.'
-            : kind === 'bitbucket_repo'
-              ? 'workspace/repository, as in the Bitbucket URL.'
-              : 'Optional. Anything that identifies the document to you.'
+            ? 'A project name reads every repository in it. Or name one: project/repository, or organisation/project/repository as it appears in the URL.'
+            : 'Optional. Anything that identifies the document to you.'
 
   return (
     <form action={action} className="grid grid-cols-1 gap-3 sm:grid-cols-2">

@@ -16,6 +16,7 @@ import {
   changelogEntries,
   decisions,
   dependencies,
+  entityThemes,
   initiatives,
   intakeRequests,
   milestones,
@@ -528,4 +529,45 @@ export async function logChange(entry: {
     entityType: entry.entityType ?? null,
     entityId: entry.entityId ?? null,
   })
+}
+
+/**
+ * What else is being talked about, newest first.
+ *
+ * Kept out of `getPortfolio` deliberately: every page pays for that query, and
+ * only one screen shows themes. They are also the least load-bearing thing in
+ * the database — a record of what came up, not a thing anyone is accountable
+ * for — so a page that needs them asks for them.
+ */
+export async function recentThemes(limit = 24) {
+  return db.select().from(entityThemes).orderBy(desc(entityThemes.lastSeenAt)).limit(limit)
+}
+
+/**
+ * One instant for the whole render.
+ *
+ * "Open 41 days" is computed in two places on the register — once per card and
+ * once for the headline figure — and reading the clock separately in each lets
+ * them disagree across a tick, which across midnight UTC means the summary says
+ * 41 and the card says 42. Cached per request, so every elapsed figure on a
+ * page is measured from the same moment.
+ */
+export const asOf = cache(async (): Promise<Date> => new Date())
+
+/**
+ * Days between raising something and resolving it, or to now if it is still
+ * live. Null when it was never dated, which is honest: a made-up start makes a
+ * blocker look newer or older than it is, and both mislead.
+ */
+export function daysOpen(
+  raisedAt: Date | string | null,
+  resolvedAt: Date | string | null,
+  now: Date,
+): number | null {
+  if (!raisedAt) return null
+  const from = typeof raisedAt === 'string' ? new Date(raisedAt) : raisedAt
+  if (Number.isNaN(from.getTime())) return null
+  const to = resolvedAt ? (typeof resolvedAt === 'string' ? new Date(resolvedAt) : resolvedAt) : now
+  if (Number.isNaN(to.getTime())) return null
+  return Math.round((to.getTime() - from.getTime()) / 86_400_000)
 }

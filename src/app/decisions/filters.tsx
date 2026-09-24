@@ -63,9 +63,11 @@ function Group({
  * pasted into a review agenda and open the same way for the next person.
  */
 export function DecisionFilters({
+  kinds,
   statuses,
   categories,
 }: {
+  kinds: FilterOption[]
   statuses: FilterOption[]
   categories: FilterOption[]
 }) {
@@ -85,11 +87,15 @@ export function DecisionFilters({
     [params, router],
   )
 
+  const kind = params.get('kind') ?? 'all'
   const status = params.get('status') ?? 'all'
   const category = params.get('category') ?? 'all'
 
   return (
     <div className="no-print flex flex-col gap-2">
+      {/* First, because it is the coarsest cut: "what is stopping us" and "what
+          do we have to choose" are two different meetings. */}
+      <Group legend="Type" param="kind" options={kinds} active={kind} onPick={pick} />
       <Group legend="Status" param="status" options={statuses} active={status} onPick={pick} />
       <Group
         legend="Category"

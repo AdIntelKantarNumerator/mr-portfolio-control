@@ -52,6 +52,25 @@ export type DecisionStatus = (typeof DECISION_STATUS)[number]
 
 export const DECISION_CATEGORY = ['strategic', 'delivery', 'risk'] as const
 
+/**
+ * A register entry is either something somebody has to choose, or something
+ * stopping somebody working. Same table, same page, different question.
+ */
+export const DECISION_KIND = ['decision', 'blocker'] as const
+export type DecisionKind = (typeof DECISION_KIND)[number]
+
+/** What happened to a register entry, and when. */
+export const DECISION_EVENT_KIND = [
+  'raised',
+  'discussed',
+  'updated',
+  'resolved',
+  'reopened',
+] as const
+export type DecisionEventKind = (typeof DECISION_EVENT_KIND)[number]
+
+export const DOCUMENT_ORIGIN = ['google_drive', 'upload', 'slack'] as const
+
 export const INTAKE_STATUS = [
   'new',
   'triage',
@@ -104,7 +123,14 @@ export const LABELS = {
     // migration — the column is text.
     github_repo: 'GitHub repository',
     azure_repo: 'Azure DevOps repository',
-    bitbucket_repo: 'Bitbucket repository',
+  },
+  decisionKind: { decision: 'Decision', blocker: 'Blocker' },
+  decisionEventKind: {
+    raised: 'Raised',
+    discussed: 'Discussed again',
+    updated: 'Updated',
+    resolved: 'Resolved',
+    reopened: 'Reopened',
   },
   rag: { green: 'On track', amber: 'At risk', red: 'In trouble', unknown: 'Needs input' },
   projectStatus: {
@@ -355,6 +381,7 @@ export const intakeInput = z.object({
 
 export const decisionInput = z.object({
   ref: z.string().optional(),
+  kind: z.enum(DECISION_KIND).default('decision'),
   category: z.enum(DECISION_CATEGORY).default('delivery'),
   title: z.string().min(3),
   body: z.string().min(1),
@@ -362,9 +389,12 @@ export const decisionInput = z.object({
   contested: z.boolean().default(false),
   ownerId: z.string().optional().nullable(),
   ownerText: z.string().optional().nullable(),
+  raisedById: z.string().optional().nullable(),
+  raisedByText: z.string().optional().nullable(),
   dueBy: z.string().optional().nullable(),
   nextAction: z.string().optional().nullable(),
   evidence: z.string().optional().nullable(),
+  history: z.string().optional().nullable(),
   leadVisible: z.boolean().default(true),
   entityType: z.enum(ENTITY_TYPE).optional().nullable(),
   entityId: z.string().optional().nullable(),
@@ -388,7 +418,6 @@ export const SOURCE_KIND = [
   'document',
   'github_repo',
   'azure_repo',
-  'bitbucket_repo',
 ] as const
 export type SourceKind = (typeof SOURCE_KIND)[number]
 
@@ -397,9 +426,13 @@ export type SourceKind = (typeof SOURCE_KIND)[number]
  *
  * Grouped because the agent asks "which repos belong to this?" rather than
  * "which GitHub repos", and because the answer should not change shape the day
- * a team moves from Bitbucket to GitHub.
+ * a team moves between hosts.
+ *
+ * Bitbucket was here and is gone: it is not used going forward, and a kind
+ * nobody can select is a menu entry that only ever produces support questions.
+ * The column is text, so removing it needs no migration.
  */
-export const REPO_SOURCE_KIND = ['github_repo', 'azure_repo', 'bitbucket_repo'] as const
+export const REPO_SOURCE_KIND = ['github_repo', 'azure_repo'] as const
 export function isRepoKind(kind: string): boolean {
   return (REPO_SOURCE_KIND as readonly string[]).includes(kind)
 }

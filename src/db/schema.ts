@@ -358,8 +358,22 @@ export const decisions = pgTable(
   'decisions',
   {
     id: id(),
-    /** Human-facing handle used in conversation: "D1", "G4", "S2". */
+    /** Human-facing handle used in conversation: "D1", "G4", "S2", "B3". */
     ref: text('ref').notNull().unique(),
+    /**
+     * decision | blocker
+     *
+     * One table rather than two, because they are the same object seen from
+     * different ends: both are open, owned, attached to a piece of work, and
+     * both close. Splitting them would have meant two pages, two queries and
+     * two answers to "what is stuck", which is the one question this screen
+     * exists to answer.
+     *
+     * What a blocker has that a decision does not is who RAISED it — a
+     * decision's interesting party is whoever owes the answer, a blocker's is
+     * whoever hit the wall. Hence the fields below rather than a second table.
+     */
+    kind: text('kind').notNull().default('decision'),
     /** strategic | delivery | risk */
     category: text('category').notNull().default('delivery'),
     title: text('title').notNull(),
@@ -368,13 +382,55 @@ export const decisions = pgTable(
     status: text('status').notNull().default('open'),
     /** Two named parties actively disagree — worth flagging on its own. */
     contested: boolean('contested').notNull().default(false),
+    /** Who owes the resolution. Unset is a real and common answer. */
     ownerId: text('owner_id').references(() => people.id, { onDelete: 'set null' }),
     /** For owners who aren't Person records (execs, vendors, "Rick / SLT"). */
     ownerText: text('owner_text'),
+    /**
+     * Who raised it. Separate from the owner on purpose: the person who hits a
+     * wall is usually not the person who can clear it, and conflating them is
+     * how a blocker ends up assigned to whoever happened to mention it.
+     */
+    raisedById: text('raised_by_id').references(() => people.id, { onDelete: 'set null' }),
+    raisedByText: text('raised_by_text'),
     /** Free text on purpose: "Next Leads", "~7/10", "This week". */
     dueBy: text('due_by'),
     nextAction: text('next_action'),
     evidence: text('evidence'),
+
+    // When and where it was raised, and when and where it was resolved.
+    //
+    // Denormalised from `decisionEvents` so the register can be sorted and
+    // filtered on them without a join, and so the answer survives the event
+    // rows being pruned. The event log is the record; these are the handles.
+    raisedAt: timestamp('raised_at', { withTimezone: true }),
+    /** The meeting or document title, kept as text so it outlives the source row. */
+    raisedAtMeeting: text('raised_at_meeting'),
+    raisedDocumentId: text('raised_document_id'),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolvedAtMeeting: text('resolved_at_meeting'),
+    resolvedDocumentId: text('resolved_document_id'),
+
+    /**
+     * The story so far, in prose.
+     *
+     * The same blocker comes up in three weekly meetings, and the useful record
+     * is one live item rather than three near-identical rows. The events below
+     * are the audit trail; this is the paragraph a person actually reads.
+     */
+    history: text('history'),
+
+    /**
+     * Who wrote this. Null means a person typed it.
+     *
+     * An agent-written row says so on the screen, in the same way an agent
+     * assessment does. A register nobody can tell apart from a machine's
+     * reading of a transcript is a register nobody should act on.
+     */
+    authoredBy: text('authored_by'),
+    reviewedBy: text('reviewed_by').references(() => people.id, { onDelete: 'set null' }),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+
     /** Include in the leadership-level view as well as the full view. */
     leadVisible: boolean('lead_visible').notNull().default(true),
     entityType: text('entity_type'),
@@ -382,7 +438,126 @@ export const decisions = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('decisions_status_idx').on(t.status)],
+  (t) => [
+    index('decisions_status_idx').on(t.status),
+    index('decisions_kind_idx').on(t.kind),
+    index('decisions_entity_idx').on(t.entityType, t.entityId),
+  ],
+)
+
+/**
+ * A document somebody shared, and the one thing worth keeping about it here:
+ * that it exists, what it was called, and when.
+ *
+ * Deliberately NOT the text. `transcripts` holds bodies for conversations a
+ * person explicitly attached and is the most sensitive table in this database;
+ * this one records documents an agent read in passing, and copying every
+ * meeting transcript into the portfolio to support a date on a blocker would
+ * be a much larger privacy decision than the feature needs. The body stays in
+ * Drive, where its sharing already governs who can read it, and every record
+ * here links back to it.
+ */
+export const sourceDocuments = pgTable(
+  'source_documents',
+  {
+    id: id(),
+    /** google_drive | upload | slack */
+    origin: text('origin').notNull().default('google_drive'),
+    /** The Drive file id. Unique, so re-reading a document does not duplicate it. */
+    externalId: text('external_id').notNull(),
+    /** The meeting name, with Meet's " - Transcript" suffix already stripped. */
+    title: text('title').notNull(),
+    url: text('url'),
+    /** When the meeting happened, not when it was read. */
+    occurredAt: timestamp('occurred_at', { withTimezone: true }),
+    /**
+     * The document's own modified time when it was last read.
+     *
+     * An edited document is new information; the same document read twice is
+     * not. Comparing this is what stops every pass re-extracting everything.
+     */
+    revision: text('revision'),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    readBy: text('read_by'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('source_documents_external_unique').on(t.origin, t.externalId)],
+)
+
+/**
+ * Every time a decision or blocker was raised, discussed, or resolved.
+ *
+ * This is what makes "when did this first come up, and how long were we stuck
+ * on it" answerable. One row per mention rather than one row per blocker,
+ * because merging mentions into a single item is what keeps the register
+ * readable and losing them is what makes it unaccountable.
+ *
+ * `meeting` is denormalised text rather than only a document id: the answer to
+ * "which meeting was that raised at" must survive the document being deleted,
+ * unshared, or never having been a document at all.
+ */
+export const decisionEvents = pgTable(
+  'decision_events',
+  {
+    id: id(),
+    decisionId: text('decision_id')
+      .notNull()
+      .references(() => decisions.id, { onDelete: 'cascade' }),
+    /** raised | discussed | updated | resolved | reopened */
+    kind: text('kind').notNull(),
+    /** When it was said, not when it was recorded. */
+    occurredAt: timestamp('occurred_at', { withTimezone: true }),
+    /** The meeting or document it was said in. */
+    meeting: text('meeting'),
+    documentId: text('document_id').references(() => sourceDocuments.id, { onDelete: 'set null' }),
+    url: text('url'),
+    /** Who said it, as named in the document. Free text: this is not a roster. */
+    actor: text('actor'),
+    /** What was said, in a sentence or two. The citation for everything above. */
+    note: text('note'),
+    recordedBy: text('recorded_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('decision_events_decision_idx').on(t.decisionId)],
+)
+
+/**
+ * What else is being talked about.
+ *
+ * Decisions and blockers are the things somebody has to act on; a great deal of
+ * what gets discussed is neither, and disappears entirely once the document
+ * scrolls out of the window an agent reads. One rolling row per theme per
+ * entity keeps it: the summary is rewritten as it develops rather than appended
+ * to forever, and the counters say whether it is a recurring drumbeat or was
+ * mentioned once in March.
+ */
+export const entityThemes = pgTable(
+  'entity_themes',
+  {
+    id: id(),
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    /** A short label: "vendor contract", "on-call load", "schema migration". */
+    theme: text('theme').notNull(),
+    /** Rewritten as it develops, not appended to. */
+    summary: text('summary').notNull(),
+    mentions: integer('mentions').notNull().default(1),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    /** The most recent meeting it came up in, for "where did you get that". */
+    lastMeeting: text('last_meeting'),
+    lastDocumentId: text('last_document_id').references(() => sourceDocuments.id, {
+      onDelete: 'set null',
+    }),
+    authoredBy: text('authored_by'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('entity_themes_entity_idx').on(t.entityType, t.entityId),
+    uniqueIndex('entity_themes_unique').on(t.entityType, t.entityId, t.theme),
+  ],
 )
 
 // ---------------------------------------------------------------------------
@@ -797,8 +972,25 @@ export const assessmentsRelations = relations(assessments, ({ one }) => ({
   assessor: one(people, { fields: [assessments.assessorId], references: [people.id] }),
 }))
 
-export const decisionsRelations = relations(decisions, ({ one }) => ({
+export const decisionsRelations = relations(decisions, ({ one, many }) => ({
   owner: one(people, { fields: [decisions.ownerId], references: [people.id] }),
+  raisedBy: one(people, { fields: [decisions.raisedById], references: [people.id] }),
+  events: many(decisionEvents),
+}))
+
+export const decisionEventsRelations = relations(decisionEvents, ({ one }) => ({
+  decision: one(decisions, { fields: [decisionEvents.decisionId], references: [decisions.id] }),
+  document: one(sourceDocuments, {
+    fields: [decisionEvents.documentId],
+    references: [sourceDocuments.id],
+  }),
+}))
+
+export const entityThemesRelations = relations(entityThemes, ({ one }) => ({
+  lastDocument: one(sourceDocuments, {
+    fields: [entityThemes.lastDocumentId],
+    references: [sourceDocuments.id],
+  }),
 }))
 
 export const dependenciesRelations = relations(dependencies, ({ one }) => ({
