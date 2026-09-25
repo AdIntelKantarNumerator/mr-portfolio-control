@@ -68,10 +68,13 @@ export function ActiveWorkCard({
             return (
               <li key={`${w.type}:${w.id}`}>
                 <div className="flex flex-wrap items-baseline gap-2">
+                  {/* The name is the thing you scan for, so it is the one
+                      coloured element in the block rather than the same ink as
+                      the lines underneath it. */}
                   <Link
                     href={w.href}
                     className="text-[13px] font-semibold no-underline hover:underline"
-                    style={{ color: 'var(--ink)' }}
+                    style={{ color: 'var(--brand)' }}
                   >
                     {w.name}
                   </Link>
@@ -86,16 +89,19 @@ export function ActiveWorkCard({
                     Activity recorded, but nothing specific enough to summarise.
                   </p>
                 ) : (
+                  // Real bullets. A left rule read as a quote block rather than
+                  // a list, which is not what three separate facts are.
                   <ul className="m-0 mt-1 flex list-none flex-col gap-1 p-0">
                     {w.recent.map((r, ix) => (
                       <li
                         key={ix}
-                        className="pl-3 text-[12.5px] leading-relaxed"
-                        style={{
-                          color: 'var(--ink)',
-                          borderLeft: '2px solid var(--line)',
-                        }}
+                        className="flex gap-1.5 text-[12.5px] leading-relaxed"
+                        style={{ color: 'var(--ink)' }}
                       >
+                        <span aria-hidden className="select-none" style={{ color: 'var(--muted)' }}>
+                          •
+                        </span>
+                        <span>
                         {r.text}
                         {when(r.at) || r.source ? (
                           <Muted>
@@ -104,6 +110,7 @@ export function ActiveWorkCard({
                             {r.source ? ` ${SOURCE_LABEL[r.source] ?? r.source}` : ''}
                           </Muted>
                         ) : null}
+                        </span>
                       </li>
                     ))}
                   </ul>
