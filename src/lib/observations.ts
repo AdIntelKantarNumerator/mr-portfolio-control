@@ -214,3 +214,101 @@ export function mostActive(
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
     .slice(0, limit)
 }
+
+/**
+ * Every recent-activity bullet this entity has ever had, oldest occurrence kept.
+ *
+ * The control room shows what is moving now — the newest observation's bullets
+ * and nothing else. Which means the record of what moved last month exists,
+ * has always existed, and was not readable anywhere: each pass supersedes the
+ * previous rather than deleting it, so the whole history has been sitting in
+ * the table since the first assessment ran.
+ *
+ * DISTINCT BULLETS, NOT A LOG OF PASSES
+ *
+ * She reassesses hourly and republishes the same bullet until it falls out of
+ * the window, so a pass-by-pass archive would be the same forty lines repeated
+ * a hundred times with nothing to tell them apart. What somebody actually
+ * wants from "the history" is each distinct thing that happened, once, with
+ * when it was first reported and when she last still considered it recent.
+ *
+ * Deduplicated on the bullet's text. Two genuinely separate events worded
+ * identically would merge, and that is the right trade: the alternative floods
+ * the page with repeats and hides the events that matter.
+ */
+export interface UpdateEntry {
+  text: string
+  /** Where the event happened — a repo, a channel, a meeting. */
+  source: string | null
+  /** When the event itself occurred, when the bullet carried a time. */
+  at: Date | null
+  /** The pass that first reported it, and the last that still did. */
+  firstReported: Date
+  lastReported: Date
+  /** How many passes carried it — a rough measure of how long it stayed live. */
+  passes: number
+  citations: ObservationEvidence[]
+}
+
+export async function getUpdateHistory(
+  entityType: string,
+  entityId: string,
+  limit = 300,
+): Promise<UpdateEntry[]> {
+  const rows = await db
+    .select()
+    .from(agentObservations)
+    .where(
+      and(eq(agentObservations.entityType, entityType), eq(agentObservations.entityId, entityId)),
+    )
+    .orderBy(desc(agentObservations.generatedAt))
+    .limit(limit)
+
+  const byText = new Map<string, UpdateEntry>()
+
+  for (const row of rows) {
+    const evidence = parse<ObservationEvidence[]>(row.evidence, [])
+    const byId = new Map(evidence.map((e) => [e.id, e]))
+
+    for (const item of parse<RecentItem[]>(row.recent ?? '[]', [])) {
+      const text = item.text?.trim()
+      if (!text) continue
+
+      const when = item.at ? new Date(item.at) : null
+      const existing = byText.get(text)
+
+      if (existing) {
+        existing.passes++
+        // Rows arrive newest first, so anything seen later in the loop is older.
+        if (row.generatedAt < existing.firstReported) existing.firstReported = row.generatedAt
+        if (row.generatedAt > existing.lastReported) existing.lastReported = row.generatedAt
+        // A later pass may have resolved citations the first one could not.
+        if (existing.citations.length === 0) {
+          existing.citations = (item.citations ?? [])
+            .map((id) => byId.get(id))
+            .filter((e): e is ObservationEvidence => Boolean(e))
+        }
+        continue
+      }
+
+      byText.set(text, {
+        text,
+        source: item.source ?? null,
+        at: when && !Number.isNaN(when.getTime()) ? when : null,
+        firstReported: row.generatedAt,
+        lastReported: row.generatedAt,
+        passes: 1,
+        citations: (item.citations ?? [])
+          .map((id) => byId.get(id))
+          .filter((e): e is ObservationEvidence => Boolean(e)),
+      })
+    }
+  }
+
+  // By when the thing happened, falling back to when she first said it. A
+  // bullet with no timestamp is not pushed to the bottom of the page — it is
+  // ordered by the only time known about it.
+  return [...byText.values()].sort(
+    (a, b) => (b.at ?? b.firstReported).getTime() - (a.at ?? a.firstReported).getTime(),
+  )
+}

@@ -13,6 +13,8 @@ import { formatDistanceToNowStrict } from 'date-fns'
 import { Brief } from '@/components/brief'
 import { Observations } from '@/components/observations'
 import { Themes } from '@/components/themes'
+import { Workstreams } from './workstreams'
+import { Updates } from '@/components/updates'
 import {
   Card,
   CardHeading,
@@ -35,7 +37,8 @@ import { LifecycleControl } from '../../lifecycle/control'
 import { overdueMilestones } from '@/lib/util'
 import { getBriefs, getSources, getTranscripts } from '@/lib/briefs'
 import { getAgentAssessments, getObservations } from '@/lib/observations'
-import { getPortfolio, personLoads, themesFor } from '@/lib/portfolio'
+import { getPortfolio, personLoads, themesFor, workstreamsFor } from '@/lib/portfolio'
+import { getUpdateHistory } from '@/lib/observations'
 import {
   getReadiness,
   readinessStatusLabel,
@@ -75,8 +78,18 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
-  const [p, readiness, sources, transcripts, briefs, observations, agentAssessments, themes] =
-    await Promise.all([
+  const [
+    p,
+    readiness,
+    sources,
+    transcripts,
+    briefs,
+    observations,
+    agentAssessments,
+    themes,
+    plan,
+    updates,
+  ] = await Promise.all([
     getPortfolio(),
     getReadiness(),
     getSources(),
@@ -85,6 +98,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     getObservations(),
     getAgentAssessments(),
     themesFor('project', id),
+    workstreamsFor(id),
+    getUpdateHistory('project', id),
   ])
 
   const project = p.projects.find((x) => x.id === id)
@@ -241,9 +256,30 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         canReview
       />
 
+      {/* The same voice as the card above, over time. Directly beneath it
+          because it is the archive OF it, and a reader who wants last month
+          should not have to learn that it lives somewhere else. */}
+      <Updates entries={updates} kind="project" />
+
       {/* After the assessments, before the conversations: it sits between what
           a machine concluded and what people said, which is what it is. */}
       <Themes themes={themes} />
+
+      {/* The plan, as the team states it to a room. Everything else on this
+          page is what a system observed; this is what somebody intends, and it
+          lived in a slide deck until now. */}
+      <Card>
+        <CardHeading
+          title="Program review"
+          sub="Objectives, where each has got to, and when it lands — the rows behind this project's slide."
+        />
+        <Workstreams
+          projectId={project.id}
+          workstreams={plan}
+          devLead={project.devLead}
+          programLead={project.programLead}
+        />
+      </Card>
 
       <Card>
         <CardHeading

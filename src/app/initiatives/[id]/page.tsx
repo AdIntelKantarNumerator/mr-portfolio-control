@@ -37,7 +37,7 @@ import {
 import { LifecycleControl } from '../../lifecycle/control'
 import { label } from '@/lib/domain'
 import { getBriefs, getSources, getTranscripts } from '@/lib/briefs'
-import { getAgentAssessments, getObservations } from '@/lib/observations'
+import { getAgentAssessments, getObservations, getUpdateHistory } from '@/lib/observations'
 import { getPortfolio, personLoads, themesFor, type ProjectView } from '@/lib/portfolio'
 import { getReadiness, scoreItems } from '@/lib/readiness'
 import { getScoringContext, scoreForRequest } from '@/lib/scoring'
@@ -45,6 +45,7 @@ import { db } from '@/db/client'
 import { intakeRequests } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { InitiativeSources } from './sources-panel'
+import { Updates } from '@/components/updates'
 
 export const dynamic = 'force-dynamic'
 
@@ -79,6 +80,7 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
     observations,
     agentAssessments,
     themes,
+    updates,
   ] = await Promise.all([
     getPortfolio(),
     getReadiness(),
@@ -89,6 +91,7 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
     getObservations(),
     getAgentAssessments(),
     themesFor('initiative', id),
+    getUpdateHistory('initiative', id),
   ])
 
   const i = p.initiatives.find((x) => x.id === id)
@@ -228,6 +231,10 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
         assessment={agentAssessments.get(`initiative:${i.id}`) ?? null}
         canReview
       />
+
+      {/* The same voice as the card above, over time. Directly beneath it
+          because it is the archive OF it. */}
+      <Updates entries={updates} kind="initiative" />
 
       <Themes themes={themes} />
 
