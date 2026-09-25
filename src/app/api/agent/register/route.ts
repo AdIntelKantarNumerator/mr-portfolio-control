@@ -109,6 +109,8 @@ interface Incoming {
     url?: string | null
     occurredAt?: string | null
     revision?: string | null
+    /** What was found and deliberately not filed, and why. */
+    notRecorded?: string | null
   }
   entries?: IncomingEntry[]
   themes?: IncomingTheme[]
@@ -155,6 +157,7 @@ export async function POST(req: Request) {
     revision: doc.revision ? String(doc.revision) : null,
     readAt: new Date(),
     readBy: agent,
+    notRecorded: doc.notRecorded ? String(doc.notRecorded).slice(0, 2000) : null,
   }
 
   const [document] = await db
@@ -169,12 +172,25 @@ export async function POST(req: Request) {
         revision: docValues.revision,
         readAt: docValues.readAt,
         readBy: docValues.readBy,
+        notRecorded: docValues.notRecorded,
         updatedAt: new Date(),
       },
     })
     .returning()
 
   const roster = await db.select({ id: people.id, name: people.name }).from(people)
+
+  // Every real piece of work, so an entry cannot be filed against an id that
+  // does not exist. The agent checks this too; this is the backstop, and the
+  // day a second agent points at this endpoint it is the only one.
+  const [inits, projs] = await Promise.all([
+    db.select({ id: initiatives.id }).from(initiatives),
+    db.select({ id: projects.id }).from(projects),
+  ])
+  const realEntities = new Set<string>([
+    ...inits.map((i) => `initiative:${i.id}`),
+    ...projs.map((x) => `project:${x.id}`),
+  ])
 
   // Every existing ref, so a new one cannot collide with a row this request is
   // about to leave alone.
@@ -198,6 +214,10 @@ export async function POST(req: Request) {
     }
     if (!ENTITY_TYPES.has(entityType) || !entityId) {
       dropped.push(`"${title.slice(0, 60)}" — no initiative or project it belongs to`)
+      continue
+    }
+    if (!realEntities.has(`${entityType}:${entityId}`)) {
+      dropped.push(`"${title.slice(0, 60)}" — ${entityType} ${entityId} does not exist`)
       continue
     }
 
@@ -356,6 +376,10 @@ export async function POST(req: Request) {
       if (theme) dropped.push(`theme "${theme}" — incomplete`)
       continue
     }
+    if (!realEntities.has(`${entityType}:${entityId}`)) {
+      dropped.push(`theme "${theme}" — ${entityType} ${entityId} does not exist`)
+      continue
+    }
 
     await db
       .insert(entityThemes)
@@ -479,6 +503,10 @@ export async function GET(req: Request) {
       raisedAtMeeting: d.raisedAtMeeting,
       resolvedAt: d.resolvedAt?.toISOString() ?? null,
       resolvedAtMeeting: d.resolvedAtMeeting,
+      // Closed by a person on the page, as opposed to closed in a meeting.
+      // Without this she can say when something closed but not who stands
+      // behind it, which is the first thing anyone asks next.
+      resolvedBy: d.resolvedById ? (personName.get(d.resolvedById) ?? null) : null,
       // Days spent blocked is the number people actually want, and it is only
       // honest when both ends are known.
       openDays:

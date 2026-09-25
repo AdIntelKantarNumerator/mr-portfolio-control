@@ -16,6 +16,7 @@ import { notFound } from 'next/navigation'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { Brief } from '@/components/brief'
 import { Observations } from '@/components/observations'
+import { Themes } from '@/components/themes'
 import {
   Card,
   CardHeading,
@@ -33,10 +34,11 @@ import {
   Stat,
   type Tone,
 } from '@/components/ui'
+import { LifecycleControl } from '../../lifecycle/control'
 import { label } from '@/lib/domain'
 import { getBriefs, getSources, getTranscripts } from '@/lib/briefs'
 import { getAgentAssessments, getObservations } from '@/lib/observations'
-import { getPortfolio, personLoads, type ProjectView } from '@/lib/portfolio'
+import { getPortfolio, personLoads, themesFor, type ProjectView } from '@/lib/portfolio'
 import { getReadiness, scoreItems } from '@/lib/readiness'
 import { getScoringContext, scoreForRequest } from '@/lib/scoring'
 import { db } from '@/db/client'
@@ -67,8 +69,17 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function InitiativePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
-  const [p, readiness, scoring, sources, transcripts, briefs, observations, agentAssessments] =
-    await Promise.all([
+  const [
+    p,
+    readiness,
+    scoring,
+    sources,
+    transcripts,
+    briefs,
+    observations,
+    agentAssessments,
+    themes,
+  ] = await Promise.all([
     getPortfolio(),
     getReadiness(),
     getScoringContext(),
@@ -77,6 +88,7 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
     getBriefs(),
     getObservations(),
     getAgentAssessments(),
+    themesFor('initiative', id),
   ])
 
   const i = p.initiatives.find((x) => x.id === id)
@@ -152,6 +164,10 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
           ))}
         </div>
         <h2 className="m-0 mt-0.5 text-[20px] font-bold tracking-[-0.01em]">{i.name}</h2>
+
+        <div className="mt-2">
+          <LifecycleControl kind="initiative" id={i.id} status={i.status} />
+        </div>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px]">
           <HealthBadge health={i.health} />
           <span>
@@ -212,6 +228,8 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
         assessment={agentAssessments.get(`initiative:${i.id}`) ?? null}
         canReview
       />
+
+      <Themes themes={themes} />
 
       {/* Conversations next: newest human-attached information, and the one
           thing here that is not already visible somewhere else. */}

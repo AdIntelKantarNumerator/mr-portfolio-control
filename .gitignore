@@ -9,5 +9,3 @@ build/
 .DS_Store
 next-env.d.ts
 .azure-deployment.txt
-
-tsconfig.tsbuildinfo

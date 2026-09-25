@@ -30,6 +30,31 @@ export const PROJECT_STATUS = [
 ] as const
 export type ProjectStatus = (typeof PROJECT_STATUS)[number]
 
+/**
+ * The states that mean the work is over.
+ *
+ * "Withdrawn" and "closed" are what people say out loud; canceled and
+ * completed are what the database has always called them, and inventing a
+ * second vocabulary for the same two states would mean explaining the
+ * difference between "canceled" and "withdrawn" forever.
+ *
+ * Defined once because four screens and an agent all have to agree on it. The
+ * day these two lists disagree, a project is hidden from the page and still
+ * matched by Yaara, or the reverse — and either way somebody's work vanishes
+ * from a list that claims to be complete.
+ */
+export const ENDED_PROJECT_STATUS = ['completed', 'canceled'] as const
+export const ENDED_INITIATIVE_STATUS = ['completed', 'canceled'] as const
+
+export function isEnded(status: string | null | undefined): boolean {
+  return status === 'completed' || status === 'canceled'
+}
+
+/** What reopening puts it back to: the earliest state that means "live". */
+export function reopenedStatus(kind: 'project' | 'initiative'): string {
+  return kind === 'project' ? 'planned' : 'active'
+}
+
 export const PRIORITY = ['urgent', 'high', 'medium', 'low', 'no_priority'] as const
 export type Priority = (typeof PRIORITY)[number]
 
@@ -202,6 +227,18 @@ export function label<K extends keyof typeof LABELS>(
 ): string {
   if (!key) return fallback
   return (LABELS[group] as Record<string, string>)[key] ?? key
+}
+
+/**
+ * What a status is called, which depends on what the row is.
+ *
+ * One vocabulary in the database and two on screen. A blocker that has been
+ * cleared is "Resolved"; calling it "Decided" is the kind of small wrongness
+ * that makes people stop reading a page carefully.
+ */
+export function statusLabel(kind: string, status: string): string {
+  if (kind === 'blocker' && status === 'decided') return 'Resolved'
+  return label('decisionStatus', status)
 }
 
 // ---------------------------------------------------------------------------

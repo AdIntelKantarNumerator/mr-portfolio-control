@@ -12,6 +12,7 @@ import { notFound } from 'next/navigation'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { Brief } from '@/components/brief'
 import { Observations } from '@/components/observations'
+import { Themes } from '@/components/themes'
 import {
   Card,
   CardHeading,
@@ -30,10 +31,11 @@ import {
   type Tone,
 } from '@/components/ui'
 import { label } from '@/lib/domain'
+import { LifecycleControl } from '../../lifecycle/control'
 import { overdueMilestones } from '@/lib/util'
 import { getBriefs, getSources, getTranscripts } from '@/lib/briefs'
 import { getAgentAssessments, getObservations } from '@/lib/observations'
-import { getPortfolio, personLoads } from '@/lib/portfolio'
+import { getPortfolio, personLoads, themesFor } from '@/lib/portfolio'
 import {
   getReadiness,
   readinessStatusLabel,
@@ -73,7 +75,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
-  const [p, readiness, sources, transcripts, briefs, observations, agentAssessments] =
+  const [p, readiness, sources, transcripts, briefs, observations, agentAssessments, themes] =
     await Promise.all([
     getPortfolio(),
     getReadiness(),
@@ -82,6 +84,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     getBriefs(),
     getObservations(),
     getAgentAssessments(),
+    themesFor('project', id),
   ])
 
   const project = p.projects.find((x) => x.id === id)
@@ -155,6 +158,12 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         </div>
 
         <h2 className="m-0 mt-0.5 text-[20px] font-bold tracking-[-0.01em]">{project.name}</h2>
+
+        {/* Closing, withdrawing and reopening. Directly under the name because
+            on an ended project this is the first thing anyone wants. */}
+        <div className="mt-2">
+          <LifecycleControl kind="project" id={project.id} status={project.status} />
+        </div>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px]">
           <HealthBadge health={project.health} />
@@ -231,6 +240,10 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         assessment={agentAssessments.get(`project:${project.id}`) ?? null}
         canReview
       />
+
+      {/* After the assessments, before the conversations: it sits between what
+          a machine concluded and what people said, which is what it is. */}
+      <Themes themes={themes} />
 
       <Card>
         <CardHeading

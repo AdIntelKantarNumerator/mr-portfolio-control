@@ -1,16 +1,33 @@
 import Link from 'next/link'
 import { getPortfolio, gaps, personLoads, risks, upcomingMilestones } from '@/lib/portfolio'
 import { Card, CardHeading, Chip, Empty, Muted, Pill, RagDot, SectionNote, Stat } from '@/components/ui'
-import { label as vocab } from '@/lib/domain'
+import { isEnded, label as vocab } from '@/lib/domain'
+import { getObservations, mostActive } from '@/lib/observations'
+import { ActiveWorkCard } from '@/components/active-work'
 import { fmtDate, relativeDays } from '@/lib/util'
 
 export const dynamic = 'force-dynamic'
 
 export default async function ControlRoom() {
-  const p = await getPortfolio()
+  const [p, observations] = await Promise.all([getPortfolio(), getObservations()])
   const now = new Date()
 
-  const openProjects = p.projects.filter((x) => !['completed', 'canceled'].includes(x.status))
+  // Closed and withdrawn work is not "active" by any reading, and Yaara stopped
+  // assessing it — so it would sit here on a stale score forever.
+  const activeInitiatives = mostActive(
+    observations,
+    p.initiatives
+      .filter((i) => !isEnded(i.status))
+      .map((i) => ({ type: 'initiative' as const, id: i.id, name: i.name, status: i.status })),
+  )
+  const activeProjects = mostActive(
+    observations,
+    p.projects
+      .filter((x) => !isEnded(x.status))
+      .map((x) => ({ type: 'project' as const, id: x.id, name: x.name, status: x.status })),
+  )
+
+  const openProjects = p.projects.filter((x) => !isEnded(x.status))
   const allRisks = risks(p, now)
   const red = allRisks.filter((r) => r.rag === 'red')
   const allGaps = gaps(p, now)
@@ -86,108 +103,25 @@ export default async function ControlRoom() {
         />
       </div>
 
+      {/* What is moving, first. Written by Yaara during her assessment passes
+          and ordered by a count she made, not one this page derives — deriving
+          it here would disagree with whatever she says in Slack, which is the
+          same question asked through a different door. */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card tone="alert">
-          <CardHeading
-            title="The core squeeze"
-            sub="Not a capacity total — the named people every dated commitment routes through."
-          />
-          {hot.length === 0 ? (
-            <Empty>No single-threaded people detected.</Empty>
-          ) : (
-            <ul className="m-0 flex list-none flex-col gap-2 p-0">
-              {hot.slice(0, 5).map((l) => (
-                <li
-                  key={l.person.id}
-                  className="flex items-start gap-3 rounded-lg border px-3 py-2"
-                  style={{
-                    borderColor: 'color-mix(in srgb, var(--red) 30%, var(--line))',
-                    background: 'var(--raised)',
-                  }}
-                >
-                  <span
-                    className="w-7 shrink-0 text-center text-[17px] font-bold"
-                    style={{ color: 'var(--red)' }}
-                  >
-                    {l.projects.length}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="text-[12.5px] font-semibold">
-                      {l.person.name}{' '}
-                      <Muted>· {l.person.role ?? l.team?.name ?? ''}</Muted>
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {l.projects.slice(0, 6).map((pr) => (
-                        <Chip key={pr.id} tone={pr.health.rag === 'red' ? 'red' : 'blue'}>
-                          {pr.name}
-                          {pr.targetDate ? ` · ${fmtDate(pr.targetDate)}` : ''}
-                        </Chip>
-                      ))}
-                    </div>
-                    {l.collisions.length > 1 ? (
-                      <p className="m-0 mt-1 text-[11.5px]" style={{ color: 'var(--red)' }}>
-                        {l.collisions.length} of these land within 45 days of each other.
-                      </p>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="m-0 mt-2.5 text-[12px]">
-            <Link href="/contention" className="font-semibold hover:underline" style={{ color: 'var(--brand)' }}>
-              Full contention view →
-            </Link>
-          </p>
-        </Card>
-
-        <Card>
-          <CardHeading
-            title="Biggest holes and conflicts"
-            sub="Absence, stated plainly. These are the items that look fine on a roadmap and are not."
-          />
-          <ul className="m-0 flex list-none flex-col gap-2 p-0 text-[12.5px]">
-            {contested.length > 0 ? (
-              <Hole tone="red" label={`${contested.length} contested decision${contested.length === 1 ? '' : 's'}`} href="/decisions?status=open">
-                Two named parties actively disagree: {contested.map((d) => d.ref).join(', ')}.
-              </Hole>
-            ) : null}
-            {externalRisk.length > 0 ? (
-              <Hole tone="red" label={`${externalRisk.length} external blocker${externalRisk.length === 1 ? '' : 's'} at risk`} href="/dependencies">
-                {externalRisk.map((d) => d.fromLabel).filter(Boolean).join(', ')} — outside the
-                portfolio, so reprioritising will not fix them.
-              </Hole>
-            ) : null}
-            {noOwner.length > 0 ? (
-              <Hole tone="violet" label={`${noOwner.length} initiative${noOwner.length === 1 ? '' : 's'} with no owner`} href="/initiatives">
-                {noOwner.map((g) => g.name).join(', ')}.
-              </Hole>
-            ) : null}
-            {noAssessment.length > 0 ? (
-              <Hole tone="amber" label={`${noAssessment.length} item${noAssessment.length === 1 ? '' : 's'} with no health on record`} href="/applications">
-                Neither a source value nor an assessment. Reads as unknown rather than green, on
-                purpose.
-              </Hole>
-            ) : null}
-            {allGaps.filter((g) => g.kind === 'no_projects').length > 0 ? (
-              <Hole tone="slate" label="Strategic initiatives with nothing in delivery" href="/initiatives">
-                {allGaps.filter((g) => g.kind === 'no_projects').map((g) => g.name).join(', ')}.
-              </Hole>
-            ) : null}
-            {allGaps.filter((g) => g.kind === 'stale_assessment').length > 0 ? (
-              <Hole tone="amber" label="Stale assessments" href="/initiatives">
-                {allGaps
-                  .filter((g) => g.kind === 'stale_assessment')
-                  .map((g) => `${g.name} (${g.detail.replace('Assessment is ', '').replace(' old', '')})`)
-                  .join(', ')}
-                .
-              </Hole>
-            ) : null}
-            {contested.length + externalRisk.length + allGaps.length === 0 ? (
-              <Empty>Nothing outstanding. Unusual — worth double-checking the assessments are current.</Empty>
-            ) : null}
-          </ul>
-        </Card>
+        <ActiveWorkCard
+          title="Active initiatives"
+          sub="Most movement first, with what actually happened underneath."
+          work={activeInitiatives}
+          href="/initiatives"
+          hrefLabel="All initiatives"
+        />
+        <ActiveWorkCard
+          title="Active projects"
+          sub="Most movement first, with what actually happened underneath."
+          work={activeProjects}
+          href="/projects"
+          hrefLabel="All projects"
+        />
       </div>
 
       <Card>
@@ -353,6 +287,116 @@ export default async function ControlRoom() {
           </p>
         </Card>
       </div>
+      {/* Moved to the bottom.
+          Both of these are real and neither has changed. But a front page that
+          opens with what is wrong is one people stop opening, and the squeeze
+          in particular is a standing condition rather than news — it reads the
+          same on the day it appears and ninety days later. What is moving goes
+          first; what is stuck is still one scroll away. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card tone="alert">
+          <CardHeading
+            title="The core squeeze"
+            sub="Not a capacity total — the named people every dated commitment routes through."
+          />
+          {hot.length === 0 ? (
+            <Empty>No single-threaded people detected.</Empty>
+          ) : (
+            <ul className="m-0 flex list-none flex-col gap-2 p-0">
+              {hot.slice(0, 3).map((l) => (
+                <li
+                  key={l.person.id}
+                  className="flex items-start gap-3 rounded-lg border px-3 py-2"
+                  style={{
+                    borderColor: 'color-mix(in srgb, var(--red) 30%, var(--line))',
+                    background: 'var(--raised)',
+                  }}
+                >
+                  <span
+                    className="w-7 shrink-0 text-center text-[17px] font-bold"
+                    style={{ color: 'var(--red)' }}
+                  >
+                    {l.projects.length}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-[12.5px] font-semibold">
+                      {l.person.name}{' '}
+                      <Muted>· {l.person.role ?? l.team?.name ?? ''}</Muted>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {l.projects.slice(0, 6).map((pr) => (
+                        <Chip key={pr.id} tone={pr.health.rag === 'red' ? 'red' : 'blue'}>
+                          {pr.name}
+                          {pr.targetDate ? ` · ${fmtDate(pr.targetDate)}` : ''}
+                        </Chip>
+                      ))}
+                    </div>
+                    {l.collisions.length > 1 ? (
+                      <p className="m-0 mt-1 text-[11.5px]" style={{ color: 'var(--red)' }}>
+                        {l.collisions.length} of these land within 45 days of each other.
+                      </p>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="m-0 mt-2.5 text-[12px]">
+            <Link href="/contention" className="font-semibold hover:underline" style={{ color: 'var(--brand)' }}>
+              {hot.length > 3 ? `See all ${hot.length} →` : 'Full contention view →'}
+            </Link>
+          </p>
+        </Card>
+
+        <Card>
+          <CardHeading
+            title="Biggest holes and conflicts"
+            sub="Absence, stated plainly. These are the items that look fine on a roadmap and are not."
+          />
+          <ul className="m-0 flex list-none flex-col gap-2 p-0 text-[12.5px]">
+            {contested.length > 0 ? (
+              <Hole tone="red" label={`${contested.length} contested decision${contested.length === 1 ? '' : 's'}`} href="/decisions?status=open">
+                Two named parties actively disagree: {contested.map((d) => d.ref).join(', ')}.
+              </Hole>
+            ) : null}
+            {externalRisk.length > 0 ? (
+              <Hole tone="red" label={`${externalRisk.length} external blocker${externalRisk.length === 1 ? '' : 's'} at risk`} href="/dependencies">
+                {externalRisk.map((d) => d.fromLabel).filter(Boolean).join(', ')} — outside the
+                portfolio, so reprioritising will not fix them.
+              </Hole>
+            ) : null}
+            {noOwner.length > 0 ? (
+              <Hole tone="violet" label={`${noOwner.length} initiative${noOwner.length === 1 ? '' : 's'} with no owner`} href="/initiatives">
+                {noOwner.map((g) => g.name).join(', ')}.
+              </Hole>
+            ) : null}
+            {noAssessment.length > 0 ? (
+              <Hole tone="amber" label={`${noAssessment.length} item${noAssessment.length === 1 ? '' : 's'} with no health on record`} href="/applications">
+                Neither a source value nor an assessment. Reads as unknown rather than green, on
+                purpose.
+              </Hole>
+            ) : null}
+            {allGaps.filter((g) => g.kind === 'no_projects').length > 0 ? (
+              <Hole tone="slate" label="Strategic initiatives with nothing in delivery" href="/initiatives">
+                {allGaps.filter((g) => g.kind === 'no_projects').map((g) => g.name).join(', ')}.
+              </Hole>
+            ) : null}
+            {allGaps.filter((g) => g.kind === 'stale_assessment').length > 0 ? (
+              <Hole tone="amber" label="Stale assessments" href="/initiatives">
+                {allGaps
+                  .filter((g) => g.kind === 'stale_assessment')
+                  .map((g) => `${g.name} (${g.detail.replace('Assessment is ', '').replace(' old', '')})`)
+                  .join(', ')}
+                .
+              </Hole>
+            ) : null}
+            {contested.length + externalRisk.length + allGaps.length === 0 ? (
+              <Empty>Nothing outstanding. Unusual — worth double-checking the assessments are current.</Empty>
+            ) : null}
+          </ul>
+        </Card>
+      </div>
+
     </div>
   )
 }

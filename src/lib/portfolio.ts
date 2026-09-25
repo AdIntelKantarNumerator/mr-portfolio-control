@@ -14,6 +14,7 @@ import {
   appAreas,
   assessments,
   changelogEntries,
+  decisionEvents,
   decisions,
   dependencies,
   entityThemes,
@@ -544,6 +545,24 @@ export async function recentThemes(limit = 24) {
 }
 
 /**
+ * The themes recorded against one piece of work.
+ *
+ * Themes were only ever shown on the register, which is the wrong place to
+ * look them up: somebody wondering what is being talked about on a project is
+ * on that project's page. Recurring discussion that never becomes a decision
+ * is exactly the signal worth seeing there, and the register is where you go
+ * when you already know what you are chasing.
+ */
+export async function themesFor(entityType: string, entityId: string) {
+  return db
+    .select()
+    .from(entityThemes)
+    .where(and(eq(entityThemes.entityType, entityType), eq(entityThemes.entityId, entityId)))
+    .orderBy(desc(entityThemes.lastSeenAt))
+    .limit(12)
+}
+
+/**
  * One instant for the whole render.
  *
  * "Open 41 days" is computed in two places on the register — once per card and
@@ -570,4 +589,23 @@ export function daysOpen(
   const to = resolvedAt ? (typeof resolvedAt === 'string' ? new Date(resolvedAt) : resolvedAt) : now
   if (Number.isNaN(to.getTime())) return null
   return Math.round((to.getTime() - from.getTime()) / 86_400_000)
+}
+
+/**
+ * Every recorded mention of an entry in the register, keyed by decision id.
+ *
+ * The register's whole claim is that what it says can be checked, and the
+ * events are where that is kept: what was said, by whom, in which meeting, and
+ * who closed it and why. A card that shows a resolution with no reason beside
+ * it is the state this exists to prevent.
+ */
+export async function decisionTrail(): Promise<Map<string, (typeof decisionEvents.$inferSelect)[]>> {
+  const rows = await db.select().from(decisionEvents).orderBy(decisionEvents.occurredAt)
+  const byDecision = new Map<string, (typeof decisionEvents.$inferSelect)[]>()
+  for (const r of rows) {
+    const list = byDecision.get(r.decisionId) ?? []
+    list.push(r)
+    byDecision.set(r.decisionId, list)
+  }
+  return byDecision
 }

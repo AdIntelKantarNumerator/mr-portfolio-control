@@ -410,6 +410,15 @@ export const decisions = pgTable(
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     resolvedAtMeeting: text('resolved_at_meeting'),
     resolvedDocumentId: text('resolved_document_id'),
+    /**
+     * Who closed it. Set when a person closes it on the page — the signed-in
+     * user, not a name they typed, because the one thing worth being certain
+     * of about a closure is who is standing behind it.
+     *
+     * Null when it was closed from a document: there the closure belongs to
+     * the meeting, and `resolvedAtMeeting` is the answer.
+     */
+    resolvedById: text('resolved_by_id').references(() => people.id, { onDelete: 'set null' }),
 
     /**
      * The story so far, in prose.
@@ -479,6 +488,16 @@ export const sourceDocuments = pgTable(
     revision: text('revision'),
     readAt: timestamp('read_at', { withTimezone: true }),
     readBy: text('read_by'),
+    /**
+     * What was found in this document and deliberately NOT recorded, and why.
+     *
+     * Almost always: something was decided or blocked, but the document never
+     * names a piece of work this portfolio tracks, so filing it anywhere would
+     * have been a guess. Dropping it silently makes "I put a blocker in that
+     * meeting and it never appeared" unanswerable, which is how people stop
+     * believing the register covers what they think it covers.
+     */
+    notRecorded: text('not_recorded'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1152,6 +1171,30 @@ export const agentObservations = pgTable(
     items: text('items').notNull(),
     /** JSON: [{ id, source, title, url, occurredAt }] — what the bullets cite. */
     evidence: text('evidence').notNull(),
+
+    /**
+     * JSON: [{ text, at, source }] — what actually HAPPENED lately, as
+     * distinct from `items`, which is what it means.
+     *
+     * The bullets above are an assessment: "delivery is slipping because the
+     * loader is blocked". These are the events underneath: "PR #412 merged",
+     * "Priya raised the SMTP blocker on Tuesday". A front page asking "what is
+     * moving" wants the second, and deriving it from the first is guessing at
+     * a summary's inputs from its output.
+     */
+    recent: text('recent'),
+
+    /**
+     * How much happened, and over what window.
+     *
+     * Counted, not judged. "How active is this" is a number of things that
+     * occurred in a period, and asking a model to score it would produce an
+     * opinion where arithmetic was available. The window widens when a quiet
+     * piece of work has nothing in the last day, so the front page can say
+     * "nothing for nine days" instead of showing an empty card.
+     */
+    activityScore: doublePrecision('activity_score'),
+    activityWindowHours: integer('activity_window_hours'),
 
     /** The model, and which provider served it — the residency answer, recorded. */
     model: text('model').notNull(),

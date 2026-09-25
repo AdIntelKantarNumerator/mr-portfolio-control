@@ -72,3 +72,67 @@ describe('handing out refs', () => {
     assert.equal(nextRef('blocker', ['b7']), 'B8')
   })
 })
+
+describe('what a status is called', () => {
+  test('a cleared blocker is Resolved, not Decided', async () => {
+    // One vocabulary in the database, two on screen. "Decided" on a blocker is
+    // the kind of small wrongness that makes people stop reading carefully.
+    const { statusLabel } = await import('../src/lib/domain')
+    assert.equal(statusLabel('blocker', 'decided'), 'Resolved')
+    assert.equal(statusLabel('decision', 'decided'), 'Decided')
+    assert.equal(statusLabel('blocker', 'open'), 'Open')
+    assert.equal(statusLabel('decision', 'watch'), 'Watch / risk')
+  })
+})
+
+describe('moving an entry to the right work', () => {
+  test('a target is parsed into a type and an id', async () => {
+    const { parseEntityTarget } = await import('../src/lib/register')
+    assert.deepEqual(parseEntityTarget('project:abc-123'), { type: 'project', id: 'abc-123' })
+    assert.deepEqual(parseEntityTarget('initiative:i1'), { type: 'initiative', id: 'i1' })
+    // Ids are uuids, which contain no colons — but splitting on the FIRST one
+    // means an id that ever does contain one still survives intact.
+    assert.deepEqual(parseEntityTarget('project:a:b'), { type: 'project', id: 'a:b' })
+  })
+
+  test('anything that is not a real endpoint is refused', async () => {
+    // A form can be posted with whatever is in it. An entry pointed at a type
+    // this app does not have is invisible on every screen.
+    const { parseEntityTarget } = await import('../src/lib/register')
+    assert.equal(parseEntityTarget('milestone:m1'), null)
+    assert.equal(parseEntityTarget('project:'), null)
+    assert.equal(parseEntityTarget(':abc'), null)
+    assert.equal(parseEntityTarget('abc'), null)
+    assert.equal(parseEntityTarget(''), null)
+  })
+})
+
+describe('what counts as ended', () => {
+  test('completed and canceled, and nothing else', async () => {
+    // Withdrawn is canceled and closed is completed — same states, the words
+    // people say out loud. Defined once because four screens and an agent all
+    // have to agree; the day two copies disagree, a project is hidden from a
+    // page and still matched by Yaara.
+    const { isEnded } = await import('../src/lib/domain')
+    assert.equal(isEnded('completed'), true)
+    assert.equal(isEnded('canceled'), true)
+    assert.equal(isEnded('in_progress'), false)
+    assert.equal(isEnded('backlog'), false, 'a converted intake request must not be hidden')
+    assert.equal(isEnded('planned'), false)
+    assert.equal(isEnded('paused'), false, 'paused work is still somebody\'s problem')
+    assert.equal(isEnded('active'), false)
+    assert.equal(isEnded(null), false)
+  })
+
+  test('reopening lands somewhere live, per kind', async () => {
+    const { reopenedStatus, PROJECT_STATUS, INITIATIVE_STATUS, isEnded } = await import('../src/lib/domain')
+    assert.equal(reopenedStatus('project'), 'planned')
+    assert.equal(reopenedStatus('initiative'), 'active')
+    // Whatever these are, they must be real statuses and must not be ended —
+    // reopening into a closed state would be a button that does nothing.
+    assert.ok((PROJECT_STATUS as readonly string[]).includes(reopenedStatus('project')))
+    assert.ok((INITIATIVE_STATUS as readonly string[]).includes(reopenedStatus('initiative')))
+    assert.equal(isEnded(reopenedStatus('project')), false)
+    assert.equal(isEnded(reopenedStatus('initiative')), false)
+  })
+})

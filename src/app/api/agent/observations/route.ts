@@ -38,6 +38,8 @@ interface Incoming {
   entityId?: string
   agent?: string
   bullets?: Array<{ kind?: string; audience?: string; text?: string; citations?: string[] }>
+  recent?: Array<{ text?: string; citations?: string[]; at?: string | null; source?: string | null }>
+  activity?: { score?: number; windowHours?: number; count?: number } | null
   health?: { rag?: string; confidence?: string; rationale?: string; citations?: string[] } | null
   evidence?: Array<{ id?: string; source?: string; title?: string; url?: string | null; occurredAt?: string | null }>
   model?: string
@@ -95,6 +97,34 @@ export async function POST(req: Request) {
     if (items.length >= 12) break
   }
 
+  // What happened, held to the same bar as a bullet. An uncited line here is
+  // the "progress was made" filler that makes a front page worthless.
+  const recent = (body.recent ?? [])
+    .map((r) => ({
+      text: String(r?.text ?? '').trim().slice(0, 200),
+      citations: (r?.citations ?? []).map(String).filter((c) => known.has(c)),
+      at: r?.at ? String(r.at) : null,
+      source: r?.source ? String(r.source) : null,
+    }))
+    .filter((r) => {
+      if (!r.text) return false
+      if (r.citations.length === 0) {
+        dropped.push(`uncited recent line: "${r.text.slice(0, 50)}…"`)
+        return false
+      }
+      return true
+    })
+    .slice(0, 3)
+
+  // The score is arithmetic the caller did, and it is clamped rather than
+  // trusted: a front page ordered by an unbounded number a caller supplies is
+  // one bad payload away from one project pinned to the top forever.
+  const rawScore = Number(body.activity?.score ?? 0)
+  const activityScore = Number.isFinite(rawScore) ? Math.max(0, Math.min(rawScore, 1000)) : 0
+  const rawWindow = Number(body.activity?.windowHours ?? 0)
+  const activityWindowHours =
+    Number.isFinite(rawWindow) && rawWindow > 0 ? Math.min(Math.round(rawWindow), 8760) : null
+
   const generatedAt = body.generatedAt ? new Date(body.generatedAt) : new Date()
   const model = String(body.model ?? 'unknown').slice(0, 200)
 
@@ -117,6 +147,9 @@ export async function POST(req: Request) {
       entityId,
       agent,
       items: JSON.stringify(items),
+      recent: JSON.stringify(recent),
+      activityScore,
+      activityWindowHours,
       evidence: JSON.stringify(evidence),
       model,
       servedBy: body.servedBy ? String(body.servedBy) : null,
@@ -169,6 +202,8 @@ export async function POST(req: Request) {
   return Response.json({
     id: row?.id ?? null,
     bullets: items.length,
+    recent: recent.length,
+    activityScore,
     assessment: assessmentWritten,
     dropped,
   })

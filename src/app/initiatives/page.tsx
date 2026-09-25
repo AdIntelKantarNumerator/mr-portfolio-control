@@ -22,13 +22,15 @@ import {
   Stat,
   type Tone,
 } from '@/components/ui'
-import { label } from '@/lib/domain'
+import { isEnded, label } from '@/lib/domain'
 import Link from 'next/link'
 import { getPortfolio, type InitiativeView, type ProjectView } from '@/lib/portfolio'
 import { getBriefs, getTranscripts, type BriefRow, type TranscriptRow } from '@/lib/briefs'
 import { Brief } from '@/components/brief'
 import { fmtDate, fmtRange } from '@/lib/util'
 import { Disclosure } from './disclosure'
+import { ShowEnded } from '@/components/show-ended'
+import { Suspense } from 'react'
 
 // This page reads the live portfolio; prerendering it would serve stale data.
 export const dynamic = 'force-dynamic'
@@ -247,17 +249,35 @@ function InitiativeRow({
   )
 }
 
-export default async function InitiativesPage() {
-  const [p, briefs, transcripts] = await Promise.all([
+export default async function InitiativesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
+  const [p, briefs, transcripts, sp] = await Promise.all([
     getPortfolio(),
     getBriefs(),
     getTranscripts(),
+    searchParams,
   ])
+
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)
+  const showEnded = one(sp.ended) === '1'
 
   // Theme order is the board's narrative order; initiatives without a theme sit
   // at the end rather than being dropped.
   const themeRank = new Map(p.themes.map((t, ix) => [t.id, t.sortOrder * 1000 + ix]))
-  const sorted = [...p.initiatives].sort((a, b) => {
+
+  // Closed and withdrawn initiatives are hidden by default, and so are ended
+  // projects inside the ones that remain - an initiative that is live can
+  // still be carrying eight finished projects, and showing them here while
+  // hiding them on the Projects page would be two answers to one question.
+  const endedCount = p.initiatives.filter((i) => isEnded(i.status)).length
+  const inScope = (showEnded ? p.initiatives : p.initiatives.filter((i) => !isEnded(i.status))).map(
+    (i) => (showEnded ? i : { ...i, projects: i.projects.filter((x) => !isEnded(x.status)) }),
+  )
+
+  const sorted = [...inScope].sort((a, b) => {
     const at = a.themeId ? (themeRank.get(a.themeId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER
     const bt = b.themeId ? (themeRank.get(b.themeId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER
     if (at !== bt) return at - bt
@@ -285,8 +305,12 @@ export default async function InitiativesPage() {
         </p>
       </div>
 
+      <Suspense fallback={null}>
+        <ShowEnded hidden={endedCount} path="/initiatives" noun="initiatives" />
+      </Suspense>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat value={sorted.length} label="Initiatives" />
+        <Stat value={sorted.length} label={showEnded ? 'Initiatives (all)' : 'Live initiatives'} />
         <Stat value={red.length} label={label('rag', 'red')} tone={red.length ? 'red' : 'green'} />
         <Stat value={unowned.length} label="No owner" tone={unowned.length ? 'amber' : 'green'} />
         <Stat

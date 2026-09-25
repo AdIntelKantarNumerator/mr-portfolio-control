@@ -49,6 +49,9 @@ export async function GET(req: Request) {
       readAt: d.readAt?.toISOString() ?? null,
       occurredAt: d.occurredAt?.toISOString() ?? null,
       url: d.url,
+      // What was in this document and deliberately not filed. The answer to
+      // "I put a blocker in that meeting and it never showed up".
+      notRecorded: d.notRecorded,
     })),
     truncated: rows.length === LIMIT,
   })

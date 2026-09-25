@@ -20,18 +20,21 @@ import {
   SourceBadge,
   Stat,
 } from '@/components/ui'
-import { label } from '@/lib/domain'
+import { isEnded, label } from '@/lib/domain'
 import { getPortfolio, type AppAreaRow, type ProjectView } from '@/lib/portfolio'
 import { fmtRange } from '@/lib/util'
+import { ShowEnded } from '@/components/show-ended'
+import { Suspense } from 'react'
 
 // This page reads the live portfolio; prerendering it would serve stale data.
 export const dynamic = 'force-dynamic'
 
 /** Finished work does not owe anybody an update, so it never counts as a gap. */
-const CLOSED = ['completed', 'canceled']
-
 function awaitingInput(projects: ProjectView[]) {
-  return projects.filter((p) => p.health.origin === 'none' && !CLOSED.includes(p.status))
+  // isEnded rather than a list declared here. This file had its own copy, and
+  // a second definition of "finished" is how a project ends up hidden on one
+  // page and counted on another.
+  return projects.filter((p) => p.health.origin === 'none' && !isEnded(p.status))
 }
 
 function ProjectTable({ projects }: { projects: ProjectView[] }) {
@@ -50,7 +53,7 @@ function ProjectTable({ projects }: { projects: ProjectView[] }) {
         </thead>
         <tbody>
           {projects.map((p) => {
-            const needsInput = p.health.origin === 'none' && !CLOSED.includes(p.status)
+            const needsInput = p.health.origin === 'none' && !isEnded(p.status)
             return (
               <tr key={p.id}>
                 <td>
@@ -146,12 +149,21 @@ function AreaCard({ area, projects }: { area: AppAreaRow | null; projects: Proje
   )
 }
 
-export default async function ApplicationsPage() {
-  const p = await getPortfolio()
+export default async function ApplicationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
+  const [p, sp] = await Promise.all([getPortfolio(), searchParams])
+
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)
+  const showEnded = one(sp.ended) === '1'
+  const endedCount = p.projects.filter((x) => isEnded(x.status)).length
+  const inScope = showEnded ? p.projects : p.projects.filter((x) => !isEnded(x.status))
 
   const byArea = new Map<string, ProjectView[]>()
   const unassigned: ProjectView[] = []
-  for (const project of p.projects) {
+  for (const project of inScope) {
     if (!project.appAreaId) {
       unassigned.push(project)
       continue
@@ -160,7 +172,7 @@ export default async function ApplicationsPage() {
     byArea.get(project.appAreaId)!.push(project)
   }
 
-  const pending = awaitingInput(p.projects)
+  const pending = awaitingInput(inScope)
   const areasWithGaps = p.appAreas.filter((a) => awaitingInput(byArea.get(a.id) ?? []).length > 0)
 
   return (
@@ -178,6 +190,10 @@ export default async function ApplicationsPage() {
         </p>
       </div>
 
+      <Suspense fallback={null}>
+        <ShowEnded hidden={endedCount} path="/applications" noun="projects" />
+      </Suspense>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat
           value={pending.length}
@@ -185,7 +201,7 @@ export default async function ApplicationsPage() {
           tone={pending.length > 0 ? 'amber' : 'green'}
           sub={`across ${areasWithGaps.length} ${areasWithGaps.length === 1 ? 'area' : 'areas'}`}
         />
-        <Stat value={p.projects.length} label="Projects" />
+        <Stat value={inScope.length} label={showEnded ? 'Projects (all)' : 'Live projects'} />
         <Stat value={p.appAreas.length} label="Application areas" />
         <Stat
           value={unassigned.length}

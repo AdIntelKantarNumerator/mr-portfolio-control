@@ -26,12 +26,24 @@ export interface ObservationEvidence {
   occurredAt: string | null
 }
 
+/** One thing that happened, as opposed to what it means. */
+export interface RecentItem {
+  text: string
+  citations: string[]
+  at: string | null
+  source: string | null
+}
+
 export interface ObservationRow {
   id: string
   entityType: string
   entityId: string
   agent: string
   items: ObservationItem[]
+  recent: RecentItem[]
+  /** Counted, not judged: how much happened, and over what window. */
+  activityScore: number
+  activityWindowHours: number | null
   evidence: ObservationEvidence[]
   model: string
   servedBy: string | null
@@ -69,6 +81,9 @@ export const getObservations = cache(async (): Promise<Map<string, ObservationRo
       entityId: r.entityId,
       agent: r.agent,
       items: parse<ObservationItem[]>(r.items, []),
+      recent: parse<RecentItem[]>(r.recent ?? '[]', []),
+      activityScore: r.activityScore ?? 0,
+      activityWindowHours: r.activityWindowHours,
       evidence: parse<ObservationEvidence[]>(r.evidence, []),
       model: r.model,
       servedBy: r.servedBy,
@@ -140,4 +155,62 @@ export async function markAssessmentReviewed(assessmentId: string, personId: str
     .update(assessments)
     .set({ reviewedBy: personId, reviewedAt: new Date() })
     .where(and(eq(assessments.id, assessmentId), eq(assessments.current, true)))
+}
+
+/** One piece of work on the "what is moving" list. */
+export interface ActiveWork {
+  type: 'initiative' | 'project'
+  id: string
+  name: string
+  href: string
+  status: string
+  score: number
+  /** How far back Yaara had to look to find anything, in hours. */
+  windowHours: number | null
+  /** Up to three things that actually happened, newest first. */
+  recent: RecentItem[]
+  /** Hours since the assessment that produced this. */
+  ageHours: number
+}
+
+/**
+ * What is moving, most active first.
+ *
+ * Ordered by a score Yaara counted rather than one this page derives. Deriving
+ * it here would mean re-deriving it on every render from data that has already
+ * been through a model once — and it would disagree with whatever she says in
+ * Slack, which is the same question asked through a different door.
+ *
+ * Work with nothing recorded is omitted rather than shown with an empty list:
+ * "here are the five most active projects" followed by three blank cards is a
+ * worse answer than a shorter list.
+ */
+export function mostActive(
+  observations: Map<string, ObservationRow>,
+  entities: ReadonlyArray<{ type: 'initiative' | 'project'; id: string; name: string; status: string }>,
+  limit = 5,
+): ActiveWork[] {
+  const out: ActiveWork[] = []
+
+  for (const e of entities) {
+    const row = observations.get(KEY(e.type, e.id))
+    if (!row) continue
+    if (row.recent.length === 0 && row.activityScore === 0) continue
+
+    out.push({
+      type: e.type,
+      id: e.id,
+      name: e.name,
+      href: `/${e.type}s/${e.id}`,
+      status: e.status,
+      score: row.activityScore,
+      windowHours: row.activityWindowHours,
+      recent: row.recent.slice(0, 3),
+      ageHours: row.ageHours,
+    })
+  }
+
+  return out
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .slice(0, limit)
 }

@@ -18,6 +18,7 @@ const NAV = [
   { href: '/', label: 'Control room' },
   { href: '/roadmap', label: 'Timeline' },
   { href: '/initiatives', label: 'Initiatives' },
+  { href: '/projects', label: 'Projects' },
   { href: '/applications', label: 'By application' },
   { href: '/contention', label: 'Contention & people' },
   { href: '/dependencies', label: 'Dependencies' },

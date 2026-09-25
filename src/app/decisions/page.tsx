@@ -35,21 +35,32 @@ import {
   DECISION_KIND,
   DECISION_STATUS,
   label,
+  statusLabel,
   type DecisionStatus,
 } from '@/lib/domain'
 import {
   getPortfolio,
   asOf,
   daysOpen,
+  decisionTrail,
   labelForEndpoint,
   recentThemes,
   type DecisionRow,
   type Portfolio,
 } from '@/lib/portfolio'
-import { DecisionFilters, type FilterOption } from './filters'
+import { DecisionFilters, type EntityOption, type FilterOption } from './filters'
+import { MoveControl, ResolveControl, type WorkOption } from './resolve'
 
 // This page reads the live portfolio; prerendering it would serve stale data.
 export const dynamic = 'force-dynamic'
+
+type DecisionEvent = Awaited<ReturnType<typeof decisionTrail>> extends Map<string, infer V>
+  ? V extends (infer E)[]
+    ? E
+    : never
+  : never
+
+const NO_EVENTS: DecisionEvent[] = []
 
 const STATUS_COLOR: Record<DecisionStatus, string> = {
   open: 'var(--red)',
@@ -113,10 +124,15 @@ function day(d: Date | string | null): string | null {
  * this line exists to pre-empt, and someone who wants to check has to go and
  * find which conversation it was.
  */
-function Provenance({ d, now }: { d: DecisionRow; now: Date }) {
+function Provenance({ d, p, now }: { d: DecisionRow; p: Portfolio; now: Date }) {
   const raised = day(d.raisedAt)
   const resolved = day(d.resolvedAt)
   if (!raised && !resolved) return null
+
+  // Closed by a person on this page, or closed in a meeting. Both are real
+  // answers to "who closed this", and a card that shows neither invites the
+  // question every time somebody reads it.
+  const closer = d.resolvedById ? (p.people.find((x) => x.id === d.resolvedById)?.name ?? null) : null
 
   const openDays = daysOpen(d.raisedAt, d.resolvedAt, now)
 
@@ -138,6 +154,7 @@ function Provenance({ d, now }: { d: DecisionRow; now: Date }) {
           </span>{' '}
           {resolved}
           {d.resolvedAtMeeting ? <> · {d.resolvedAtMeeting}</> : null}
+          {closer ? <> · closed by {closer}</> : null}
         </div>
       ) : null}
       {openDays !== null && openDays > 0 ? (
@@ -149,7 +166,76 @@ function Provenance({ d, now }: { d: DecisionRow; now: Date }) {
   )
 }
 
-function DecisionCard({ d, p, now }: { d: DecisionRow; p: Portfolio; now: Date }) {
+/**
+ * Every time it came up, and who closed it.
+ *
+ * Collapsed by default: on a card this is supporting evidence, not the point,
+ * and forty expanded trails is an unreadable page. But it is on the card rather
+ * than behind a navigation, because the moment anyone doubts a row — "who
+ * decided that?", "I thought this was fixed" — is the moment they are looking
+ * at it, and a doubt that takes a page load to answer usually just goes
+ * unanswered.
+ */
+function Trail({ events }: { events: DecisionEvent[] }) {
+  if (events.length === 0) return null
+
+  const closing = events.filter((e) => e.kind === 'resolved' || e.kind === 'reopened')
+  const last = closing.at(-1)
+
+  return (
+    <details className="mt-2.5">
+      <summary
+        className="cursor-pointer text-[11.5px] font-semibold"
+        style={{ color: 'var(--brand-2)' }}
+      >
+        {events.length === 1 ? '1 entry in the trail' : `${events.length} entries in the trail`}
+        {/* The closure is the one people look for, so it is in the summary
+            line rather than only inside. */}
+        {last
+          ? ` · ${last.kind === 'resolved' ? 'closed' : 'reopened'} by ${last.actor ?? 'unknown'}`
+          : ''}
+      </summary>
+      <ol className="m-0 mt-1.5 flex list-none flex-col gap-1.5 p-0">
+        {events.map((e) => (
+          <li key={e.id} className="text-[12px] leading-relaxed">
+            <span className="font-semibold">{label('decisionEventKind', e.kind)}</span>
+            <Muted>
+              {' '}
+              {day(e.occurredAt) ?? 'undated'}
+              {e.meeting ? ` · ${e.meeting}` : ' · in the portfolio'}
+              {e.actor ? ` · ${e.actor}` : ''}
+            </Muted>
+            {e.note ? (
+              <div style={{ color: 'var(--ink)' }}>
+                {e.url ? (
+                  <a href={e.url} target="_blank" rel="noreferrer" style={{ color: 'var(--brand-2)' }}>
+                    {e.note}
+                  </a>
+                ) : (
+                  e.note
+                )}
+              </div>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </details>
+  )
+}
+
+function DecisionCard({
+  d,
+  p,
+  now,
+  events,
+  work,
+}: {
+  d: DecisionRow
+  p: Portfolio
+  now: Date
+  events: DecisionEvent[]
+  work: WorkOption[]
+}) {
   const status = isStatus(d.status) ? d.status : 'open'
   const owner = ownerOf(d, p.people)
   const raiser = raiserOf(d, p.people)
@@ -169,7 +255,7 @@ function DecisionCard({ d, p, now }: { d: DecisionRow; p: Portfolio; now: Date }
         <span className="font-mono text-[11px] font-bold" style={{ color: 'var(--brand-2)' }}>
           {d.ref}
         </span>
-        <Pill tone={STATUS_TONE[status]}>{label('decisionStatus', d.status)}</Pill>
+        <Pill tone={STATUS_TONE[status]}>{statusLabel(d.kind, d.status)}</Pill>
         <Chip tone={d.kind === 'blocker' ? 'red' : 'slate'}>{label('decisionKind', d.kind)}</Chip>
         <Chip tone={CATEGORY_TONE[d.category] ?? 'slate'}>{d.category}</Chip>
         {linked ? (
@@ -266,7 +352,7 @@ function DecisionCard({ d, p, now }: { d: DecisionRow; p: Portfolio; now: Date }
         </div>
       ) : null}
 
-      <Provenance d={d} now={now} />
+      <Provenance d={d} p={p} now={now} />
 
       {/* The same blocker comes up in three weekly meetings, and the useful
           record is one live item rather than three near-identical rows. This is
@@ -304,6 +390,27 @@ function DecisionCard({ d, p, now }: { d: DecisionRow; p: Portfolio; now: Date }
           </GapFlag>
         </div>
       ) : null}
+
+      <Trail events={events} />
+
+      {/* Both keyed on the state they change, so a successful save remounts
+          them closed rather than an effect reaching in to reset them. */}
+      <div className="no-print mt-2.5 flex flex-wrap items-start gap-2">
+        <ResolveControl
+          key={`r:${d.id}:${d.resolvedAt?.toISOString() ?? 'open'}`}
+          id={d.id}
+          refName={d.ref}
+          kind={d.kind}
+          resolved={Boolean(d.resolvedAt)}
+        />
+        <MoveControl
+          key={`m:${d.id}:${d.entityType}:${d.entityId}`}
+          id={d.id}
+          refName={d.ref}
+          current={d.entityType && d.entityId ? `${d.entityType}:${d.entityId}` : null}
+          options={work}
+        />
+      </div>
     </Card>
   )
 }
@@ -313,21 +420,28 @@ export default async function DecisionsPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
-  const [p, sp, themes, now] = await Promise.all([
+  const [p, sp, themes, now, trail] = await Promise.all([
     getPortfolio(),
     searchParams,
     recentThemes(),
     asOf(),
+    decisionTrail(),
   ])
 
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)
   const kind = one(sp.kind) ?? 'all'
   const status = one(sp.status) ?? 'all'
   const category = one(sp.category) ?? 'all'
+  // "type:id", so one control can offer initiatives and projects together.
+  const entity = one(sp.entity) ?? 'all'
+
+  const keyOf = (d: DecisionRow) =>
+    d.entityType && d.entityId ? `${d.entityType}:${d.entityId}` : ''
 
   const all = p.decisions
   const visible = all
     .filter((d) => (kind === 'all' ? true : d.kind === kind))
+    .filter((d) => (entity === 'all' ? true : keyOf(d) === entity))
     .filter((d) => (status === 'all' ? true : d.status === status))
     .filter((d) => (category === 'all' ? true : d.category === category))
     .sort((a, b) => {
@@ -343,8 +457,9 @@ export default async function DecisionsPage({
 
   // Counts are computed against the other axes so the numbers on the buttons
   // describe what a click would actually show, not the unfiltered totals.
-  const matchesOthers = (d: DecisionRow, ignore: 'kind' | 'status' | 'category') =>
+  const matchesOthers = (d: DecisionRow, ignore: 'kind' | 'status' | 'category' | 'entity') =>
     (ignore === 'kind' || kind === 'all' || d.kind === kind) &&
+    (ignore === 'entity' || entity === 'all' || keyOf(d) === entity) &&
     (ignore === 'status' || status === 'all' || d.status === status) &&
     (ignore === 'category' || category === 'all' || d.category === category)
 
@@ -371,6 +486,33 @@ export default async function DecisionsPage({
       label: c,
       count: all.filter((d) => d.category === c && matchesOthers(d, 'category')).length,
     })),
+  ]
+
+  // Only work that actually has something in the register. A select listing
+  // forty projects of which six have ever had a blocker is a scrolling
+  // exercise, and the empty ones answer nothing.
+  const entityOptions: EntityOption[] = [
+    { value: 'all', label: 'All work', count: all.filter((d) => matchesOthers(d, 'entity')).length },
+    ...[...new Set(all.map(keyOf).filter(Boolean))]
+      .map((key) => {
+        const [type, id] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]
+        return {
+          value: key,
+          label: labelForEndpoint(p, type, id),
+          count: all.filter((d) => keyOf(d) === key && matchesOthers(d, 'entity')).length,
+        }
+      })
+      .sort((a, b) => a.label.localeCompare(b.label)),
+  ]
+
+  // Everything an entry could be moved to. Initiatives first because they are
+  // the coarser answer, and prefixed so the two are distinguishable in a list
+  // where a project and an initiative can share a name.
+  const work: WorkOption[] = [
+    ...p.initiatives.map((i) => ({ value: `initiative:${i.id}`, label: `Initiative · ${i.name}` })),
+    ...p.projects
+      .map((x) => ({ value: `project:${x.id}`, label: `Project · ${x.name}` }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
   ]
 
   const live = (d: DecisionRow) => d.status !== 'decided' && d.status !== 'dropped'
@@ -419,6 +561,7 @@ export default async function DecisionsPage({
         <Suspense fallback={<Muted>Loading filters…</Muted>}>
           <DecisionFilters
             kinds={kindOptions}
+            entities={entityOptions}
             statuses={statusOptions}
             categories={categoryOptions}
           />
@@ -433,12 +576,62 @@ export default async function DecisionsPage({
         </SectionNote>
       ) : null}
 
+      {/* Two sections, not one list.
+          A blocker and a decision share a table because they share owner,
+          status, entity and provenance - but they are not the same thing to a
+          person reading the page. "What is stopping us" and "what do we have to
+          choose" are asked by different people, answered by different people,
+          and acted on differently. Interleaving them by status made the page
+          read as one undifferentiated pile of trouble.
+          Filtering to one type collapses this to a single section, because then
+          the heading would only repeat the filter. */}
       {visible.length === 0 ? (
         <Empty>Nothing in the register matches this filter.</Empty>
+      ) : kind === 'all' ? (
+        <>
+          {(['blocker', 'decision'] as const).map((k) => {
+            const rows = visible.filter((d) => d.kind === k)
+            if (rows.length === 0) return null
+            const liveCount = rows.filter(live).length
+            return (
+              <section key={k} className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <h3 className="m-0 text-[15px] font-bold tracking-[-0.01em]">
+                    {label('decisionKind', k)}s
+                  </h3>
+                  <Muted>
+                    {liveCount === 0
+                      ? `${rows.length} recorded, none still ${k === 'blocker' ? 'blocking' : 'open'}`
+                      : `${liveCount} still ${k === 'blocker' ? 'blocking' : 'open'} of ${rows.length}`}
+                  </Muted>
+                </div>
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {rows.map((d) => (
+                    <DecisionCard
+                      key={d.id}
+                      d={d}
+                      p={p}
+                      now={now}
+                      events={trail.get(d.id) ?? NO_EVENTS}
+                      work={work}
+                    />
+                  ))}
+                </div>
+              </section>
+            )
+          })}
+        </>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {visible.map((d) => (
-            <DecisionCard key={d.id} d={d} p={p} now={now} />
+            <DecisionCard
+              key={d.id}
+              d={d}
+              p={p}
+              now={now}
+              events={trail.get(d.id) ?? NO_EVENTS}
+              work={work}
+            />
           ))}
         </div>
       )}
