@@ -17,14 +17,39 @@ import type { Database } from '../src/db/client'
  * encrypts without checking who is on the other end, and exists only for a
  * self-signed certificate on an internal server.
  *
- * Without this the scripts connect with TLS disabled, and Azure refuses the
- * connection outright rather than falling back.
+ * THE DEFAULT IS ON, AND THAT MATTERS TWICE.
+ *
+ * It used to be off unless DATABASE_SSL was set, which was wrong in two
+ * separate ways. The visible way: App Service has that variable and a laptop
+ * does not, so a migration run by hand connected without TLS and Azure refused
+ * it — "no pg_hba.conf entry ... no encryption" — which reads like a firewall
+ * problem and sent an hour in the wrong direction while the site was down.
+ *
+ * The one that actually worries me: on any server that did accept the
+ * connection, forgetting a variable meant sending the database password across
+ * the network in the clear, silently. A security property should not depend on
+ * remembering a second environment variable.
+ *
+ * So TLS is now the default for anything that is not plainly a local database,
+ * and turning it off is an explicit, named act.
  */
-export function sslOption() {
-  const mode = process.env.DATABASE_SSL?.trim()
+export function sslOption(url = process.env.DATABASE_URL ?? '') {
+  const mode = process.env.DATABASE_SSL?.trim().toLowerCase()
   if (mode === 'require') return { rejectUnauthorized: true }
   if (mode === 'no-verify') return { rejectUnauthorized: false }
-  return undefined
+  if (mode === 'off' || mode === 'disable') return undefined
+  if (/\bsslmode=disable\b/.test(url)) return undefined
+
+  // A database on this machine needs no transport security and often has no
+  // certificate to offer. Anything else is across a network.
+  let host = ''
+  try {
+    host = new URL(url).hostname
+  } catch {
+    host = ''
+  }
+  const local = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === ''
+  return local ? undefined : { rejectUnauthorized: true }
 }
 
 export interface Connection {

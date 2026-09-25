@@ -50,14 +50,31 @@ function resolve(): { db: Database; kind: 'pglite' | 'postgres' } {
      * `no-verify` exists for a self-signed certificate on an internal server.
      * It is a deliberate, named choice rather than the quiet default it used
      * to be.
+     *
+     * TLS defaults to ON for any host that is not local. Leaving it off by
+     * default meant a missing environment variable silently downgraded the
+     * connection to plaintext — password included — and separately made a
+     * hand-run migration fail against Azure with an error that looks like a
+     * firewall rule. Neither should hinge on remembering a second variable.
      */
-    const sslMode = process.env.DATABASE_SSL?.trim()
+    const sslMode = process.env.DATABASE_SSL?.trim().toLowerCase()
+    let host = ''
+    try {
+      host = new URL(url).hostname
+    } catch {
+      host = ''
+    }
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === ''
     const ssl =
       sslMode === 'require'
         ? { rejectUnauthorized: true }
         : sslMode === 'no-verify'
           ? { rejectUnauthorized: false }
-          : undefined
+          : sslMode === 'off' || sslMode === 'disable' || /\bsslmode=disable\b/.test(url)
+            ? undefined
+            : isLocal
+              ? undefined
+              : { rejectUnauthorized: true }
 
     const pool = new Pool({
       connectionString: url,
