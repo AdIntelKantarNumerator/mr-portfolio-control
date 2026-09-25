@@ -136,3 +136,29 @@ describe('what counts as ended', () => {
     assert.equal(isEnded(reopenedStatus('initiative')), false)
   })
 })
+
+describe('the program review plan', () => {
+  test('a calendar band is a statement about months', async () => {
+    // 'YYYY-MM' rather than a date, because a band covers a month and a
+    // timestamp would imply a day nobody chose.
+    const { isPeriod } = await import('../src/lib/domain')
+    assert.equal(isPeriod('2026-07'), true)
+    assert.equal(isPeriod('2026-12'), true)
+    assert.equal(isPeriod('2026-13'), false)
+    assert.equal(isPeriod('2026-00'), false)
+    assert.equal(isPeriod('2026-7'), false)
+    assert.equal(isPeriod('2026-07-15'), false)
+    assert.equal(isPeriod('Q3 2026'), false)
+  })
+
+  test('the deck legend is the deck legend, not the portfolio vocabulary', async () => {
+    // A workstream is "On Track"; a project is "In progress". Different
+    // statements about different things, and the deck is read by a room.
+    const { label, WORKSTREAM_STATUS } = await import('../src/lib/domain')
+    assert.deepEqual([...WORKSTREAM_STATUS], ['planning', 'on_track', 'at_risk', 'blocked', 'complete'])
+    assert.equal(label('workstreamStatus', 'on_track'), 'On Track')
+    assert.equal(label('workstreamStatus', 'at_risk'), 'At Risk')
+    assert.equal(label('workstreamPhase', 'testing'), 'Testing (QA)')
+    assert.equal(label('workstreamPhase', 'ga'), 'General Availability (GA)')
+  })
+})

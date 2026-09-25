@@ -55,6 +55,46 @@ export function reopenedStatus(kind: 'project' | 'initiative'): string {
   return kind === 'project' ? 'planned' : 'active'
 }
 
+/**
+ * The program review legend, exactly as the deck prints it.
+ *
+ * These are the team's words on a slide people read every fortnight, so they
+ * are not renamed here to match the portfolio's other vocabularies. A
+ * workstream is "On Track"; a project is "In progress". They are different
+ * statements about different things, and collapsing them would lose the one
+ * the deck exists to make.
+ */
+export const WORKSTREAM_STATUS = [
+  'planning',
+  'on_track',
+  'at_risk',
+  'blocked',
+  'complete',
+] as const
+export type WorkstreamStatus = (typeof WORKSTREAM_STATUS)[number]
+
+/** Where a bullet sits under a Status Update. */
+export const WORKSTREAM_ITEM_STATE = ['completed', 'in_progress', 'to_do'] as const
+export type WorkstreamItemState = (typeof WORKSTREAM_ITEM_STATE)[number]
+
+/** The phases row: Discovery → Development → Testing (QA) → UAT → Alpha/Beta → GA. */
+export const WORKSTREAM_PHASE = [
+  'discovery',
+  'development',
+  'testing',
+  'uat',
+  'alpha_beta',
+  'ga',
+  'release',
+  'tbd',
+] as const
+export type WorkstreamPhase = (typeof WORKSTREAM_PHASE)[number]
+
+/** 'YYYY-MM', which is what a release calendar band is a statement about. */
+export function isPeriod(value: string): boolean {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value)
+}
+
 export const PRIORITY = ['urgent', 'high', 'medium', 'low', 'no_priority'] as const
 export type Priority = (typeof PRIORITY)[number]
 
@@ -156,6 +196,28 @@ export const LABELS = {
     updated: 'Updated',
     resolved: 'Resolved',
     reopened: 'Reopened',
+  },
+  workstreamStatus: {
+    planning: 'Planning',
+    on_track: 'On Track',
+    at_risk: 'At Risk',
+    blocked: 'Blocked',
+    complete: 'Complete',
+  },
+  workstreamItemState: {
+    completed: 'Completed',
+    in_progress: 'In Progress',
+    to_do: 'To Do',
+  },
+  workstreamPhase: {
+    discovery: 'Discovery',
+    development: 'Development',
+    testing: 'Testing (QA)',
+    uat: 'UAT',
+    alpha_beta: 'Alpha/Beta',
+    ga: 'General Availability (GA)',
+    release: 'Release',
+    tbd: 'TBD',
   },
   rag: { green: 'On track', amber: 'At risk', red: 'In trouble', unknown: 'Needs input' },
   projectStatus: {

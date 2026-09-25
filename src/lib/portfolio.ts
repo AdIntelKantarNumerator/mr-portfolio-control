@@ -27,6 +27,9 @@ import {
   syncRuns,
   teams,
   themes,
+  workstreamItems,
+  workstreamPhases,
+  workstreams,
 } from '@/db/schema'
 import { loadOverrides, applyOverrides, type OverrideMap } from './overrides'
 import { resolveHealth, type Rag, type ResolvedHealth } from './domain'
@@ -608,4 +611,48 @@ export async function decisionTrail(): Promise<Map<string, (typeof decisionEvent
     byDecision.set(r.decisionId, list)
   }
   return byDecision
+}
+
+/**
+ * The program review plan for one project.
+ *
+ * Three tables, assembled in the order the slide reads them, because every
+ * caller wants it that way and none of them should have to know there are
+ * three.
+ */
+export async function workstreamsFor(projectId: string) {
+  const rows = await db
+    .select()
+    .from(workstreams)
+    .where(eq(workstreams.projectId, projectId))
+    .orderBy(workstreams.sortOrder)
+
+  if (rows.length === 0) return []
+
+  const ids = rows.map((w) => w.id)
+  const [items, phases] = await Promise.all([
+    db.select().from(workstreamItems).where(inArray(workstreamItems.workstreamId, ids)).orderBy(workstreamItems.sortOrder),
+    db.select().from(workstreamPhases).where(inArray(workstreamPhases.workstreamId, ids)),
+  ])
+
+  return rows.map((w) => ({
+    id: w.id,
+    name: w.name,
+    details: w.details,
+    status: w.status,
+    targetLabel: w.targetLabel,
+    dependencies: w.dependencies,
+    authoredBy: w.authoredBy,
+    agentNote: w.agentNote,
+    items: items.filter((i) => i.workstreamId === w.id).map((i) => ({ state: i.state, text: i.text })),
+    phases: phases
+      .filter((p) => p.workstreamId === w.id)
+      .map((p) => ({
+        id: p.id,
+        phase: p.phase,
+        label: p.label,
+        fromPeriod: p.fromPeriod,
+        toPeriod: p.toPeriod,
+      })),
+  }))
 }

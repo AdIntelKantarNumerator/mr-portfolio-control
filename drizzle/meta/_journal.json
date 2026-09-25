@@ -64,6 +64,20 @@
       "when": 1790298096506,
       "tag": "0008_third_shiva",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790344387281,
+      "tag": "0009_spooky_colonel_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790353763005,
+      "tag": "0010_elite_sharon_ventura",
+      "breakpoints": true
     }
   ]
 }

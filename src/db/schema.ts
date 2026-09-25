@@ -169,6 +169,18 @@ export const projects = pgTable(
     appAreaId: text('app_area_id').references(() => appAreas.id, { onDelete: 'set null' }),
     leadId: text('lead_id').references(() => people.id, { onDelete: 'set null' }),
     teamId: text('team_id').references(() => teams.id, { onDelete: 'set null' }),
+
+    /**
+     * The three names on a program review slide: Owner, Dev, Program.
+     *
+     * Owner is `leadId`, which is a real Person. These two are free text
+     * because what the deck actually carries is "Scott & Sadiya" and "Spencer"
+     * — a pairing and a first name, neither of which a foreign key models
+     * without inventing precision nobody asked for.
+     */
+    devLead: text('dev_lead'),
+    programLead: text('program_lead'),
+
     sortOrder: integer('sort_order').notNull().default(0),
 
     createdAt: createdAt(),
@@ -453,6 +465,155 @@ export const decisions = pgTable(
     index('decisions_entity_idx').on(t.entityType, t.entityId),
   ],
 )
+
+// ---------------------------------------------------------------------------
+// Program review — the plan as people present it
+//
+// Everything above is what systems know: what a tracker holds, what an agent
+// read, what somebody assessed. This is different. It is the plan as a team
+// states it to a room every other week — objectives, what is done and what is
+// next, and when each version lands.
+//
+// It lives here because it was living in a slide deck, which meant the only
+// copy of "what are we actually trying to do on this project" was a file
+// somebody rebuilt by hand every fortnight. Moving it here does not remove the
+// deck; it makes the deck a rendering of something that can also be read,
+// queried, and kept current between meetings.
+// ---------------------------------------------------------------------------
+
+/**
+ * One row of a program review table: an objective and where it has got to.
+ *
+ * A project has a handful. "Logo Rec Tech", "Sports Dashboard MVP", "Data
+ * Updates" are workstreams of the Sports project — each with its own status
+ * and its own date, which is exactly why a project's single RAG cannot say
+ * what the deck says.
+ */
+export const workstreams = pgTable(
+  'workstreams',
+  {
+    id: id(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    /** The Objective column: "Logo Rec Tech", "Hybrid Capture w/ Automation". */
+    name: text('name').notNull(),
+    /** The Details column: one sentence on what it actually is. */
+    details: text('details'),
+    /** planning | on_track | at_risk | blocked | complete — the deck's legend. */
+    status: text('status').notNull().default('planning'),
+    /**
+     * Free text, and deliberately: the deck says "9/30", "Q3/Q4", "Jan 2027"
+     * and "TBD/Sep". Forcing those into a date column would either lose the
+     * meaning or invent a precision the team does not have.
+     */
+    targetLabel: text('target_label'),
+    /** The Key Dependencies column, where a slide has one. */
+    dependencies: text('dependencies'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    /** Set when an agent read this off a deck rather than a person typing it. */
+    authoredBy: text('authored_by'),
+
+    /**
+     * What the agent changed here since a person last touched it, and why.
+     *
+     * One line per judgement call, newline separated:
+     *
+     *   Status on_track → at_risk: blocker B12 open 3 days, target in 6
+     *   Added to In Progress: SMTP relay fix (Priya, #ratings-eng, Tue)
+     *
+     * This exists because she is allowed to move the plan between reviews, and
+     * a status that changed silently is how somebody gets surprised by their
+     * own slide in front of a room. Every change she makes is printed on the
+     * slide next to the row it changed, so the person presenting can see her
+     * working and say "no, that is wrong" before anyone else does.
+     *
+     * Cleared when a person edits the row: once a human has looked at it, her
+     * reasoning is superseded and showing it would be arguing with the owner.
+     */
+    agentNote: text('agent_note'),
+    agentNoteAt: timestamp('agent_note_at', { withTimezone: true }),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('workstreams_project_idx').on(t.projectId)],
+)
+
+/**
+ * The bullets under a Status Update, and which of the three lists they are in.
+ *
+ * Completed / In Progress / To Do is the structure every one of these slides
+ * uses, and it is the part most worth keeping current between meetings: it is
+ * the only place that says what is happening RIGHT NOW rather than what was
+ * planned.
+ */
+export const workstreamItems = pgTable(
+  'workstream_items',
+  {
+    id: id(),
+    workstreamId: text('workstream_id')
+      .notNull()
+      .references(() => workstreams.id, { onDelete: 'cascade' }),
+    /** completed | in_progress | to_do */
+    state: text('state').notNull().default('in_progress'),
+    text: text('text').notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    /** An agent may propose these from what it observed; a person confirms. */
+    authoredBy: text('authored_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('workstream_items_workstream_idx').on(t.workstreamId)],
+)
+
+/**
+ * A band on the release calendar: this workstream is in this phase, from this
+ * month to that one.
+ *
+ * Months as 'YYYY-MM' strings rather than dates, because a band is a statement
+ * about calendar months and a timestamp would imply a day nobody chose. The
+ * label is kept separately from the phase: their decks say "Development",
+ * "Development/Release", "Primary Capture" and "Secondary Capture" in the same
+ * column, and only some of those are phases.
+ */
+export const workstreamPhases = pgTable(
+  'workstream_phases',
+  {
+    id: id(),
+    workstreamId: text('workstream_id')
+      .notNull()
+      .references(() => workstreams.id, { onDelete: 'cascade' }),
+    /** discovery | development | testing | uat | alpha_beta | ga | release | tbd */
+    phase: text('phase').notNull().default('development'),
+    /** What the band actually reads, when it is not just the phase name. */
+    label: text('label'),
+    /** 'YYYY-MM', inclusive at both ends. */
+    fromPeriod: text('from_period').notNull(),
+    toPeriod: text('to_period').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('workstream_phases_workstream_idx').on(t.workstreamId)],
+)
+
+export const workstreamsRelations = relations(workstreams, ({ one, many }) => ({
+  project: one(projects, { fields: [workstreams.projectId], references: [projects.id] }),
+  items: many(workstreamItems),
+  phases: many(workstreamPhases),
+}))
+
+export const workstreamItemsRelations = relations(workstreamItems, ({ one }) => ({
+  workstream: one(workstreams, {
+    fields: [workstreamItems.workstreamId],
+    references: [workstreams.id],
+  }),
+}))
+
+export const workstreamPhasesRelations = relations(workstreamPhases, ({ one }) => ({
+  workstream: one(workstreams, {
+    fields: [workstreamPhases.workstreamId],
+    references: [workstreams.id],
+  }),
+}))
 
 /**
  * A document somebody shared, and the one thing worth keeping about it here:
