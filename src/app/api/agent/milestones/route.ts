@@ -46,6 +46,7 @@ import {
   isPeriod,
 } from '@/lib/domain'
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
+import { mergeFromSource } from '@/lib/milestones'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -115,6 +116,8 @@ export async function POST(req: Request) {
   const workstreamId = String(body.workstreamId ?? '')
   const mode = body.mode === 'merge' ? 'merge' : 'replace'
   const dropped: string[] = []
+  // Fields this write deliberately left alone because a person set them.
+  const notes: string[] = []
 
   const [workstream] = await db.select().from(workstreams).where(eq(workstreams.id, workstreamId)).limit(1)
   if (!workstream) return Response.json({ error: `No workstream with id ${workstreamId}.` }, { status: 400 })
@@ -180,7 +183,15 @@ export async function POST(req: Request) {
     const found = byName.get(name.toLowerCase())
     let id: string
     if (found) {
-      await db.update(milestones).set(values).where(eq(milestones.id, found.id))
+      // Fields a person corrected on the milestone editor are theirs. See
+      // lib/milestones.ts — an agent restating a deck must not quietly undo
+      // a date somebody fixed here after the deck was written.
+      const allowed = mergeFromSource(values, found.editedFields)
+      if (Object.keys(allowed).length > 0) {
+        await db.update(milestones).set(allowed).where(eq(milestones.id, found.id))
+      }
+      const held = Object.keys(values).filter((k) => !(k in allowed))
+      if (held.length) notes.push(`${name}: left ${held.join(', ')} as edited here`)
       id = found.id
     } else {
       const [row] = await db.insert(milestones).values(values).returning()
@@ -237,7 +248,7 @@ export async function POST(req: Request) {
     }
   }
 
-  return Response.json({ workstream: workstream.name, written, removed, mode, dropped })
+  return Response.json({ workstream: workstream.name, written, removed, mode, dropped, notes })
 }
 
 /**

@@ -31,12 +31,26 @@ export const dynamic = 'force-dynamic'
 const KINDS = new Set(['progress', 'blocker', 'decision_needed', 'decision_made', 'risk', 'change'])
 const AUDIENCES = new Set(['engineering', 'stakeholder'])
 const RAGS = new Set(['green', 'amber', 'red', 'unknown'])
-const ENTITY_TYPES = new Set(['project', 'workstream'])
+// Initiatives are here now. They are the tier the home page leads with, and
+// an initiative that cannot carry an assessment shows "No assessment yet"
+// forever while every project inside it has one.
+const ENTITY_TYPES = new Set(['initiative', 'project', 'workstream'])
 
 interface Incoming {
   entityType?: string
   entityId?: string
   agent?: string
+  /**
+   * One sentence for the card, synthesising the bullets rather than repeating
+   * the loudest one.
+   *
+   * Without it the card fell back to bullets[0], so an entity with four
+   * updates showed the first and looked like it had one. It is stored in
+   * `verdict`, which a person can then edit in place - and `verdictBy` stays
+   * null here so the card can still tell "she wrote this" from "somebody
+   * corrected it".
+   */
+  summary?: string
   bullets?: Array<{ kind?: string; audience?: string; text?: string; citations?: string[] }>
   recent?: Array<{ text?: string; citations?: string[]; at?: string | null; source?: string | null }>
   activity?: { score?: number; windowHours?: number; count?: number } | null
@@ -146,6 +160,7 @@ export async function POST(req: Request) {
       entityType,
       entityId,
       agent,
+      verdict: String(body.summary ?? '').trim().slice(0, 400) || null,
       items: JSON.stringify(items),
       recent: JSON.stringify(recent),
       activityScore,
