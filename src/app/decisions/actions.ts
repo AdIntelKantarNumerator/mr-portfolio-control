@@ -23,7 +23,7 @@
 import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { decisionEvents, decisions, initiatives, projects } from '@/db/schema'
+import { decisionEvents, decisions, projects, workstreams } from '@/db/schema'
 import { logChange } from '@/lib/portfolio'
 import { actorName, actorPersonId } from '@/lib/auth/current-user'
 import { parseEntityTarget } from '@/lib/register'
@@ -174,7 +174,7 @@ export async function reopenEntry(_prev: ActionState, formData: FormData): Promi
  * Move an entry to the piece of work it actually belongs to.
  *
  * This exists because entries arrive misfiled. Yaara reads a meeting and has to
- * decide which project it is about; she now refuses to guess, but a wrong
+ * decide which workstream it is about; she now refuses to guess, but a wrong
  * attachment made before that guard — or by a person picking the wrong row —
  * has to be fixable, and it was not. A register you cannot correct is one
  * people work around.
@@ -195,7 +195,7 @@ export async function moveEntry(_prev: ActionState, formData: FormData): Promise
 
   const entry = await load(id)
   if (!entry) return { error: 'That entry no longer exists.' }
-  if (!target) return { ref: entry.ref, error: 'Pick the initiative or project it belongs to.' }
+  if (!target) return { ref: entry.ref, error: 'Pick the project or workstream it belongs to.' }
 
   if (entry.entityType === target.type && entry.entityId === target.id) {
     return { ref: entry.ref, error: 'It is already there.' }
@@ -203,16 +203,16 @@ export async function moveEntry(_prev: ActionState, formData: FormData): Promise
 
   // The target has to be real. A form can be posted with anything in it, and an
   // entry pointed at an id that does not exist is invisible everywhere.
-  const [initiative, project] = await Promise.all([
-    target.type === 'initiative'
-      ? db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives).where(eq(initiatives.id, target.id)).limit(1)
-      : Promise.resolve([]),
+  const [project, workstream] = await Promise.all([
     target.type === 'project'
       ? db.select({ id: projects.id, name: projects.name }).from(projects).where(eq(projects.id, target.id)).limit(1)
       : Promise.resolve([]),
+    target.type === 'workstream'
+      ? db.select({ id: workstreams.id, name: workstreams.name }).from(workstreams).where(eq(workstreams.id, target.id)).limit(1)
+      : Promise.resolve([]),
   ])
-  const found = initiative[0] ?? project[0]
-  if (!found) return { ref: entry.ref, error: 'That initiative or project no longer exists.' }
+  const found = project[0] ?? workstream[0]
+  if (!found) return { ref: entry.ref, error: 'That project or workstream no longer exists.' }
 
   // The name it is leaving, for the event. Looked up before the update, since
   // afterwards there is nothing to look it up from.
@@ -252,12 +252,12 @@ export async function moveEntry(_prev: ActionState, formData: FormData): Promise
 /** What a piece of work is called, for the record of a move away from it. */
 async function nameOfEntity(type: string | null, id: string | null): Promise<string | null> {
   if (!type || !id) return null
-  if (type === 'initiative') {
-    const [row] = await db.select({ name: initiatives.name }).from(initiatives).where(eq(initiatives.id, id)).limit(1)
-    return row?.name ?? null
-  }
   if (type === 'project') {
     const [row] = await db.select({ name: projects.name }).from(projects).where(eq(projects.id, id)).limit(1)
+    return row?.name ?? null
+  }
+  if (type === 'workstream') {
+    const [row] = await db.select({ name: workstreams.name }).from(workstreams).where(eq(workstreams.id, id)).limit(1)
     return row?.name ?? null
   }
   return null

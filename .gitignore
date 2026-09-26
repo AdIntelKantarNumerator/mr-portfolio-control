@@ -9,3 +9,6 @@ build/
 .DS_Store
 next-env.d.ts
 .azure-deployment.txt
+
+# Incremental build cache — machine-specific, never useful in a diff.
+tsconfig.tsbuildinfo

@@ -13,7 +13,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { intakeRequests, projects } from '@/db/schema'
+import { intakeRequests, workstreams } from '@/db/schema'
 import { INTAKE_STATUS, LABELS, intakeInput, type IntakeStatus } from '@/lib/domain'
 import { logChange } from '@/lib/portfolio'
 import { actorName } from '@/lib/auth/current-user'
@@ -47,7 +47,7 @@ export async function moveRequest(formData: FormData) {
   if (!row || row.status === next) return
 
   // 'converted' is owned by approveAndConvert — reaching it by hand would leave
-  // a request marked converted with no project behind it.
+  // a request marked converted with no workstream behind it.
   if (next === 'converted') return
 
   await db.update(intakeRequests).set({ status: next }).where(eq(intakeRequests.id, id))
@@ -232,7 +232,7 @@ export async function createRequest(
 }
 
 // ---------------------------------------------------------------------------
-// Approve → create project
+// Approve → create workstream
 // ---------------------------------------------------------------------------
 
 export async function approveAndConvert(formData: FormData) {
@@ -245,30 +245,30 @@ export async function approveAndConvert(formData: FormData) {
   if (!row || row.status !== 'approved' || row.convertedProjectId) return
 
   const existing = await db
-    .select({ key: projects.key, sortOrder: projects.sortOrder })
-    .from(projects)
-    .orderBy(desc(projects.sortOrder))
+    .select({ key: workstreams.key, sortOrder: workstreams.sortOrder })
+    .from(workstreams)
+    .orderBy(desc(workstreams.sortOrder))
   const taken = new Set(existing.map((p) => p.key))
   const base = slugify(row.title) || slugify(row.ref)
   // Deterministic rather than "-2", "-3": two concurrent submits for the same
   // request compute the same key, so the unique index turns a double-click into
-  // a no-op instead of a second project nobody asked for.
+  // a no-op instead of a second workstream nobody asked for.
   const key = taken.has(base) ? `${base}-${slugify(row.ref)}` : base
 
   // The id is generated here rather than read back with `.returning()`: the
   // `db` handle is a union of two drivers and the returning overload does not
   // resolve across it, and the request row needs the id in the same breath.
-  const projectId = randomUUID()
+  const workstreamId = randomUUID()
 
   try {
-    await db.insert(projects).values({
-      id: projectId,
+    await db.insert(workstreams).values({
+      id: workstreamId,
       key,
       name: row.title,
       description: row.problem,
       status: 'backlog',
       progress: 0,
-      initiativeId: row.proposedInitiativeId,
+      projectId: row.proposedInitiativeId,
       appAreaId: row.appAreaId,
       targetDate: row.desiredDate,
       sortOrder: (existing[0]?.sortOrder ?? 0) + 1,
@@ -280,16 +280,16 @@ export async function approveAndConvert(formData: FormData) {
 
   await db
     .update(intakeRequests)
-    .set({ status: 'converted', convertedProjectId: projectId })
+    .set({ status: 'converted', convertedProjectId: workstreamId })
     .where(eq(intakeRequests.id, id))
 
   await logChange({
     actor: await actorName(),
     kind: 'change',
-    summary: `${row.ref} approved and converted to project "${row.title}"`,
+    summary: `${row.ref} approved and converted to workstream "${row.title}"`,
     detail: [
-      `Project key ${key}`,
-      row.proposedInitiativeId ? 'Linked to the proposed initiative' : 'No initiative linked yet',
+      `Workstream key ${key}`,
+      row.proposedInitiativeId ? 'Linked to the proposed project' : 'No project linked yet',
       row.desiredDate ? `Target date carried over from the desired date` : 'No target date set',
     ].join(' · '),
     entityType: ENTITY,

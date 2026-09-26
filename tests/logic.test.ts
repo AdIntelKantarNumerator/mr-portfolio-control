@@ -3,7 +3,7 @@
  *
  * Deliberately no UI tests and no database: these cover the rules that decide
  * what a number on screen *means* — whether an edit survives a sync, whether
- * an unassessed project reads as green, whether a signature check can be
+ * an unassessed workstream reads as green, whether a signature check can be
  * bypassed. Those are the failures nobody notices until a decision has already
  * been made on bad information.
  *
@@ -72,12 +72,12 @@ describe('override merge', () => {
   const makeMap = (field: string, value: unknown, reason = 'board-locked'): OverrideMap =>
     new Map([
       [
-        'project:p1',
+        'workstream:p1',
         new Map([
           [
             field,
             {
-              entityType: 'project',
+              entityType: 'workstream',
               entityId: 'p1',
               field,
               value: JSON.stringify(value),
@@ -92,34 +92,34 @@ describe('override merge', () => {
 
   test('a manual value replaces the synced one and is reported as overridden', () => {
     const row = { id: 'p1', name: 'GPC', status: 'backlog' }
-    const merged = applyOverrides(row, 'project', makeMap('status', 'in_progress'))
+    const merged = applyOverrides(row, 'workstream', makeMap('status', 'in_progress'))
     assert.equal(merged.value.status, 'in_progress')
     assert.ok(merged.overridden.has('status'))
   })
 
   test('the original source value is preserved so both can be shown', () => {
     const row = { id: 'p1', name: 'GPC', status: 'backlog' }
-    const merged = applyOverrides(row, 'project', makeMap('status', 'in_progress'))
+    const merged = applyOverrides(row, 'workstream', makeMap('status', 'in_progress'))
     assert.equal(merged.sourceValues.status, 'backlog')
     assert.equal(merged.reasons.status, 'board-locked')
   })
 
   test('date fields come back as real Dates, not JSON strings', () => {
     const row = { id: 'p1', targetDate: new Date('2026-10-05') }
-    const merged = applyOverrides(row, 'project', makeMap('targetDate', '2026-11-20'), ['targetDate'])
+    const merged = applyOverrides(row, 'workstream', makeMap('targetDate', '2026-11-20'), ['targetDate'])
     assert.ok(merged.value.targetDate instanceof Date)
     assert.equal(merged.value.targetDate.toISOString().slice(0, 10), '2026-11-20')
   })
 
   test('an override for a field the row does not have is ignored', () => {
     const row = { id: 'p1', name: 'GPC' }
-    const merged = applyOverrides(row, 'project', makeMap('nonexistent', 'x'))
+    const merged = applyOverrides(row, 'workstream', makeMap('nonexistent', 'x'))
     assert.equal(merged.overridden.size, 0)
   })
 
   test('rows with no overrides pass through untouched', () => {
     const row = { id: 'p2', name: 'Other' }
-    const merged = applyOverrides(row, 'project', makeMap('status', 'x'))
+    const merged = applyOverrides(row, 'workstream', makeMap('status', 'x'))
     assert.equal(merged.value, row)
     assert.equal(merged.overridden.size, 0)
   })
@@ -190,8 +190,8 @@ describe('CSV ingestion', () => {
   })
 
   test('headers map onto objects', () => {
-    const objs = rowsToObjects(parseCsv('Project,Target\nGPC,2026-10-05'))
-    assert.deepEqual(objs, [{ Project: 'GPC', Target: '2026-10-05' }])
+    const objs = rowsToObjects(parseCsv('Workstream,Target\nGPC,2026-10-05'))
+    assert.deepEqual(objs, [{ Workstream: 'GPC', Target: '2026-10-05' }])
   })
 
   test('a sheet URL becomes a CSV export URL, keeping the gid', () => {

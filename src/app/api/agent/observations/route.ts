@@ -22,7 +22,7 @@
  */
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { agentObservations, assessments, initiatives, projects } from '@/db/schema'
+import { agentObservations, assessments, projects, workstreams } from '@/db/schema'
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
 
 export const runtime = 'nodejs'
@@ -31,7 +31,7 @@ export const dynamic = 'force-dynamic'
 const KINDS = new Set(['progress', 'blocker', 'decision_needed', 'decision_made', 'risk', 'change'])
 const AUDIENCES = new Set(['engineering', 'stakeholder'])
 const RAGS = new Set(['green', 'amber', 'red', 'unknown'])
-const ENTITY_TYPES = new Set(['initiative', 'project'])
+const ENTITY_TYPES = new Set(['project', 'workstream'])
 
 interface Incoming {
   entityType?: string
@@ -61,7 +61,7 @@ export async function POST(req: Request) {
   const entityId = String(body.entityId ?? '')
   if (!ENTITY_TYPES.has(entityType) || !entityId) {
     return Response.json(
-      { error: 'entityType must be "initiative" or "project", and entityId is required.' },
+      { error: 'entityType must be "project" or "workstream", and entityId is required.' },
       { status: 400 },
     )
   }
@@ -118,7 +118,7 @@ export async function POST(req: Request) {
 
   // The score is arithmetic the caller did, and it is clamped rather than
   // trusted: a front page ordered by an unbounded number a caller supplies is
-  // one bad payload away from one project pinned to the top forever.
+  // one bad payload away from one workstream pinned to the top forever.
   const rawScore = Number(body.activity?.score ?? 0)
   const activityScore = Number.isFinite(rawScore) ? Math.max(0, Math.min(rawScore, 1000)) : 0
   const rawWindow = Number(body.activity?.windowHours ?? 0)
@@ -235,13 +235,13 @@ export async function GET(req: Request) {
       .where(isNull(agentObservations.supersededAt))
       .orderBy(desc(agentObservations.generatedAt)),
     db.select().from(assessments).where(eq(assessments.current, true)).orderBy(desc(assessments.asOf)),
-    db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives),
     db.select({ id: projects.id, name: projects.name }).from(projects),
+    db.select({ id: workstreams.id, name: workstreams.name }).from(workstreams),
   ])
 
   const nameOf = new Map<string, string>([
-    ...inits.map((i) => [`initiative:${i.id}`, i.name] as const),
-    ...projs.map((p) => [`project:${p.id}`, p.name] as const),
+    ...inits.map((i) => [`project:${i.id}`, i.name] as const),
+    ...projs.map((p) => [`workstream:${p.id}`, p.name] as const),
   ])
 
   const assessmentFor = new Map<string, (typeof current)[number]>()

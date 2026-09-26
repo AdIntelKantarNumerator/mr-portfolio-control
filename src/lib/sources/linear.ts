@@ -9,17 +9,17 @@
  *
  * The queries are assembled from a schema introspection rather than hard-coded.
  * Linear's available fields differ by plan and move between API versions
- * (initiatives, project status objects and health have all changed shape), and
+ * (projects, workstream status objects and health have all changed shape), and
  * a hard-coded selection set fails the whole sync on one unknown field. Probing
  * costs one extra request per run and degrades to "we synced what exists".
  */
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import {
-  initiatives,
+  projects,
   milestones,
   people,
-  projects,
+  workstreams,
   sourceRecords,
   syncRuns,
   teams,
@@ -296,7 +296,7 @@ export interface SyncResult {
  * Without this, a single unexpected row — a field a workspace uses in a way
  * the mapping did not anticipate, a constraint met for the first time — aborts
  * the whole sync. That is how a run ends having imported the teams and people
- * and none of the projects, which is the part anyone actually wanted.
+ * and none of the workstreams, which is the part anyone actually wanted.
  *
  * The run is then reported as `partial` rather than `success`, so a
  * half-imported portfolio never looks like a complete one.
@@ -406,9 +406,9 @@ export async function syncLinear(opts: SyncOptions = {}): Promise<SyncResult> {
       }
     }
 
-    // --- initiatives -----------------------------------------------------
-    if (caps.hasQuery('initiatives')) {
-      const initFields = pick(caps, 'Initiative', [
+    // --- projects -----------------------------------------------------
+    if (caps.hasQuery('projects')) {
+      const initFields = pick(caps, 'Project', [
         'id',
         'name',
         'description',
@@ -419,25 +419,25 @@ export async function syncLinear(opts: SyncOptions = {}): Promise<SyncResult> {
         'sortOrder',
         'updatedAt',
       ])
-      const ownerSel = caps.has('Initiative', 'owner') ? ' owner { id }' : ''
+      const ownerSel = caps.has('Project', 'owner') ? ' owner { id }' : ''
       for await (const nodes of paged<Record<string, unknown>>(
-        'initiatives',
+        'projects',
         initFields.join(' ') + ownerSel,
       )) {
         for (const n of nodes) {
-          await attempt(`initiative ${String(n.name ?? n.id)}`, warnings, () =>
+          await attempt(`project ${String(n.name ?? n.id)}`, warnings, () =>
             upsertInitiative(n, counters),
           )
         }
       }
     } else {
       warnings.push(
-        'This Linear workspace does not expose initiatives on the API; initiatives can still be created and managed here by hand.',
+        'This Linear workspace does not expose projects on the API; projects can still be created and managed here by hand.',
       )
     }
 
-    // --- projects --------------------------------------------------------
-    const projFields = pick(caps, 'Project', [
+    // --- workstreams --------------------------------------------------------
+    const projFields = pick(caps, 'Workstream', [
       'id',
       'name',
       'description',
@@ -455,11 +455,11 @@ export async function syncLinear(opts: SyncOptions = {}): Promise<SyncResult> {
       'updatedAt',
     ])
     const projExtra = [
-      caps.has('Project', 'lead') ? 'lead { id }' : '',
-      caps.has('Project', 'status') ? 'status { name type }' : '',
-      caps.has('Project', 'teams') ? 'teams(first: 5) { nodes { id } }' : '',
-      caps.has('Project', 'initiatives') ? 'initiatives(first: 5) { nodes { id } }' : '',
-      caps.has('Project', 'projectMilestones')
+      caps.has('Workstream', 'lead') ? 'lead { id }' : '',
+      caps.has('Workstream', 'status') ? 'status { name type }' : '',
+      caps.has('Workstream', 'teams') ? 'teams(first: 5) { nodes { id } }' : '',
+      caps.has('Workstream', 'projects') ? 'projects(first: 5) { nodes { id } }' : '',
+      caps.has('Workstream', 'projectMilestones')
         ? 'projectMilestones(first: 50) { nodes { id name description targetDate sortOrder } }'
         : '',
     ].filter(Boolean)
@@ -468,7 +468,7 @@ export async function syncLinear(opts: SyncOptions = {}): Promise<SyncResult> {
     // the filter entirely rather than passing a very old date, because the
     // unfiltered query is the one Linear's own caching is tuned for.
     for await (const nodes of paged<Record<string, unknown>>(
-      'projects',
+      'workstreams',
       [...projFields, ...projExtra].join(' '),
       opts.since
         ? {
@@ -478,7 +478,7 @@ export async function syncLinear(opts: SyncOptions = {}): Promise<SyncResult> {
         : {},
     )) {
       for (const n of nodes) {
-        await attempt(`project ${String(n.name ?? n.id)}`, warnings, () =>
+        await attempt(`workstream ${String(n.name ?? n.id)}`, warnings, () =>
           upsertProject(n, counters),
         )
       }
@@ -548,62 +548,6 @@ export async function upsertInitiative(n: Record<string, unknown>, counters: Cou
 
   let entityId: string
   if (existing) {
-    await db.update(initiatives).set(values).where(eq(initiatives.id, existing.entityId))
-    entityId = existing.entityId
-    bump(counters, 'initiatives', 'updated')
-  } else {
-    const [created] = await db
-      .insert(initiatives)
-      .values({ ...values, key: await uniqueKey(initiatives, slugify(values.name)) })
-      .returning({ id: initiatives.id })
-    entityId = created.id
-    bump(counters, 'initiatives', 'created')
-  }
-
-  await recordSource({
-    externalId,
-    entityType: 'initiative',
-    entityId,
-    url: (n.url as string) ?? null,
-    raw: n,
-  })
-  return entityId
-}
-
-export async function upsertProject(n: Record<string, unknown>, counters: Counters = {}) {
-  const externalId = n.id as string
-  const existing = await localIdFor(externalId)
-
-  const leadExternal = (n.lead as { id?: string } | undefined)?.id
-  const leadLocal = leadExternal ? await localIdFor(leadExternal) : null
-
-  const teamExternal = (n.teams as { nodes?: { id: string }[] } | undefined)?.nodes?.[0]?.id
-  const teamLocal = teamExternal ? await localIdFor(teamExternal) : null
-
-  const initExternal = (n.initiatives as { nodes?: { id: string }[] } | undefined)?.nodes?.[0]?.id
-  const initLocal = initExternal ? await localIdFor(initExternal) : null
-
-  const statusObj = n.status as { type?: string } | undefined
-
-  const values = {
-    name: n.name as string,
-    description: (n.description as string) ?? null,
-    status: mapProjectStatus(n.state as string, statusObj?.type),
-    priority: mapPriority(n.priority as number),
-    progress: normaliseProgress(n.progress),
-    sourceHealth: (n.health as string) ?? null,
-    startDate: date(n.startDate as string),
-    targetDate: date(n.targetDate as string),
-    startedAt: date(n.startedAt as string),
-    completedAt: date(n.completedAt as string),
-    leadId: leadLocal?.entityId ?? null,
-    teamId: teamLocal?.entityId ?? null,
-    sortOrder: Math.round(Number(n.sortOrder ?? 0)),
-    ...(initLocal ? { initiativeId: initLocal.entityId } : {}),
-  }
-
-  let entityId: string
-  if (existing) {
     await db.update(projects).set(values).where(eq(projects.id, existing.entityId))
     entityId = existing.entityId
     bump(counters, 'projects', 'updated')
@@ -623,6 +567,62 @@ export async function upsertProject(n: Record<string, unknown>, counters: Counte
     url: (n.url as string) ?? null,
     raw: n,
   })
+  return entityId
+}
+
+export async function upsertProject(n: Record<string, unknown>, counters: Counters = {}) {
+  const externalId = n.id as string
+  const existing = await localIdFor(externalId)
+
+  const leadExternal = (n.lead as { id?: string } | undefined)?.id
+  const leadLocal = leadExternal ? await localIdFor(leadExternal) : null
+
+  const teamExternal = (n.teams as { nodes?: { id: string }[] } | undefined)?.nodes?.[0]?.id
+  const teamLocal = teamExternal ? await localIdFor(teamExternal) : null
+
+  const initExternal = (n.projects as { nodes?: { id: string }[] } | undefined)?.nodes?.[0]?.id
+  const initLocal = initExternal ? await localIdFor(initExternal) : null
+
+  const statusObj = n.status as { type?: string } | undefined
+
+  const values = {
+    name: n.name as string,
+    description: (n.description as string) ?? null,
+    status: mapProjectStatus(n.state as string, statusObj?.type),
+    priority: mapPriority(n.priority as number),
+    progress: normaliseProgress(n.progress),
+    sourceHealth: (n.health as string) ?? null,
+    startDate: date(n.startDate as string),
+    targetDate: date(n.targetDate as string),
+    startedAt: date(n.startedAt as string),
+    completedAt: date(n.completedAt as string),
+    leadId: leadLocal?.entityId ?? null,
+    teamId: teamLocal?.entityId ?? null,
+    sortOrder: Math.round(Number(n.sortOrder ?? 0)),
+    ...(initLocal ? { projectId: initLocal.entityId } : {}),
+  }
+
+  let entityId: string
+  if (existing) {
+    await db.update(workstreams).set(values).where(eq(workstreams.id, existing.entityId))
+    entityId = existing.entityId
+    bump(counters, 'workstreams', 'updated')
+  } else {
+    const [created] = await db
+      .insert(workstreams)
+      .values({ ...values, key: await uniqueKey(workstreams, slugify(values.name)) })
+      .returning({ id: workstreams.id })
+    entityId = created.id
+    bump(counters, 'workstreams', 'created')
+  }
+
+  await recordSource({
+    externalId,
+    entityType: 'workstream',
+    entityId,
+    url: (n.url as string) ?? null,
+    raw: n,
+  })
 
   const msNodes = (n.projectMilestones as { nodes?: Record<string, unknown>[] } | undefined)?.nodes
   if (msNodes) {
@@ -636,15 +636,17 @@ export async function upsertProject(n: Record<string, unknown>, counters: Counte
 
 export async function upsertMilestone(
   n: Record<string, unknown>,
-  projectId: string,
+  workstreamId: string,
   counters: Counters = {},
 ) {
   const externalId = n.id as string
   const existing = await localIdFor(externalId)
   const values = {
-    projectId,
+    // A Linear milestone hangs off a Linear project, which is a workstream here.
+    level: 'workstream' as const,
+    entityId: workstreamId,
     name: n.name as string,
-    description: (n.description as string) ?? null,
+    details: (n.description as string) ?? null,
     targetDate: date(n.targetDate as string),
     sortOrder: Math.round(Number(n.sortOrder ?? 0)),
   }
@@ -669,13 +671,13 @@ export async function upsertMilestone(
 export async function archiveByExternalId(externalId: string) {
   const existing = await localIdFor(externalId)
   if (!existing) return
-  if (existing.entityType === 'project') {
-    await db.update(projects).set({ status: 'canceled' }).where(eq(projects.id, existing.entityId))
-  } else if (existing.entityType === 'initiative') {
+  if (existing.entityType === 'workstream') {
+    await db.update(workstreams).set({ status: 'canceled' }).where(eq(workstreams.id, existing.entityId))
+  } else if (existing.entityType === 'project') {
     await db
-      .update(initiatives)
+      .update(projects)
       .set({ status: 'canceled' })
-      .where(eq(initiatives.id, existing.entityId))
+      .where(eq(projects.id, existing.entityId))
   }
 }
 
@@ -683,7 +685,7 @@ export async function archiveByExternalId(externalId: string) {
 
 /** Ensure a human-readable key is unique without a retry loop at the caller. */
 async function uniqueKey(
-  table: typeof teams | typeof projects | typeof initiatives,
+  table: typeof teams | typeof workstreams | typeof projects,
   base: string,
 ): Promise<string> {
   const candidate = base || 'item'

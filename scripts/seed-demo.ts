@@ -32,7 +32,7 @@ async function main() {
     TRUNCATE TABLE
       scores, intake_requests, allocations, decisions, dependencies, assessments,
       field_overrides, status_updates, source_records, sync_runs, changelog_entries,
-      project_readiness, milestones, projects, initiatives, app_areas, themes,
+      project_readiness, milestones, workstreams, projects, app_areas, themes,
       people, teams
     RESTART IDENTITY CASCADE
   `)
@@ -86,11 +86,11 @@ async function main() {
   // ---- themes (the board narrative spine) --------------------------------
   const themeRows = [
     { key: 'coverage', name: 'Coverage', color: '#4a6fa5', sortOrder: 1,
-      description: 'New data and markets the product does not cover today.' },
+      details: 'New data and markets the product does not cover today.' },
     { key: 'experiences', name: 'Experiences', color: '#2f4b7c', sortOrder: 2,
-      description: 'What customers actually touch — Insight Studio, Pub Intel, Creative Intel, Sports.' },
+      details: 'What customers actually touch — Insight Studio, Pub Intel, Creative Intel, Sports.' },
     { key: 'table-stakes', name: 'Table stakes', color: '#5a53a8', sortOrder: 3,
-      description: 'Foundations everything else depends on. Invisible until they slip.' },
+      details: 'Foundations everything else depends on. Invisible until they slip.' },
   ].map((t) => ({ ...t, id: id() }))
   await db.insert(s.themes).values(themeRows)
   const theme = (k: string) => themeRows.find((t) => t.key === k)!.id
@@ -109,7 +109,7 @@ async function main() {
   await db.insert(s.appAreas).values(areaRows)
   const area = (k: string) => areaRows.find((a) => a.key === k)!.id
 
-  // ---- initiatives -------------------------------------------------------
+  // ---- projects -------------------------------------------------------
   const initRows = [
     { key: 'insights-studio', name: 'Insights Studio', themeId: theme('experiences'),
       status: 'active', ownerId: null, ownerGap: true, targetDate: d('2026-09-30'), sortOrder: 1 },
@@ -127,130 +127,130 @@ async function main() {
       ownerId: who('Sadiya'), sortOrder: 7 },
     { key: 'retail-media', name: 'Retail Media', themeId: theme('coverage'), status: 'planned',
       ownerId: null, ownerGap: true, sortOrder: 8,
-      notes: 'Strategic initiative, no delivery projects yet. IA into Pub Intel ~Sept; MVP-plus is post-board.' },
+      notes: 'Strategic project, no delivery workstreams yet. IA into Pub Intel ~Sept; MVP-plus is post-board.' },
     { key: 'market-intel', name: 'Market Intel', themeId: theme('coverage'), status: 'planned',
-      ownerId: who('Milena'), sortOrder: 9, notes: 'Strategic initiative; no delivery projects yet.' },
+      ownerId: who('Milena'), sortOrder: 9, notes: 'Strategic project; no delivery workstreams yet.' },
     { key: 'political', name: 'Political', themeId: theme('coverage'), status: 'planned',
       ownerId: null, ownerGap: true, sortOrder: 10,
-      notes: 'Strategic initiative; no delivery projects yet. Legal/CCPA review is an open strategic item.' },
+      notes: 'Strategic project; no delivery workstreams yet. Legal/CCPA review is an open strategic item.' },
     { key: 'data-platform-other', name: 'Data Platform — other', themeId: theme('table-stakes'),
       status: 'active', ownerId: who('Remy'), sortOrder: 11,
-      notes: 'Work not tied to a strategic initiative but competing for the same people.' },
+      notes: 'Work not tied to a strategic project but competing for the same people.' },
   ].map((i) => ({ ...i, id: id() }))
-  await db.insert(s.initiatives).values(initRows)
+  await db.insert(s.projects).values(initRows)
   const init = (k: string) => initRows.find((i) => i.key === k)!.id
 
-  // ---- projects ----------------------------------------------------------
+  // ---- workstreams ----------------------------------------------------------
   // Every field below is traceable to the 7/7 control room export. Where the
   // export showed no date, no priority and no percentage, none is invented:
   // `progress` stays 0 except where the work was stated as done, because a
   // made-up completion bar is the single most quietly misleading thing a
   // portfolio screen can show. Linear supplies these on first sync.
   const projectRows = [
-    { key: 'is-board-demo', name: 'Insight Studio — Board Demo', initiativeId: init('insights-studio'),
+    { key: 'is-board-demo', name: 'Insight Studio — Board Demo', projectId: init('insights-studio'),
       appAreaId: area('insights-studio'), leadId: who('Nick'), teamId: team('platform'),
       status: 'completed', progress: 1, startDate: d('2026-06-22'),
       targetDate: d('2026-07-17'), completedAt: d('2026-07-17') },
     { key: 'is-client-launch', name: 'Insight Studio — Client Launch (MVP)',
-      initiativeId: init('insights-studio'), appAreaId: area('insights-studio'), leadId: who('Nick'),
+      projectId: init('insights-studio'), appAreaId: area('insights-studio'), leadId: who('Nick'),
       teamId: team('platform'), status: 'backlog', progress: 0,
       targetDate: d('2026-09-30') },
     { key: 'is-quality', name: 'Insight Studio — Quality Engineering',
-      initiativeId: init('insights-studio'), appAreaId: area('insights-studio'),
+      projectId: init('insights-studio'), appAreaId: area('insights-studio'),
       leadId: who('Morgan'), teamId: team('platform'), status: 'in_progress', progress: 0,
       startDate: d('2026-06-16') },
-    { key: 'mr-migrations', name: 'MR Migrations', initiativeId: init('pub-intel'),
+    { key: 'mr-migrations', name: 'MR Migrations', projectId: init('pub-intel'),
       appAreaId: area('overarching'), leadId: who('Remy'), teamId: team('data-platform'),
       status: 'in_progress', progress: 0, startDate: d('2026-06-24'),
       targetDate: d('2026-09-01') },
-    { key: 'ce-integration', name: 'TV & Digital CE Integration', initiativeId: init('pub-intel'),
+    { key: 'ce-integration', name: 'TV & Digital CE Integration', projectId: init('pub-intel'),
       appAreaId: area('overarching'), teamId: team('data-platform'),
       status: 'backlog', progress: 0, startDate: d('2026-06-01'),
       targetDate: d('2026-07-23') },
-    { key: 'publisher-intel', name: 'Publisher Intel', initiativeId: init('pub-intel'),
+    { key: 'publisher-intel', name: 'Publisher Intel', projectId: init('pub-intel'),
       appAreaId: area('insights-studio'), teamId: team('explore-reviews'),
       status: 'backlog', progress: 0 },
-    { key: 'gpc', name: 'Global Product Catalog (GPC)', initiativeId: init('globalization'),
+    { key: 'gpc', name: 'Global Product Catalog (GPC)', projectId: init('globalization'),
       appAreaId: area('overarching'), leadId: who('Remy'), teamId: team('data-platform'),
       status: 'in_progress', priority: 'high', progress: 0, startDate: d('2026-06-01'),
       targetDate: d('2026-10-05') },
     { key: 'creative-central', name: 'Creative Central (Avo Toast)',
-      initiativeId: init('globalization'), appAreaId: area('overarching'), leadId: who('Remy'),
+      projectId: init('globalization'), appAreaId: area('overarching'), leadId: who('Remy'),
       teamId: team('data-platform'), status: 'in_progress', priority: 'high', progress: 0,
       startDate: d('2026-06-10'), targetDate: d('2026-10-05') },
-    { key: 'videoamp-ratings', name: 'VideoAmp TV Ratings', initiativeId: init('bau'),
+    { key: 'videoamp-ratings', name: 'VideoAmp TV Ratings', projectId: init('bau'),
       appAreaId: area('360'), leadId: who('Mukesh'), teamId: team('middleware'),
       status: 'in_progress', priority: 'high', progress: 0, startDate: d('2026-06-20'),
       targetDate: d('2026-09-30') },
     { key: 'nielsen-broadcast', name: "Nielsen Nat'l Broadcast (Live+7) restore",
-      initiativeId: init('bau'), appAreaId: area('360'), leadId: who('Mukesh'),
+      projectId: init('bau'), appAreaId: area('360'), leadId: who('Mukesh'),
       teamId: team('middleware'), status: 'in_progress', progress: 0 },
-    { key: 'sports-cannes', name: 'Sports Dashboard — Cannes demo', initiativeId: init('sports'),
+    { key: 'sports-cannes', name: 'Sports Dashboard — Cannes demo', projectId: init('sports'),
       appAreaId: area('sports'), leadId: who('Nick'), teamId: team('dashboards-opps'),
       status: 'completed', progress: 1, completedAt: d('2026-06-25') },
     { key: 'sports-client-launch', name: 'Sports Dashboard — Client Launch',
-      initiativeId: init('sports'), appAreaId: area('sports'), leadId: who('Shane'),
+      projectId: init('sports'), appAreaId: area('sports'), leadId: who('Shane'),
       teamId: team('dashboards-opps'), status: 'backlog', progress: 0 },
-    { key: 'logo-recognition', name: 'Logo Recognition', initiativeId: init('data-platform-other'),
+    { key: 'logo-recognition', name: 'Logo Recognition', projectId: init('data-platform-other'),
       appAreaId: area('sports'), leadId: who('Remy'), teamId: team('data-platform'),
       status: 'backlog', progress: 0 },
-    { key: 'nsfw-classifier', name: 'NSFW Classifier', initiativeId: init('data-platform-other'),
+    { key: 'nsfw-classifier', name: 'NSFW Classifier', projectId: init('data-platform-other'),
       appAreaId: area('overarching'), leadId: who('Remy'), teamId: team('data-platform'),
       status: 'backlog', progress: 0 },
-    { key: 'junk-ad-classifier', name: 'Junk Ad Classifier', initiativeId: init('data-platform-other'),
+    { key: 'junk-ad-classifier', name: 'Junk Ad Classifier', projectId: init('data-platform-other'),
       appAreaId: area('overarching'), leadId: who('Remy'), teamId: team('data-platform'),
       status: 'backlog', progress: 0 },
-    { key: 'ews-tws', name: 'EWS & TWS', initiativeId: init('data-platform-other'),
+    { key: 'ews-tws', name: 'EWS & TWS', projectId: init('data-platform-other'),
       appAreaId: area('overarching'), leadId: who('Muhammad'), teamId: team('data-platform'),
       status: 'backlog', progress: 0 },
-    { key: 'winbox', name: 'Winbox', initiativeId: init('data-platform-other'),
+    { key: 'winbox', name: 'Winbox', projectId: init('data-platform-other'),
       appAreaId: area('overarching'), teamId: team('data-platform'), status: 'in_progress',
       progress: 0, startDate: d('2026-07-02') },
-    { key: 'shared-services', name: 'Shared Services', initiativeId: init('data-platform-other'),
+    { key: 'shared-services', name: 'Shared Services', projectId: init('data-platform-other'),
       appAreaId: area('overarching'), leadId: who('Tom'), teamId: team('data-platform'),
       status: 'backlog', progress: 0, targetDate: d('2026-07-31') },
-    { key: '360-ctv', name: '360 CTV', initiativeId: init('bau'), appAreaId: area('360'),
+    { key: '360-ctv', name: '360 CTV', projectId: init('bau'), appAreaId: area('360'),
       leadId: who('Irina'), teamId: team('bau-360'), status: 'paused', progress: 0 },
-    { key: '360-social', name: '360 Social formats', initiativeId: init('bau'),
+    { key: '360-social', name: '360 Social formats', projectId: init('bau'),
       appAreaId: area('360'), leadId: who('Irina'), teamId: team('bau-360'), status: 'paused',
       progress: 0 },
-    { key: 'ci-message-elements', name: 'Message Elements 2.0', initiativeId: init('creative-intel'),
+    { key: 'ci-message-elements', name: 'Message Elements 2.0', projectId: init('creative-intel'),
       appAreaId: area('creative-intel'), teamId: team('creative-intel-devs'), status: 'in_progress',
       progress: 0 },
     { key: 'retail-media-ia', name: 'Retail Media — IA into Pub Intel',
-      initiativeId: init('retail-media'), appAreaId: area('insights-studio'),
+      projectId: init('retail-media'), appAreaId: area('insights-studio'),
       teamId: team('dashboards-opps'), status: 'planned', progress: 0,
-      description: 'Stated as landing around September; no dates recorded in the source.' },
+      details: 'Stated as landing around September; no dates recorded in the source.' },
   ].map((p, ix) => ({ ...p, id: id(), sortOrder: ix }))
-  await db.insert(s.projects).values(projectRows)
+  await db.insert(s.workstreams).values(projectRows)
   const proj = (k: string) => projectRows.find((p) => p.key === k)!.id
 
   // ---- milestones --------------------------------------------------------
   await db.insert(s.milestones).values([
-    { id: id(), projectId: proj('is-board-demo'), name: 'IS Board Demo', targetDate: d('2026-07-17'),
-      actualDate: d('2026-07-17'), status: 'done', portfolioLevel: true },
-    { id: id(), projectId: proj('ce-integration'), name: 'Classification Engine go-live',
-      targetDate: d('2026-07-23'), actualDate: d('2026-07-24'), status: 'done', portfolioLevel: true,
-      description: 'Digital / TROI / print; TV and sports followed on 7/24.' },
-    { id: id(), projectId: proj('mr-migrations'), name: 'MR Migrations first release',
-      targetDate: d('2026-09-01'), status: 'done', contested: true, portfolioLevel: true,
-      description: "Early gate, not the finish. Matt's 'everyone off MR by Sept' was flagged not feasible." },
-    { id: id(), projectId: proj('is-client-launch'), name: 'IS Client Launch MVP live',
-      targetDate: d('2026-09-30'), status: 'pending', portfolioLevel: true, contested: true },
-    { id: id(), projectId: proj('videoamp-ratings'), name: 'VideoAmp Ratings live',
-      targetDate: d('2026-09-30'), status: 'pending', portfolioLevel: true },
-    { id: id(), projectId: proj('creative-central'), name: 'Creative Central ready',
-      targetDate: d('2026-09-05'), status: 'done', description: 'Globalization work-back gate.' },
-    { id: id(), projectId: proj('gpc'), name: 'GPC + Creative Central GA',
-      targetDate: d('2026-10-05'), status: 'pending', contested: true, portfolioLevel: true,
-      description: 'All CTV categories, not Tier 1. Flagged possible but high risk.' },
-    { id: id(), projectId: proj('mr-migrations'), name: 'Migration spend across all 5 data sets',
-      targetDate: d('2026-11-20'), status: 'pending', contested: true, portfolioLevel: true,
-      description: 'Digital / Print / Retail / Native / Podcast. At risk.' },
-    { id: id(), projectId: proj('mr-migrations'), name: 'MR Classic app retired',
-      targetDate: d('2026-12-31'), status: 'pending', contested: true, portfolioLevel: true },
-    { id: id(), projectId: proj('360-ctv'), name: '360 decommission (realistic)',
-      targetDate: d('2027-06-30'), status: 'pending', contested: true, portfolioLevel: true },
+    { id: id(), level: 'workstream' as const, entityId: proj('is-board-demo'), name: 'IS Board Demo', targetDate: d('2026-07-17'),
+      actualDate: d('2026-07-17'), status: 'complete' },
+    { id: id(), level: 'workstream' as const, entityId: proj('ce-integration'), name: 'Classification Engine go-live',
+      targetDate: d('2026-07-23'), actualDate: d('2026-07-24'), status: 'complete',
+      details: 'Digital / TROI / print; TV and sports followed on 7/24.' },
+    { id: id(), level: 'workstream' as const, entityId: proj('mr-migrations'), name: 'MR Migrations first release',
+      targetDate: d('2026-09-01'), status: 'complete', contested: true,
+      details: "Early gate, not the finish. Matt's 'everyone off MR by Sept' was flagged not feasible." },
+    { id: id(), level: 'workstream' as const, entityId: proj('is-client-launch'), name: 'IS Client Launch MVP live',
+      targetDate: d('2026-09-30'), status: 'planning', contested: true },
+    { id: id(), level: 'workstream' as const, entityId: proj('videoamp-ratings'), name: 'VideoAmp Ratings live',
+      targetDate: d('2026-09-30'), status: 'planning' },
+    { id: id(), level: 'workstream' as const, entityId: proj('creative-central'), name: 'Creative Central ready',
+      targetDate: d('2026-09-05'), status: 'complete', details: 'Globalization work-back gate.' },
+    { id: id(), level: 'workstream' as const, entityId: proj('gpc'), name: 'GPC + Creative Central GA',
+      targetDate: d('2026-10-05'), status: 'planning', contested: true,
+      details: 'All CTV categories, not Tier 1. Flagged possible but high risk.' },
+    { id: id(), level: 'workstream' as const, entityId: proj('mr-migrations'), name: 'Migration spend across all 5 data sets',
+      targetDate: d('2026-11-20'), status: 'planning', contested: true,
+      details: 'Digital / Print / Retail / Native / Podcast. At risk.' },
+    { id: id(), level: 'workstream' as const, entityId: proj('mr-migrations'), name: 'MR Classic app retired',
+      targetDate: d('2026-12-31'), status: 'planning', contested: true },
+    { id: id(), level: 'workstream' as const, entityId: proj('360-ctv'), name: '360 decommission (realistic)',
+      targetDate: d('2027-06-30'), status: 'planning', contested: true },
   ])
 
   // ---- assessments — the layer Linear does not hold ----------------------
@@ -271,58 +271,58 @@ async function main() {
   })
 
   await db.insert(s.assessments).values([
-    assess('initiative', init('globalization'), 'red',
+    assess('project', init('globalization'), 'red',
       'GA on 10/5 requires all CTV categories, and Anthony is still a single point on the critical path.',
       'Program Review — Global critical path', 'high'),
-    assess('initiative', init('taxonomy'), 'red',
+    assess('project', init('taxonomy'), 'red',
       'GPC is go-forward but nothing is built against it and there is no dedicated capacity.',
       'CE / GPC deck', 'high'),
-    assess('initiative', init('insights-studio'), 'amber',
+    assess('project', init('insights-studio'), 'amber',
       'Board demo landed, but the 9/30 MVP and the data dependency are both unresolved.',
       'Jul 6 Leads call + Linear', 'medium'),
-    assess('initiative', init('pub-intel'), 'amber',
+    assess('project', init('pub-intel'), 'amber',
       'CE landed 7/23 so the gate cleared, but migration spend by ~11/20 is the real commitment and it is tight.',
       'CE / Migration deck', 'medium'),
-    assess('initiative', init('creative-intel'), 'amber',
+    assess('project', init('creative-intel'), 'amber',
       'Fold-in is TBD and the team perceives itself blocked on taxonomy.',
       'Jul 6 Leads call'),
-    assess('initiative', init('sports'), 'green',
+    assess('project', init('sports'), 'green',
       'Cannes demo delivered; client launch sits in backlog with a named lead.',
       'Linear'),
-    assess('initiative', init('bau'), 'amber',
+    assess('project', init('bau'), 'amber',
       'Frozen except Ratings. Every expansion request competes with the 9/30 Ratings date.',
       'Jul 6 Leads call'),
-    assess('initiative', init('retail-media'), 'amber',
+    assess('project', init('retail-media'), 'amber',
       'Active as a migration data set; the broader own-media-group MVP-plus is unprioritised.',
       'CE / Migration deck'),
-    assess('initiative', init('market-intel'), 'green',
-      'Strategic initiative with an owner and no delivery commitment yet — nothing to be off track about.',
+    assess('project', init('market-intel'), 'green',
+      'Strategic project with an owner and no delivery commitment yet — nothing to be off track about.',
       'Linear'),
-    assess('initiative', init('political'), 'green',
+    assess('project', init('political'), 'green',
       'Strategic only; legal/CCPA review is the open item.', 'Strat Plan → Board'),
-    assess('initiative', init('data-platform-other'), 'green',
+    assess('project', init('data-platform-other'), 'green',
       'Dedup, classifiers and SSO are steady; the risk is that they hide Remy’s real load.',
       'Linear + Program Review'),
-    assess('project', proj('gpc'), 'red',
+    assess('workstream', proj('gpc'), 'red',
       'BiS data feed has no firm ETA and VX-Central ingestion was the ~7/10 trip-wire.',
       'Program Review — Global critical path', 'high'),
-    assess('project', proj('creative-central'), 'red',
+    assess('workstream', proj('creative-central'), 'red',
       'Shares the 10/5 GA and the same single-threaded people as GPC.',
       'Program Review', 'high'),
-    assess('project', proj('is-client-launch'), 'amber',
+    assess('workstream', proj('is-client-launch'), 'amber',
       'Nine days out with the taxonomy dependency still contested.',
       'Jul 6 Leads call', 'high'),
-    assess('project', proj('mr-migrations'), 'amber',
+    assess('workstream', proj('mr-migrations'), 'amber',
       '9/1 first release landed; the ~11/20 spend date across all five data sets is the exposure.',
       'CE / Migration deck'),
-    assess('project', proj('videoamp-ratings'), 'amber',
+    assess('workstream', proj('videoamp-ratings'), 'amber',
       'On track for 9/30 but Mukesh is also carrying the Nielsen restore and GPC pipeline work.',
       'Linear + Program Review'),
   ])
 
   // ---- allocations (the contention matrix) -------------------------------
   const alloc = (t: string, i: string, mode: string, note?: string) => ({
-    id: id(), teamId: team(t), initiativeId: init(i), mode, note: note ?? null,
+    id: id(), teamId: team(t), projectId: init(i), mode, note: note ?? null,
   })
   await db.insert(s.allocations).values([
     alloc('platform', 'insights-studio', 'primary', 'Core build'),
@@ -364,43 +364,43 @@ async function main() {
     dueDate: o.dueDate ?? null, ownerId: null,
   })
   await db.insert(s.dependencies).values([
-    dep('external', 'bis-feed', 'project', proj('gpc'), {
+    dep('external', 'bis-feed', 'workstream', proj('gpc'), {
       fromLabel: 'BiS data feed', status: 'at_risk', criticality: 'critical',
       description: 'No firm ETA. VX-Central ingestion was the ~7/10 trip-wire and it gates the 10/5 GA.',
       dueDate: d('2026-07-10'),
     }),
-    dep('project', proj('ce-integration'), 'project', proj('mr-migrations'), {
+    dep('workstream', proj('ce-integration'), 'workstream', proj('mr-migrations'), {
       status: 'resolved', criticality: 'high',
       description: 'CE go-live on 7/23 was the gate for migration work. Cleared 7/24.',
     }),
-    dep('project', proj('ce-integration'), 'project', proj('gpc'), {
+    dep('workstream', proj('ce-integration'), 'workstream', proj('gpc'), {
       status: 'resolved', criticality: 'high',
     }),
-    dep('project', proj('mr-migrations'), 'project', proj('is-client-launch'), {
+    dep('workstream', proj('mr-migrations'), 'workstream', proj('is-client-launch'), {
       status: 'open', criticality: 'critical',
       description: 'Migration data has to be flowing before the MVP can launch against it.',
       dueDate: d('2026-09-30'),
     }),
-    dep('project', proj('publisher-intel'), 'project', proj('is-client-launch'), {
+    dep('workstream', proj('publisher-intel'), 'workstream', proj('is-client-launch'), {
       status: 'open', criticality: 'high', description: 'Pub Intel data ready.',
     }),
-    dep('project', proj('retail-media-ia'), 'project', proj('is-client-launch'), {
+    dep('workstream', proj('retail-media-ia'), 'workstream', proj('is-client-launch'), {
       status: 'open', criticality: 'normal', description: 'Retail Media IA lands inside Pub Intel.',
     }),
-    dep('project', proj('gpc'), 'project', proj('creative-central'), {
+    dep('workstream', proj('gpc'), 'workstream', proj('creative-central'), {
       status: 'at_risk', criticality: 'critical',
       description: 'Both share the 10/5 GA date and the same people.', dueDate: d('2026-10-05'),
     }),
-    dep('project', proj('gpc'), 'initiative', init('creative-intel'), {
+    dep('workstream', proj('gpc'), 'project', init('creative-intel'), {
       kind: 'informs', status: 'open', criticality: 'high',
       description: 'Taxonomy dependency — contested. Jay and David want it first; program says build on minimal data now.',
     }),
-    dep('external', 'anthony-capacity', 'project', proj('gpc'), {
+    dep('external', 'anthony-capacity', 'workstream', proj('gpc'), {
       fromLabel: 'Anthony — single point of failure', status: 'at_risk', criticality: 'critical',
       kind: 'shares_resource',
       description: 'Schema, Product Central equivalent, HiTL/feed screens and CC all route through one person.',
     }),
-    dep('external', 'reference-data', 'project', proj('gpc'), {
+    dep('external', 'reference-data', 'workstream', proj('gpc'), {
       fromLabel: 'Reference-data seeding (C&D / ML)', status: 'open', criticality: 'high',
       description: 'Brands, advertisers, subsidiaries, parents and categories must be populated for GPC.',
       dueDate: d('2026-10-05'),
@@ -425,21 +425,21 @@ async function main() {
       "Three different dates hide under 'September': IS Phase 1 launch, MR Migrations 9/1 gate, and migration spend ~11/20 with MR Classic retired at year end. The GPC deck flags 'everyone off MR by Sept' as not feasible.",
       { contested: true, ownerText: 'Yael → Tejas / Matt / David', dueBy: 'This week',
         nextAction: 'Pin what September actually commits and reset expectations against the 11/20 spend date.',
-        evidence: 'CE / Migration deck + Linear + Jul 6 call', entityType: 'initiative', entityId: init('pub-intel') }),
+        evidence: 'CE / Migration deck + Linear + Jul 6 call', entityType: 'project', entityId: init('pub-intel') }),
     dec('D2', 'delivery', 'Kill the taxonomy / 5–10-year-history dependency',
       'Jay and David say they need new taxonomy plus years of history before building in IS. Program says build on minimal data now. Tejas already said do not delay migration for taxonomy.',
       { contested: true, ownerText: 'Product (Jay/David) + Yael', dueBy: 'Next Leads',
         nextAction: 'Explicit decision: features start on minimal data; document required vs preferred history.',
         evidence: 'Jul 6 Leads call' }),
     dec('D3', 'delivery', 'Define the 360 → Insight Studio plan beyond MVP',
-      'The MVP is Pub Intel only. There is no plan for what else in 360 carries forward or gets abandoned, and no program owner on the IS initiative.',
+      'The MVP is Pub Intel only. There is no plan for what else in 360 carries forward or gets abandoned, and no program owner on the IS project.',
       { ownerText: 'Eric (+ Yael)', dueBy: 'This quarter',
-        nextAction: 'Add a 360→IS workstream and assign a program owner.',
-        evidence: 'Jul 6 call + Linear owner gap', entityType: 'initiative', entityId: init('insights-studio') }),
+        nextAction: 'Add a 360→IS milestone and assign a program owner.',
+        evidence: 'Jul 6 call + Linear owner gap', entityType: 'project', entityId: init('insights-studio') }),
     dec('D5', 'delivery', 'Agree the estimation model',
       'Eric wants top-down quarterly bets from the four leads rather than bottoms-up rollups. Sizing in Linear is currently empty.',
       { ownerText: 'Eric + 4 leads + Yael', dueBy: 'Next Leads',
-        nextAction: 'Leads make a dated quarter-level bet per initiative; PMs track sprint fit.',
+        nextAction: 'Leads make a dated quarter-level bet per project; PMs track sprint fit.',
         evidence: 'Jul 6 Leads call' }),
     dec('D6', 'delivery', 'Set a WIP limit and priority order across the shared pool',
       'Everything cannot be priority for the same people. Without a WIP cap and a ranked list, new requests displace September.',
@@ -451,11 +451,11 @@ async function main() {
       { ownerText: 'Eric / Matt', dueBy: 'Before Sept launch',
         nextAction: 'Confirm VX1-now / GPC-later so IS Phase 1 is not gated on GPC.',
         evidence: 'CE / GPC deck' }),
-    dec('D11', 'delivery', 'Dedicate capacity to a focused GPC project',
+    dec('D11', 'delivery', 'Dedicate capacity to a focused GPC workstream',
       'GPC is go-forward but nothing is built against it and there is no dedicated capacity — a named critical blocker.',
       { ownerText: 'Rick / SLT', dueBy: 'ASAP',
         nextAction: 'Allocate dedicated GPC capacity; decide the MDM funnel point.',
-        evidence: 'CE / GPC deck', entityType: 'project', entityId: proj('gpc') }),
+        evidence: 'CE / GPC deck', entityType: 'workstream', entityId: proj('gpc') }),
     dec('D8', 'delivery', 'Sept MVP stack: SQL Server, not Clickhouse',
       'September MVP runs on the existing 360 backbone. Clickhouse comes later; GPC and Global are on the new stack.',
       { status: 'decided', ownerText: 'Eric / Scott / Sadiya', dueBy: 'Closed',
@@ -568,11 +568,11 @@ async function main() {
     { id: id(), at: new Date(), actor: 'seed', kind: 'note',
       summary: 'Seeded from the 7/7 Portfolio Control Room export and the program references site',
       detail:
-        'Delivery layer (initiatives, projects, dates, leads), health assessments, decisions, ' +
+        'Delivery layer (projects, workstreams, dates, leads), health assessments, decisions, ' +
         'dependencies and the contention matrix are transcribed from the static control room, ' +
         'which was itself pulled from Linear on 7/7 — so they are a snapshot of a snapshot. ' +
         'Lifecycle gates, readiness items, templates and the discovery question bank are ' +
-        'verbatim from the program references site. Nothing else is populated: per-project ' +
+        'verbatim from the program references site. Nothing else is populated: per-workstream ' +
         'readiness, prioritization scores, progress percentages and most headcounts are ' +
         'deliberately empty rather than guessed. Run the Linear sync to take over the ' +
         'delivery layer.' },
@@ -585,9 +585,9 @@ async function main() {
     { id: id(), at: d('2026-07-07'), actor: 'Yael', kind: 'change',
       summary: 'Connected the delivery layer to Linear and reconciled against the program review',
       detail:
-        'Corrected September to two dated projects — MR Migrations 9/1 and IS Client Launch ' +
+        'Corrected September to two dated workstreams — MR Migrations 9/1 and IS Client Launch ' +
         '9/30. Replaced the earlier ~Jul 31 guess with CE go-live 7/23. Surfaced Remy Pham as ' +
-        'the biggest hidden bottleneck. Flagged the no-owner initiatives. Dropped the capacity ' +
+        'the biggest hidden bottleneck. Flagged the no-owner projects. Dropped the capacity ' +
         'spreadsheets as a source of truth.' },
     { id: id(), at: d('2026-07-06'), actor: 'Yael', kind: 'note',
       summary: 'First build of the Control Room, synthesized from the Jul 6 Leads call' },
@@ -595,7 +595,7 @@ async function main() {
 
   console.log(
     `Demo portfolio loaded: ${teamRows.length} teams, ${personRows.length} people, ` +
-      `${initRows.length} initiatives, ${projectRows.length} projects, ${requests.length} intake requests.` +
+      `${initRows.length} projects, ${projectRows.length} workstreams, ${requests.length} intake requests.` +
       '\nNo readiness statuses, scores, progress percentages or invented headcounts — ' +
       'those were not knowable from the source and are left empty.\n' +
       'Run `npm run db:reset` to return to an empty system.',

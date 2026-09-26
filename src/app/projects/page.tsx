@@ -1,193 +1,344 @@
 /**
- * Every project, findable by name.
+ * Projects, with the delivery work behind each one a keypress away.
  *
- * The detail page has always existed; there was no way to reach it. Projects
- * were visible only nested under the initiative that owns them, which works
- * right up until the thing you are looking for has no initiative — which is
- * exactly what a project converted from intake looks like on the day it is
- * created. Someone who had just created a project could not find it again.
- *
- * Search is here rather than clever filtering because the question this page
- * answers is almost always "where did my project go".
+ * The collapsed row is the board-level answer — is it healthy, who owns it,
+ * when does it land. The expanded panel is the delivery answer, and the two are
+ * deliberately on the same screen so nobody has to reconcile a slide against a
+ * tracker in their head.
  */
-import Link from 'next/link'
-import { Suspense } from 'react'
 import {
   Card,
+  Chip,
   Empty,
   GapFlag,
   HealthBadge,
   Kicker,
   Muted,
+  OverrideBadge,
   Pill,
   ProgressBar,
+  SectionNote,
+  SourceBadge,
   Stat,
   type Tone,
 } from '@/components/ui'
 import { isEnded, label } from '@/lib/domain'
-import { getPortfolio, type Portfolio, type ProjectView } from '@/lib/portfolio'
-import { fmtDate } from '@/lib/util'
-import { ProjectSearch } from './search'
+import Link from 'next/link'
+import { getPortfolio, type ProjectView, type WorkstreamView } from '@/lib/portfolio'
+import { getBriefs, getTranscripts, type BriefRow, type TranscriptRow } from '@/lib/briefs'
+import { Brief } from '@/components/brief'
+import { fmtDate, fmtRange } from '@/lib/util'
+import { Disclosure } from './disclosure'
 import { ShowEnded } from '@/components/show-ended'
+import { Suspense } from 'react'
 
 // This page reads the live portfolio; prerendering it would serve stale data.
 export const dynamic = 'force-dynamic'
 
 const STATUS_TONE: Record<string, Tone> = {
-  backlog: 'slate',
+  active: 'blue',
   planned: 'slate',
-  in_progress: 'blue',
   paused: 'amber',
   completed: 'green',
   canceled: 'slate',
 }
 
-/** Live work first, then the not-yet-started, then everything finished. */
-const STATUS_RANK: Record<string, number> = {
-  in_progress: 0,
-  paused: 1,
-  planned: 2,
-  backlog: 3,
-  completed: 4,
-  canceled: 5,
-}
-
-function initiativeOf(p: Portfolio, project: ProjectView): string | null {
-  if (!project.initiativeId) return null
-  return p.initiatives.find((i) => i.id === project.initiativeId)?.name ?? null
-}
-
-function Row({ project, p }: { project: ProjectView; p: Portfolio }) {
-  const initiative = initiativeOf(p, project)
-
+function ProjectsTable({ workstreams }: { workstreams: WorkstreamView[] }) {
   return (
-    <Link
-      href={`/projects/${project.id}`}
-      className="flex flex-col gap-1.5 rounded-lg border px-3 py-2.5 no-underline transition-colors hover:bg-[var(--raised)]"
-      style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[13.5px] font-semibold tracking-[-0.01em]">{project.name}</span>
-        <Pill tone={STATUS_TONE[project.status] ?? 'slate'}>
-          {label('projectStatus', project.status)}
-        </Pill>
-        <HealthBadge health={project.health} showOrigin={false} />
-        {/* A project with no initiative is not an error, but it is the state a
-            freshly converted intake request is in - and the reason somebody
-            could not find it by browsing initiatives. */}
-        {initiative ? (
-          <Muted>{initiative}</Muted>
-        ) : (
-          <GapFlag title="Not under any initiative. Newly converted intake requests start this way.">
-            no initiative
-          </GapFlag>
-        )}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
-        <span>
-          <Muted>Lead</Muted>{' '}
-          {project.lead ? (
-            <span className="font-semibold">{project.lead.name}</span>
-          ) : (
-            <GapFlag title="Nobody is named as lead.">unassigned</GapFlag>
-          )}
-        </span>
-        {project.team ? (
-          <span>
-            <Muted>Team</Muted> <span className="font-semibold">{project.team.name}</span>
-          </span>
-        ) : null}
-        {project.targetDate ? (
-          <span>
-            <Muted>Target</Muted>{' '}
-            <span className="font-semibold">{fmtDate(project.targetDate)}</span>
-          </span>
-        ) : null}
-        <span className="min-w-[90px] flex-1">
-          <ProgressBar value={project.progress ?? 0} />
-        </span>
-      </div>
-    </Link>
+    <div className="scroll-x">
+      <table className="grid">
+        <thead>
+          <tr>
+            <th style={{ minWidth: 210 }}>Workstream</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th style={{ minWidth: 120 }}>Progress</th>
+            <th>Lead</th>
+            <th style={{ minWidth: 130 }}>Dates</th>
+            <th className="full-only">Milestones</th>
+            <th className="full-only">Provenance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {workstreams.map((p) => (
+            <tr key={p.id}>
+              <td>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <HealthBadge health={p.health} showOrigin={false} />
+                  <Link
+                    href={`/workstreams/${p.id}`}
+                    className="font-semibold underline decoration-dotted underline-offset-2"
+                  >
+                    {p.name}
+                  </Link>
+                </div>
+              </td>
+              <td>
+                <Pill tone={p.status === 'in_progress' ? 'blue' : 'slate'}>
+                  {label('projectStatus', p.status)}
+                </Pill>
+              </td>
+              <td>{label('priority', p.priority)}</td>
+              <td>
+                <ProgressBar
+                  value={p.progress}
+                  tone={p.health.rag === 'red' ? 'red' : p.health.rag === 'amber' ? 'amber' : 'blue'}
+                />
+              </td>
+              <td>
+                {p.lead ? (
+                  p.lead.name
+                ) : (
+                  <GapFlag title="No delivery lead on this workstream.">no lead</GapFlag>
+                )}
+              </td>
+              <td className="tabular-nums">{fmtRange(p.startDate, p.targetDate)}</td>
+              <td className="full-only tabular-nums">
+                {p.milestones.length === 0 ? (
+                  <Muted>none</Muted>
+                ) : (
+                  <span title={p.milestones.map((m) => m.name).join('\n')}>
+                    {p.milestones.filter((m) => m.status === 'done').length}/{p.milestones.length}
+                  </span>
+                )}
+              </td>
+              <td className="full-only">
+                <div className="flex flex-wrap gap-1">
+                  {p.sources.length === 0 ? (
+                    <Muted>typed here</Muted>
+                  ) : (
+                    p.sources.map((s, i) => (
+                      <SourceBadge key={`${s.system}-${i}`} system={s.system} url={s.url} />
+                    ))
+                  )}
+                  {p.overridden.length > 0 ? <OverrideBadge fields={p.overridden} /> : null}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
-export default async function ProjectsPage({
+function ProjectRow({
+  i,
+  brief,
+  transcripts,
+}: {
+  i: ProjectView
+  brief: BriefRow | null
+  transcripts: TranscriptRow[]
+}) {
+  const start = i.startDate ?? i.derivedStart
+  const target = i.targetDate ?? i.derivedTarget
+  // The derived dates are rolled up from child workstreams, so say so rather than
+  // letting a date that nobody typed look like a commitment somebody made.
+  const derived = !i.targetDate && Boolean(i.derivedTarget)
+  const ownerMissing = i.ownerGap || !i.owner
+  const themeColor = i.theme?.color ?? 'var(--line)'
+
+  // Everything in the summary is phrasing content (spans), because it renders
+  // inside the disclosure's <button> and block elements are invalid there.
+  const summary = (
+    <span className="flex flex-col gap-1.5">
+      <span className="flex flex-wrap items-center gap-2">
+        <span className="text-[14.5px] font-semibold tracking-[-0.01em]">{i.name}</span>
+        {i.theme ? (
+          <Chip tone="slate" title={i.theme.description ?? undefined}>
+            <span
+              className="rag-dot"
+              style={{ background: themeColor, width: 8, height: 8 }}
+              aria-hidden="true"
+            />
+            {i.theme.name}
+          </Chip>
+        ) : (
+          <GapFlag title="Not attached to a board theme.">no theme</GapFlag>
+        )}
+        <Pill tone={STATUS_TONE[i.status] ?? 'slate'}>{label('initiativeStatus', i.status)}</Pill>
+        <HealthBadge health={i.health} />
+      </span>
+
+      {i.health.origin === 'assessed' && i.health.rationale ? (
+        <span
+          className="block max-w-[820px] text-[12px] leading-relaxed"
+          style={{ color: 'var(--ink)' }}
+        >
+          {i.health.rationale}
+          {i.health.evidence ? (
+            <span style={{ color: 'var(--muted)' }}> — {i.health.evidence}</span>
+          ) : null}
+          {i.health.asOf ? (
+            <span style={{ color: 'var(--muted)' }}> · {fmtDate(i.health.asOf)}</span>
+          ) : null}
+        </span>
+      ) : null}
+
+      <span className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
+        <span>
+          <Muted>Owner</Muted>{' '}
+          {ownerMissing ? (
+            <GapFlag title="No project owner. Everything below is nobody's to answer for.">
+              no owner
+            </GapFlag>
+          ) : (
+            <span className="font-semibold">{i.owner!.name}</span>
+          )}
+        </span>
+        <span>
+          <Muted>Workstreams</Muted> <span className="font-semibold tabular-nums">{i.workstreams.length}</span>
+        </span>
+        <span className="tabular-nums">
+          <Muted>Dates</Muted> {fmtRange(start, target)}
+          {derived ? <Muted> (rolled up)</Muted> : null}
+        </span>
+      </span>
+    </span>
+  )
+
+  return (
+    <Card className="border-l-4" style={{ borderLeftColor: themeColor }}>
+      <Disclosure
+        labelText={i.name}
+        // Anything in trouble opens on load: the reasoning is what the row is
+        // for, and a red project behind a click gets read as decoration.
+        defaultOpen={i.health.rag === 'red'}
+        summary={summary}
+      >
+        {i.notes ? (
+          <p className="m-0 mb-3 text-[12.5px] leading-relaxed" style={{ color: 'var(--ink)' }}>
+            {i.notes}
+          </p>
+        ) : null}
+
+        {i.workstreams.length === 0 ? (
+          <SectionNote tone="violet">
+            Strategic project, nothing in delivery yet — no workstreams roll up to it. That is a
+            statement about the plan, not a missing row.
+          </SectionNote>
+        ) : (
+          <ProjectsTable workstreams={i.workstreams} />
+        )}
+
+        {brief || transcripts.length > 0 ? (
+          <Brief brief={brief} transcripts={transcripts} transcriptCount={transcripts.length} />
+        ) : null}
+
+        {i.overridden.length > 0 ? (
+          <div className="full-only mt-2">
+            <OverrideBadge fields={i.overridden} />
+          </div>
+        ) : null}
+      </Disclosure>
+
+      {/* Outside the disclosure on purpose: the one-page view of a project
+          is the thing people come here for, and putting it behind an expand
+          means it gets found by the people who already knew it existed. */}
+      <div className="mt-2 border-t pt-2" style={{ borderColor: 'var(--line)' }}>
+        <Link
+          href={`/projects/${i.id}`}
+          className="text-[12px] font-semibold underline decoration-dotted underline-offset-2"
+          style={{ color: 'var(--brand-2)' }}
+        >
+          Everything about {i.name} →
+        </Link>
+      </div>
+    </Card>
+  )
+}
+
+export default async function InitiativesPage({
   searchParams,
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
-  const [p, sp] = await Promise.all([getPortfolio(), searchParams])
+  const [p, briefs, transcripts, sp] = await Promise.all([
+    getPortfolio(),
+    getBriefs(),
+    getTranscripts(),
+    searchParams,
+  ])
 
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)
-  const q = (one(sp.q) ?? '').trim().toLowerCase()
   const showEnded = one(sp.ended) === '1'
 
-  const all = p.projects
-  // Closed and withdrawn work is hidden by default. A list that only grows
-  // stops being read, and the things people come here for are all live.
-  const inScope = showEnded ? all : all.filter((x) => !isEnded(x.status))
-  // Name, key and description: someone searching for a converted intake
-  // request may remember the problem they described rather than the title
-  // they gave it.
-  const visible = inScope
-    .filter((x) =>
-      !q
-        ? true
-        : [x.name, x.key, x.description].some((f) => (f ?? '').toLowerCase().includes(q)),
-    )
-    .sort((a, b) => {
-      const ra = STATUS_RANK[a.status] ?? 99
-      const rb = STATUS_RANK[b.status] ?? 99
-      if (ra !== rb) return ra - rb
-      return a.name.localeCompare(b.name)
-    })
+  // Theme order is the board's narrative order; projects without a theme sit
+  // at the end rather than being dropped.
+  const themeRank = new Map(p.themes.map((t, ix) => [t.id, t.sortOrder * 1000 + ix]))
 
-  const live = all.filter((x) => x.status === 'in_progress' || x.status === 'paused')
-  const orphans = inScope.filter((x) => !x.initiativeId)
-  const endedCount = all.filter((x) => isEnded(x.status)).length
+  // Closed and withdrawn projects are hidden by default, and so are ended
+  // workstreams inside the ones that remain - a project that is live can
+  // still be carrying eight finished workstreams, and showing them here while
+  // hiding them on the Workstreams page would be two answers to one question.
+  const endedCount = p.projects.filter((i) => isEnded(i.status)).length
+  const inScope = (showEnded ? p.projects : p.projects.filter((i) => !isEnded(i.status))).map(
+    (i) => (showEnded ? i : { ...i, workstreams: i.workstreams.filter((x) => !isEnded(x.status)) }),
+  )
+
+  const sorted = [...inScope].sort((a, b) => {
+    const at = a.themeId ? (themeRank.get(a.themeId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER
+    const bt = b.themeId ? (themeRank.get(b.themeId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER
+    if (at !== bt) return at - bt
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
+    return a.name.localeCompare(b.name)
+  })
+
+  const red = sorted.filter((i) => i.health.rag === 'red')
+  const unowned = sorted.filter(
+    (i) => (i.ownerGap || !i.owner) && !['completed', 'canceled'].includes(i.status),
+  )
+  const noDelivery = sorted.filter((i) => i.workstreams.length === 0)
 
   return (
     <div className="flex flex-col gap-4">
       <div>
         <Kicker>Projects</Kicker>
         <h2 className="m-0 mt-0.5 text-[18px] font-bold tracking-[-0.01em]">
-          Every project, including the ones no initiative owns yet
+          The board view, with the delivery work one keypress underneath
         </h2>
-        <p className="m-0 mt-1 max-w-[760px] text-[12.5px]" style={{ color: 'var(--muted)' }}>
-          Initiatives show the projects beneath them. This shows all of them — which is the only
-          way to find one that has just been converted from intake and has no initiative yet.
+        <p className="m-0 mt-1 max-w-[820px] text-[12.5px]" style={{ color: 'var(--muted)' }}>
+          Sorted by theme, then by the order each theme reads in. Where health was assessed, the
+          rationale sits under the badge — the colour on its own has never moved a decision.
+          Anything assessed {label('rag', 'red')} is expanded already.
         </p>
       </div>
 
+      <Suspense fallback={null}>
+        <ShowEnded hidden={endedCount} path="/projects" noun="projects" />
+      </Suspense>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat value={inScope.length} label={showEnded ? 'Projects (all)' : 'Live projects'} />
-        <Stat value={live.length} label="In progress or paused" tone="blue" />
+        <Stat value={sorted.length} label={showEnded ? 'Projects (all)' : 'Live projects'} />
+        <Stat value={red.length} label={label('rag', 'red')} tone={red.length ? 'red' : 'green'} />
+        <Stat value={unowned.length} label="No owner" tone={unowned.length ? 'amber' : 'green'} />
         <Stat
-          value={orphans.length}
-          label="Not under an initiative"
-          tone={orphans.length ? 'amber' : 'green'}
+          value={noDelivery.length}
+          label="Nothing in delivery"
+          sub="strategic only, by design or by neglect"
         />
-        <Stat value={endedCount} label="Closed or withdrawn" />
       </div>
 
-      <Card>
-        <Suspense fallback={<Muted>Loading search…</Muted>}>
-          <div className="flex flex-col gap-2">
-            <ProjectSearch total={inScope.length} />
-            <ShowEnded hidden={endedCount} path="/projects" noun="projects" />
-          </div>
-        </Suspense>
-      </Card>
+      {unowned.length > 0 ? (
+        <SectionNote tone="violet">
+          {unowned.length} active {unowned.length === 1 ? 'project has' : 'projects have'} no
+          owner: {unowned.map((i) => i.name).join(', ')}. An unowned project has nobody to ask
+          when the date moves.
+        </SectionNote>
+      ) : null}
 
-      {visible.length === 0 ? (
-        <Empty>
-          {q ? `No project matches "${q}".` : 'No projects yet.'}
-        </Empty>
+      {sorted.length === 0 ? (
+        <Empty>No projects yet.</Empty>
       ) : (
-        <div className="flex flex-col gap-2">
-          {visible.map((project) => (
-            <Row key={project.id} project={project} p={p} />
+        <div className="flex flex-col gap-3">
+          {sorted.map((i) => (
+            <ProjectRow
+              key={i.id}
+              i={i}
+              brief={briefs.get(`project:${i.id}`) ?? null}
+              transcripts={transcripts.get(`project:${i.id}`) ?? []}
+            />
           ))}
         </div>
       )}

@@ -71,7 +71,7 @@ export async function POST(req: Request) {
   /*
    * One sync at a time.
    *
-   * Two runs that both find a project unmapped will both create it, and the
+   * Two runs that both find a workstream unmapped will both create it, and the
    * mapping write that lands second orphans the other row. The uniqueness
    * constraint protects the mapping table but cannot protect against that, so
    * the guard belongs here. It also stops a scheduler stacking up runs on an
@@ -129,7 +129,7 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
-  // Sync history names projects and failure reasons — not catastrophic, but
+  // Sync history names workstreams and failure reasons — not catastrophic, but
   // not something an anonymous caller has any business reading.
   if (!machineCallerAuthorised(req)) return unauthorised()
 

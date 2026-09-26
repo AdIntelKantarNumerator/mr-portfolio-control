@@ -17,10 +17,10 @@ export type Rag = (typeof RAG)[number]
 export const CONFIDENCE = ['low', 'medium', 'high'] as const
 export type Confidence = (typeof CONFIDENCE)[number]
 
-export const INITIATIVE_STATUS = ['planned', 'active', 'paused', 'completed', 'canceled'] as const
-export type InitiativeStatus = (typeof INITIATIVE_STATUS)[number]
+export const PROJECT_STATUS = ['planned', 'active', 'paused', 'completed', 'canceled'] as const
+export type ProjectStatus = (typeof PROJECT_STATUS)[number]
 
-export const PROJECT_STATUS = [
+export const WORKSTREAM_STATUS_SET = [
   'backlog',
   'planned',
   'in_progress',
@@ -28,7 +28,7 @@ export const PROJECT_STATUS = [
   'completed',
   'canceled',
 ] as const
-export type ProjectStatus = (typeof PROJECT_STATUS)[number]
+export type WorkstreamEntityStatus = (typeof WORKSTREAM_STATUS_SET)[number]
 
 /**
  * The states that mean the work is over.
@@ -39,7 +39,7 @@ export type ProjectStatus = (typeof PROJECT_STATUS)[number]
  * difference between "canceled" and "withdrawn" forever.
  *
  * Defined once because four screens and an agent all have to agree on it. The
- * day these two lists disagree, a project is hidden from the page and still
+ * day these two lists disagree, a workstream is hidden from the page and still
  * matched by Yaara, or the reverse — and either way somebody's work vanishes
  * from a list that claims to be complete.
  */
@@ -51,8 +51,8 @@ export function isEnded(status: string | null | undefined): boolean {
 }
 
 /** What reopening puts it back to: the earliest state that means "live". */
-export function reopenedStatus(kind: 'project' | 'initiative'): string {
-  return kind === 'project' ? 'planned' : 'active'
+export function reopenedStatus(kind: 'workstream' | 'project'): string {
+  return kind === 'workstream' ? 'planned' : 'active'
 }
 
 /**
@@ -60,7 +60,7 @@ export function reopenedStatus(kind: 'project' | 'initiative'): string {
  *
  * These are the team's words on a slide people read every fortnight, so they
  * are not renamed here to match the portfolio's other vocabularies. A
- * workstream is "On Track"; a project is "In progress". They are different
+ * milestone is "On Track"; a workstream is "In progress". They are different
  * statements about different things, and collapsing them would lose the one
  * the deck exists to make.
  */
@@ -88,7 +88,7 @@ export const WORKSTREAM_PHASE = [
   'release',
   'tbd',
 ] as const
-export type WorkstreamPhase = (typeof WORKSTREAM_PHASE)[number]
+export type MilestonePhase = (typeof WORKSTREAM_PHASE)[number]
 
 /** 'YYYY-MM', which is what a release calendar band is a statement about. */
 export function isPeriod(value: string): boolean {
@@ -155,8 +155,8 @@ export type Tshirt = (typeof TSHIRT)[number]
 export const TSHIRT_WEEKS: Record<Tshirt, number> = { xs: 1, s: 3, m: 8, l: 20, xl: 45 }
 
 export const ENTITY_TYPE = [
-  'initiative',
   'project',
+  'workstream',
   'milestone',
   'app_area',
   'theme',
@@ -183,7 +183,7 @@ export const LABELS = {
     meeting_series: 'Meeting series',
     document: 'Document',
     // Code hosts. Same table on purpose: "which things out there are this
-    // project" is one question, and answering it in two places is how the two
+    // workstream" is one question, and answering it in two places is how the two
     // answers drift. Adding a host here is a vocabulary change, not a
     // migration — the column is text.
     github_repo: 'GitHub repository',
@@ -501,7 +501,7 @@ export const decisionInput = z.object({
 
 export const allocationInput = z.object({
   teamId: z.string().min(1),
-  initiativeId: z.string().min(1),
+  projectId: z.string().min(1),
   mode: z.enum(ALLOCATION_MODE),
   note: z.string().optional().nullable(),
   share: z.number().min(0).max(1).optional().nullable(),

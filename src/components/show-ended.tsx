@@ -4,7 +4,7 @@
  * Show the closed and withdrawn work too.
  *
  * Hiding ended work by default is right — a list that grows forever stops
- * being read — but hiding it silently is how somebody concludes their project
+ * being read — but hiding it silently is how somebody concludes their workstream
  * was deleted. So the count is always on the control, even when it is off: the
  * page says "12 closed or withdrawn hidden" rather than saying nothing and
  * leaving the reader to wonder.

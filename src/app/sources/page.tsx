@@ -47,13 +47,13 @@ export default async function SourcesPage() {
     getBriefs(),
   ])
 
-  // Initiatives first, then their projects indented — the same order the rest
+  // Projects first, then their workstreams indented — the same order the rest
   // of the app uses, so the dropdown matches the mental model.
   const entities: EntityOption[] = []
-  for (const i of p.initiatives) {
-    entities.push({ value: KEY('initiative', i.id), label: i.name })
-    for (const proj of i.projects) {
-      entities.push({ value: KEY('project', proj.id), label: `  ${proj.name}` })
+  for (const i of p.projects) {
+    entities.push({ value: KEY('project', i.id), label: i.name })
+    for (const proj of i.workstreams) {
+      entities.push({ value: KEY('workstream', proj.id), label: `  ${proj.name}` })
     }
   }
 
@@ -70,7 +70,7 @@ export default async function SourcesPage() {
   }))
 
   // Only entities that have something attached get a card; an empty screen of
-  // every project in the portfolio would bury the handful that matter.
+  // every workstream in the portfolio would bury the handful that matter.
   const withSomething = [...new Set([...sources.keys(), ...transcripts.keys()])].sort((a, b) =>
     (nameFor.get(a) ?? a).localeCompare(nameFor.get(b) ?? b),
   )

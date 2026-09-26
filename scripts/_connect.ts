@@ -134,13 +134,13 @@ export const ALL_TABLES = `
   allocations, decisions, dependencies, assessments, field_overrides,
   status_updates, source_records, sync_runs, changelog_entries,
   project_readiness, readiness_items, lifecycle_gates, discovery_topics, templates,
-  milestones, projects, initiatives, app_areas, themes, people, teams, settings
+  milestones, workstreams, projects, app_areas, themes, people, teams, settings
 `
 
 /** The portfolio content only — leaves process reference data in place. */
 export const PORTFOLIO_TABLES = `
   scores, intake_requests, allocations, decisions, dependencies, assessments,
   field_overrides, status_updates, source_records, sync_runs, changelog_entries,
-  project_readiness, milestones, projects, initiatives, app_areas, themes,
+  project_readiness, milestones, workstreams, projects, app_areas, themes,
   people, teams
 `

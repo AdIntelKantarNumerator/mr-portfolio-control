@@ -432,7 +432,7 @@ export default async function DecisionsPage({
   const kind = one(sp.kind) ?? 'all'
   const status = one(sp.status) ?? 'all'
   const category = one(sp.category) ?? 'all'
-  // "type:id", so one control can offer initiatives and projects together.
+  // "type:id", so one control can offer projects and workstreams together.
   const entity = one(sp.entity) ?? 'all'
 
   const keyOf = (d: DecisionRow) =>
@@ -489,7 +489,7 @@ export default async function DecisionsPage({
   ]
 
   // Only work that actually has something in the register. A select listing
-  // forty projects of which six have ever had a blocker is a scrolling
+  // forty workstreams of which six have ever had a blocker is a scrolling
   // exercise, and the empty ones answer nothing.
   const entityOptions: EntityOption[] = [
     { value: 'all', label: 'All work', count: all.filter((d) => matchesOthers(d, 'entity')).length },
@@ -505,13 +505,13 @@ export default async function DecisionsPage({
       .sort((a, b) => a.label.localeCompare(b.label)),
   ]
 
-  // Everything an entry could be moved to. Initiatives first because they are
+  // Everything an entry could be moved to. Projects first because they are
   // the coarser answer, and prefixed so the two are distinguishable in a list
-  // where a project and an initiative can share a name.
+  // where a workstream and a project can share a name.
   const work: WorkOption[] = [
-    ...p.initiatives.map((i) => ({ value: `initiative:${i.id}`, label: `Initiative · ${i.name}` })),
-    ...p.projects
-      .map((x) => ({ value: `project:${x.id}`, label: `Project · ${x.name}` }))
+    ...p.projects.map((i) => ({ value: `project:${i.id}`, label: `Project · ${i.name}` })),
+    ...p.workstreams
+      .map((x) => ({ value: `workstream:${x.id}`, label: `Workstream · ${x.name}` }))
       .sort((a, b) => a.label.localeCompare(b.label)),
   ]
 

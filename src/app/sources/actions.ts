@@ -18,7 +18,7 @@ export interface ActionState {
 
 function refresh() {
   revalidatePath('/sources')
-  revalidatePath('/initiatives')
+  revalidatePath('/projects')
   revalidatePath('/changes')
 }
 
@@ -30,8 +30,8 @@ function parseEntity(raw: string): { type: string; id: string } | null {
 }
 
 /**
- * Attaches a Slack channel, meeting series or document to an initiative or
- * project. Ingestion is off unless the person ticked the box — see the note on
+ * Attaches a Slack channel, meeting series or document to a project or
+ * workstream. Ingestion is off unless the person ticked the box — see the note on
  * the table for why that default is not negotiable.
  */
 export async function addSource(

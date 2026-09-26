@@ -64,7 +64,7 @@ export function AddSourceForm({ entities }: { entities: EntityOption[] }) {
         : kind === 'github_repo'
           ? 'owner/name, exactly as it appears in the GitHub URL — e.g. AdIntelKantarNumerator/clickhouse-serving.'
           : kind === 'azure_repo'
-            ? 'A project name reads every repository in it. Or name one: project/repository, or organisation/project/repository as it appears in the URL.'
+            ? 'A workstream name reads every repository in it. Or name one: workstream/repository, or organisation/workstream/repository as it appears in the URL.'
             : 'Optional. Anything that identifies the document to you.'
 
   return (

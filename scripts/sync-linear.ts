@@ -6,7 +6,7 @@
  *   npm run sync:linear -- --probe   report which fields this workspace exposes
  *
  * Run the probe first against a new workspace: it prints exactly which
- * initiative and project fields are available, which is the difference between
+ * project and workstream fields are available, which is the difference between
  * a five-minute setup and an afternoon of guessing at GraphQL errors.
  */
 import 'dotenv/config'
@@ -29,12 +29,12 @@ async function main() {
       console.log(`  available: ${have.join(', ') || '(none)'}`)
       if (miss.length) console.log(`  missing:   ${miss.join(', ')}`)
     }
-    console.log(`initiatives query: ${caps.hasQuery('initiatives') ? 'yes' : 'no'}`)
-    report('Initiative', ['id', 'name', 'description', 'targetDate', 'startedAt', 'status', 'owner', 'url', 'sortOrder'])
-    report('Project', [
+    console.log(`projects query: ${caps.hasQuery('projects') ? 'yes' : 'no'}`)
+    report('Project', ['id', 'name', 'description', 'targetDate', 'startedAt', 'status', 'owner', 'url', 'sortOrder'])
+    report('Workstream', [
       'id', 'name', 'description', 'url', 'state', 'status', 'priority', 'progress',
       'health', 'startDate', 'targetDate', 'startedAt', 'completedAt', 'lead', 'teams',
-      'initiatives', 'projectMilestones',
+      'projects', 'projectMilestones',
     ])
     report('Team', ['id', 'key', 'name', 'description'])
     report('User', ['id', 'name', 'email', 'active'])

@@ -22,7 +22,7 @@ function refresh() {
 
 /**
  * Endpoints arrive from the form as "type:id" so one <select> can offer
- * projects, initiatives and milestones together without three parallel fields.
+ * workstreams, projects and milestones together without three parallel fields.
  * An endpoint typed as free text becomes an `external` node — which is how the
  * vendor feeds and other-org deliverables that actually slip get represented.
  */

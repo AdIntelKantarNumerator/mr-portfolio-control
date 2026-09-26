@@ -10,7 +10,7 @@
  */
 import { Card, CardHeading, Chip, Empty, Muted, SectionNote } from '@/components/ui'
 import type { AgentAssessmentRow, ObservationRow } from '@/lib/observations'
-import { MarkReviewedButton } from '@/app/initiatives/[id]/review-action'
+import { MarkReviewedButton } from '@/app/projects/[id]/review-action'
 
 const KIND_LABEL: Record<string, string> = {
   progress: 'progress',

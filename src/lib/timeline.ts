@@ -5,7 +5,7 @@
  * is testable and stated once. Everything is expressed as a percentage of the
  * horizon, so the same model renders at any width without re-computing.
  */
-import type { InitiativeView, Portfolio, ProjectView, MilestoneRow } from './portfolio'
+import type { ProjectView, Portfolio, WorkstreamView, MilestoneRow } from './portfolio'
 import type { Rag } from './domain'
 
 export interface TimelineColumn {
@@ -19,7 +19,7 @@ export interface TimelineColumn {
 }
 
 export interface TimelineBar {
-  project: ProjectView
+  workstream: WorkstreamView
   leftPct: number
   widthPct: number
   /** No usable dates: rendered as a hatched placeholder, not a confident bar. */
@@ -38,11 +38,11 @@ export interface TimelineMilestone {
 }
 
 export interface TimelineLane {
-  initiative: InitiativeView
+  project: ProjectView
   bars: TimelineBar[]
   milestones: TimelineMilestone[]
-  /** Projects with no dates at all, listed rather than drawn. */
-  undatedProjects: ProjectView[]
+  /** Workstreams with no dates at all, listed rather than drawn. */
+  undatedProjects: WorkstreamView[]
 }
 
 export interface TimelineModel {
@@ -97,7 +97,7 @@ function pct(date: Date, start: Date, span: number) {
  *
  * Preference order: explicit settings, then the actual spread of dated work
  * padded by a month at each end. Falling back to the data means a fresh
- * install with one quarter of projects does not render eighteen empty months.
+ * install with one quarter of workstreams does not render eighteen empty months.
  */
 export function horizonFor(
   p: Portfolio,
@@ -109,7 +109,7 @@ export function horizonFor(
   }
 
   const dates: number[] = []
-  for (const pr of p.projects) {
+  for (const pr of p.workstreams) {
     if (pr.startDate) dates.push(pr.startDate.getTime())
     if (pr.targetDate) dates.push(pr.targetDate.getTime())
   }
@@ -127,7 +127,7 @@ export function horizonFor(
 
 export function buildTimeline(
   p: Portfolio,
-  opts: { start: Date; end: Date; now?: Date; initiatives?: InitiativeView[] },
+  opts: { start: Date; end: Date; now?: Date; projects?: ProjectView[] },
 ): TimelineModel {
   const now = opts.now ?? new Date()
   const start = startOfMonth(opts.start)
@@ -135,23 +135,23 @@ export function buildTimeline(
   const span = end.getTime() - start.getTime()
   const columns = buildColumns(start, opts.end)
 
-  const source = opts.initiatives ?? p.initiatives
-  const lanes: TimelineLane[] = source.map((initiative) => {
+  const source = opts.projects ?? p.projects
+  const lanes: TimelineLane[] = source.map((project) => {
     const bars: TimelineBar[] = []
-    const undatedProjects: ProjectView[] = []
+    const undatedProjects: WorkstreamView[] = []
     const milestones: TimelineMilestone[] = []
 
-    for (const project of initiative.projects) {
-      const s = project.startDate ?? project.targetDate
-      const e = project.targetDate ?? project.startDate
+    for (const workstream of project.workstreams) {
+      const s = workstream.startDate ?? workstream.targetDate
+      const e = workstream.targetDate ?? workstream.startDate
 
       if (!s || !e) {
-        undatedProjects.push(project)
+        undatedProjects.push(workstream)
         continue
       }
 
       // A single-day range would render as a hairline, so give every bar at
-      // least a few days of width — a one-day project still needs to be seen.
+      // least a few days of width — a one-day workstream still needs to be seen.
       const from = new Date(Math.min(s.getTime(), e.getTime()))
       const to = new Date(Math.max(s.getTime(), e.getTime(), from.getTime() + 5 * MS))
 
@@ -162,22 +162,22 @@ export function buildTimeline(
       if (right <= 0 || left >= 100) continue
 
       bars.push({
-        project,
+        workstream,
         leftPct: left,
         widthPct: Math.max(1.2, right - left),
         undated: false,
         clippedStart,
         clippedEnd,
-        rag: project.health.rag,
+        rag: workstream.health.rag,
       })
 
-      for (const m of project.milestones) {
+      for (const m of workstream.milestones) {
         if (!m.targetDate) continue
         const mp = pct(m.targetDate, start, span)
         if (mp < 0 || mp > 100) continue
         milestones.push({
           milestone: m,
-          projectName: project.name,
+          projectName: workstream.name,
           leftPct: mp,
           overdue: m.status === 'pending' && m.targetDate < now,
         })
@@ -186,18 +186,18 @@ export function buildTimeline(
 
     bars.sort((a, b) => a.leftPct - b.leftPct)
     milestones.sort((a, b) => a.leftPct - b.leftPct)
-    return { initiative, bars, milestones, undatedProjects }
+    return { project, bars, milestones, undatedProjects }
   })
 
   const todayRaw = pct(now, start, span)
   const todayPct = todayRaw >= 0 && todayRaw <= 100 ? todayRaw : null
 
   const keyDates = p.milestones
-    .filter((m) => m.portfolioLevel && m.targetDate)
+    .filter((m) => (m.level === 'initiative') && m.targetDate)
     .sort((a, b) => a.targetDate!.getTime() - b.targetDate!.getTime())
     .map((m) => ({
       milestone: m,
-      projectName: m.project.name,
+      projectName: m.workstream.name,
       leftPct: pct(m.targetDate!, start, span),
       overdue: m.status === 'pending' && m.targetDate! < now,
     }))

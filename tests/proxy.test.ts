@@ -38,6 +38,6 @@ test('no route outside api is accidentally exempt', () => {
 
 test('the app itself still requires a session', () => {
   assert.equal(isPublic('/'), false)
-  assert.equal(isPublic('/initiatives'), false)
+  assert.equal(isPublic('/projects'), false)
   assert.equal(isPublic('/sources'), false)
 })

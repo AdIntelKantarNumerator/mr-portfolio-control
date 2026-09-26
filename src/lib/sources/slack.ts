@@ -35,7 +35,7 @@ export async function buildDigest(baseUrl?: string) {
         next
           .map(
             (m) =>
-              `• ${fmtDate(m.targetDate, { year: true })} — ${m.name} _(${m.project.name}, ${relativeDays(m.targetDate)})_${m.contested ? ' ⚠️ contested' : ''}`,
+              `• ${fmtDate(m.targetDate, { year: true })} — ${m.name} _(${m.workstream.name}, ${relativeDays(m.targetDate)})_${m.contested ? ' ⚠️ contested' : ''}`,
           )
           .join('\n'),
     )
@@ -53,7 +53,7 @@ export async function buildDigest(baseUrl?: string) {
       '*Single-threaded people*\n' +
         hot
           .slice(0, 5)
-          .map((h) => `• ${h.person.name} — ${h.projects.length} open projects`)
+          .map((h) => `• ${h.person.name} — ${h.workstreams.length} open workstreams`)
           .join('\n'),
     )
   }

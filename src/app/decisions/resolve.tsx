@@ -130,7 +130,7 @@ export function ResolveControl({
 }
 
 export interface WorkOption {
-  /** "type:id" — one control for initiatives and projects together. */
+  /** "type:id" — one control for projects and workstreams together. */
   value: string
   label: string
 }
@@ -186,7 +186,7 @@ export function MoveControl({
         className={box}
       >
         <option value="" disabled>
-          Pick an initiative or project…
+          Pick a project or workstream…
         </option>
         {options.map((o) => (
           <option key={o.value} value={o.value}>

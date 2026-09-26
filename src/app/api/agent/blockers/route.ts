@@ -21,7 +21,7 @@
  */
 import { inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { decisions, dependencies, initiatives, milestones, people, projects } from '@/db/schema'
+import { decisions, dependencies, projects, milestones, people, workstreams } from '@/db/schema'
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
 
 export const runtime = 'nodejs'
@@ -38,15 +38,15 @@ export async function GET(req: Request) {
     db.select().from(dependencies).where(inArray(dependencies.status, LIVE_DEPENDENCY_STATUSES)),
     db.select().from(decisions).where(inArray(decisions.status, LIVE_DECISION_STATUSES)),
     db.select().from(people),
-    db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives),
     db.select({ id: projects.id, name: projects.name }).from(projects),
+    db.select({ id: workstreams.id, name: workstreams.name }).from(workstreams),
     db.select({ id: milestones.id, name: milestones.name }).from(milestones),
   ])
 
   const personName = new Map(folk.map((p) => [p.id, p.name]))
   const entityName = new Map<string, string>([
-    ...inits.map((i) => [`initiative:${i.id}`, i.name] as const),
-    ...projs.map((p) => [`project:${p.id}`, p.name] as const),
+    ...inits.map((i) => [`project:${i.id}`, i.name] as const),
+    ...projs.map((p) => [`workstream:${p.id}`, p.name] as const),
     ...miles.map((m) => [`milestone:${m.id}`, m.name] as const),
   ])
 

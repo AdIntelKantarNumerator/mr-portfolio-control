@@ -40,9 +40,9 @@ const KIND_TONE: Record<string, Tone> = {
 export default async function TemplatesPage() {
   const [templates, topicsByWorkstream] = await Promise.all([getTemplates(), getDiscoveryTopics()])
 
-  // Any workstream the seed did not anticipate still renders, after the known
+  // Any milestone the seed did not anticipate still renders, after the known
   // ones, rather than silently disappearing from the bank.
-  const workstreams = [
+  const milestones = [
     ...WORKSTREAM_ORDER.filter((w) => topicsByWorkstream.has(w)),
     ...[...topicsByWorkstream.keys()].filter(
       (w) => !(WORKSTREAM_ORDER as readonly string[]).includes(w),
@@ -56,7 +56,7 @@ export default async function TemplatesPage() {
       <div>
         <Kicker>Standard templates</Kicker>
         <h2 className="m-0 mt-0.5 text-[18px] font-bold tracking-[-0.01em]">
-          The documents every project is expected to have
+          The documents every workstream is expected to have
         </h2>
         <p className="m-0 mt-1 max-w-[820px] text-[12.5px]" style={{ color: 'var(--muted)' }}>
           One place for the canonical links, so a kick-off does not start with someone hunting
@@ -98,20 +98,20 @@ export default async function TemplatesPage() {
       <div className="mt-2">
         <Kicker>Discovery question bank</Kicker>
         <h2 className="m-0 mt-0.5 text-[18px] font-bold tracking-[-0.01em]">
-          What a data project has to answer before it commits to a date
+          What a data workstream has to answer before it commits to a date
         </h2>
         <p className="m-0 mt-1 max-w-[820px] text-[12.5px]" style={{ color: 'var(--muted)' }}>
-          {questionCount} questions across {workstreams.length} workstreams. These are prompts, not
+          {questionCount} questions across {milestones.length} milestones. These are prompts, not
           fields — the value is in a team having to say &ldquo;we don&apos;t know yet&rdquo; out
           loud while that is still cheap.
         </p>
       </div>
 
-      {workstreams.length === 0 ? (
+      {milestones.length === 0 ? (
         <Empty>The question bank is empty.</Empty>
       ) : (
         <div className="grid gap-3 lg:grid-cols-2">
-          {workstreams.map((w) => {
+          {milestones.map((w) => {
             const questions = topicsByWorkstream.get(w) ?? []
             return (
               <Card key={w}>

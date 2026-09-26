@@ -17,7 +17,11 @@
     "seed:demo": "tsx scripts/seed-demo.ts",
     "db:reset": "tsx scripts/reset.ts && npm run db:migrate -- --local && npm run seed:process && npm run init",
     "sync:linear": "tsx scripts/sync-linear.ts",
-    "db:migrate:prod": "node scripts/migrate-prod.mjs"
+    "db:migrate:prod": "node scripts/migrate-prod.mjs",
+    "check:entity": "tsx scripts/check-entity-route.ts",
+    "check:drift": "tsx scripts/check-schema-drift.ts",
+    "check:agent-writes": "tsx scripts/check-agent-writes.ts",
+    "check:grouping": "tsx scripts/check-grouping.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

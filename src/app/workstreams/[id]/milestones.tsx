@@ -7,8 +7,8 @@
  * lists — because the people editing it have that slide in their heads and
  * anything else would need translating twice a fortnight.
  *
- * Each workstream is a collapsed summary that opens into a form. Five
- * workstreams as five open forms is a page nobody can read; five summaries
+ * Each milestone is a collapsed summary that opens into a form. Five
+ * milestones as five open forms is a page nobody can read; five summaries
  * with the status and date visible is the slide itself.
  */
 import { useActionState, useState } from 'react'
@@ -21,7 +21,7 @@ import {
   setLeads,
   updateWorkstream,
   type WorkstreamState,
-} from './workstream-actions'
+} from './milestone-actions'
 
 export interface PhaseView {
   id: string
@@ -98,7 +98,7 @@ function bulletsFor(w: WorkstreamView, state: string) {
     .join('\n')
 }
 
-function PhaseEditor({ w, projectId }: { w: WorkstreamView; projectId: string }) {
+function PhaseEditor({ w, workstreamId }: { w: WorkstreamView; workstreamId: string }) {
   const [state, action, pending] = useActionState<WorkstreamState, FormData>(addPhase, {})
   const [, removeAction] = useActionState<WorkstreamState, FormData>(removePhase, {})
 
@@ -121,7 +121,7 @@ function PhaseEditor({ w, projectId }: { w: WorkstreamView; projectId: string })
                 </span>
                 <form action={removeAction}>
                   <input type="hidden" name="id" value={p.id} />
-                  <input type="hidden" name="projectId" value={projectId} />
+                  <input type="hidden" name="workstreamId" value={workstreamId} />
                   <button
                     type="submit"
                     aria-label={`Remove ${p.phase} band`}
@@ -137,8 +137,8 @@ function PhaseEditor({ w, projectId }: { w: WorkstreamView; projectId: string })
       ) : null}
 
       <form action={action} className="flex flex-wrap items-end gap-1.5">
-        <input type="hidden" name="workstreamId" value={w.id} />
-        <input type="hidden" name="projectId" value={projectId} />
+        <input type="hidden" name="milestoneId" value={w.id} />
+        <input type="hidden" name="workstreamId" value={workstreamId} />
         <select name="phase" className="rounded-md border px-2 py-1 text-[11.5px]" defaultValue="development">
           {WORKSTREAM_PHASE.map((p) => (
             <option key={p} value={p}>
@@ -162,7 +162,7 @@ function PhaseEditor({ w, projectId }: { w: WorkstreamView; projectId: string })
   )
 }
 
-function Row({ w, projectId }: { w: WorkstreamView; projectId: string }) {
+function Row({ w, workstreamId }: { w: WorkstreamView; workstreamId: string }) {
   const [open, setOpen] = useState(false)
   const [state, action, pending] = useActionState<WorkstreamState, FormData>(updateWorkstream, {})
   const [, deleteAction] = useActionState<WorkstreamState, FormData>(removeWorkstream, {})
@@ -230,7 +230,7 @@ function Row({ w, projectId }: { w: WorkstreamView; projectId: string }) {
         <>
           <form action={action} className="mt-2 flex flex-col gap-2">
             <input type="hidden" name="id" value={w.id} />
-            <input type="hidden" name="projectId" value={projectId} />
+            <input type="hidden" name="workstreamId" value={workstreamId} />
 
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="flex flex-col gap-1">
@@ -297,13 +297,13 @@ function Row({ w, projectId }: { w: WorkstreamView; projectId: string }) {
             </div>
           </form>
 
-          <PhaseEditor w={w} projectId={projectId} />
+          <PhaseEditor w={w} workstreamId={workstreamId} />
 
           <form action={deleteAction} className="mt-3">
             <input type="hidden" name="id" value={w.id} />
-            <input type="hidden" name="projectId" value={projectId} />
+            <input type="hidden" name="workstreamId" value={workstreamId} />
             <Btn type="submit" tone="danger">
-              Remove this workstream
+              Remove this milestone
             </Btn>
           </form>
         </>
@@ -312,14 +312,14 @@ function Row({ w, projectId }: { w: WorkstreamView; projectId: string }) {
   )
 }
 
-export function Workstreams({
-  projectId,
-  workstreams,
+export function Milestones({
+  workstreamId,
+  milestones,
   devLead,
   programLead,
 }: {
-  projectId: string
-  workstreams: WorkstreamView[]
+  workstreamId: string
+  milestones: WorkstreamView[]
   devLead: string | null
   programLead: string | null
 }) {
@@ -347,19 +347,19 @@ export function Workstreams({
             className="rounded-md border px-2.5 py-1.5 text-[12.5px]"
           />
         </label>
-        <input type="hidden" name="projectId" value={projectId} />
+        <input type="hidden" name="workstreamId" value={workstreamId} />
         <Btn type="submit">Save names</Btn>
       </form>
 
-      {workstreams.length === 0 ? (
+      {milestones.length === 0 ? (
         <p className="m-0 text-[12.5px]" style={{ color: 'var(--muted)' }}>
-          No workstreams yet — add the first one below, or send Yaara a program review deck and she
+          No milestones yet — add the first one below, or send Yaara a program review deck and she
           will read them off it.
         </p>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-2 p-0">
-          {workstreams.map((w) => (
-            <Row key={w.id} w={w} projectId={projectId} />
+          {milestones.map((w) => (
+            <Row key={w.id} w={w} workstreamId={workstreamId} />
           ))}
         </ul>
       )}
@@ -369,7 +369,7 @@ export function Workstreams({
         Before this it was a bare row of two inputs with the button floated to
         the far right edge of the card — which read as part of the empty-state
         message rather than as a form, and the first person to look for "a way
-        to add a workstream" did not find one. The placeholders made it worse:
+        to add a milestone" did not find one. The placeholders made it worse:
         grey sample text in an unlabelled row looks like content, not an input.
       */}
       <form
@@ -377,8 +377,8 @@ export function Workstreams({
         className="flex flex-col gap-2 rounded-lg border border-dashed p-3"
         style={{ borderColor: 'var(--line)' }}
       >
-        <span className={legend}>Add a workstream</span>
-        <input type="hidden" name="projectId" value={projectId} />
+        <span className={legend}>Add a milestone</span>
+        <input type="hidden" name="workstreamId" value={workstreamId} />
 
         <div className="flex flex-wrap gap-2">
           <label className="flex min-w-[200px] flex-1 flex-col gap-1">
@@ -393,7 +393,7 @@ export function Workstreams({
 
         <div className="flex flex-wrap items-center gap-2">
           <Btn type="submit" tone="go" disabled={adding}>
-            {adding ? 'Adding…' : 'Add workstream'}
+            {adding ? 'Adding…' : 'Add milestone'}
           </Btn>
           <span className="text-[11.5px]" style={{ color: 'var(--muted)' }}>
             Status, target date and the three lists are set once it exists.

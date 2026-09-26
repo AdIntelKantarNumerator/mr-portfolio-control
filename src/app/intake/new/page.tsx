@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { asc } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { appAreas, initiatives, themes } from '@/db/schema'
+import { appAreas, projects, themes } from '@/db/schema'
 import { Kicker, Muted } from '@/components/ui'
 import { RequestForm } from './request-form'
 
@@ -16,9 +16,9 @@ export default async function NewRequestPage() {
     db.select({ id: themes.id, name: themes.name }).from(themes).orderBy(asc(themes.sortOrder)),
     db.select({ id: appAreas.id, name: appAreas.name }).from(appAreas).orderBy(asc(appAreas.sortOrder)),
     db
-      .select({ id: initiatives.id, name: initiatives.name })
-      .from(initiatives)
-      .orderBy(asc(initiatives.sortOrder), asc(initiatives.name)),
+      .select({ id: projects.id, name: projects.name })
+      .from(projects)
+      .orderBy(asc(projects.sortOrder), asc(projects.name)),
   ])
 
   return (
@@ -37,7 +37,7 @@ export default async function NewRequestPage() {
         </Link>
       </div>
 
-      <RequestForm themes={themeRows} appAreas={areaRows} initiatives={initiativeRows} />
+      <RequestForm themes={themeRows} appAreas={areaRows} projects={initiativeRows} />
     </div>
   )
 }

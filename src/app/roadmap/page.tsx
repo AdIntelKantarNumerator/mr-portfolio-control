@@ -21,17 +21,17 @@ export default async function RoadmapPage({
   const settingRows = await db.select().from(settingsTable)
   const setting = (k: string) => settingRows.find((s) => s.key === k)?.value ?? null
 
-  let initiatives = portfolio.initiatives
-  if (theme) initiatives = initiatives.filter((i) => i.theme?.key === theme)
-  if (risk === '1') initiatives = initiatives.filter((i) => i.health.rag === 'red' || i.health.rag === 'amber')
+  let projects = portfolio.projects
+  if (theme) projects = projects.filter((i) => i.theme?.key === theme)
+  if (risk === '1') projects = projects.filter((i) => i.health.rag === 'red' || i.health.rag === 'amber')
 
   const horizon = horizonFor(portfolio, {
     start: setting('portfolio.horizonStart'),
     end: setting('portfolio.horizonEnd'),
   })
-  const model = buildTimeline(portfolio, { ...horizon, initiatives })
+  const model = buildTimeline(portfolio, { ...horizon, projects })
 
-  const open = portfolio.projects.filter(
+  const open = portfolio.workstreams.filter(
     (p) => !['completed', 'canceled'].includes(p.status),
   )
   const undated = open.filter((p) => !p.startDate && !p.targetDate)
@@ -56,7 +56,7 @@ export default async function RoadmapPage({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat value={open.length} label="Projects in flight or planned" />
+        <Stat value={open.length} label="Workstreams in flight or planned" />
         <Stat
           value={nextMilestone ? fmtDate(nextMilestone.milestone.targetDate) : '—'}
           label={nextMilestone ? nextMilestone.milestone.name : 'No dated commitments ahead'}
@@ -65,7 +65,7 @@ export default async function RoadmapPage({
         <Stat value={atRisk.length} label="Items assessed red" tone={atRisk.length ? 'red' : 'green'} />
         <Stat
           value={undated.length}
-          label="Open projects with no dates at all"
+          label="Open workstreams with no dates at all"
           tone={undated.length ? 'amber' : undefined}
           sub={undated.length ? 'They cannot be planned against or drawn below.' : undefined}
         />
@@ -73,12 +73,12 @@ export default async function RoadmapPage({
 
       <Card>
         <CardHeading
-          title="Initiative and project timeline"
+          title="Project and workstream timeline"
           sub={
             <>
               {fmtDate(model.start, { year: true })} → {fmtDate(model.end, { year: true })}. One lane
-              per initiative; each bar is a project, coloured by assessed health. Diamonds are
-              milestones. Click a bar for that project&rsquo;s kick-off readiness.
+              per project; each bar is a workstream, coloured by assessed health. Diamonds are
+              milestones. Click a bar for that workstream&rsquo;s kick-off readiness.
             </>
           }
           right={
@@ -99,7 +99,7 @@ export default async function RoadmapPage({
         />
         <TimelineLegend />
         {model.lanes.length === 0 ? (
-          <Empty>No initiatives match this filter.</Empty>
+          <Empty>No projects match this filter.</Empty>
         ) : (
           <Timeline model={model} />
         )}
@@ -124,7 +124,7 @@ export default async function RoadmapPage({
               <li key={p.id} className="flex flex-wrap items-center gap-2 text-[12px]">
                 <span className="font-semibold">{p.name}</span>
                 <Muted>
-                  {p.initiativeId ? '' : 'no initiative · '}
+                  {p.projectId ? '' : 'no project · '}
                   {p.lead ? p.lead.name : 'no lead'}
                 </Muted>
               </li>

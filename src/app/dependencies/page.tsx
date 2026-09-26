@@ -30,19 +30,19 @@ export default async function DependenciesPage({
   const nodeLabel = (id: string) => graph.nodes.find((n) => n.id === id)?.label ?? id
 
   const endpointOptions: EndpointOption[] = [
-    ...portfolio.projects
+    ...portfolio.workstreams
       .filter((p) => !['completed', 'canceled'].includes(p.status))
-      .map((p) => ({ value: `project:${p.id}`, label: p.name, group: 'Projects' })),
-    ...portfolio.initiatives.map((i) => ({
-      value: `initiative:${i.id}`,
+      .map((p) => ({ value: `workstream:${p.id}`, label: p.name, group: 'Workstreams' })),
+    ...portfolio.projects.map((i) => ({
+      value: `project:${i.id}`,
       label: i.name,
-      group: 'Initiatives',
+      group: 'Projects',
     })),
     ...portfolio.milestones
       .filter((m) => m.status !== 'done')
       .map((m) => ({
         value: `milestone:${m.id}`,
-        label: `${m.project.name} — ${m.name}`,
+        label: `${m.workstream.name} — ${m.name}`,
         group: 'Milestones',
       })),
   ]

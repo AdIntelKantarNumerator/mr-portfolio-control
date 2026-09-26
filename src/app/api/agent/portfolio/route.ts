@@ -13,7 +13,7 @@
  */
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { initiatives, people, projects, sourceRecords } from '@/db/schema'
+import { initiatives, projects, people, workstreams, sourceRecords } from '@/db/schema'
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
 
 export const runtime = 'nodejs'
@@ -22,9 +22,10 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: Request) {
   if (!machineCallerAuthorised(req)) return unauthorised()
 
-  const [inits, projs, folk, records] = await Promise.all([
+  const [groups, projs, streams, folk, records] = await Promise.all([
     db.select().from(initiatives),
     db.select().from(projects),
+    db.select().from(workstreams),
     db.select().from(people),
     db.select().from(sourceRecords).where(eq(sourceRecords.system, 'linear')),
   ])
@@ -32,14 +33,17 @@ export async function GET(req: Request) {
   const nameOf = new Map(folk.map((p) => [p.id, p.name]))
   const externalOf = new Map(records.map((r) => [`${r.entityType}:${r.entityId}`, r.externalId]))
 
+  // All three tiers, each naming its parent. An agent that can see only two of
+  // them cannot tell an ungrouped project from a grouped one, and "which
+  // projects belong together" is a question about exactly that gap.
   const entities = [
-    ...inits.map((i) => ({
+    ...groups.map((g) => ({
       type: 'initiative' as const,
-      id: i.id,
-      name: i.name,
-      externalId: externalOf.get(`initiative:${i.id}`) ?? null,
-      status: i.status,
-      people: [nameOf.get(i.ownerId ?? ''), nameOf.get(i.sponsorId ?? '')].filter(Boolean) as string[],
+      id: g.id,
+      name: g.name,
+      externalId: null,
+      status: g.status,
+      people: [nameOf.get(g.ownerId ?? '')].filter(Boolean) as string[],
       parent: null,
     })),
     ...projs.map((p) => ({
@@ -48,8 +52,17 @@ export async function GET(req: Request) {
       name: p.name,
       externalId: externalOf.get(`project:${p.id}`) ?? null,
       status: p.status,
-      people: [nameOf.get(p.leadId ?? '')].filter(Boolean) as string[],
+      people: [nameOf.get(p.ownerId ?? ''), nameOf.get(p.sponsorId ?? '')].filter(Boolean) as string[],
       parent: p.initiativeId,
+    })),
+    ...streams.map((w) => ({
+      type: 'workstream' as const,
+      id: w.id,
+      name: w.name,
+      externalId: externalOf.get(`workstream:${w.id}`) ?? null,
+      status: w.status,
+      people: [nameOf.get(w.leadId ?? '')].filter(Boolean) as string[],
+      parent: w.projectId,
     })),
   ]
 

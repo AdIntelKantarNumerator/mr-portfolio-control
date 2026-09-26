@@ -69,11 +69,11 @@ function Field({
 export function RequestForm({
   themes,
   appAreas,
-  initiatives,
+  projects,
 }: {
   themes: Option[]
   appAreas: Option[]
-  initiatives: Option[]
+  projects: Option[]
 }) {
   const [state, formAction, pending] = useActionState(createRequest, INITIAL)
 
@@ -194,10 +194,10 @@ export function RequestForm({
               ))}
             </select>
           </Field>
-          <Field name="proposedInitiativeId" label="Proposed initiative" errors={state.errors}>
+          <Field name="proposedInitiativeId" label="Proposed project" errors={state.errors}>
             <select {...text('proposedInitiativeId')}>
               <option value="">None proposed</option>
-              {initiatives.map((i) => (
+              {projects.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.name}
                 </option>

@@ -1,8 +1,8 @@
 /**
  * The "by application" view.
  *
- * Initiatives are how the board reads the portfolio; application areas are how
- * the people who own the code read it. Same projects, second axis — and this is
+ * Projects are how the board reads the portfolio; application areas are how
+ * the people who own the code read it. Same workstreams, second axis — and this is
  * the axis on which "who owes me an update" is actually actionable, because an
  * area has a named owner and named devs.
  */
@@ -21,7 +21,7 @@ import {
   Stat,
 } from '@/components/ui'
 import { isEnded, label } from '@/lib/domain'
-import { getPortfolio, type AppAreaRow, type ProjectView } from '@/lib/portfolio'
+import { getPortfolio, type AppAreaRow, type WorkstreamView } from '@/lib/portfolio'
 import { fmtRange } from '@/lib/util'
 import { ShowEnded } from '@/components/show-ended'
 import { Suspense } from 'react'
@@ -30,21 +30,21 @@ import { Suspense } from 'react'
 export const dynamic = 'force-dynamic'
 
 /** Finished work does not owe anybody an update, so it never counts as a gap. */
-function awaitingInput(projects: ProjectView[]) {
+function awaitingInput(workstreams: WorkstreamView[]) {
   // isEnded rather than a list declared here. This file had its own copy, and
-  // a second definition of "finished" is how a project ends up hidden on one
+  // a second definition of "finished" is how a workstream ends up hidden on one
   // page and counted on another.
-  return projects.filter((p) => p.health.origin === 'none' && !isEnded(p.status))
+  return workstreams.filter((p) => p.health.origin === 'none' && !isEnded(p.status))
 }
 
-function ProjectTable({ projects }: { projects: ProjectView[] }) {
+function ProjectTable({ workstreams }: { workstreams: WorkstreamView[] }) {
   return (
     <div className="scroll-x">
       <table className="grid">
         <thead>
           <tr>
             <th style={{ minWidth: 150 }}>Health</th>
-            <th style={{ minWidth: 220 }}>Project</th>
+            <th style={{ minWidth: 220 }}>Workstream</th>
             <th>Status</th>
             <th>Lead</th>
             <th style={{ minWidth: 130 }}>Dates</th>
@@ -52,7 +52,7 @@ function ProjectTable({ projects }: { projects: ProjectView[] }) {
           </tr>
         </thead>
         <tbody>
-          {projects.map((p) => {
+          {workstreams.map((p) => {
             const needsInput = p.health.origin === 'none' && !isEnded(p.status)
             return (
               <tr key={p.id}>
@@ -83,7 +83,7 @@ function ProjectTable({ projects }: { projects: ProjectView[] }) {
                   {p.lead ? (
                     p.lead.name
                   ) : (
-                    <GapFlag title="No delivery lead on this project.">no lead</GapFlag>
+                    <GapFlag title="No delivery lead on this workstream.">no lead</GapFlag>
                   )}
                 </td>
                 <td className="tabular-nums">{fmtRange(p.startDate, p.targetDate)}</td>
@@ -107,13 +107,13 @@ function ProjectTable({ projects }: { projects: ProjectView[] }) {
   )
 }
 
-function AreaCard({ area, projects }: { area: AppAreaRow | null; projects: ProjectView[] }) {
-  const pending = awaitingInput(projects)
+function AreaCard({ area, workstreams }: { area: AppAreaRow | null; workstreams: WorkstreamView[] }) {
+  const pending = awaitingInput(workstreams)
   const meta = area
     ? [area.owner ? `Owner: ${area.owner}` : null, area.devs ? `Devs: ${area.devs}` : null]
         .filter(Boolean)
         .join(' · ')
-    : 'These projects have no application area set, so no owner sees them on this axis.'
+    : 'These workstreams have no application area set, so no owner sees them on this axis.'
 
   return (
     <Card>
@@ -122,7 +122,7 @@ function AreaCard({ area, projects }: { area: AppAreaRow | null; projects: Proje
         sub={meta || 'No owner or devs recorded for this area.'}
         right={
           pending.length > 0 ? (
-            <Pill tone="slate" title="Projects with no health on record.">
+            <Pill tone="slate" title="Workstreams with no health on record.">
               <RagDot rag="unknown" />
               {pending.length} awaiting input
             </Pill>
@@ -136,14 +136,14 @@ function AreaCard({ area, projects }: { area: AppAreaRow | null; projects: Proje
       {!area ? (
         <SectionNote tone="violet">
           No application area means no owner on this axis. Assigning one is usually a five-second
-          fix and it is the difference between a project being chased and being forgotten.
+          fix and it is the difference between a workstream being chased and being forgotten.
         </SectionNote>
       ) : null}
 
-      {projects.length === 0 ? (
-        <Empty>No projects in this area.</Empty>
+      {workstreams.length === 0 ? (
+        <Empty>No workstreams in this area.</Empty>
       ) : (
-        <ProjectTable projects={projects} />
+        <ProjectTable workstreams={workstreams} />
       )}
     </Card>
   )
@@ -158,18 +158,18 @@ export default async function ApplicationsPage({
 
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)
   const showEnded = one(sp.ended) === '1'
-  const endedCount = p.projects.filter((x) => isEnded(x.status)).length
-  const inScope = showEnded ? p.projects : p.projects.filter((x) => !isEnded(x.status))
+  const endedCount = p.workstreams.filter((x) => isEnded(x.status)).length
+  const inScope = showEnded ? p.workstreams : p.workstreams.filter((x) => !isEnded(x.status))
 
-  const byArea = new Map<string, ProjectView[]>()
-  const unassigned: ProjectView[] = []
-  for (const project of inScope) {
-    if (!project.appAreaId) {
-      unassigned.push(project)
+  const byArea = new Map<string, WorkstreamView[]>()
+  const unassigned: WorkstreamView[] = []
+  for (const workstream of inScope) {
+    if (!workstream.appAreaId) {
+      unassigned.push(workstream)
       continue
     }
-    if (!byArea.has(project.appAreaId)) byArea.set(project.appAreaId, [])
-    byArea.get(project.appAreaId)!.push(project)
+    if (!byArea.has(workstream.appAreaId)) byArea.set(workstream.appAreaId, [])
+    byArea.get(workstream.appAreaId)!.push(workstream)
   }
 
   const pending = awaitingInput(inScope)
@@ -183,7 +183,7 @@ export default async function ApplicationsPage({
           The same portfolio, seen by the people who own the code
         </h2>
         <p className="m-0 mt-1 max-w-[820px] text-[12.5px]" style={{ color: 'var(--muted)' }}>
-          A grey row is a project with no health on record — no assessment, and nothing usable from
+          A grey row is a workstream with no health on record — no assessment, and nothing usable from
           the source either. That grey list is literally the &ldquo;who owes me an update&rdquo;
           list: each one has a named area owner and a named lead, and neither has said anything
           about it. Nothing here is guessed green.
@@ -191,7 +191,7 @@ export default async function ApplicationsPage({
       </div>
 
       <Suspense fallback={null}>
-        <ShowEnded hidden={endedCount} path="/applications" noun="projects" />
+        <ShowEnded hidden={endedCount} path="/applications" noun="workstreams" />
       </Suspense>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -201,7 +201,7 @@ export default async function ApplicationsPage({
           tone={pending.length > 0 ? 'amber' : 'green'}
           sub={`across ${areasWithGaps.length} ${areasWithGaps.length === 1 ? 'area' : 'areas'}`}
         />
-        <Stat value={inScope.length} label={showEnded ? 'Projects (all)' : 'Live projects'} />
+        <Stat value={inScope.length} label={showEnded ? 'Workstreams (all)' : 'Live workstreams'} />
         <Stat value={p.appAreas.length} label="Application areas" />
         <Stat
           value={unassigned.length}
@@ -215,7 +215,7 @@ export default async function ApplicationsPage({
           <span className="inline-flex items-center gap-1.5">
             <RagDot rag="unknown" />
             <span>
-              {pending.length} {pending.length === 1 ? 'project has' : 'projects have'} no health on
+              {pending.length} {pending.length === 1 ? 'workstream has' : 'workstreams have'} no health on
               record. Chase the area owner, not the tool.
             </span>
           </span>
@@ -223,14 +223,14 @@ export default async function ApplicationsPage({
       ) : null}
 
       {p.appAreas.length === 0 && unassigned.length === 0 ? (
-        <Empty>No application areas and no projects yet.</Empty>
+        <Empty>No application areas and no workstreams yet.</Empty>
       ) : null}
 
       <div className="flex flex-col gap-4">
         {p.appAreas.map((area) => (
-          <AreaCard key={area.id} area={area} projects={byArea.get(area.id) ?? []} />
+          <AreaCard key={area.id} area={area} workstreams={byArea.get(area.id) ?? []} />
         ))}
-        {unassigned.length > 0 ? <AreaCard area={null} projects={unassigned} /> : null}
+        {unassigned.length > 0 ? <AreaCard area={null} workstreams={unassigned} /> : null}
       </div>
 
       <Muted>

@@ -159,7 +159,7 @@ export async function markAssessmentReviewed(assessmentId: string, personId: str
 
 /** One piece of work on the "what is moving" list. */
 export interface ActiveWork {
-  type: 'initiative' | 'project'
+  type: 'project' | 'workstream'
   id: string
   name: string
   href: string
@@ -182,12 +182,12 @@ export interface ActiveWork {
  * Slack, which is the same question asked through a different door.
  *
  * Work with nothing recorded is omitted rather than shown with an empty list:
- * "here are the five most active projects" followed by three blank cards is a
+ * "here are the five most active workstreams" followed by three blank cards is a
  * worse answer than a shorter list.
  */
 export function mostActive(
   observations: Map<string, ObservationRow>,
-  entities: ReadonlyArray<{ type: 'initiative' | 'project'; id: string; name: string; status: string }>,
+  entities: ReadonlyArray<{ type: 'project' | 'workstream'; id: string; name: string; status: string }>,
   limit = 5,
 ): ActiveWork[] {
   const out: ActiveWork[] = []

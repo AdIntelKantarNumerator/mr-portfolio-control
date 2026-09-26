@@ -26,7 +26,7 @@ export function ProjectSearch({ total }: { total: number }) {
       if (text.trim()) next.set('q', text.trim())
       else next.delete('q')
       const qs = next.toString()
-      router.replace(qs ? `/projects?${qs}` : '/projects', { scroll: false })
+      router.replace(qs ? `/workstreams?${qs}` : '/workstreams', { scroll: false })
     }, 200)
     return () => clearTimeout(timer)
   }, [text, current, params, router])
@@ -34,18 +34,18 @@ export function ProjectSearch({ total }: { total: number }) {
   return (
     <div className="no-print flex flex-wrap items-center gap-2">
       <label
-        htmlFor="project-search"
+        htmlFor="workstream-search"
         className="text-[10.5px] font-bold uppercase tracking-[0.06em]"
         style={{ color: 'var(--muted)' }}
       >
         Find
       </label>
       <input
-        id="project-search"
+        id="workstream-search"
         type="search"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={`Search ${total} projects by name, key or problem…`}
+        placeholder={`Search ${total} workstreams by name, key or problem…`}
         className="min-w-[240px] flex-1 rounded-md border px-2.5 py-1.5 text-[12.5px]"
         style={{ background: 'var(--surface)', borderColor: 'var(--line)', color: 'var(--ink)' }}
       />

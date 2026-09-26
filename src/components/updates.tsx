@@ -18,7 +18,7 @@
  *
  * PAGED, TWENTY AT A TIME
  *
- * A project with a year of history pushed Conversations, Readiness and
+ * A workstream with a year of history pushed Conversations, Readiness and
  * everything below it off the bottom of the page. An archive is something you
  * go looking for; the sections under it are things people scroll past on the
  * way to something else, and an archive that buries them has made the page
@@ -90,10 +90,10 @@ export function Updates({
   kind,
 }: {
   entries: UpdateEntry[]
-  kind: 'project' | 'initiative'
+  kind: 'workstream' | 'project'
 }) {
   const [page, setPage] = useState(0)
-  const heading = kind === 'project' ? 'Project updates' : 'Initiative updates'
+  const heading = kind === 'workstream' ? 'Workstream updates' : 'Project updates'
   const sub =
     'Everything Yaara has reported about this, oldest kept — the full version of the bullets on the control room.'
 

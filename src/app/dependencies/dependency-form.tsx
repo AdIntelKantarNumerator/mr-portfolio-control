@@ -15,7 +15,7 @@ export interface EndpointOption {
  * The external option exists because the dependencies that actually break a
  * plan are usually the ones with no record in any tracker — a vendor's data
  * feed, another org's deliverable, one person's capacity. Forcing every
- * endpoint to be a known project would quietly drop exactly those.
+ * endpoint to be a known workstream would quietly drop exactly those.
  */
 export function DependencyForm({ options }: { options: EndpointOption[] }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(createDependency, {})

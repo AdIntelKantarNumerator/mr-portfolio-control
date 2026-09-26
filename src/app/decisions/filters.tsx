@@ -70,7 +70,7 @@ export interface EntityOption {
 
 /**
  * A select rather than chips, because this list is as long as the portfolio.
- * Twenty projects as buttons would push the filters that people use on every
+ * Twenty workstreams as buttons would push the filters that people use on every
  * visit — type and status — below the fold.
  */
 function EntityPicker({
@@ -93,7 +93,7 @@ function EntityPicker({
       <select
         value={active}
         onChange={(e) => onPick('entity', e.target.value)}
-        aria-label="Filter by initiative or project"
+        aria-label="Filter by project or workstream"
         className="rounded-lg border px-2 py-1 text-[11.5px] font-semibold"
         style={{
           background: active === 'all' ? 'var(--surface)' : 'var(--brand)',
@@ -148,8 +148,8 @@ export function DecisionFilters({
       {/* First, because it is the coarsest cut: "what is stopping us" and "what
           do we have to choose" are two different meetings. */}
       <Group legend="Type" param="kind" options={kinds} active={kind} onPick={pick} />
-      {/* Second, because "everything on my project" is the other way people
-          arrive here — usually just before a review of exactly that project. */}
+      {/* Second, because "everything on my workstream" is the other way people
+          arrive here — usually just before a review of exactly that workstream. */}
       <EntityPicker options={entities} active={entity} onPick={pick} />
       <Group legend="Status" param="status" options={statuses} active={status} onPick={pick} />
       <Group

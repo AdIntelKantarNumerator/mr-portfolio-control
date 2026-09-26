@@ -7,7 +7,7 @@
  * Protected by SYNC_TOKEN.
  *
  * A row is written only when the value differs from the last one recorded. That
- * makes this safe to call every hour forever: a project whose date never moves
+ * makes this safe to call every hour forever: a workstream whose date never moves
  * costs one row for its lifetime, and the history stays readable rather than
  * being ten thousand identical rows with the two interesting ones buried.
  */
@@ -21,7 +21,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const FIELDS = new Set(['target_date', 'start_date'])
-const ENTITY_TYPES = new Set(['initiative', 'project', 'milestone'])
+const ENTITY_TYPES = new Set(['project', 'workstream', 'milestone'])
 
 interface Incoming {
   observations?: Array<{

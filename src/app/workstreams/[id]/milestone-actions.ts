@@ -17,7 +17,7 @@
 import { revalidatePath } from 'next/cache'
 import { asc, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { workstreamItems, workstreamPhases, workstreams } from '@/db/schema'
+import { milestoneItems, milestonePhases, milestones } from '@/db/schema'
 import { WORKSTREAM_ITEM_STATE, WORKSTREAM_STATUS, isPeriod } from '@/lib/domain'
 import { logChange } from '@/lib/portfolio'
 import { actorName } from '@/lib/auth/current-user'
@@ -27,8 +27,8 @@ export interface WorkstreamState {
   error?: string
 }
 
-function refresh(projectId: string) {
-  revalidatePath(`/projects/${projectId}`)
+function refresh(workstreamId: string) {
+  revalidatePath(`/workstreams/${workstreamId}`)
   revalidatePath('/changes')
 }
 
@@ -36,19 +36,21 @@ export async function addWorkstream(
   _prev: WorkstreamState,
   formData: FormData,
 ): Promise<WorkstreamState> {
-  const projectId = String(formData.get('projectId') ?? '')
+  const workstreamId = String(formData.get('workstreamId') ?? '')
   const name = String(formData.get('name') ?? '').trim()
-  if (!projectId) return { error: 'No project.' }
+  if (!workstreamId) return { error: 'No workstream.' }
   if (name.length < 2) return { error: 'Give it a name — the objective, as the deck would say it.' }
 
   const last = await db
-    .select({ sortOrder: workstreams.sortOrder })
-    .from(workstreams)
-    .where(eq(workstreams.projectId, projectId))
-    .orderBy(asc(workstreams.sortOrder))
+    .select({ sortOrder: milestones.sortOrder })
+    .from(milestones)
+    .where(eq(milestones.entityId, workstreamId))
+    .orderBy(asc(milestones.sortOrder))
 
-  await db.insert(workstreams).values({
-    projectId,
+  await db.insert(milestones).values({
+    // Milestones added from a workstream page sit at workstream level.
+    level: 'workstream',
+    entityId: workstreamId,
     name: name.slice(0, 200),
     details: String(formData.get('details') ?? '').trim().slice(0, 1000) || null,
     status: 'planning',
@@ -60,12 +62,12 @@ export async function addWorkstream(
   await logChange({
     actor: await actorName(),
     kind: 'change',
-    summary: `Workstream added: ${name}`,
-    entityType: 'project',
-    entityId: projectId,
+    summary: `Milestone added: ${name}`,
+    entityType: 'workstream',
+    entityId: workstreamId,
   })
 
-  refresh(projectId)
+  refresh(workstreamId)
   return { ok: true }
 }
 
@@ -74,14 +76,14 @@ export async function updateWorkstream(
   formData: FormData,
 ): Promise<WorkstreamState> {
   const id = String(formData.get('id') ?? '')
-  const projectId = String(formData.get('projectId') ?? '')
+  const workstreamId = String(formData.get('workstreamId') ?? '')
   const status = String(formData.get('status') ?? '')
 
-  const [row] = await db.select().from(workstreams).where(eq(workstreams.id, id)).limit(1)
-  if (!row) return { error: 'That workstream no longer exists.' }
+  const [row] = await db.select().from(milestones).where(eq(milestones.id, id)).limit(1)
+  if (!row) return { error: 'That milestone no longer exists.' }
 
   await db
-    .update(workstreams)
+    .update(milestones)
     .set({
       name: String(formData.get('name') ?? row.name).trim().slice(0, 200) || row.name,
       details: String(formData.get('details') ?? '').trim().slice(0, 1000) || null,
@@ -96,7 +98,7 @@ export async function updateWorkstream(
       agentNoteAt: null,
       updatedAt: new Date(),
     })
-    .where(eq(workstreams.id, id))
+    .where(eq(milestones.id, id))
 
   // The three lists arrive as three textareas, one line per bullet. That is
   // how people actually type a list, and a row-per-bullet form for something
@@ -107,32 +109,32 @@ export async function updateWorkstream(
   ])
 
   if (lists.some(([, text]) => text.trim() !== '') || formData.has('items_completed')) {
-    await db.delete(workstreamItems).where(eq(workstreamItems.workstreamId, id))
+    await db.delete(milestoneItems).where(eq(milestoneItems.milestoneId, id))
     const values = lists.flatMap(([state, text]) =>
       text
         .split('\n')
         .map((line) => line.replace(/^[-•*]\s*/, '').trim())
         .filter(Boolean)
         .map((line, ix) => ({
-          workstreamId: id,
+          milestoneId: id,
           state,
           text: line.slice(0, 500),
           sortOrder: ix,
           authoredBy: null,
         })),
     )
-    if (values.length) await db.insert(workstreamItems).values(values)
+    if (values.length) await db.insert(milestoneItems).values(values)
   }
 
   await logChange({
     actor: await actorName(),
     kind: 'change',
-    summary: `Workstream updated: ${row.name}`,
-    entityType: 'project',
-    entityId: projectId,
+    summary: `Milestone updated: ${row.name}`,
+    entityType: 'workstream',
+    entityId: workstreamId,
   })
 
-  refresh(projectId)
+  refresh(workstreamId)
   return { ok: true }
 }
 
@@ -141,21 +143,21 @@ export async function removeWorkstream(
   formData: FormData,
 ): Promise<WorkstreamState> {
   const id = String(formData.get('id') ?? '')
-  const projectId = String(formData.get('projectId') ?? '')
+  const workstreamId = String(formData.get('workstreamId') ?? '')
 
-  const [row] = await db.select().from(workstreams).where(eq(workstreams.id, id)).limit(1)
-  if (!row) return { error: 'That workstream no longer exists.' }
+  const [row] = await db.select().from(milestones).where(eq(milestones.id, id)).limit(1)
+  if (!row) return { error: 'That milestone no longer exists.' }
 
-  await db.delete(workstreams).where(eq(workstreams.id, id))
+  await db.delete(milestones).where(eq(milestones.id, id))
   await logChange({
     actor: await actorName(),
     kind: 'change',
-    summary: `Workstream removed: ${row.name}`,
-    entityType: 'project',
-    entityId: projectId,
+    summary: `Milestone removed: ${row.name}`,
+    entityType: 'workstream',
+    entityId: workstreamId,
   })
 
-  refresh(projectId)
+  refresh(workstreamId)
   return { ok: true }
 }
 
@@ -170,23 +172,23 @@ export async function addPhase(
   _prev: WorkstreamState,
   formData: FormData,
 ): Promise<WorkstreamState> {
+  const milestoneId = String(formData.get('milestoneId') ?? '')
   const workstreamId = String(formData.get('workstreamId') ?? '')
-  const projectId = String(formData.get('projectId') ?? '')
   const from = String(formData.get('fromPeriod') ?? '').trim()
   const to = String(formData.get('toPeriod') ?? '').trim() || from
 
   if (!isPeriod(from) || !isPeriod(to)) return { error: 'Months look like 2026-07.' }
   if (to < from) return { error: 'It cannot end before it starts.' }
 
-  await db.insert(workstreamPhases).values({
-    workstreamId,
+  await db.insert(milestonePhases).values({
+    milestoneId,
     phase: String(formData.get('phase') ?? 'development'),
     label: String(formData.get('label') ?? '').trim().slice(0, 80) || null,
     fromPeriod: from,
     toPeriod: to,
   })
 
-  refresh(projectId)
+  refresh(workstreamId)
   return { ok: true }
 }
 
@@ -194,8 +196,8 @@ export async function removePhase(
   _prev: WorkstreamState,
   formData: FormData,
 ): Promise<WorkstreamState> {
-  await db.delete(workstreamPhases).where(eq(workstreamPhases.id, String(formData.get('id') ?? '')))
-  refresh(String(formData.get('projectId') ?? ''))
+  await db.delete(milestonePhases).where(eq(milestonePhases.id, String(formData.get('id') ?? '')))
+  refresh(String(formData.get('workstreamId') ?? ''))
   return { ok: true }
 }
 
@@ -204,16 +206,16 @@ export async function setLeads(
   _prev: WorkstreamState,
   formData: FormData,
 ): Promise<WorkstreamState> {
-  const { projects } = await import('@/db/schema')
-  const projectId = String(formData.get('projectId') ?? '')
+  const { workstreams } = await import('@/db/schema')
+  const workstreamId = String(formData.get('workstreamId') ?? '')
   await db
-    .update(projects)
+    .update(workstreams)
     .set({
       devLead: String(formData.get('devLead') ?? '').trim().slice(0, 200) || null,
       programLead: String(formData.get('programLead') ?? '').trim().slice(0, 200) || null,
       updatedAt: new Date(),
     })
-    .where(eq(projects.id, projectId))
-  refresh(projectId)
+    .where(eq(workstreams.id, workstreamId))
+  refresh(workstreamId)
   return { ok: true }
 }

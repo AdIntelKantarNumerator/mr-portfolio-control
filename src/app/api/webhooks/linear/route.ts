@@ -2,7 +2,7 @@
  * Linear webhook receiver.
  *
  * Point a Linear webhook at POST /api/webhooks/linear and subscribe to
- * Projects, Initiatives and Project milestones. Set LINEAR_WEBHOOK_SECRET to
+ * Workstreams, Projects and Workstream milestones. Set LINEAR_WEBHOOK_SECRET to
  * the signing secret Linear shows when you create the webhook.
  *
  * Security notes, because this endpoint is necessarily public:
@@ -109,8 +109,17 @@ async function handle(payload: LinearWebhook) {
   }
 
   switch (type) {
-    case 'Project': {
+    case 'Workstream': {
       await upsertProject(data)
+      await logChange({
+        actor: 'linear-webhook',
+        kind: 'sync',
+        summary: `Workstream "${data.name ?? id}" ${action}d in Linear`,
+      })
+      return
+    }
+    case 'Project': {
+      await upsertInitiative(data)
       await logChange({
         actor: 'linear-webhook',
         kind: 'sync',
@@ -118,18 +127,9 @@ async function handle(payload: LinearWebhook) {
       })
       return
     }
-    case 'Initiative': {
-      await upsertInitiative(data)
-      await logChange({
-        actor: 'linear-webhook',
-        kind: 'sync',
-        summary: `Initiative "${data.name ?? id}" ${action}d in Linear`,
-      })
-      return
-    }
     case 'ProjectMilestone': {
       // The webhook gives the parent by external id; resolve it to ours.
-      const projectExternalId = (data.projectId ?? (data.project as { id?: string })?.id) as
+      const projectExternalId = (data.workstreamId ?? (data.workstream as { id?: string })?.id) as
         | string
         | undefined
       if (!projectExternalId) return

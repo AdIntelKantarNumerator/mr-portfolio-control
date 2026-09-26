@@ -4,7 +4,7 @@
  */
 
 /**
- * Linear project states are lowercase strings ("backlog", "started", ...) and
+ * Linear workstream states are lowercase strings ("backlog", "started", ...) and
  * newer workspaces also expose a `status` object whose `type` carries the same
  * meaning. The status object wins when both are present, because it is the
  * field Linear is moving towards; the rest of the app never sees either shape.
