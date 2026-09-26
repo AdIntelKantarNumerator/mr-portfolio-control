@@ -30,8 +30,15 @@
   --color-slate: #6b7280;
   --color-slate-bg: #eef0f3;
 
+  /* mediaradar.com's typefaces. Instrument Sans carries everything; Instrument
+     Serif is used only for page titles, the same split the marketing site uses.
+     Loaded by a <link> in the layout rather than next/font so a build with no
+     route to fonts.gstatic.com still succeeds — the fallback stack below is
+     what renders if the request never lands. */
   --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-display: 'Instrument Serif', Cambria, Georgia, 'Times New Roman', serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
 }
 
@@ -210,7 +217,11 @@ body[data-detail='lead'] .full-only {
   display: none !important;
 }
 
-input,
+/* Text-like controls fill their field. Checkboxes and radios must be excluded:
+   width:100% stretched every tick box across its whole row, which on the
+   project picker put a 1100px checkbox between the row and its label and made
+   the names look right-aligned. */
+input:not([type='checkbox']):not([type='radio']),
 select,
 textarea {
   font: inherit;
@@ -220,6 +231,15 @@ textarea {
   border-radius: 8px;
   padding: 7px 10px;
   width: 100%;
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  flex: none;
+  accent-color: var(--brand);
+  width: 15px;
+  height: 15px;
+  margin: 0;
 }
 
 input::placeholder,
@@ -322,3 +342,451 @@ table.grid thead th {
     background: #fff;
   }
 }
+
+/* ===========================================================================
+   Home board — initiative / project / workstream cards
+   ---------------------------------------------------------------------------
+   The categorical colours are stepped from the client app's palette and
+   validated: the brand navy and plum were too dark for chart use and were
+   lifted into the readable band. Orange and cyan sit under 3:1 on white, which
+   is only acceptable because every segment they colour carries a visible
+   label.
+   =========================================================================== */
+
+:root {
+  /* Status colours the cards use for the ring, the rail and the pills. The
+     component references these by name; without them the ring drew grey. */
+  --good: #0ca30c;
+  --warn: #fab219;
+  --crit: #d03b3b;
+  --c1: #2f5fd0;
+  --c2: #f5871f;
+  --c3: #e8342c;
+  --c4: #a83a93;
+  --c5: #00a651;
+  --line-2: #d2d7e0;
+  --surface-2: #f8f9fb;
+  --good-bg: #e8f6e8;
+  --warn-bg: #fdf3da;
+  --crit-bg: #fae8e8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --good: #22b522; --warn: #fab219; --crit: #e35c5c;
+    --c1: #5b87e8; --c2: #f5871f; --c3: #ef5a52; --c4: #c661b2; --c5: #17bb63;
+    --line-2: #333947; --surface-2: #1b1f28;
+    --good-bg: #102a15; --warn-bg: #2d2410; --crit-bg: #2b1517;
+  }
+}
+:root[data-theme='dark'] {
+  --good: #22b522; --warn: #fab219; --crit: #e35c5c;
+  --c1: #5b87e8; --c2: #f5871f; --c3: #ef5a52; --c4: #c661b2; --c5: #17bb63;
+  --line-2: #333947; --surface-2: #1b1f28;
+  --good-bg: #102a15; --warn-bg: #2d2410; --crit-bg: #2b1517;
+}
+
+.home .crumb {
+  font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700; margin-bottom: 6px;
+}
+.home .titlerow { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.home .titlerow h1 { margin: 0; font-size: 25px; letter-spacing: -.022em; }
+.home .titlerow .sub { margin: 0; font-size: 13px; color: var(--muted); }
+
+.filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.fpill {
+  border: 1px solid var(--line-2); background: var(--surface); border-radius: 9px;
+  padding: 6px 13px; min-width: 150px; display: flex; align-items: center; gap: 10px;
+}
+.fpill:not(.static):hover { border-color: var(--c1); }
+.fpill .lab {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); font-weight: 700; display: block; margin-bottom: 1px;
+}
+.fpill .val { font-size: 13.5px; font-weight: 650; }
+.fpill .fsel {
+  appearance: none; border: 0; background: transparent; font: inherit;
+  font-size: 13.5px; font-weight: 650; color: var(--ink); cursor: pointer; padding: 0 16px 0 0;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 5px center, right 1px center;
+  background-size: 4px 4px, 4px 4px; background-repeat: no-repeat;
+}
+.fpill.static { opacity: .72; }
+
+.icard {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  margin-bottom: 14px; overflow: hidden; border-left: 4px solid var(--edge, var(--line-2));
+  box-shadow: 0 1px 2px rgba(16,20,28,.04), 0 1px 3px rgba(16,20,28,.06);
+}
+.ihead { display: flex; align-items: center; gap: 13px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+.ihead .nm { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; min-width: 0; }
+/* The name is the label; the assessment is the sentence. They were the other
+   way round — the name set plain and the assessment set heavy — which made
+   the card read as a quote with a caption. Bold sans for the thing, serif at
+   a normal weight for what is said about it. */
+.ihead h2 { margin: 0; font-size: 17.5px; font-weight: 750; letter-spacing: -.016em; }
+.ihead h2 a { color: inherit; text-decoration: none; }
+.ihead h2 a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ihead .meta { font-size: 12.5px; color: var(--muted); }
+.ihead .right { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+
+.status { display: inline-flex; align-items: center; gap: 6px; border-radius: 7px; padding: 5px 11px; font-size: 12.5px; font-weight: 750; }
+.status.good { background: var(--good-bg); color: #0a7d0a; }
+.status.warn { background: var(--warn-bg); color: #8a6100; }
+.status.crit { background: var(--crit-bg); color: #a72d2d; }
+.status.quiet { background: var(--surface-2); color: var(--muted); }
+
+.drill {
+  display: inline-flex; align-items: center; gap: 4px; color: var(--brand);
+  font-size: 12.5px; font-weight: 700; padding: 5px 7px; border-radius: 7px; text-decoration: none;
+}
+.drill:hover { background: var(--brand-soft, var(--surface-2)); }
+
+.ibody { display: grid; grid-template-columns: 214px minmax(0,1fr) 330px; }
+@media (max-width: 1180px) { .ibody { grid-template-columns: 200px 1fr; } .panel.signals { grid-column: 1/-1; border-top: 1px solid var(--line); border-left: 0 !important; } }
+@media (max-width: 760px) { .ibody { grid-template-columns: 1fr; } .panel + .panel { border-left: 0 !important; border-top: 1px solid var(--line); } }
+.panel { padding: 14px 16px; min-width: 0; }
+.panel + .panel { border-left: 1px solid var(--line); }
+.ptitle { font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; margin: 0 0 10px; }
+.empty { font-size: 13px; color: var(--muted); margin: 0; font-style: italic; }
+
+.ringwrap { display: flex; flex-direction: column; align-items: center; gap: 8px; border: 0; background: transparent; cursor: pointer; width: 100%; padding: 4px; border-radius: 9px; position: relative; }
+.ringwrap:hover { background: var(--surface-2); }
+.ring { position: relative; width: 112px; height: 112px; display: block; }
+.ring .tick { position: absolute; inset: 0; }
+.rmid { position: absolute; top: 4px; left: 0; right: 0; height: 112px; display: grid; place-content: center; justify-items: center; text-align: center; padding: 0 24px; pointer-events: none; }
+.rmid .pct { font-size: 26px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+.rmid .of { font-size: 9.5px; color: var(--muted); font-weight: 650; margin-top: 3px; line-height: 1.2; }
+.rcap { font-size: 12px; font-weight: 700; color: var(--ink-2, var(--muted)); display: flex; align-items: center; gap: 3px; }
+.ringwrap:hover .rcap { color: var(--brand); }
+.rsub { font-size: 11.5px; color: var(--muted); text-align: center; line-height: 1.35; }
+
+.vwrap { display: flex; align-items: flex-start; gap: 4px; margin: -4px 0 12px -10px; }
+.verdict { flex: 1; text-align: left; border: 0; background: transparent; cursor: pointer; padding: 8px 10px; border-radius: 9px; font-family: var(--font-display); font-size: 21px; line-height: 1.3; font-weight: 400; letter-spacing: 0; color: var(--ink); }
+.verdict:hover { background: var(--surface-2); }
+.verdict .sig { display: block; font-family: var(--font-sans); margin-top: 9px; font-size: 11px; color: var(--muted); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+.verdict .sig b { color: var(--brand); }
+.pencil { flex: none; width: 28px; height: 28px; margin-top: 8px; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.pencil:hover { border-color: var(--line-2); color: var(--brand); background: var(--surface); }
+.vedit { display: grid; gap: 8px; margin-bottom: 12px; }
+.vedit textarea { width: 100%; font: inherit; font-size: 15px; line-height: 1.4; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); resize: vertical; }
+.vrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.vrow .err { font-size: 12px; color: var(--crit); }
+
+.rail { position: relative; width: 100%; margin: 4px 0 0; cursor: pointer; padding: 10px 34px 2px; border-radius: 8px; border: 0; background: transparent; display: block; }
+.rail:hover { background: var(--surface-2); }
+.railline { position: relative; display: block; height: 6px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--line); }
+.railfill { position: absolute; inset: 0 auto 0 0; border-radius: 99px; }
+.railnow { position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--ink); opacity: .55; }
+/* Each milestone label gets its share of the rail and no more. Without a cap,
+   "Migration spend across all 5 data sets" ran straight through its
+   neighbour and both became unreadable — worse than truncation, because you
+   cannot tell it happened. The first and last are edge-aligned rather than
+   centred, so they only have half a neighbour's gap to work with. */
+.dots { position: relative; display: block; height: 34px; margin-top: 2px; --gap: calc(100% / (var(--slots, 2) - 1)); }
+.dot { position: absolute; transform: translateX(-50%); text-align: center; max-width: calc(var(--gap) - 12px); }
+.dot:first-child { transform: none; text-align: left; max-width: calc(var(--gap) / 2 - 6px); }
+.dot:last-child { transform: translateX(-100%); text-align: right; max-width: calc(var(--gap) / 2 - 6px); }
+.dot i { display: block; width: 11px; height: 11px; border-radius: 99px; margin: 0 auto 4px; border: 2.5px solid var(--surface); box-shadow: 0 0 0 1.5px currentColor; }
+.dot span { display: block; font-size: 10.5px; color: var(--muted); white-space: nowrap; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+
+.sig-row { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer; padding: 7px 8px; border-radius: 8px; }
+.sig-row:hover, .sig-row[aria-expanded='true'] { background: var(--surface-2); }
+.sig-row .sw { width: 8px; height: 8px; border-radius: 99px; flex: none; }
+.sig-row .tx { flex: 1; min-width: 0; font-size: 13px; font-weight: 550; line-height: 1.32; }
+.sig-row .tx em { font-style: normal; color: var(--muted); font-size: 12px; display: block; margin-top: 1px; }
+.sig-row .ct { font-size: 11px; font-weight: 800; background: var(--surface-2); border-radius: 99px; padding: 2px 7px; flex: none; }
+.sig-row .cv { flex: none; color: var(--muted); display: grid; }
+.kids { padding: 2px 8px 8px 25px; display: grid; gap: 2px; }
+.kids a { display: flex; gap: 8px; font-size: 12.5px; color: var(--muted); padding: 4px 6px; border-radius: 6px; text-decoration: none; }
+.kids a:hover { background: var(--surface-2); color: var(--ink); }
+.kids .when { margin-left: auto; font-size: 11px; flex: none; }
+
+.ifoot { border-top: 1px solid var(--line); background: var(--surface-2); padding: 11px 16px; display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; }
+@media (max-width: 760px) { .ifoot { grid-template-columns: 1fr; } }
+.mixwrap, .trendwrap { border: 0; background: transparent; cursor: pointer; border-radius: 8px; padding: 4px 6px; text-align: left; }
+.mixwrap:hover, .trendwrap:hover { background: var(--surface); }
+.mixbar { display: flex; height: 13px; border-radius: 4px; overflow: hidden; gap: 2px; }
+.mixbar span { display: block; }
+.mixlegend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 7px; }
+.mixlegend span { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+.mixlegend i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.mixlegend b { color: var(--ink); }
+.trendwrap { display: flex; align-items: center; gap: 13px; }
+.spark { display: flex; align-items: flex-end; gap: 2.5px; height: 30px; }
+.spark i { width: 6px; border-radius: 2px 2px 0 0; background: var(--c1); display: block; }
+.trendmeta { font-size: 11.5px; color: var(--muted); line-height: 1.3; white-space: nowrap; }
+.trendmeta b { display: block; font-size: 15px; color: var(--ink); font-weight: 750; letter-spacing: -.02em; }
+
+.blank { background: var(--surface); border: 1px dashed var(--line-2); border-radius: 10px; padding: 26px 20px; text-align: center; }
+.blank h2 { margin: 0 0 6px; font-size: 17px; }
+.blank p { margin: 0 auto; max-width: 62ch; font-size: 13.5px; color: var(--muted); }
+
+.orphan { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-top: 4px; }
+.orphan .oh { padding: 13px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+.orphan .oh h2 { margin: 0; font-size: 15.5px; }
+.orphan .ob { padding: 14px 16px; }
+.orphan p.lead { margin: 0 0 12px; color: var(--muted); font-size: 13.5px; max-width: 78ch; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chips a { border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink); border-radius: 8px; padding: 7px 12px; font-size: 13px; font-weight: 600; display: inline-flex; gap: 8px; text-decoration: none; }
+.chips a:hover { border-color: var(--brand); color: var(--brand); }
+.chips .w { font-size: 11px; color: var(--muted); font-weight: 700; }
+
+.scrim { position: fixed; inset: 0; background: rgba(12,14,19,.5); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 90; }
+.modal { background: var(--surface); border-radius: 12px; border: 1px solid var(--line); width: min(700px,100%); max-height: 86vh; overflow: auto; }
+.mh { padding: 15px 18px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; position: sticky; top: 0; background: var(--surface); }
+.mh h3 { margin: 0; font-size: 16.5px; flex: 1; }
+.mh button { width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; color: var(--muted); }
+.mb { padding: 16px 18px 22px; font-size: 14px; line-height: 1.55; color: var(--muted); }
+.mb p { margin: 0 0 11px; }
+.mb p.lead { font-size: 16px; color: var(--ink); font-weight: 600; }
+.mb h4 { margin: 17px 0 7px; font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.mb ul { margin: 0; padding-left: 17px; display: grid; gap: 4px; }
+.mb .lnk { color: var(--brand); }
+.ev { display: grid; gap: 5px; }
+.ev div { display: flex; gap: 10px; font-size: 12.5px; background: var(--surface-2); padding: 7px 10px; border-radius: 7px; }
+.ev .s { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; width: 56px; flex: none; padding-top: 2px; }
+
+/* ---- Grouping form (initiatives) -------------------------------------- */
+/* Create an initiative, or move projects into one. Both are the same gesture
+   — tick some projects, say where they go — so they share one control. */
+.group-form { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 16px; display: grid; gap: 13px; }
+.gf-modes { display: flex; gap: 6px; }
+.gf-modes button { border: 1px solid var(--line-2); background: var(--surface-2); color: var(--muted); border-radius: 8px; padding: 6px 13px; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.gf-modes button.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+.gf-modes button:disabled { opacity: .45; cursor: not-allowed; }
+.gf-fields { display: grid; gap: 11px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.gf-fields label { display: grid; gap: 4px; }
+.gf-fields span { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 800; }
+.gf-fields input, .gf-fields select { border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13.5px; background: var(--surface); color: var(--ink); width: 100%; }
+.gf-pick { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.gf-pickhead { display: flex; gap: 10px; align-items: center; padding: 9px 11px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.gf-pickhead strong { font-size: 12.5px; flex: 1; }
+.gf-pickhead input { border: 1px solid var(--line-2); border-radius: 7px; padding: 5px 9px; font: inherit; font-size: 12.5px; background: var(--surface); color: var(--ink); max-width: 210px; }
+.gf-list { max-height: 270px; overflow: auto; display: grid; }
+.gf-list p.muted { margin: 0; padding: 14px; color: var(--muted); font-size: 13px; }
+.gf-list label { display: flex; gap: 10px; align-items: center; padding: 8px 11px; border-bottom: 1px solid var(--line); font-size: 13.5px; cursor: pointer; }
+.gf-list label:last-child { border-bottom: 0; }
+.gf-list label.on { background: var(--surface-2); }
+.gf-list .n { flex: 1; font-weight: 600; text-align: left; }
+.gf-list .w { font-size: 11px; font-weight: 700; color: var(--muted); }
+.gf-list .i { font-size: 11px; color: var(--muted); min-width: 96px; text-align: right; }
+.gf-foot { display: flex; gap: 12px; align-items: center; }
+.gf-foot button { border: 0; background: var(--brand); color: #fff; border-radius: 8px; padding: 8px 17px; font: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+.gf-foot button:disabled { opacity: .5; cursor: not-allowed; }
+.gf-foot .err { color: var(--crit); font-size: 13px; }
+.gf-foot .ok { color: var(--good); font-size: 13px; }
+
+@media (max-width: 720px) {
+  .gf-list .i { display: none; }
+  .gf-pickhead input { max-width: 130px; }
+}
+
+/* ---- Grouping suggestions --------------------------------------------- */
+/* Proposals from Yaara. Visually distinct from the grouping form beneath —
+   one is something she thinks, the other is something you do. */
+.suggs { display: grid; gap: 11px; }
+.sh { display: flex; align-items: center; gap: 10px; }
+.sh h2 { margin: 0; font-size: 15px; }
+.suggs > .lead { margin: 0; font-size: 13px; color: var(--muted); }
+.sugg { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--c4); border-radius: 12px; padding: 13px 15px; }
+.sugg.done { opacity: .55; }
+.sg-main { display: grid; gap: 9px; }
+.sg-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.sg-head input { border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 14.5px; font-weight: 700; background: var(--surface); color: var(--ink); min-width: 260px; }
+.sg-by { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 800; }
+.sg-why { margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.5; max-width: 72ch; }
+.sg-chips span { border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 8px; padding: 6px 11px; font-size: 12.5px; font-weight: 600; display: inline-flex; gap: 8px; align-items: baseline; }
+.sg-chips span.missing { opacity: .55; font-style: italic; font-weight: 500; }
+.sg-chips .w { font-size: 10.5px; color: var(--warn); font-weight: 700; }
+.sg-foot button { border: 0; background: var(--brand); color: #fff; border-radius: 8px; padding: 7px 15px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.sg-no button { border: 1px solid var(--line-2); background: var(--surface); color: var(--muted); border-radius: 8px; padding: 7px 15px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.sg-foot button:disabled, .sg-no button:disabled { opacity: .5; cursor: not-allowed; }
+.sg-msg { grid-column: 1 / -1; margin: 0; font-size: 13px; }
+.sg-msg.err { color: var(--crit); }
+.sg-msg.ok { color: var(--good); }
+
+@media (max-width: 720px) {
+  .sugg { grid-template-columns: 1fr; }
+  .sg-head input { min-width: 0; width: 100%; }
+}
+
+/* ---- Action items ------------------------------------------------------ */
+/* Overdue and unowned carry a left edge, because those are the two states a
+   date-sorted list hides and the two that need a person. */
+.acts { display: grid; gap: 8px; }
+.act { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 10px; padding: 11px 14px; }
+.act.crit { border-left-color: var(--crit); }
+.act.warn { border-left-color: var(--warn); }
+.act.closed { opacity: .62; }
+.a-text { display: flex; gap: 8px; align-items: baseline; font-size: 14px; line-height: 1.45; }
+.a-ref { font-size: 10.5px; font-weight: 800; color: var(--muted); letter-spacing: .04em; flex: none; }
+.a-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; font-size: 12px; color: var(--muted); }
+.a-meta a { color: var(--brand); text-decoration: none; }
+.a-meta a:hover { text-decoration: underline; }
+.a-gap { color: var(--crit); font-weight: 700; }
+.act.warn .a-gap { color: var(--warn); }
+.a-src { opacity: .8; }
+.a-do { display: flex; gap: 6px; align-items: center; }
+.a-do form { display: flex; gap: 6px; align-items: center; }
+.a-was { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.a-done { border: 0; background: var(--brand); color: #fff; border-radius: 7px; padding: 5px 13px; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.a-edit { border: 1px solid var(--line-2); background: var(--surface); color: var(--muted); border-radius: 7px; padding: 5px 11px; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.a-do button:disabled { opacity: .5; cursor: not-allowed; }
+.a-panel { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 11px; display: grid; gap: 9px; }
+.a-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.a-form label { display: grid; gap: 3px; }
+.a-form label.grow { flex: 1; min-width: 220px; }
+.a-form span { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 800; }
+.a-form input, .a-form select { border: 1px solid var(--line-2); border-radius: 7px; padding: 6px 9px; font: inherit; font-size: 13px; background: var(--surface); color: var(--ink); width: 100%; }
+.a-form button { border: 0; background: var(--brand); color: #fff; border-radius: 7px; padding: 7px 14px; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.a-drop { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; text-decoration: underline; text-decoration-style: dotted; cursor: pointer; justify-self: start; padding: 0; }
+.a-msg { grid-column: 1 / -1; margin: 0; font-size: 12.5px; }
+.a-msg.err { color: var(--crit); }
+.a-msg.ok { color: var(--good); }
+
+@media (max-width: 720px) {
+  .act { grid-template-columns: 1fr; }
+  .a-do { justify-content: flex-start; }
+}
+
+/* ---- The frame: left rail + page ---------------------------------------
+   A grid rather than a fixed-position aside, so the page column is sized by
+   the browser instead of by a margin that has to be kept in sync with the
+   rail's width. Collapsing the rail changes one custom property. */
+.frame {
+  --side: 232px;
+  display: grid;
+  grid-template-columns: var(--side) minmax(0, 1fr);
+  min-height: 100vh;
+}
+.frame.tight { --side: 60px; }
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 10px 12px;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.side-top { display: flex; align-items: center; gap: 6px; padding: 0 4px 12px; }
+.brand { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--ink); min-width: 0; flex: 1; }
+.brand-words { display: grid; min-width: 0; }
+.brand-name { font-size: 14.5px; font-weight: 700; letter-spacing: -.01em; line-height: 1.15; white-space: nowrap; }
+.brand-tag { font-family: var(--font-display); font-style: italic; font-size: 12px; color: var(--muted); line-height: 1.3; white-space: nowrap; }
+.frame.tight .brand-words { display: none; }
+.frame.tight .side-top { flex-direction: column; gap: 10px; padding-bottom: 14px; }
+
+.side-toggle { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 4px; border-radius: 6px; display: grid; place-items: center; }
+.side-toggle:hover { background: var(--surface-2); color: var(--ink); }
+
+.side-nav { flex: 1; display: grid; gap: 2px; align-content: start; }
+.side-group { display: grid; gap: 1px; }
+.side-group + .side-group { margin-top: 9px; }
+.side-head {
+  display: flex; align-items: center; gap: 5px; width: 100%;
+  border: 0; background: none; cursor: pointer;
+  padding: 5px 8px 4px; color: var(--muted);
+  font: inherit; font-size: 9.5px; font-weight: 800;
+  letter-spacing: .09em; text-transform: uppercase; text-align: left;
+}
+.side-head:hover { color: var(--ink); }
+.side-nav ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.side-nav a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 9px; border-radius: 8px;
+  color: var(--muted); text-decoration: none;
+  font-size: 13.5px; font-weight: 600; line-height: 1.2;
+  white-space: nowrap;
+}
+.side-nav a:hover { background: var(--surface-2); color: var(--ink); }
+.side-nav a.on { background: var(--brand); color: #fff; }
+.side-nav a svg { flex: none; }
+.frame.tight .side-label { display: none; }
+.frame.tight .side-nav a { justify-content: center; padding: 9px 0; }
+
+.page { min-width: 0; padding: 22px 26px 60px; }
+
+/* Who you are and how you like the page. Top right of the content column,
+   above the breadcrumb, out of the reading order of the page itself. */
+.pagebar { display: flex; justify-content: flex-end; align-items: center; gap: 9px; margin-bottom: 12px; }
+.seg { display: flex; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+.seg button { border: 0; background: var(--surface); color: var(--muted); padding: 5px 13px; font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+.seg button.on { background: var(--brand); color: #fff; }
+.pb-theme { width: auto !important; font-size: 11.5px !important; font-weight: 600; padding: 5px 9px !important; color: var(--muted); }
+.pb-user { display: flex; align-items: center; gap: 9px; }
+.pb-user span { font-size: 11.5px; font-weight: 600; color: var(--muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-user button { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 8px; padding: 5px 11px; font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+.pb-user button:hover { color: var(--ink); border-color: var(--line-2); }
+
+@media (max-width: 560px) {
+  .pagebar { flex-wrap: wrap; justify-content: flex-start; }
+  .pb-user span { display: none; }
+}
+.topbar, .side-scrim { display: none; }
+
+/* Phone and narrow tablet: the rail becomes a drawer. A sidebar that eats
+   half a phone screen is worse than the top bar it replaced. */
+@media (max-width: 860px) {
+  .frame, .frame.tight { grid-template-columns: minmax(0, 1fr); }
+  .sidebar {
+    position: fixed; inset: 0 auto 0 0; z-index: 60; width: 246px;
+    transform: translateX(-100%); transition: transform .18s ease;
+    box-shadow: 0 0 0 1px var(--line);
+  }
+  .frame.menu-open .sidebar { transform: none; }
+  .frame.tight .side-label, .frame.tight .brand-words { display: revert; }
+  .frame.tight .side-nav a { justify-content: flex-start; padding: 7px 9px; }
+  .frame.tight .seg { flex-direction: row; }
+  .side-toggle { display: none; }
+  .side-scrim { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(12,14,19,.45); }
+  .topbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--surface);
+    position: sticky; top: 0; z-index: 40;
+  }
+  .topbar button { display: grid; gap: 4px; border: 0; background: none; cursor: pointer; padding: 4px; }
+  .topbar button span { display: block; width: 18px; height: 2px; border-radius: 2px; background: var(--ink); }
+  .page { padding: 16px 14px 48px; }
+}
+
+/* Page titles pick up the serif, the same split mediaradar.com uses: the
+   marketing site sets its section headings in Instrument Serif and everything
+   else in Instrument Sans. Only h1 — a serif on every table heading would be
+   a different site, not this one with better type.
+   
+   The size is set here too. Every page declared its own before, so "Active
+   initiatives" was 25px and "Action items" was whatever the browser default
+   left it at, and the two screens did not look like one product. */
+.page h1 {
+  font-family: var(--font-display);
+  font-size: 27px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -.005em;
+  margin: 0 0 2px;
+}
+.page .titlerow h1, .home .titlerow h1 { font-size: 27px; }
+
+@media print {
+  .frame, .frame.tight { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { display: none; }
+  .page { padding: 0; }
+}
+.page-foot { margin-top: 34px; padding-top: 13px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+
+/* A filtered board looks exactly like an empty one until you notice the
+   picker. The active filter carries the brand colour so "where did
+   everything go" has an answer in peripheral vision. */
+.fpill.active { border-color: var(--brand); }
+.fpill.active .lab { color: var(--brand); }
+.fpill.active .fsel { color: var(--brand); font-weight: 700; }

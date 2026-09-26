@@ -65,7 +65,10 @@ export default async function SignInPage({
         </div>
         <h1 className="m-0 mt-1 text-[20px] font-bold tracking-[-0.02em]">{BRAND_NAME}</h1>
         {BRAND_TAGLINE ? (
-          <div className="mt-1 text-[11px] italic" style={{ color: 'var(--muted)' }}>
+          <div
+            className="mt-1 text-[12.5px] italic"
+            style={{ color: 'var(--muted)', fontFamily: 'var(--font-display)' }}
+          >
             {BRAND_TAGLINE}
           </div>
         ) : null}
