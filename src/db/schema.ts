@@ -616,6 +616,23 @@ export const milestones = pgTable(
     agentNote: text('agent_note'),
     agentNoteAt: timestamp('agent_note_at', { withTimezone: true }),
 
+    /**
+     * Who last edited this by hand, and which fields they set.
+     *
+     * Linear and the deck reader write the whole row on every run. That is
+     * right until somebody corrects a date here — then the correction lives
+     * until the next sync and silently reverts, and the person concludes the
+     * app does not save.
+     *
+     * `editedFields` is a comma-separated list of column names. A sync skips
+     * exactly those and keeps updating the rest, so correcting a date does
+     * not also freeze the name. See MILESTONE_FIELDS and mergeFromSource in
+     * lib/milestones.ts, which is the only place the rule is written down.
+     */
+    editedBy: text('edited_by'),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+    editedFields: text('edited_fields'),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
