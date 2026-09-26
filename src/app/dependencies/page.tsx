@@ -133,7 +133,7 @@ export default async function DependenciesPage({
           <Empty>Nothing recorded yet. Add the first one below.</Empty>
         ) : (
           <div className="scroll-x">
-            <table className="grid">
+            <table className="dtable">
               <thead>
                 <tr>
                   <th>Blocker</th>
@@ -234,7 +234,7 @@ export default async function DependenciesPage({
             sub="Rows wait on columns. Cross-team cells are where dependencies actually go wrong; same-team sequencing usually sorts itself out."
           />
           <div className="scroll-x">
-            <table className="grid">
+            <table className="dtable">
               <thead>
                 <tr>
                   <th style={{ minWidth: 180 }}>Waits on →</th>

@@ -40,7 +40,7 @@ function awaitingInput(workstreams: WorkstreamView[]) {
 function ProjectTable({ workstreams }: { workstreams: WorkstreamView[] }) {
   return (
     <div className="scroll-x">
-      <table className="grid">
+      <table className="dtable">
         <thead>
           <tr>
             <th style={{ minWidth: 150 }}>Health</th>

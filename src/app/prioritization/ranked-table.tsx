@@ -177,7 +177,7 @@ export function RankedTable({
       ) : null}
 
       <div className="scroll-x">
-        <table className="grid">
+        <table className="dtable">
           <thead>
             <tr>
               <th className="whitespace-nowrap">#</th>

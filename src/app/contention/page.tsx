@@ -119,7 +119,7 @@ export default async function ContentionPage() {
         ) : (
           <>
             <div className="scroll-x">
-              <table className="grid">
+              <table className="dtable">
                 <thead>
                   <tr>
                     <th style={{ minWidth: 190 }}>Team / resource</th>

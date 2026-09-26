@@ -92,7 +92,10 @@ export function Timeline({ model }: { model: TimelineModel }) {
               style={{ background: 'var(--surface)', borderColor: 'var(--line)' }}
             >
               <Link
-                href={`/projects#${lane.project.key}`}
+                // The project's own page, not an anchor into the list: the
+                // list is filtered in the browser now, so an anchor lands on
+                // a row that may not be rendered.
+                href={`/projects/${lane.project.id}`}
                 className="truncate text-[11.5px] font-semibold hover:underline"
                 title={lane.project.name}
               >

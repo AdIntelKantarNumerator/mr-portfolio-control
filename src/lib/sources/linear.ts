@@ -15,6 +15,7 @@
  */
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
+import { mergeFromSource } from '@/lib/milestones'
 import {
   projects,
   milestones,
@@ -653,9 +654,22 @@ export async function upsertMilestone(
 
   let entityId: string
   if (existing) {
-    await db.update(milestones).set(values).where(eq(milestones.id, existing.entityId))
+    // Only the fields nobody has corrected here. See lib/milestones.ts: a
+    // sync that writes the whole row every run reverts a person's edit at
+    // the next sync, and they conclude the app does not save.
+    const [row] = await db
+      .select({ editedFields: milestones.editedFields })
+      .from(milestones)
+      .where(eq(milestones.id, existing.entityId))
+      .limit(1)
+    const allowed = mergeFromSource(values, row?.editedFields)
     entityId = existing.entityId
-    bump(counters, 'milestones', 'updated')
+    if (Object.keys(allowed).length > 0) {
+      await db.update(milestones).set(allowed).where(eq(milestones.id, entityId))
+      bump(counters, 'milestones', 'updated')
+    } else {
+      bump(counters, 'milestones', 'skipped')
+    }
   } else {
     const [created] = await db.insert(milestones).values(values).returning({ id: milestones.id })
     entityId = created.id

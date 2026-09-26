@@ -144,7 +144,7 @@ export function ModelPanel({
       </div>
 
       <div className="scroll-x">
-        <table className="grid">
+        <table className="dtable">
           <thead>
             <tr>
               <th>Criterion</th>

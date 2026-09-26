@@ -168,7 +168,7 @@ export default async function ReadinessPage() {
           }
         />
         <div className="scroll-x">
-          <table className="grid">
+          <table className="dtable">
             <thead>
               <tr>
                 <th className="min-w-[220px]">Workstream</th>
