@@ -13,6 +13,8 @@
  */
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { MilestoneEditor } from '@/components/milestone-editor'
+import { milestoneRows } from '@/lib/milestone-rows'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { Brief } from '@/components/brief'
 import { Observations } from '@/components/observations'
@@ -81,6 +83,7 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
     agentAssessments,
     themes,
     updates,
+    plan,
   ] = await Promise.all([
     getPortfolio(),
     getReadiness(),
@@ -92,6 +95,7 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
     getAgentAssessments(),
     themesFor('project', id),
     getUpdateHistory('project', id),
+    milestoneRows(id),
   ])
 
   const i = p.projects.find((x) => x.id === id)
@@ -203,6 +207,8 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
           <p className="m-0 mt-2 max-w-[760px] text-[12.5px] leading-relaxed">{i.notes}</p>
         ) : null}
       </div>
+
+      <MilestoneEditor level="project" entityId={id} milestones={plan} />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Stat value={i.workstreams.length} label="Workstreams" />

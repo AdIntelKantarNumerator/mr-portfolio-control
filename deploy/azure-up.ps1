@@ -69,7 +69,21 @@ param(
   # Reuse the image already in the registry instead of building again. For
   # picking up after a run that failed somewhere past the build  -  it saves the
   # several minutes a rebuild costs when the code has not changed.
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+
+  # Stream the build log live instead of polling for the result.
+  #
+  # Off by default, and that is the whole point. The Azure CLI cannot reliably
+  # print an ACR build log on a Windows console: it encodes through the
+  # console's legacy code page and dies on the first character that page
+  # cannot represent, taking the script with it while the build carries on in
+  # Azure with nothing watching. PYTHONIOENCODING, [Console]::OutputEncoding
+  # and chcp 65001 were all tried here and none of them stopped it.
+  #
+  # So the log is not streamed. The build is queued, its run is polled, and
+  # the log is fetched to a file only if it fails. Use this switch if you want
+  # the live log and are willing to lose the run to an encoding crash.
+  [switch]$StreamLogs
 )
 
 # Deliberately NOT 'Stop'. Windows PowerShell turns anything a native command
@@ -79,13 +93,39 @@ param(
 # the only signal that actually means failure.
 $ErrorActionPreference = 'Continue'
 
-# The Azure CLI is a Python program, and on Windows it writes its output
-# through the console's legacy code page (cp1252). The Next.js build prints a
-# triangle character, which cp1252 cannot represent, so the CLI dies with a
-# UnicodeEncodeError while PRINTING a build that is otherwise succeeding.
-# Telling Python to use UTF-8 removes the failure at its source.
+# The Azure CLI is a Python program, and on Windows it prints through the
+# console's legacy code page. Anything it writes containing a character that
+# page cannot represent kills the CLI mid-command with a UnicodeEncodeError.
+#
+# PYTHONIOENCODING is set because it is free and sometimes enough. It is NOT
+# enough for the ACR build log - that was tried here, along with
+# [Console]::OutputEncoding and chcp 65001, and the crash survived all three.
+# The fix that works is not printing the log at all, which is why the build
+# below runs with --no-logs. See the -StreamLogs note in param().
 $env:PYTHONIOENCODING = 'utf-8'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+
+# Only for -StreamLogs, which is the one path that still prints CLI output
+# character by character. It improves the odds; it does not guarantee
+# anything. Restored on the way out - leaving a terminal in 65001 breaks other
+# tools, and this script does not own the window it was run in.
+$script:originalCodePage = $null
+function Restore-CodePage {
+  if ($script:originalCodePage -and $script:originalCodePage -ne '65001') {
+    try { & chcp.com $script:originalCodePage | Out-Null } catch { }
+    $script:originalCodePage = $null
+  }
+}
+if ($StreamLogs) {
+  try {
+    $script:originalCodePage = (& chcp.com) -replace '[^\d]', ''
+    & chcp.com 65001 | Out-Null
+  } catch { }
+}
+
+# Every exit goes through one of these two: the trap catches the throws, the
+# line at the bottom of the file catches success.
+trap { Restore-CodePage; break }
 
 $image = 'mr-portfolio-control'
 $plan  = "$App-plan"
@@ -193,25 +233,54 @@ Step 'Building the image in Azure (several minutes the first time)'
 # build does not depend on what is installed on this laptop. .dockerignore
 # keeps .env and the local .data database out of the upload.
 #
-# Not run through Invoke-Az: this one streams a long build log, and capturing
-# it means staring at a blank terminal for five minutes.
-& az acr build -r $Registry -t "$image`:$ImageTag" -t "$image`:latest" .
+# --no-logs unless asked otherwise. See the -StreamLogs note in param() for
+# why: printing the log is the part that crashes, not the build.
+$buildArgs = @('acr', 'build', '-r', $Registry, '-t', "$image`:$ImageTag", '-t', "$image`:latest")
+if (-not $StreamLogs) { $buildArgs += '--no-logs' }
+$buildArgs += '.'
 
-if ($LASTEXITCODE -ne 0) {
-  # A non-zero exit here does not always mean the build failed. The CLI can die
-  # while printing the log (see the encoding note at the top) after the image
-  # has already been built and pushed. So ask the registry what it has rather
-  # than trusting the exit code.
-  Note 'The build command exited with an error. Asking the registry whether the image arrived anyway...'
-  Start-Sleep -Seconds 10
-  $tags = & az acr repository show-tags -n $Registry --repository $image -o tsv 2>$null
-  $found = ($LASTEXITCODE -eq 0) -and (($tags | Out-String) -split "`r?`n" | Where-Object { $_.Trim() -eq $ImageTag })
-  if ($found) {
-    Note "Image $image`:$ImageTag is in the registry. The failure was in the log output, not the build."
-  } else {
-    throw "The image was not built. Run this to see what the build did:`n  az acr task list-runs -r $Registry -o table`n  az acr task logs -r $Registry --run-id <id>"
-  }
+& az @buildArgs
+
+# Whether or not the command above came back cleanly, the question that
+# matters is what the RUN did. --no-logs returns as soon as the build is
+# queued, and a streamed run can die in the printer while the build succeeds,
+# so in both cases the exit code is the wrong thing to trust.
+#
+# The first version of this recovery slept ten seconds and asked the registry
+# for the tag. That is the wrong question at the wrong time: ten seconds into
+# a four-minute build the tag is legitimately absent, so a succeeding build
+# was reported as "the image was not built".
+$runId = (& az acr task list-runs -r $Registry --top 1 --query '[0].runId' -o tsv 2>$null | Out-String).Trim()
+if (-not $runId) {
+  throw "No build run was queued. Check:`n  az acr task list-runs -r $Registry -o table"
 }
+
+Note "Build queued as run $runId. Waiting for it (several minutes the first time)."
+$status = ''
+$deadline = (Get-Date).AddMinutes(30)
+while ((Get-Date) -lt $deadline) {
+  $status = (& az acr task show-run -r $Registry --run-id $runId --query status -o tsv 2>$null | Out-String).Trim()
+  if ($status -in @('Succeeded', 'Failed', 'Canceled', 'Error', 'Timeout')) { break }
+  Start-Sleep -Seconds 15
+  Write-Host '.' -NoNewline -ForegroundColor DarkGray
+}
+Write-Host ''
+
+if ($status -ne 'Succeeded') {
+  # Fetch the log to a file rather than to the console: writing it to the
+  # terminal is the operation that cannot survive a non-UTF-8 code page, and
+  # a build that failed for a real reason deserves a readable reason.
+  $logFile = Join-Path (Get-Location) "acr-build-$runId.log"
+  try {
+    & az acr task logs -r $Registry --run-id $runId 2>&1 |
+      Out-File -FilePath $logFile -Encoding utf8
+    Note "Log written to $logFile"
+  } catch {
+    Note 'Could not download the log. It is in the Azure portal under the registry, Tasks, Runs.'
+  }
+  throw "Build run $runId ended as '$status'. The reason is in:`n  $logFile"
+}
+Note "Run $runId succeeded."
 
 }
 
@@ -535,3 +604,4 @@ Write-Host ''
 Write-Host '  Connection string and sync token written to .azure-deployment.txt' -ForegroundColor Green
 Note 'That file is gitignored. Keep it off email and chat, and delete it once the values are in your password manager.'
 Write-Host ''
+Restore-CodePage

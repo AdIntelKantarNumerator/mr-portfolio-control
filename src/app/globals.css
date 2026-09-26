@@ -305,21 +305,21 @@ button {
   border-color: color-mix(in srgb, var(--brand) 88%, #000);
 }
 
-table.grid {
+table.dtable {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
 }
 
-table.grid th,
-table.grid td {
+table.dtable th,
+table.dtable td {
   border: 1px solid var(--line);
   padding: 7px 9px;
   text-align: left;
   vertical-align: top;
 }
 
-table.grid thead th {
+table.dtable thead th {
   background: color-mix(in srgb, var(--brand) 12%, var(--surface));
   color: var(--ink);
   font-weight: 600;
@@ -365,6 +365,11 @@ table.grid thead th {
   --c4: #a83a93;
   --c5: #00a651;
   --line-2: #d2d7e0;
+  /* Backlog is lighter than planned; ended work is a deliberate dark grey.
+     Red means "a person needs to do something", and nobody needs to do
+     anything about a cancelled project. */
+  --line-3: #e3e7ee;
+  --ended: #6b7280;
   --surface-2: #f8f9fb;
   --good-bg: #e8f6e8;
   --warn-bg: #fdf3da;
@@ -374,14 +379,14 @@ table.grid thead th {
   :root:not([data-theme='light']) {
     --good: #22b522; --warn: #fab219; --crit: #e35c5c;
     --c1: #5b87e8; --c2: #f5871f; --c3: #ef5a52; --c4: #c661b2; --c5: #17bb63;
-    --line-2: #333947; --surface-2: #1b1f28;
+    --line-2: #333947; --surface-2: #1b1f28; --line-3: #262b36; --ended: #8b93a3;
     --good-bg: #102a15; --warn-bg: #2d2410; --crit-bg: #2b1517;
   }
 }
 :root[data-theme='dark'] {
   --good: #22b522; --warn: #fab219; --crit: #e35c5c;
   --c1: #5b87e8; --c2: #f5871f; --c3: #ef5a52; --c4: #c661b2; --c5: #17bb63;
-  --line-2: #333947; --surface-2: #1b1f28;
+  --line-2: #333947; --surface-2: #1b1f28; --line-3: #262b36; --ended: #8b93a3;
   --good-bg: #102a15; --warn-bg: #2d2410; --crit-bg: #2b1517;
 }
 
@@ -398,7 +403,7 @@ table.grid thead th {
   border: 1px solid var(--line-2); background: var(--surface); border-radius: 9px;
   padding: 6px 13px; min-width: 150px; display: flex; align-items: center; gap: 10px;
 }
-.fpill:not(.static):hover { border-color: var(--c1); }
+.fpill:not(.quiet):hover { border-color: var(--c1); }
 .fpill .lab {
   font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em;
   color: var(--muted); font-weight: 700; display: block; margin-bottom: 1px;
@@ -412,7 +417,7 @@ table.grid thead th {
   background-position: right 5px center, right 1px center;
   background-size: 4px 4px, 4px 4px; background-repeat: no-repeat;
 }
-.fpill.static { opacity: .72; }
+.fpill.quiet { opacity: .72; }
 
 .icard {
   background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
@@ -453,8 +458,8 @@ table.grid thead th {
 
 .ringwrap { display: flex; flex-direction: column; align-items: center; gap: 8px; border: 0; background: transparent; cursor: pointer; width: 100%; padding: 4px; border-radius: 9px; position: relative; }
 .ringwrap:hover { background: var(--surface-2); }
-.ring { position: relative; width: 112px; height: 112px; display: block; }
-.ring .tick { position: absolute; inset: 0; }
+.dial { position: relative; width: 112px; height: 112px; display: block; }
+.dial .tick { position: absolute; inset: 0; }
 .rmid { position: absolute; top: 4px; left: 0; right: 0; height: 112px; display: grid; place-content: center; justify-items: center; text-align: center; padding: 0 24px; pointer-events: none; }
 .rmid .pct { font-size: 26px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
 .rmid .of { font-size: 9.5px; color: var(--muted); font-weight: 650; margin-top: 3px; line-height: 1.2; }
@@ -506,11 +511,16 @@ table.grid thead th {
 .ifoot { border-top: 1px solid var(--line); background: var(--surface-2); padding: 11px 16px; display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; }
 @media (max-width: 760px) { .ifoot { grid-template-columns: 1fr; } }
 .mixwrap, .trendwrap { border: 0; background: transparent; cursor: pointer; border-radius: 8px; padding: 4px 6px; text-align: left; }
-.mixwrap:hover, .trendwrap:hover { background: var(--surface); }
+.trendwrap:hover { background: var(--surface); }
 .mixbar { display: flex; height: 13px; border-radius: 4px; overflow: hidden; gap: 2px; }
-.mixbar span { display: block; }
-.mixlegend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 7px; }
-.mixlegend span { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+/* Each segment is a button. It lifts slightly on hover so it is obvious the
+   bar is a control and not a picture of one. */
+.mixbar button { display: block; border: 0; padding: 0; cursor: pointer; transition: filter .12s, transform .12s; }
+.mixbar button:hover { filter: brightness(1.12); transform: scaleY(1.35); }
+.mixbar button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.mixlegend { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+.mixlegend button { display: flex; align-items: center; gap: 6px; font: inherit; font-size: 11.5px; color: var(--muted); border: 0; background: transparent; cursor: pointer; padding: 2px 7px; border-radius: 6px; }
+.mixlegend button:hover { background: var(--surface); color: var(--ink); }
 .mixlegend i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
 .mixlegend b { color: var(--ink); }
 .trendwrap { display: flex; align-items: center; gap: 13px; }
@@ -718,7 +728,16 @@ table.grid thead th {
 
 /* Who you are and how you like the page. Top right of the content column,
    above the breadcrumb, out of the reading order of the page itself. */
-.pagebar { display: flex; justify-content: flex-end; align-items: center; gap: 9px; margin-bottom: 12px; }
+/* Floated rather than stacked above the page.
+   
+   As its own row it pushed the breadcrumb down by its full height, so every
+   screen opened with an inch of nothing above "PORTFOLIO · INITIATIVES".
+   Floating it right puts it on the same line as the breadcrumb and takes the
+   gap back, and the page content flows under it once the title is past.
+   
+   A float rather than absolute positioning so the page's own first element
+   still reserves the space if it happens to be tall. */
+.pagebar { float: right; display: flex; align-items: center; gap: 9px; margin: -2px 0 8px 18px; }
 .seg { display: flex; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
 .seg button { border: 0; background: var(--surface); color: var(--muted); padding: 5px 13px; font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
 .seg button.on { background: var(--brand); color: #fff; }
@@ -790,3 +809,137 @@ table.grid thead th {
 .fpill.active { border-color: var(--brand); }
 .fpill.active .lab { color: var(--brand); }
 .fpill.active .fsel { color: var(--brand); font-weight: 700; }
+
+/* ---- Milestone editor -------------------------------------------------- */
+/* At the top of every detail page, because "what is this supposed to deliver
+   and by when" is the question people arrive with. */
+.ms-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 13px 16px 14px; display: grid; gap: 10px; }
+.ms-head { display: flex; align-items: baseline; gap: 10px; }
+.ms-head h2 { margin: 0; font-size: 14.5px; }
+.ms-head .muted { font-size: 12.5px; color: var(--muted); flex: 1; }
+.ms-add { border: 1px solid var(--line-2); background: var(--surface); color: var(--muted); border-radius: 8px; padding: 5px 12px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.ms-add:hover { color: var(--ink); border-color: var(--brand); }
+.ms-empty { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; max-width: 80ch; }
+.ms-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.ms-list li { border-top: 1px solid var(--line); }
+.ms-list li:first-child { border-top: 0; }
+.ms-row { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; cursor: pointer; padding: 8px 4px; font: inherit; font-size: 13.5px; text-align: left; border-radius: 7px; }
+.ms-row:hover { background: var(--surface-2); }
+.ms-row i { width: 9px; height: 9px; border-radius: 99px; flex: none; }
+.ms-row .n { font-weight: 650; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-row .s { font-size: 11.5px; color: var(--muted); font-weight: 700; }
+.ms-row .d { font-size: 12px; color: var(--muted); min-width: 110px; text-align: right; }
+.ms-row .e { font-size: 9.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--brand); }
+.ms-form { display: grid; gap: 10px; padding: 11px 4px 6px; border-top: 1px dashed var(--line); }
+.ms-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.ms-grid label { display: grid; gap: 3px; }
+.ms-grid label.wide { grid-column: 1 / -1; }
+.ms-grid label.check { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+.ms-grid label.check span { text-transform: none; letter-spacing: 0; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.ms-grid span { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 800; }
+.ms-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ms-foot button { border: 0; background: var(--brand); color: #fff; border-radius: 8px; padding: 6px 15px; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.ms-foot button.ghost { background: var(--surface); color: var(--muted); border: 1px solid var(--line-2); }
+.ms-foot button.danger:hover { color: var(--crit); border-color: var(--crit); }
+.ms-foot button:disabled { opacity: .5; cursor: not-allowed; }
+.ms-foot .err { color: var(--crit); font-size: 12.5px; }
+.ms-foot .ok { color: var(--good); font-size: 12.5px; }
+.ms-foot .muted { color: var(--muted); font-size: 11.5px; margin-left: auto; }
+
+/* The ring at list size: percentage centred, no caption. */
+/* The small ring. Both children are placed in the one grid cell so the
+   percentage sits inside the dial rather than under it, and the dial is
+   sized by the caller rather than by its own 112px default - the big ring on
+   the home card and the 56px one in a list row are the same component. */
+.ringmini { position: relative; display: inline-grid; place-items: center; flex: none; }
+.ringmini > .dial { grid-area: 1 / 1; width: 100%; height: 100%; }
+.ringmini > .pct { grid-area: 1 / 1; }
+.ringmini svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ringmini .pct { position: relative; font-size: 12.5px; font-weight: 800; letter-spacing: -.02em; }
+
+/* ---- Initiative and project list rows ---------------------------------- */
+/* The ring on the left, the coloured edge, and the work inside. The same
+   shape on both list pages so moving between them costs no re-learning. */
+.ilist { display: grid; gap: 9px; }
+.irow { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 14px; align-items: start; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line-2); border-radius: 11px; padding: 13px 16px 14px; }
+.ir-ring { display: grid; justify-items: center; gap: 4px; }
+.ir-noring { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 99px; border: 2px dashed var(--line-2); color: var(--muted); font-size: 15px; }
+.ir-bang { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 99px; border: 2.5px solid var(--crit); color: var(--crit); font-size: 26px; font-weight: 800; line-height: 1; }
+.ir-due { font-size: 10.5px; color: var(--muted); font-weight: 700; text-align: center; }
+.ir-body { min-width: 0; display: grid; gap: 5px; }
+.ir-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 9px; }
+.ir-name { font-size: 15.5px; font-weight: 750; letter-spacing: -.012em; color: var(--ink); text-decoration: none; }
+a.ir-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ir-status { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.ir-meta { font-size: 12.5px; color: var(--muted); }
+.ir-next { margin: 0; font-size: 12.5px; color: var(--muted); }
+.ir-desc { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; max-width: 90ch; }
+.ir-hidden { margin: 0; font-size: 12px; color: var(--muted); }
+.orphan-row .ir-name { color: var(--crit); }
+
+/* The find box wears the same pill as the pickers beside it. */
+.ffind { border: 0; background: transparent; font: inherit; font-size: 14px; font-weight: 650; color: var(--ink); padding: 0; width: 100%; min-width: 180px; }
+.ffind:focus { outline: none; }
+.fpill.as-btn { border: 1px solid var(--line); background: var(--surface); cursor: pointer; font: inherit; text-align: left; }
+.fpill.as-btn:hover { border-color: var(--brand); }
+
+@media (max-width: 640px) {
+  .irow { grid-template-columns: minmax(0, 1fr); }
+  .ir-ring { justify-items: start; grid-auto-flow: column; align-items: center; gap: 10px; }
+}
+
+/* ---- Click-to-edit ----------------------------------------------------- */
+/* Text until you click it. A page of visible inputs is a page nobody reads,
+   so the affordance is a hover underline rather than a box. */
+.ed { position: relative; display: inline-flex; }
+.ed-val { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; padding: 1px 4px; margin: -1px -4px; border-radius: 5px; display: inline-flex; align-items: center; gap: 6px; text-align: left; }
+.ed-val:hover { background: var(--surface-2); box-shadow: inset 0 -1px 0 var(--line-2); }
+/* "No owner" and "no date" are the values most worth fixing, so they read as
+   an invitation rather than as an absence. */
+.ed-val.empty { color: var(--muted); font-style: italic; }
+.ed-val.empty:hover { color: var(--brand); }
+.ed-pop { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 9px; padding: 7px 8px; box-shadow: 0 8px 24px rgba(12,14,19,.14); }
+.ed-pop select, .ed-pop input { width: auto !important; min-width: 130px; font-size: 13px !important; padding: 5px 8px !important; }
+.ed-pop button { border: 0; background: var(--brand); color: #fff; border-radius: 7px; padding: 6px 12px; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.ed-pop button:disabled { opacity: .5; }
+.ed-err { position: absolute; top: calc(100% + 4px); left: 0; width: 260px; font-size: 11.5px; color: var(--crit); background: var(--surface); border: 1px solid var(--crit); border-radius: 8px; padding: 6px 8px; }
+
+/* ---------------------------------------------------------------------------
+   Editable list rows (projects, workstreams)
+   --------------------------------------------------------------------------- */
+
+/* Facts that decide something, on the row rather than a click away. The
+   labels are small and quiet because the values are the content. */
+.ir-facts { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12.5px; align-items: baseline; }
+.ir-facts > span { display: inline-flex; align-items: baseline; gap: 5px; }
+.ir-facts i { font-style: normal; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.ir-facts em { font-style: normal; color: var(--muted); }
+.ir-facts b { font-weight: 600; font-size: 10.5px; color: var(--muted); border: 1px dashed var(--line-2); border-radius: 5px; padding: 0 5px; }
+.ir-status-ed .ed-val { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+
+/* A table whose headings are positioned by its colgroup and not by whatever
+   is in the cells. With auto layout, one row containing a wide badge widened
+   a column for every row and left the headings sitting over the wrong ones. */
+table.dtable.cols { table-layout: fixed; }
+table.dtable.cols td { vertical-align: middle; overflow: hidden; }
+.ws-name { font-weight: 650; color: var(--ink); text-decoration: none; }
+.ws-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.arrow { font-style: normal; color: var(--muted); padding: 0 2px; }
+
+/* The bar is decoration beside the number, which is the value being edited.
+   It sits inside the button so the whole thing is one hit area. */
+.wsbar { display: inline-block; width: 44px; height: 5px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.wsbar > span { display: block; height: 100%; border-radius: 99px; background: var(--brand-2); }
+
+/* The health badge, which is a button that looks exactly like the badge. */
+.hb .hb-btn { border: 1px solid transparent; cursor: pointer; font: inherit; }
+.hb .hb-btn:hover { border-color: var(--line-2); }
+.hb-pop { flex-direction: column; align-items: stretch; gap: 8px; width: 290px; }
+.hb-pop label { display: grid; gap: 3px; }
+.hb-pop label > span { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.hb-pop textarea { width: 100%; font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line-2); border-radius: 7px; resize: vertical; background: var(--surface); color: var(--ink); }
+.hb-pop select, .hb-pop input { min-width: 0 !important; width: 100% !important; }
+.hb-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ed-err.flow { position: static; width: auto; }
+.ir-loose { font-size: 12.5px; font-weight: 700; color: var(--crit); }
+a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }

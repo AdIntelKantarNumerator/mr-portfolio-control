@@ -9,6 +9,8 @@
  */
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { MilestoneEditor } from '@/components/milestone-editor'
+import { milestoneRows } from '@/lib/milestone-rows'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { Brief } from '@/components/brief'
 import { Observations } from '@/components/observations'
@@ -89,6 +91,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     themes,
     plan,
     updates,
+    milestonePlan,
   ] = await Promise.all([
     getPortfolio(),
     getReadiness(),
@@ -100,6 +103,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     themesFor('workstream', id),
     workstreamsFor(id),
     getUpdateHistory('workstream', id),
+    milestoneRows(id),
   ])
 
   const workstream = p.workstreams.find((x) => x.id === id)
@@ -171,6 +175,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
             <SourceBadge key={s.system} system={s.system} url={s.url} />
           ))}
         </div>
+
+      <MilestoneEditor level="workstream" entityId={id} milestones={milestonePlan} />
 
         <h2 className="m-0 mt-0.5 text-[20px] font-bold tracking-[-0.01em]">{workstream.name}</h2>
 
