@@ -14,6 +14,8 @@ import { Card, Empty, Kicker, Muted, Pill, type Tone } from '@/components/ui'
 import { isEnded } from '@/lib/domain'
 import { fmtDate } from '@/lib/util'
 import { EditInitiative } from './edit'
+import { MilestoneEditor } from '@/components/milestone-editor'
+import { milestoneRows } from '@/lib/milestone-rows'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +32,7 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
   const [row] = await db.select().from(initiatives).where(eq(initiatives.id, id)).limit(1)
   if (!row) notFound()
 
-  const [mine, streams, history] = await Promise.all([
+  const [mine, streams, history, plan] = await Promise.all([
     db.select().from(projects).where(eq(projects.initiativeId, id)).orderBy(asc(projects.name)),
     db.select({ id: workstreams.id, projectId: workstreams.projectId, status: workstreams.status }).from(workstreams),
     db
@@ -39,6 +41,7 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
       .where(and(eq(changelogEntries.entityType, 'initiative'), eq(changelogEntries.entityId, id)))
       .orderBy(desc(changelogEntries.at))
       .limit(20),
+    milestoneRows(id),
   ])
 
   const countFor = new Map<string, number>()
@@ -67,6 +70,12 @@ export default async function InitiativePage({ params }: { params: Promise<{ id:
         </div>
         {row.description && <p className="mt-2">{row.description}</p>}
       </div>
+
+      {/* First, because "what is this committed to" is the question people
+          arrive with. Nothing upstream knows what an initiative owes — the
+          grouping only exists here — so for this level it is the only place
+          a milestone can be said at all. */}
+      <MilestoneEditor level="initiative" entityId={id} milestones={plan} />
 
       <Card>
         <strong>Projects</strong>
