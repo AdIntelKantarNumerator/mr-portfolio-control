@@ -36,3 +36,73 @@ export const HEALTHS: HealthFilter[] = ['all', 'good', 'crit']
 export function isHealth(v: string | undefined): v is HealthFilter {
   return v === 'all' || v === 'good' || v === 'crit'
 }
+
+export interface MixMember {
+  id: string
+  name: string
+  href: string
+}
+
+export interface MixGroup {
+  status: string
+  label: string
+  members: MixMember[]
+}
+
+/**
+ * The order the segments are drawn in, and it is not alphabetical or
+ * by-count: it is the life of a piece of work, left to right. Done, then
+ * doing, then intending, then queued, then abandoned.
+ *
+ * Statuses not listed here keep their relative order after the ones that are,
+ * so a new status added to the lifecycle appears rather than vanishing.
+ */
+export const MIX_ORDER = [
+  'complete',
+  'completed',
+  'in_progress',
+  'on_track',
+  'active',
+  'at_risk',
+  'blocked',
+  'paused',
+  'planned',
+  'planning',
+  'backlog',
+  'canceled',
+  'cancelled',
+] as const
+
+export function mixRank(status: string): number {
+  const i = (MIX_ORDER as readonly string[]).indexOf(status)
+  return i === -1 ? MIX_ORDER.length : i
+}
+
+/**
+ * A status as a person says it. "in_progress" is a column value, not a word.
+ *
+ * Deliberately not lib/domain.ts's `label()`: that one takes a named group,
+ * and the mix bar mixes two vocabularies on one card - a project's lifecycle
+ * status and a milestone's - which is exactly the case a group-keyed lookup
+ * cannot serve.
+ */
+const STATUS_WORDS: Record<string, string> = {
+  complete: 'complete',
+  completed: 'completed',
+  in_progress: 'in progress',
+  on_track: 'on track',
+  at_risk: 'at risk',
+  blocked: 'blocked',
+  paused: 'paused',
+  planned: 'planned',
+  planning: 'planning',
+  backlog: 'backlog',
+  canceled: 'canceled',
+  cancelled: 'cancelled',
+  active: 'active',
+  withdrawn: 'withdrawn',
+}
+
+export function statusLabel(status: string): string {
+  return STATUS_WORDS[status] ?? status.replace(/_/g, ' ')
+}

@@ -33,6 +33,11 @@ import { ENDED_PROJECT_STATUS } from './domain'
 // components can use it without dragging this module's database import into
 // the browser bundle. Re-exported here so existing imports keep working.
 export {
+  MIX_ORDER,
+  mixRank,
+  statusLabel,
+  type MixGroup,
+  type MixMember,
   LEVELS,
   SORTS,
   HEALTHS,
@@ -43,7 +48,7 @@ export {
   type Sort,
   type HealthFilter,
 } from './home-types'
-import type { HealthFilter, Level, Sort } from './home-types'
+import { mixRank, statusLabel, type HealthFilter, type Level, type MixGroup, type MixMember, type Sort } from './home-types'
 
 export interface Signal {
   kind: 'blocker' | 'decision' | 'action'
@@ -74,18 +79,47 @@ export interface HomeCard {
   verdictAt: Date | null
   /** Set when a person overwrote what she wrote. */
   verdictEditedBy: string | null
+  /**
+   * Set when this card's assessment is borrowed from the tier beneath.
+   *
+   * Names what it was rolled up from, so the card can say "from 3 projects"
+   * rather than presenting somebody else's sentence as if it were about this
+   * initiative. An honest secondhand answer beats "No assessment yet" when
+   * every project inside has one, and beats a silent merge either way.
+   */
+  verdictRolledUp: string | null
   detail: string[]
   evidence: Array<{ source: string; text: string; url: string | null }>
   next: { id: string; name: string; due: string | null; days: number | null; pct: number; expected: number } | null
   rail: MilestoneMark[]
   signals: Signal[]
-  mix: Array<[string, number]>
+  /**
+   * What sits directly beneath, grouped by status, in a fixed order.
+   *
+   * The tier below and no further: an initiative's mix is its projects, a
+   * project's is its workstreams. Counting two tiers down made "23 in
+   * progress" on an initiative card a workstream count, which is not the
+   * number anybody reading an initiative has in mind.
+   *
+   * The members travel with the count so a segment can say what is in it. A
+   * bar you cannot interrogate is a bar you have to take on trust.
+   */
+  mix: MixGroup[]
   activity: number[]
   activityDelta: string
   href: string
 }
 
 const DAY = 86_400_000
+
+/**
+ * Same text twice is the commonest artefact of rolling up: two projects in
+ * one initiative frequently produce the identical bullet from the identical
+ * pull request.
+ */
+function dedupe(values: string[]): string[] {
+  return [...new Set(values.map((v) => v.trim()).filter(Boolean))]
+}
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 const ENDED = new Set<string>(ENDED_PROJECT_STATUS)
@@ -242,9 +276,41 @@ export const getHomeCards = cache(async (
       }))
 
       const ob = obsFor.get(`${level}:${r.id}`) ?? null
-      const recent = parse<Array<{ text: string; at: string | null; source: string | null }>>(ob?.recent ?? null, [])
-      const items = parse<Array<{ text: string; kind: string }>>(ob?.items ?? null, [])
-      const ev = parse<Array<{ source: string; title: string; url: string | null }>>(ob?.evidence ?? null, [])
+
+      // Nothing assessed at this level, but something assessed beneath it.
+      //
+      // An initiative is a grouping; Yaara may not have been asked about it
+      // directly, while every project inside has a current reading. Showing
+      // "No assessment yet" there is technically true and useless - the
+      // information exists, one tier down. So the card borrows it, newest
+      // first, and says where it came from.
+      const kids = ob
+        ? []
+        : [...sc.projects, ...sc.workstreams]
+            .map((id) => obsFor.get(`project:${id}`) ?? obsFor.get(`workstream:${id}`) ?? null)
+            .filter((o): o is NonNullable<typeof o> => Boolean(o))
+            .sort((a, b) => b.generatedAt.getTime() - a.generatedAt.getTime())
+
+      const source = ob ?? kids[0] ?? null
+      const rolledUp = !ob && kids.length > 0
+
+      const recent = rolledUp
+        ? kids.flatMap((k) =>
+            parse<Array<{ text: string; at: string | null; source: string | null }>>(k.recent, []),
+          )
+        : parse<Array<{ text: string; at: string | null; source: string | null }>>(ob?.recent ?? null, [])
+
+      // Every child's bullets, newest child first. The detail panel shows
+      // them all; the one-line summary is chosen below.
+      const items = rolledUp
+        ? kids.flatMap((k) => parse<Array<{ text: string; kind: string }>>(k.items, []))
+        : parse<Array<{ text: string; kind: string }>>(ob?.items ?? null, [])
+
+      const ev = rolledUp
+        ? kids.flatMap((k) =>
+            parse<Array<{ source: string; title: string; url: string | null }>>(k.evidence, []),
+          )
+        : parse<Array<{ source: string; title: string; url: string | null }>>(ob?.evidence ?? null, [])
 
       const openDecs = decs.filter((d) => allIds.has(d.entityId ?? '') && d.status !== 'resolved' && d.status !== 'closed')
       const blockers = openDecs.filter((d) => d.kind === 'blocker')
@@ -252,8 +318,13 @@ export const getHomeCards = cache(async (
       const myActionIds = new Set(links.filter((l) => allIds.has(l.entityId)).map((l) => l.actionItemId))
       const myActions = acts.filter((a) => myActionIds.has(a.id))
 
-      const activityScore = ob?.activityScore ?? 0
-      const ageDays = ob ? Math.round((now - ob.generatedAt.getTime()) / DAY) : 999
+      // Rolled-up activity is the sum of the children's: an initiative whose
+      // five projects each had a busy week is a busy initiative, and taking
+      // only the newest child's score would call it quiet.
+      const activityScore = rolledUp
+        ? kids.reduce((n, k) => n + (k.activityScore ?? 0), 0)
+        : (ob?.activityScore ?? 0)
+      const ageDays = source ? Math.round((now - source.generatedAt.getTime()) / DAY) : 999
 
       const signals: Signal[] = []
       if (blockers.length) {
@@ -305,12 +376,37 @@ export const getHomeCards = cache(async (
         })
       }
 
-      const mixCount = new Map<string, number>()
-      for (const id of sc.workstreams.length ? sc.workstreams : [r.id]) {
-        const w = wss.find((x) => x.id === id)
-        const key = w?.status ?? 'planning'
-        mixCount.set(key, (mixCount.get(key) ?? 0) + 1)
+      // The tier directly beneath, by status. A workstream has no tier below
+      // it that carries a lifecycle status, so it shows its milestones.
+      const below: MixMember[] =
+        level === 'initiative'
+          ? (projByInitiative.get(r.id) ?? []).map((p) => ({
+              id: p.id,
+              name: p.name,
+              status: p.status,
+              href: `/projects/${p.id}`,
+            }))
+          : level === 'project'
+            ? (wsByProject.get(r.id) ?? []).map((w) => ({
+                id: w.id,
+                name: w.name,
+                status: w.status,
+                href: `/workstreams/${w.id}`,
+              }))
+            : own.map((m) => ({
+                id: m.id,
+                name: m.name,
+                status: m.status,
+                href: `/workstreams/${r.id}`,
+              }))
+
+      const byStatus = new Map<string, MixMember[]>()
+      for (const b of below as Array<MixMember & { status: string }>) {
+        byStatus.set(b.status, [...(byStatus.get(b.status) ?? []), { id: b.id, name: b.name, href: b.href }])
       }
+      const mix: MixGroup[] = [...byStatus.entries()]
+        .map(([status, members]) => ({ status, label: statusLabel(status), members }))
+        .sort((a, b) => mixRank(a.status) - mixRank(b.status))
 
       const beneath =
         level === 'initiative'
@@ -331,12 +427,23 @@ export const getHomeCards = cache(async (
           activityScore,
           ageDays,
         ),
-        verdict: ob?.verdict ?? (items[0]?.text ?? null),
-        verdictBy: ob?.verdictBy ?? (ob ? ob.agent : null),
-        verdictAt: ob?.verdictAt ?? ob?.generatedAt ?? null,
+        // Her synthesis if she wrote one, then a child's, and only then the
+        // first bullet. That last fallback is why an entity with four updates
+        // used to show one of them as though it were the summary.
+        verdict: ob?.verdict ?? kids.find((k) => k.verdict)?.verdict ?? items[0]?.text ?? null,
+        verdictBy: source?.verdictBy ?? source?.agent ?? null,
+        verdictAt: source?.verdictAt ?? source?.generatedAt ?? null,
         verdictEditedBy: ob?.verdictBy ?? null,
-        detail: items.slice(0, 3).map((i) => i.text),
-        evidence: ev.slice(0, 6).map((e) => ({ source: e.source, text: e.title, url: e.url })),
+        verdictRolledUp: rolledUp
+          ? `${kids.length} ${level === 'initiative' ? 'project' : 'workstream'}${kids.length === 1 ? '' : 's'}`
+          : null,
+        detail: dedupe(items.map((i) => i.text)).slice(0, 6),
+        evidence: dedupe(ev.map((e) => `${e.source}\u0000${e.title}\u0000${e.url ?? ''}`))
+          .slice(0, 8)
+          .map((k) => {
+            const [source2, text, url] = k.split('\u0000')
+            return { source: source2!, text: text!, url: url || null }
+          }),
         next: openNext
           ? {
               id: openNext.id,
@@ -349,7 +456,7 @@ export const getHomeCards = cache(async (
           : null,
         rail,
         signals,
-        mix: [...mixCount.entries()],
+        mix,
         activity: recent.length ? [1, 2, 3, 4, 5, 6, 7, 8].map(() => Math.round(activityScore)) : [0, 0, 0, 0, 0, 0, 0, 0],
         activityDelta: activityScore > 0 ? `${Math.round(activityScore)}` : '0',
         href:

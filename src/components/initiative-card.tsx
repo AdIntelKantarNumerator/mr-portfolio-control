@@ -20,6 +20,9 @@
  */
 import { useActionState, useState } from 'react'
 import type { HomeCard } from '@/lib/home'
+import type { MixGroup } from '@/lib/home-types'
+import { LocalTime } from './local-time'
+import { Ring, paceColor } from './ring'
 import { saveVerdict, restoreVerdict, type VerdictState } from '@/app/verdict-actions'
 
 const STATUS = {
@@ -41,13 +44,19 @@ const MS_COLOR: Record<string, string> = {
   at_risk: 'var(--c2)',
   blocked: 'var(--c3)',
   planning: 'var(--line-2)',
-  // workstream statuses
+  // workstream and project statuses
   completed: 'var(--c1)',
   in_progress: 'var(--c5)',
+  active: 'var(--c5)',
   paused: 'var(--c2)',
-  backlog: 'var(--line-2)',
+  backlog: 'var(--line-3)',
   planned: 'var(--line-2)',
-  canceled: 'var(--c3)',
+  // Red is reserved for "somebody needs to do something". Cancelled work
+  // needs nothing from anybody; it was red here, which made every card with
+  // a tidy-up on it look like a card in trouble.
+  canceled: 'var(--ended)',
+  cancelled: 'var(--ended)',
+  withdrawn: 'var(--ended)',
 }
 
 const SIGNAL = {
@@ -71,52 +80,6 @@ function Chevron({ open = false }: { open?: boolean }) {
   )
 }
 
-/**
- * Coordinates rounded before they reach the DOM.
- *
- * Math.cos on the server and Math.cos in the browser can disagree in the last
- * bit — 88.15874509685646 against ...648 — and React reports that as a
- * hydration mismatch and stops patching the tree. Three decimals is far below
- * a pixel at this size and is identical on both sides.
- */
-const px = (n: number) => Math.round(n * 1000) / 1000
-
-function Ring({ pct, expected, color }: { pct: number; expected: number; color: string }) {
-  const R = 50
-  const C = 2 * Math.PI * R
-  const len = (C * pct) / 100
-  const a = ((expected / 100) * 360 - 90) * (Math.PI / 180)
-  return (
-    <span className="ring">
-      <svg width="112" height="112" viewBox="0 0 118 118" style={{ transform: 'rotate(-90deg)' }} aria-hidden="true">
-        <circle cx="59" cy="59" r={R} fill="none" stroke="var(--surface-2)" strokeWidth="13" />
-        <circle
-          cx="59"
-          cy="59"
-          r={R}
-          fill="none"
-          stroke={color}
-          strokeWidth="13"
-          strokeLinecap="round"
-          strokeDasharray={`${px(len)} ${px(C - len)}`}
-        />
-      </svg>
-      <svg width="112" height="112" viewBox="0 0 118 118" className="tick" aria-hidden="true">
-        <line
-          x1={px(59 + Math.cos(a) * 40)}
-          y1={px(59 + Math.sin(a) * 40)}
-          x2={px(59 + Math.cos(a) * 59)}
-          y2={px(59 + Math.sin(a) * 59)}
-          stroke="var(--ink)"
-          strokeWidth="2.4"
-          strokeLinecap="round"
-          opacity=".62"
-        />
-      </svg>
-    </span>
-  )
-}
-
 export function InitiativeCard({
   card,
   onOpen,
@@ -131,17 +94,33 @@ export function InitiativeCard({
 
   const st = STATUS[card.health]
   const behind = card.next ? card.next.expected - card.next.pct : 0
-  const pace =
-    card.health === 'quiet'
-      ? 'var(--line-2)'
-      : behind > 15
-        ? 'var(--crit)'
-        : behind > 4
-          ? 'var(--warn)'
-          : 'var(--good)'
+  // One rule, in components/ring.tsx: three screens draw this ring and a
+  // colour that differs between them for the same work is worse than none.
+  const pace = paceColor(card.health, behind)
 
   const edited = Boolean(card.verdictEditedBy)
   const byline = edited ? card.verdictEditedBy : 'Yaara'
+
+  /** What is actually in one segment of the mix bar. */
+  function openMix(g: MixGroup) {
+    const noun = card.level === 'initiative' ? 'project' : card.level === 'project' ? 'workstream' : 'milestone'
+    onOpen(
+      `${card.name} — ${g.members.length} ${noun}${g.members.length === 1 ? '' : 's'} ${g.label}`,
+      <div>
+        <p className="lead">
+          Counted from the status on each {noun} directly beneath this {card.level} — not from everything further
+          down, which is a different and usually larger number.
+        </p>
+        <div className="chips">
+          {g.members.map((m) => (
+            <a key={m.id} href={m.href}>
+              {m.name}
+            </a>
+          ))}
+        </div>
+      </div>,
+    )
+  }
 
   function provenance(what: string, extra?: React.ReactNode) {
     onOpen(`${card.name} — where ${what} comes from`, (
@@ -281,6 +260,12 @@ export function InitiativeCard({
                   onOpen(`${card.name} — assessment`, (
                     <div>
                       <p className="lead">{card.verdict ?? 'Nothing assessed yet.'}</p>
+                      {card.verdictRolledUp && (
+                        <p>
+                          Nothing has been assessed against this {card.level} itself. What follows is every update
+                          from the {card.verdictRolledUp} inside it, newest first, with duplicates removed.
+                        </p>
+                      )}
                       {card.detail.map((d, i) => (
                         <p key={i}>{d}</p>
                       ))}
@@ -305,7 +290,16 @@ export function InitiativeCard({
                 <span className="sig">
                   {byline}
                   {edited ? ' (edited)' : ''}
-                  {card.verdictAt ? ` · ${new Date(card.verdictAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}
+                  {/* A borrowed assessment says so. Presenting a project's
+                      sentence as though it were written about the initiative
+                      would be the kind of quiet inaccuracy nobody catches. */}
+                  {card.verdictRolledUp ? ` · from ${card.verdictRolledUp}` : ''}
+                  {card.verdictAt ? (
+                    <>
+                      {' · '}
+                      <LocalTime at={new Date(card.verdictAt).toISOString()} show="date" />
+                    </>
+                  ) : null}
                   {' · '}
                   <b>see the evidence ›</b>
                 </span>
@@ -415,32 +409,30 @@ export function InitiativeCard({
       </div>
 
       <div className="ifoot">
-        <button
-          className="mixwrap"
-          onClick={() =>
-            provenance(
-              'this breakdown',
-              <p>
-                Counted from the status field on each workstream beneath this {card.level}. Somebody set those by hand or
-                Yaara moved them — the project page says which, per row.
-              </p>,
-            )
-          }
-        >
+        {/* Each segment is its own button. One button for the whole bar could
+            only ever say how many are in each state; a bar you cannot ask
+            "which ones" is a bar you have to take on trust. */}
+        <div className="mixwrap">
           <span className="mixbar">
-            {card.mix.map(([k, n]) => (
-              <span key={k} style={{ flex: n, background: MS_COLOR[k] ?? 'var(--line-2)' }} />
+            {card.mix.map((g) => (
+              <button
+                key={g.status}
+                style={{ flex: g.members.length, background: MS_COLOR[g.status] ?? 'var(--line-2)' }}
+                title={`${g.members.length} ${g.label} — click to see which`}
+                aria-label={`${g.members.length} ${g.label}`}
+                onClick={() => openMix(g)}
+              />
             ))}
           </span>
           <span className="mixlegend">
-            {card.mix.map(([k, n]) => (
-              <span key={k}>
-                <i style={{ background: MS_COLOR[k] ?? 'var(--line-2)' }} />
-                {k.replace('_', ' ')} <b>{n}</b>
-              </span>
+            {card.mix.map((g) => (
+              <button key={g.status} onClick={() => openMix(g)}>
+                <i style={{ background: MS_COLOR[g.status] ?? 'var(--line-2)' }} />
+                {g.label} <b>{g.members.length}</b>
+              </button>
             ))}
           </span>
-        </button>
+        </div>
 
         <button
           className="trendwrap"
