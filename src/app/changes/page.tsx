@@ -11,19 +11,12 @@ import { syncRuns } from '@/db/schema'
 import { Card, CardHeading, Chip, Empty, Kicker, Muted, SectionNote, type Tone } from '@/components/ui'
 import { label } from '@/lib/domain'
 import { recentChanges } from '@/lib/portfolio'
-import { fmtDate, relativeDays } from '@/lib/util'
+import { relativeDays } from '@/lib/util'
+import { ChangeLog } from './log'
+import { LocalTime } from '@/components/local-time'
 
 // This page reads the live portfolio; prerendering it would serve stale data.
 export const dynamic = 'force-dynamic'
-
-const TIME = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' })
-
-const KIND_TONE: Record<string, Tone> = {
-  change: 'blue',
-  sync: 'accent',
-  note: 'slate',
-  decision: 'violet',
-}
 
 const SYNC_TONE: Record<string, Tone> = {
   success: 'green',
@@ -83,11 +76,19 @@ function SyncPanel({ run }: { run: typeof syncRuns.$inferSelect | null }) {
             <Chip tone={SYNC_TONE[run.status] ?? 'slate'}>{run.status}</Chip>
           </span>
         }
-        sub={`Triggered ${run.trigger} · started ${fmtDate(run.startedAt, { year: true })} ${TIME.format(run.startedAt)}${
-          run.finishedAt
-            ? ` · finished ${fmtDate(run.finishedAt, { year: true })} ${TIME.format(run.finishedAt)}`
-            : ' · still running'
-        }`}
+        sub={
+          <span>
+            Triggered {run.trigger} · started{' '}
+            <LocalTime at={run.startedAt.toISOString()} year />
+            {run.finishedAt ? (
+              <>
+                {' '}· finished <LocalTime at={run.finishedAt.toISOString()} year />
+              </>
+            ) : (
+              ' · still running'
+            )}
+          </span>
+        }
         right={<Muted>{relativeDays(run.startedAt)}</Muted>}
       />
 
@@ -127,15 +128,6 @@ export default async function ChangesPage() {
     db.select().from(syncRuns).orderBy(desc(syncRuns.startedAt)).limit(1),
   ])
 
-  // Group by calendar day. `recentChanges` already returns newest first, so the
-  // insertion order of the map is the display order and needs no re-sort.
-  const byDay = new Map<string, typeof entries>()
-  for (const e of entries) {
-    const key = fmtDate(e.at, { year: true })
-    if (!byDay.has(key)) byDay.set(key, [])
-    byDay.get(key)!.push(e)
-  }
-
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -152,57 +144,22 @@ export default async function ChangesPage() {
 
       <SyncPanel run={runs[0] ?? null} />
 
-      {entries.length === 0 ? (
-        <Empty>Nothing has been logged yet.</Empty>
-      ) : (
-        <div className="flex flex-col gap-4">
-          {[...byDay.entries()].map(([day, items]) => (
-            <div key={day}>
-              <div className="mb-2 flex items-baseline gap-2">
-                <h3 className="m-0 text-[13px] font-bold tracking-[-0.01em]">{day}</h3>
-                <Muted>{relativeDays(items[0].at)}</Muted>
-              </div>
-
-              <div
-                className="flex flex-col gap-2 border-l-2 pl-3 sm:pl-4"
-                style={{ borderColor: 'var(--line)' }}
-              >
-                {items.map((e) => (
-                  <Card key={e.id}>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className="text-[11px] tabular-nums"
-                        style={{ color: 'var(--muted)' }}
-                      >
-                        {TIME.format(e.at)}
-                      </span>
-                      <Chip tone={KIND_TONE[e.kind] ?? 'slate'}>{e.kind}</Chip>
-                      <span className="text-[12px] font-semibold">{e.actor}</span>
-                    </div>
-                    <div className="mt-1 text-[13px] font-semibold leading-snug">{e.summary}</div>
-                    {e.detail ? (
-                      <p
-                        className="m-0 mt-1 text-[12px] leading-relaxed"
-                        style={{ color: 'var(--muted)' }}
-                      >
-                        {e.detail}
-                      </p>
-                    ) : null}
-                    {e.entityType ? (
-                      <div className="full-only mt-1.5">
-                        <Muted>
-                          {e.entityType}
-                          {e.entityId ? ` · ${e.entityId}` : ''}
-                        </Muted>
-                      </div>
-                    ) : null}
-                  </Card>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Dates cross into the client as ISO strings: a Date would be
+          serialised anyway, and being explicit about it keeps the boundary
+          visible. The grouping and the formatting both happen there, in the
+          reader's timezone — see changes/log.tsx. */}
+      <ChangeLog
+        entries={entries.map((e) => ({
+          id: e.id,
+          at: (e.at instanceof Date ? e.at : new Date(e.at)).toISOString(),
+          kind: e.kind,
+          actor: e.actor,
+          summary: e.summary,
+          detail: e.detail,
+          entityType: e.entityType,
+          entityId: e.entityId,
+        }))}
+      />
     </div>
   )
 }
