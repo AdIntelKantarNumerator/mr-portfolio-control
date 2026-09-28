@@ -20,11 +20,14 @@ export function DetailBody({
   tier,
   data,
   canEdit,
+  entity,
 }: {
   /** "Project" | "Workstream" | "Initiative" — used in two tile titles. */
   tier: string
   data: DetailData
   canEdit: boolean
+  /** Which record this page is, so an update can be sent somewhere else. */
+  entity: { entityType: string; entityId: string }
 }) {
   return (
     <>
@@ -57,6 +60,11 @@ export function DetailBody({
             icon="updates"
             items={data.updates}
             perPage={5}
+            // Only this tile. A blocker or a decision is a record somebody
+            // filed against this work on purpose; an update is Yaara's guess
+            // about where something belongs, and the guess is the thing worth
+            // being able to correct.
+            correctable={canEdit ? entity : undefined}
             empty="Nothing reported yet. Silence here means nothing was found, not that nothing happened."
           />
 

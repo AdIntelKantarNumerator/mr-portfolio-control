@@ -36,6 +36,16 @@ export interface Evidence {
   title: string
   url: string | null
   occurredAt: string | null
+  /**
+   * Where inside its source this came from — a Slack channel, a repo, a
+   * meeting series — and who wrote it, when Yaara knew.
+   *
+   * Optional because observations written before she started sending them do
+   * not have it, and those rows are not rewritten. A line without them simply
+   * offers no correction button.
+   */
+  location?: string | null
+  author?: string | null
 }
 
 /**

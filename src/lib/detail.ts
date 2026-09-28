@@ -221,15 +221,24 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
       // channel it came from, the ticket or document behind it, and when
       // that happened. It was showing the bare source name, which told you
       // "slack" and not which channel.
-      const cited = (r.citations ?? [])
+      const citedRows = (r.citations ?? [])
         .map((c) => evidence.find((e) => e.id === c))
         .filter((e): e is Evidence => Boolean(e))
-        .map((e) => [e.source, e.title, e.occurredAt ? e.occurredAt.slice(0, 10) : null].filter(Boolean).join(' · '))
+      const cited = citedRows.map((e) =>
+        [e.source, e.title, e.occurredAt ? e.occurredAt.slice(0, 10) : null].filter(Boolean).join(' · '),
+      )
       const parts = [
         r.source ? `From ${r.source}` : null,
         r.at ? `Reported ${shortDate(r.at)}` : null,
         ...cited,
       ].filter(Boolean) as string[]
+
+      // The first citation that says WHERE it came from, which is what a
+      // routing rule matches on. A line with no such citation gets no
+      // correction button: "slack" on its own is not something anyone can
+      // usefully write a rule about, and offering a control that would be
+      // refused on submit is worse than not offering it.
+      const locatable = citedRows.find((e) => e.location || e.author)
       return {
         id: r.id,
         text: r.text,
@@ -237,6 +246,15 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
         tone: 'var(--c1)',
         // One per line: a single run-on string is unreadable in a tooltip.
         detail: parts.length ? parts.join('\n') : undefined,
+        misroute: locatable
+          ? {
+              source: locatable.source,
+              location: locatable.location ?? null,
+              author: locatable.author ?? null,
+              evidenceId: locatable.id,
+              evidenceTitle: locatable.title,
+            }
+          : undefined,
       }
     })
 

@@ -115,7 +115,12 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
       <MilestoneEditor level="project" entityId={id} milestones={plan} />
 
-      <DetailBody tier="Project" data={data} canEdit={Boolean(user.personId)} />
+      <DetailBody
+        tier="Project"
+        data={data}
+        canEdit={Boolean(user.personId)}
+        entity={{ entityType: 'project', entityId: id }}
+      />
     </div>
   )
 }

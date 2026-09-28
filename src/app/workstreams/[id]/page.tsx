@@ -123,7 +123,12 @@ export default async function WorkstreamDetailPage({ params }: { params: Promise
 
       <MilestoneEditor level="workstream" entityId={id} milestones={plan} />
 
-      <DetailBody tier="Workstream" data={data} canEdit={Boolean(user.personId)} />
+      <DetailBody
+        tier="Workstream"
+        data={data}
+        canEdit={Boolean(user.personId)}
+        entity={{ entityType: 'workstream', entityId: id }}
+      />
     </div>
   )
 }

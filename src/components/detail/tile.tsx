@@ -19,6 +19,7 @@
  */
 import Link from 'next/link'
 import { useState } from 'react'
+import { MisroutedButton, type Misroute } from './misrouted'
 import {
   IconAction,
   IconBlocker,
@@ -69,6 +70,15 @@ export interface TileItem {
   /** Everything a reader might want to check, on hover. Sources go here. */
   detail?: string
   href?: string
+  /**
+   * Where this line was read from, when that is known well enough to correct.
+   *
+   * Present only on rows a reader could sensibly say "this is not ours" about
+   * — an update Yaara attributed — and only when the source carries a channel,
+   * repo or meeting to write a rule against. A bare "slack" is not something
+   * anybody can correct usefully, so no button appears.
+   */
+  misroute?: Misroute
 }
 
 export function Tile({
@@ -102,12 +112,15 @@ export function ListTile({
   items,
   perPage = 3,
   empty,
+  correctable,
 }: {
   title: string
   icon?: IconName
   items: TileItem[]
   perPage?: number
   empty: string
+  /** The entity this tile is on, when its rows can be corrected. */
+  correctable?: { entityType: string; entityId: string }
 }) {
   const [page, setPage] = useState(0)
   const pages = Math.max(1, Math.ceil(items.length / perPage))
@@ -145,6 +158,14 @@ export function ListTile({
                 <span className="t">
                   {it.href ? <Link href={it.href}>{it.text}</Link> : it.text}
                   {it.meta ? <em>{it.meta}</em> : null}
+                  {correctable && it.misroute ? (
+                    <MisroutedButton
+                      item={it.misroute}
+                      entityType={correctable.entityType}
+                      entityId={correctable.entityId}
+                      label={it.text}
+                    />
+                  ) : null}
                 </span>
               </li>
             )
