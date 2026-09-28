@@ -28,7 +28,14 @@ export function DetailBody({
 }) {
   return (
     <>
-      <div className="tiles">
+      {/* When there is a tier beneath, the right column carries the updates
+          and then that list. A workstream has no tier beneath, so its updates
+          tile stretches to the height of the health tile beside it rather
+          than leaving a column of empty page. */}
+      {/* The top row always squares off: whatever is in the right column ends
+          level with the health tile, rather than leaving a gap of page beside
+          it. */}
+      <div className="tiles tiles-even">
         <HealthTile
           tier={tier}
           assessmentId={data.health.assessmentId}
@@ -44,13 +51,25 @@ export function DetailBody({
           canEdit={canEdit}
         />
 
-        <ListTile
-          title={`${tier} Updates`}
-          icon="updates"
-          items={data.updates}
-          perPage={5}
-          empty="Nothing reported yet. Silence here means nothing was found, not that nothing happened."
-        />
+        <div className="tilecol">
+          <ListTile
+            title={`${tier} Updates`}
+            icon="updates"
+            items={data.updates}
+            perPage={5}
+            empty="Nothing reported yet. Silence here means nothing was found, not that nothing happened."
+          />
+
+          {data.children && (
+            <ListTile
+              title={data.children.title}
+              icon={data.children.title === 'Projects' ? 'projects' : 'workstreams'}
+              items={data.children.items}
+              perPage={8}
+              empty={`No ${data.children.title.toLowerCase()} yet.`}
+            />
+          )}
+        </div>
       </div>
 
       <div className="tiles">

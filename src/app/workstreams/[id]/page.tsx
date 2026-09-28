@@ -62,7 +62,7 @@ export default async function WorkstreamDetailPage({ params }: { params: Promise
   return (
     <div className="stack">
       <DetailHead
-        tier={{ label: 'Workstreams', href: '/workstreams' }}
+        tier={{ label: 'Workstream', href: '/workstreams' }}
         name={w.name}
         parent={parent ? { label: 'in', name: parent.name, href: `/projects/${parent.id}` } : null}
         orphan="Not under a project"

@@ -34,6 +34,17 @@ import type { ReadinessGateView } from '@/components/detail/readiness-tile'
 
 export type Level = 'initiative' | 'project' | 'workstream'
 
+/** Assessed health as a bullet colour, so a child list reads like the rest. */
+const RAG_TONE: Record<string, string> = {
+  green: 'var(--c5)',
+  amber: 'var(--c2)',
+  red: 'var(--c3)',
+  unknown: 'var(--line-2)',
+}
+
+/** States that mean a workstream is no longer live, for the "N live" count. */
+const ENDED_WS = new Set(['completed', 'canceled', 'cancelled', 'withdrawn'])
+
 const DEC_TONE: Record<string, string> = {
   open: 'var(--c3)',
   watch: 'var(--c2)',
@@ -75,6 +86,14 @@ export interface DetailData {
   dependencies: TileItem[]
   /** Null when there is nothing outstanding, or nothing to be ready for. */
   readiness: { workstreamId: string; gates: ReadinessGateView[] } | null
+  /**
+   * The tier directly beneath, linked.
+   *
+   * An initiative lists its projects and a project lists its workstreams. A
+   * workstream has nothing below it that carries a name and a page, so this
+   * is null there and the layout gives the space back to the updates.
+   */
+  children: { title: string; items: TileItem[] } | null
 }
 
 /** Every entity id at or beneath this one, and the workstreams among them. */
@@ -192,18 +211,34 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
   const updates: TileItem[] = mineFirst
     .flatMap((o) =>
       parse<Array<{ text: string; at: string | null; source: string | null; citations?: string[] }>>(o.recent, []).map(
-        (r, ix) => ({ ...r, id: `${o.id}-r${ix}`, at: r.at }),
+        (r, ix) => ({ ...r, id: `${o.id}-r${ix}`, at: r.at, citations: r.citations ?? [] }),
       ),
     )
     .sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
     .filter((r, ix, all) => all.findIndex((x) => x.text.trim() === r.text.trim()) === ix)
-    .map((r) => ({
-      id: r.id,
-      text: r.text,
-      meta: shortDate(r.at),
-      tone: 'var(--c1)',
-      detail: r.source ?? undefined,
-    }))
+    .map((r) => {
+      // Everything known about this line, for the hover: which meeting or
+      // channel it came from, the ticket or document behind it, and when
+      // that happened. It was showing the bare source name, which told you
+      // "slack" and not which channel.
+      const cited = (r.citations ?? [])
+        .map((c) => evidence.find((e) => e.id === c))
+        .filter((e): e is Evidence => Boolean(e))
+        .map((e) => [e.source, e.title, e.occurredAt ? e.occurredAt.slice(0, 10) : null].filter(Boolean).join(' · '))
+      const parts = [
+        r.source ? `From ${r.source}` : null,
+        r.at ? `Reported ${shortDate(r.at)}` : null,
+        ...cited,
+      ].filter(Boolean) as string[]
+      return {
+        id: r.id,
+        text: r.text,
+        meta: shortDate(r.at),
+        tone: 'var(--c1)',
+        // One per line: a single run-on string is unreadable in a tooltip.
+        detail: parts.length ? parts.join('\n') : undefined,
+      }
+    })
 
   // --- the register --------------------------------------------------------
   const regs = p.decisions.filter((d) => d.entityId && ids.has(d.entityId))
@@ -296,5 +331,40 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
     actions,
     dependencies,
     readiness: readinessFor(model, workstreamIds),
+    children:
+      level === 'initiative'
+        ? {
+            title: 'Projects',
+            items: p.projects
+              .filter((x) => x.initiativeId === id)
+              .map((x) => ({
+                id: x.id,
+                text: x.name,
+                meta: `${x.workstreams.filter((w) => !ENDED_WS.has(w.status)).length} live`,
+                tone: RAG_TONE[x.health.rag] ?? 'var(--line-2)',
+                toneLabel: x.status,
+                detail: [x.owner?.name ? `Owner ${x.owner.name}` : 'No owner', x.health.rationale]
+                  .filter(Boolean)
+                  .join('\n'),
+                href: `/projects/${x.id}`,
+              })),
+          }
+        : level === 'project'
+          ? {
+              title: 'Workstreams',
+              items: (p.projects.find((x) => x.id === id)?.workstreams ?? []).map((w) => ({
+                id: w.id,
+                text: w.name,
+                meta: w.progress ? `${Math.round(w.progress)}%` : null,
+                tone: RAG_TONE[w.health.rag] ?? 'var(--line-2)',
+                toneLabel: w.status,
+                detail: [w.lead?.name ? `Lead ${w.lead.name}` : 'No lead', w.health.rationale]
+                  .filter(Boolean)
+                  .join('\n'),
+                href: `/workstreams/${w.id}`,
+              })),
+            }
+          // A workstream has nothing below it with a page of its own.
+          : null,
   }
 })

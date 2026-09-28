@@ -68,7 +68,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   return (
     <div className="stack">
       <DetailHead
-        tier={{ label: 'Projects', href: '/projects' }}
+        tier={{ label: 'Project', href: '/projects' }}
         name={i.name}
         parent={parent ? { label: 'in', name: parent.name, href: `/initiatives/${parent.id}` } : null}
         orphan="Not in an initiative"

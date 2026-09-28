@@ -119,3 +119,21 @@ export const IconReadiness: SectionIcon = ({ size = 20 }) => (
     <path d="M8 16.6h8" stroke="var(--c1)" strokeWidth="1.9" strokeLinecap="round" opacity=".55" />
   </svg>
 )
+
+/** A stack of cards: the projects grouped under an initiative. */
+export const IconProjectsTile: SectionIcon = ({ size = 20 }) => (
+  <svg {...box(size)}>
+    <rect x="3" y="7.4" width="18" height="13.2" rx="2.6" fill="var(--c1)" opacity=".18" />
+    <rect x="3" y="7.4" width="18" height="13.2" rx="2.6" stroke="var(--c1)" strokeWidth="1.8" />
+    <path d="M6 4.6h12M7.6 1.9h8.8" stroke="var(--c2)" strokeWidth="1.8" strokeLinecap="round" />
+  </svg>
+)
+
+/** Lanes running left to right: the workstreams delivering a project. */
+export const IconWorkstreamsTile: SectionIcon = ({ size = 20 }) => (
+  <svg {...box(size)}>
+    <rect x="2.6" y="4.4" width="12" height="4.2" rx="2.1" fill="var(--c5)" />
+    <rect x="6.4" y="9.9" width="14" height="4.2" rx="2.1" fill="var(--c1)" opacity=".55" />
+    <rect x="4.4" y="15.4" width="10" height="4.2" rx="2.1" fill="var(--c2)" opacity=".85" />
+  </svg>
+)

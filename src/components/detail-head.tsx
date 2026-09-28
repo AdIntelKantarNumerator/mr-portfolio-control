@@ -50,8 +50,12 @@ export interface DetailHeadProps {
 export function DetailHead({ tier, name, parent, orphan, status, pills, children }: DetailHeadProps) {
   return (
     <div className="dhead">
+      {/* Singular: this is one of them, not the list. The link still goes to
+          the list, which the title attribute says out loud. */}
       <Kicker>
-        <Link href={tier.href}>{tier.label}</Link>
+        <Link href={tier.href} title={`All ${tier.label.toLowerCase()}s`}>
+          {tier.label}
+        </Link>
       </Kicker>
 
       <div className="dhead-line">
