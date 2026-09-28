@@ -1579,3 +1579,44 @@ export const cardOrders = pgTable(
   },
   (t) => [primaryKey({ name: 'card_orders_person_level_pk', columns: [t.personId, t.level] })],
 )
+
+/**
+ * Somebody saying an update is on the wrong piece of work.
+ *
+ * Yaara's third way of attributing evidence — the entity's name appeared in
+ * the text — is a guess, and a wrong guess used to be permanent: the next pass
+ * made it again and there was nowhere to say otherwise. A row here is one
+ * correction, which she reads and turns into a standing routing rule.
+ *
+ * `source`, `location` and `author` are copied in rather than referenced
+ * because they are what the rule will match on and the evidence row they came
+ * from is replaced every pass. See drizzle/0016_routing_corrections.sql for
+ * that, and for why a null destination is a real answer rather than a missing
+ * one.
+ */
+export const routingCorrections = pgTable(
+  'routing_corrections',
+  {
+    id: id(),
+    /** Where it was wrongly attached. */
+    wrongEntityType: text('wrong_entity_type').notNull(),
+    wrongEntityId: text('wrong_entity_id').notNull(),
+    /** Where it belongs. Both null together means "nothing". */
+    rightEntityType: text('right_entity_type'),
+    rightEntityId: text('right_entity_id'),
+    /** The coordinates a rule matches on: which system, where in it, who. */
+    source: text('source').notNull(),
+    location: text('location'),
+    author: text('author'),
+    /** What prompted it. Not a foreign key — the observation is replaced hourly. */
+    evidenceId: text('evidence_id'),
+    evidenceTitle: text('evidence_title'),
+    note: text('note'),
+    createdBy: text('created_by').notNull(),
+    createdAt: createdAt(),
+    /** When Yaara turned it into a rule, and which rule she made. */
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    ruleId: text('rule_id'),
+  },
+  (t) => [index('routing_corrections_pending_idx').on(t.consumedAt, t.createdAt)],
+)
