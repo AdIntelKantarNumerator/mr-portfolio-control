@@ -1,4 +1,5 @@
 import { HealthTile } from './health-tile'
+import { AddEntry, type AddContext, type EntryKind } from './add-entry'
 import { ListTile } from './tile'
 import { ReadinessTile } from './readiness-tile'
 import type { DetailData } from '@/lib/detail'
@@ -21,6 +22,7 @@ export function DetailBody({
   data,
   canEdit,
   entity,
+  adding,
 }: {
   /** "Project" | "Workstream" | "Initiative" — used in two tile titles. */
   tier: string
@@ -28,7 +30,14 @@ export function DetailBody({
   canEdit: boolean
   /** Which record this page is, so an update can be sent somewhere else. */
   entity: { entityType: string; entityId: string }
+  /** What an added register entry needs: who could own it, what it could point at. */
+  adding?: AddContext
 }) {
+  // The "+" only where somebody can actually write. Offering it to a reader
+  // who cannot save would be a control that fails on submit.
+  const plus = (kind: EntryKind) =>
+    canEdit && adding ? <AddEntry kind={kind} ctx={adding} /> : undefined
+
   return (
     <>
       {/* When there is a tier beneath, the right column carries the updates
@@ -81,17 +90,36 @@ export function DetailBody({
       </div>
 
       <div className="tiles">
-        <ListTile title="Blockers" icon="blocker" items={data.blockers} empty="Nothing is blocked." />
-        <ListTile title="Decisions" icon="decision" items={data.decisions} empty="No decisions recorded." />
+        <ListTile
+          title="Blockers"
+          icon="blocker"
+          items={data.blockers}
+          empty="Nothing is blocked."
+          add={plus('blocker')}
+        />
+        <ListTile
+          title="Decisions"
+          icon="decision"
+          items={data.decisions}
+          empty="No decisions recorded."
+          add={plus('decision')}
+        />
       </div>
 
       <div className="tiles">
-        <ListTile title="Action Items" icon="action" items={data.actions} empty="No open actions." />
+        <ListTile
+          title="Action Items"
+          icon="action"
+          items={data.actions}
+          empty="No open actions."
+          add={plus('action')}
+        />
         <ListTile
           title="Dependencies"
           icon="dependency"
           items={data.dependencies}
           empty="Nothing is waiting on anything."
+          add={plus('dependency')}
         />
       </div>
 

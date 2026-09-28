@@ -10,7 +10,7 @@ import {
   removeSource,
   setIngestEnabled,
   type ActionState,
-} from '@/app/sources/actions'
+} from '@/app/source-actions'
 
 const field =
   'w-full rounded-md border px-2.5 py-1.5 text-[12.5px] bg-[var(--surface)] border-[var(--line)]'

@@ -113,6 +113,7 @@ export function ListTile({
   perPage = 3,
   empty,
   correctable,
+  add,
 }: {
   title: string
   icon?: IconName
@@ -121,6 +122,8 @@ export function ListTile({
   empty: string
   /** The entity this tile is on, when its rows can be corrected. */
   correctable?: { entityType: string; entityId: string }
+  /** A control for the tile's header — the "+ Add" on a register. */
+  add?: React.ReactNode
 }) {
   const [page, setPage] = useState(0)
   const pages = Math.max(1, Math.ceil(items.length / perPage))
@@ -134,16 +137,19 @@ export function ListTile({
       title={title}
       icon={icon}
       right={
-        pages > 1 ? (
-          <span className="tile-page">
-            <button type="button" onClick={() => setPage(current - 1)} disabled={current === 0}>
-              ← Newer
-            </button>
-            <button type="button" onClick={() => setPage(current + 1)} disabled={current >= pages - 1}>
-              Older →
-            </button>
-          </span>
-        ) : null
+        <>
+          {add}
+          {pages > 1 ? (
+            <span className="tile-page">
+              <button type="button" onClick={() => setPage(current - 1)} disabled={current === 0}>
+                ← Newer
+              </button>
+              <button type="button" onClick={() => setPage(current + 1)} disabled={current >= pages - 1}>
+                Older →
+              </button>
+            </span>
+          ) : null}
+        </>
       }
     >
       {items.length === 0 ? (

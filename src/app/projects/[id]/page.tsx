@@ -18,6 +18,7 @@ import { milestoneRows } from '@/lib/milestone-rows'
 import { getDetail } from '@/lib/detail'
 import { getPortfolio } from '@/lib/portfolio'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { addContext } from '@/lib/add-context'
 import { HealthEditable } from '@/components/health-editable'
 import { Editable } from '@/components/editable'
 import { SourceBadge } from '@/components/ui'
@@ -45,11 +46,12 @@ const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null)
 
 export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const [p, data, plan, user] = await Promise.all([
+  const [p, data, plan, user, adding] = await Promise.all([
     getPortfolio(),
     getDetail('project', id),
     milestoneRows('project', id),
     getCurrentUser(),
+    addContext(),
   ])
 
   const i = p.projects.find((x) => x.id === id)
@@ -120,6 +122,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         data={data}
         canEdit={Boolean(user.personId)}
         entity={{ entityType: 'project', entityId: id }}
+        adding={{ level: 'project', entityId: id, ...adding }}
       />
     </div>
   )
