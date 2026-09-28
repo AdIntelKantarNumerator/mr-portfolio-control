@@ -6,7 +6,6 @@
  * the registers, readiness - rolls up from the work underneath, because the
  * grouping tier owns almost no records of its own.
  */
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { asc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
@@ -18,7 +17,6 @@ import { MilestoneEditor } from '@/components/milestone-editor'
 import { milestoneRows } from '@/lib/milestone-rows'
 import { getDetail } from '@/lib/detail'
 import { getCurrentUser } from '@/lib/auth/current-user'
-import { Tile } from '@/components/detail/tile'
 import { EditInitiative } from './edit'
 
 export const dynamic = 'force-dynamic'
@@ -70,7 +68,7 @@ export default async function InitiativeDetailPage({ params }: { params: Promise
   return (
     <div className="stack">
       <DetailHead
-        tier={{ label: 'Initiatives', href: '/initiatives' }}
+        tier={{ label: 'Initiative', href: '/initiatives' }}
         name={row.name}
         status={{
           level: 'initiative',
@@ -97,26 +95,6 @@ export default async function InitiativeDetailPage({ params }: { params: Promise
       <MilestoneEditor level="initiative" entityId={id} milestones={plan} />
 
       <DetailBody tier="Initiative" data={data} canEdit={Boolean(user.personId)} />
-
-      <div className="tiles">
-        <Tile title="Projects in this initiative" className="tile-wide">
-          {mine.length === 0 ? (
-            <p className="tile-empty">
-              Empty. An initiative with no projects is a card with nothing on it — group some on the
-              Initiatives page.
-            </p>
-          ) : (
-            <div className="chips">
-              {mine.map((m) => (
-                <Link key={m.id} href={`/projects/${m.id}`}>
-                  {m.name}
-                  <span className="w">{countFor.get(m.id) ?? 0} WS</span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </Tile>
-      </div>
 
       <EditInitiative
         initiative={{ id: row.id, name: row.name, description: row.description ?? '', status: row.status }}
