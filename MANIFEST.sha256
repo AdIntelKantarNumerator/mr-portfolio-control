@@ -27,6 +27,7 @@ f2f2452ce1e865bb325719f0a56295c5356d1fcda1be796f28916b13e215e8fe  ./drizzle/0011
 940bcb97b847af7b3fe82377c96f1f39039e6266226d0c14517ab585d2b14022  ./drizzle/0013_grouping_suggestions.sql
 915752a3640ceb4fc9acf0675773621fdbf641f9cc1ba3c0379e968c04417ace  ./drizzle/0014_milestone_edits.sql
 2b4d1bceccda5d010bfdb9e5101e177ffa74a7cfacafe2ef38d7ea0a2bbca931  ./drizzle/0015_card_order.sql
+c0707b23abddaf557f5b04fbb9d647c0b901c4c9ed890e506fff949b6c7437be  ./drizzle/0016_routing_corrections.sql
 9678dd5c6d0c23a6ac918cee39d6defe2a92c0477e60fa1e45a8278339ab44f9  ./drizzle/meta/0000_snapshot.json
 2a24f201f60c36fc9841dba5a86ec94cc3d15854fd439162405d6693fc00b55e  ./drizzle/meta/0001_snapshot.json
 397414ad1998dc352ca9f2bae8d4f276745f764db80dcf9a6249259eda73541a  ./drizzle/meta/0002_snapshot.json
@@ -38,7 +39,7 @@ f32888c42f8dd72789c94d99c7a13bc600819bd6118926cdc093b536a2085d2b  ./drizzle/meta
 d7b150ee76048968fdb6bd88666a8dcc29a896e10b9dcced5c0998da74df8071  ./drizzle/meta/0008_snapshot.json
 fe112a86de80c83c4c8b8cd472f1558da94ca38a9d21ca33d73adea6ba5f79c9  ./drizzle/meta/0009_snapshot.json
 451b1c97cb21ef54931824e11a643f830a59aeb053ef26dfde276979e810293d  ./drizzle/meta/0010_snapshot.json
-7440da07692112931c5c269ec024c2017af84c3ea4cd0ea23a41433739a98c42  ./drizzle/meta/_journal.json
+487e87b4cbd7fca690d74b5b788d565d51319b0da532646fe6f2649015698403  ./drizzle/meta/_journal.json
 870f1adccecf3051cbcd9fd307cef51d7633cf510979c181a81f4b1797273493  ./eslint.config.mjs
 998e6efe63287cee278edbcc8186463412e14d8fb50594939ab77fd1714c1fcb  ./next.config.ts
 75f5595a5c27f0ebe7d29a071afe60714f0e61c5fb57d4b6f45f85b42b1b323d  ./package-lock.json
@@ -55,6 +56,7 @@ f081337b2fee635b455b63275406a3e7f39d6a014e25ad90dab5a67e62a12ac4  ./public/verce
 9eacfee0be8d41f23971dfaeb0c95ba92958eb7624895fadf1273249541f2aeb  ./scripts/_connect.ts
 4441e6e766aeb06bee7914b60e1d7e7e22a0844a71e6d4392f6f1ec8f2994281  ./scripts/check-agent-writes.ts
 4905f1e30e92276a23a700fedb5e53de8e251169228a97719d16770962cab7b5  ./scripts/check-card-order.ts
+fc2ce2fff117290631d6978fded002aea9f5164598d6aa20d773e2b5b5a6a32f  ./scripts/check-corrections.ts
 30095608ee0768882909177a9de77dec8c6e39332d53d0a2aa7b17116b44fe01  ./scripts/check-entity-route.ts
 ab73c958eff61fd81590493fd451c64105669f98f17bcc367302b236cf29c944  ./scripts/check-grouping.ts
 8ad19c968cdc8176379fb97c0c2477ad0c76b891a9a1d82914d4a518b1ea338d  ./scripts/check-rotation.ts
@@ -72,6 +74,7 @@ ff9de07782730ee656fc2a7c7dfa767c3bfe44a6c7df29408a4709af7334f739  ./scripts/seed
 1901ebb88ad5ebc29c6e2696856317d86abbbd3441a93b1cac89622247af9625  ./src/app/actions/row.tsx
 08d219310ff02509c39edd34455ba02c4e7f2fb915652865331529b37d3f67db  ./src/app/api/agent/actions/route.ts
 0fe07658e1bd407531292a2ef24e1bdf2bd3496b97846942315b9dc02b52ee03  ./src/app/api/agent/blockers/route.ts
+e132bca9cd002b60621d5148b5b10c0c84f1cc5db86ada8417d4401c9374a202  ./src/app/api/agent/corrections/route.ts
 52739d9a92436a608d88aff9d3df1d0bebb84713ac98cecb60359080618e6ba6  ./src/app/api/agent/dates/route.ts
 68d9702a6c3a81de058c2835542cc2251a993d75fd8a702ba03a46b5b77bb0ff  ./src/app/api/agent/documents/route.ts
 0247f0ab59109568986e564b005129c7eba844a24134558fb7e759188bb5794d  ./src/app/api/agent/entity/route.ts
@@ -95,6 +98,7 @@ c4baf7d6ce31b50c6eb2bcd30463dc8899febbac71f6abe7d0753d586e6a1409  ./src/app/api/
 57ba59a281f8ff86e95d73860d067fcace7325cf93baedc02175ebd669fe5e99  ./src/app/changes/log.tsx
 cf15d052fe74b8ac21ce81f30df2457afe0ee6e6b869b2cb1b62aeb403df667c  ./src/app/changes/page.tsx
 80b9aa12270aeb7455df53d08ef608d3786ab7a4165d7c7b660b4ab0bd0d039c  ./src/app/contention/page.tsx
+15ff42ed21845e3270d50eab9f707b35873e2b22438a7c2a0458d4e60506ee65  ./src/app/correction-actions.ts
 2156fc924fc3fff9b617c954b30bd22ee7e3098edba62c07434580d92602f331  ./src/app/decisions/actions.ts
 54988fb8fb0bb77d0573a7eebbe847580b2f2d5811aa3463a12dfaf1338439f1  ./src/app/decisions/filters.tsx
 eafc9b23b0ee871258b18df357d7e6752eb016315f54c56c2dab52b448310396  ./src/app/decisions/page.tsx
@@ -104,11 +108,11 @@ aa3db9943246e4317c85bd91714245b8e839413ffbc33911321bd292ecf08b2c  ./src/app/depe
 df44443178e8ba4126a196d1839a82ca4dd982c0fdde0f56ed34f518befc7ca4  ./src/app/dependencies/page.tsx
 2b8ad2d33455a8f736fc3a8ebf8f0bdea8848ad4c0db48a2833bd0f9cd775932  ./src/app/favicon.ico
 9788a21546904bfa47b717bb8df8bfd1b6c7425c3fab51ff42b3e08d85a54d16  ./src/app/field-actions.ts
-2215d3242d5304d9c8d48c8f7a3fe32e5feaf688f153222ababae5ab7e7f12d4  ./src/app/globals.css
+c9910e7f5206cb1ba656f3fbc5d03033dee043864d2c43047f87bde4d90967bb  ./src/app/globals.css
 285a0d4065e4e439fdd4797ee80160dae87f6a9f4364a34ca9338bca4905277e  ./src/app/health-actions.ts
 346b6a451b60684204eb65d54bc41e9f6c441efd13b824dbc139e2e3a5e88e1b  ./src/app/icon.svg
 ac9c1d4feb18b70bce2dd6b17251ee73a559dff1fc7719115e7397c56036c335  ./src/app/initiatives/[id]/edit.tsx
-ee7f15c6b4654edbb7837a1c93c99b28abfd5ea5cf8b9c2240436fb1b9cfb7a3  ./src/app/initiatives/[id]/page.tsx
+a38d6ea80b321c1344e8a6596236a069f640b771063aa8d245f1ba22e66496c7  ./src/app/initiatives/[id]/page.tsx
 a717f3d02776c1629d9cbf9aea6c200579a5bfac4c7cab0ab82e1d7cd53915c5  ./src/app/initiatives/actions.ts
 aa9303551c8269fa8a2713b531ff9559be3515fcedcc8454c5fd3eafb70b287c  ./src/app/initiatives/grouping.tsx
 fe1f6fc6563643528d27d3a9c75090f2425e4eea26facb657b5fec8ee1170b1a  ./src/app/initiatives/list.tsx
@@ -127,7 +131,7 @@ c8e8d9db6219f4d70a5647caff31a075881846d00c7468eed89b525ebc30d9df  ./src/app/page
 6e059decb54aa421a63b5b84d40ab9db4191267beacef4156854f94815e3959d  ./src/app/prioritization/model-panel.tsx
 370672df56ac209e2dbe7560c1fc78c97a6f3a318aaa06ed85a515b569db58d0  ./src/app/prioritization/page.tsx
 6f1425234bd9a53989cca36ccd41ad42e269f9f7b87eafefce69e5e07947aa26  ./src/app/prioritization/ranked-table.tsx
-5a0b2818f75c44908902852e085c79bae3cb722c3dc3ad5406381637c0b9436f  ./src/app/projects/[id]/page.tsx
+731031dd8af8503265fcf0c407c63cc1fdc58f6aa8117b4d351e3d5f5659b961  ./src/app/projects/[id]/page.tsx
 10e12d972966f9e6735496b0f127f7b9e425c3080bb72bc0cce3fb7c0e90bf71  ./src/app/projects/[id]/review-action.tsx
 1cb4d54023f50a5c2278b36b2369401387ee92640724934f0227e0bbd74e0e4a  ./src/app/projects/[id]/review.ts
 9470912fb56c4a56c28d41429842a6c52eb9e66c974a904bfa158c386775b425  ./src/app/projects/[id]/sources-panel.tsx
@@ -145,7 +149,7 @@ bf1e5224d498c28ef8a13b3a325e2716299acb82e42ad5ec03190b3d43961c45  ./src/app/temp
 06417dbcfcb0aa5522f537d9c59190b100fbd47f53d6c67d9fd68432ed2d69d9  ./src/app/verdict-actions.ts
 1aed0fdad7d21366eeff0e058da751c628eb5d547c47145308ddf9d59e5bc505  ./src/app/workstreams/[id]/milestone-actions.ts
 9ac8e033d63ab995e759da03acc64f1a4f8fc51d661d3b8629fc1e0d3c618ef3  ./src/app/workstreams/[id]/milestones.tsx
-7f7c740a78531f936dc2343aad44533340c3584944b4b278377bcfcf404697a9  ./src/app/workstreams/[id]/page.tsx
+3225ba065a6804194cf58d08dd62eb85b82063a6d133bf1a555f0225ca784d83  ./src/app/workstreams/[id]/page.tsx
 e70db6a835bbed7a3806b7e66a83ad99fc0d09427ba1e8e66c947e7c409e7d94  ./src/app/workstreams/list.tsx
 0c0ed11d435a5246aaa44515c92edb2740655ae0d77177456786f1fe9ed55980  ./src/app/workstreams/page.tsx
 81129f6abbb79b4e2c5ce82abf192ad2deec0fd2e918279d2ff83692b7bc2743  ./src/components/active-work.tsx
@@ -153,11 +157,12 @@ de7315aef1a3fb9fb095d68675359413558b580f59b6cfb9d7fef866d8ea1943  ./src/componen
 6419f256e8f38889d26e6d7af7ffe24792f61da64ed357cbc6db90a806763243  ./src/components/brief.tsx
 57f2df073ea313e2c4796fe110b5922329c89d94e4878a2244501d84ba4e416b  ./src/components/dep-graph.tsx
 21246635a980e69de68291510a6b5a239b0968ec9e5e26be798f46316d5eb31c  ./src/components/detail-head.tsx
-cdc32111f4efad5986c144b45edc2850dd07997a075684df7b6d0ae57b579077  ./src/components/detail/body.tsx
-de2bc9e73bb4a8db6d06965b80de303ade69a95c9452118a304c99481ed93d4c  ./src/components/detail/health-tile.tsx
+4301d6673482459a6e715619ec18841ab798811b76cbe7e7d0c2f1a49660cc97  ./src/components/detail/body.tsx
+ecd16531b8a98eb00481e3bea5c2966265727f311979e7cac0fd1983a7266be0  ./src/components/detail/health-tile.tsx
 a35d4b19a8aa584d81cd13a81b20d931b39eec7c48520d6a5eea582da0dc4eb5  ./src/components/detail/icons.tsx
+b56888cacc8c5241b8ee65fb428bfbf2dbd492001c2d24b21113b9badf84bc42  ./src/components/detail/misrouted.tsx
 f3eaf57b1b2ff6a5717edf00169dfaeff8526560b83d218f151139bd7203153a  ./src/components/detail/readiness-tile.tsx
-742a6fe2152d0d0bb53e96b2475ddc9162c4d1ce8ce8658d028dbb78b6f9e0e4  ./src/components/detail/tile.tsx
+6547e7f5d1fa5c12f4e2c31108eb6ba1ad20ac4be3ce05d21e4b22dd9e449b01  ./src/components/detail/tile.tsx
 e812c1ece58525bf1a1a89baa82a28731b1597e72ee8342cff11bf866099aee6  ./src/components/editable.tsx
 0911da0528d0eb2a2c216d1818e328a5f01c655707b25e9d27a47399951ac5ca  ./src/components/health-editable.tsx
 61462df6d93cdc492028f1fecf64defbf2ffd41e04f9f071c2feb69eda5ea65d  ./src/components/home-board.tsx
@@ -176,7 +181,7 @@ db9e03dca67ab92615c733779248ca0093a57442a96e133091feb6e8ef4e35d7  ./src/componen
 b48a4df66188b53efcffba4c3c9e5f6c1507c03936a8d28de01ca98c0b0d288a  ./src/components/ui.tsx
 d8ae9e753c1ecfb50e4298d918b45e326754f6fa92a365781447d568c4a6df8e  ./src/components/updates.tsx
 85e830ae1b7b998ecde1d972fc37fd0e4830200c2c3e5823a6740ffe79438351  ./src/db/client.ts
-82a370e8c8f4efdeb28e2e1d5bcdebd117eb0aa5f6b58aa294dac4949bcd4c75  ./src/db/schema.ts
+9aa10c76dceb058fb89b2598a1b04f0d5d30ae7bbbce3ee02c982cd3825bd838  ./src/db/schema.ts
 2463bb8055b2e3209971eab771eaa790b8adafa0b0c79bd02448a28bda9031c6  ./src/instrumentation.ts
 78c8ec1c9f481cd14b5216bf37043d21e30e74b6e9ddeb3a4353ea7ef42285f1  ./src/lib/auth/config.ts
 4c7467a5dd132f5814cbf6df6ba3730b7cb511d871cbf8deed2b4fdbc3eae373  ./src/lib/auth/current-user.ts
@@ -188,7 +193,7 @@ a083692c9b2537a21666ffa14e4784d1c906f9b2047060d027842158d964d6f9  ./src/lib/brie
 0c4eab13b02acccd03ffdce13d9b92b58d00236e6291aaef2d1f34aebee978f5  ./src/lib/calendar-date.ts
 e4bec636abf25c9354fb46987ba8151c1a6f6909270a7c00cb17cdff4356b80c  ./src/lib/card-order.ts
 dd305d7732b843fbd49747662c3dd9bca03f54bc7302a031c1012420a50f95f5  ./src/lib/dates.ts
-60b8f54917f73e121200710d1dddd94baf4adeb9d0b6376071a0c9040a556252  ./src/lib/detail.ts
+297c693a05fd96616767bd079de28920b65a8a9994a74a148fcf3bd7c3fade02  ./src/lib/detail.ts
 aa0709891bee3416bee5aee6d773be2f05c53ce0434a16d7832f8f30d9e0abc2  ./src/lib/domain.ts
 e85c79678bc3ce3211251254a3167fd930871f4ca89ab2d5863490ac9385731c  ./src/lib/field-rules.ts
 5c13b75859814b56c6dd8663490ca6abd17aac9d29f7b14d8a6d5c575d4ca92b  ./src/lib/graph.ts
@@ -233,4 +238,4 @@ ece87482fcadc871fc402c4035184e7e59fd49fd3323576eab0702eb81c80411  ./tests/nav.te
 d53ba9fafa069e44fadff0ef03fddaa1649f2e95a470b1cfae9662578b95d7bd  ./tests/register.test.ts
 e19b4125630b81eef9d4561f4c934b2313d86a91230c938e9a9a296ef7bac11f  ./tests/reorder.test.ts
 5c51df4c59f4510d8c7dadf07a5c32132228826a3b331da5e286207b4df7ef9c  ./tsconfig.json
-dc3302609aca5458b1534f9d6461adba73acc072518dd6dd3b4e3269fe49b2cf  ./tsconfig.tsbuildinfo
+1fcc33e211f91c679bedb8d0f803528fa9233324c1e43001f9aefe8413ae2078  ./tsconfig.tsbuildinfo
