@@ -50,7 +50,6 @@ export function SortableCards({
   const [held, setHeld] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
 
   // The order the server sent, remembered so a change of sort or level drops
   // any local arrangement instead of applying it to a different list.
@@ -73,19 +72,22 @@ export function SortableCards({
     if (ids === was) return
     setOrder(ids)
     setError(null)
-    setSaving(true)
     void setCardOrder(level, ids)
       .then((r) => setError(r.error ?? null))
       .catch(() => setError('The new order could not be saved.'))
-      .finally(() => setSaving(false))
   }
 
   return (
     <>
-      {draggable && (
+      {/* No instructions. The grip changes the cursor to a hand on hover and
+          carries a title, which is how every other draggable thing on a
+          screen announces itself; a standing sentence above the board was
+          paying for that hint on every visit, forever, including the
+          thousandth. Only a failure gets a line, because a drag that silently
+          did not save is the one thing the reader cannot see for themselves. */}
+      {error && (
         <p className="dragnote">
-          {saving ? 'Saving the order…' : 'Drag a card by its top or side edge to reorder. The order is shared, not just yours.'}
-          {error ? <b> {error}</b> : null}
+          <b>{error}</b>
         </p>
       )}
 
