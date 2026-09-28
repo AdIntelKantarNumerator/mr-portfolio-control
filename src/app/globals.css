@@ -1107,7 +1107,12 @@ a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 /* Detail tiles: the same breathing room the home cards have between them,
    and an inset so a tile edge is never flush with the page edge. */
-.tiles { gap: 16px; padding: 0 2px; margin-bottom: 2px; }
+/* The gap BETWEEN rows is the same 16px as the gap between the columns: the
+   rows were sharing a 2px margin, so the page read as one tall grid of boxes
+   rather than as four rows of two. `gap` only spaces siblings inside a grid —
+   these rows are separate elements, so the space has to be a margin. */
+.tiles { gap: 16px; padding: 0 2px; margin: 0 0 16px; }
+.tiles:last-child { margin-bottom: 2px; }
 /* The right column can hold one tile (a workstream has nothing beneath it) or
    two (updates, then the tier below), and either way it ends level with the
    health tile beside it. A column shorter than its neighbour leaves a slab of
@@ -1178,3 +1183,154 @@ a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }
 .mr-hint { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
 .mr-said { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink); }
 .mr-said.mr-bad { color: var(--crit); }
+
+/* The register tables: action items, dependencies, blockers.
+   One shape for all of them — the columns differ, what a register IS does
+   not, and four layouts meant re-learning the page on every move between
+   them. Named rt- rather than table- because Tailwind owns "table". */
+.rt-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-bottom: 14px; }
+.rt-f { display: grid; gap: 4px; }
+.rt-f > span { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.rt-f select, .rt-f input { font: inherit; font-size: 13px; padding: 6px 9px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--ink); min-width: 150px; }
+.rt-clear { align-self: end; border: 1px solid var(--line-2); background: var(--surface); border-radius: 8px; font: inherit; font-size: 12px; font-weight: 650; color: var(--muted); padding: 6px 10px; cursor: pointer; }
+.rt-clear:hover { border-color: var(--brand); color: var(--brand); }
+.rt-count { align-self: end; padding-bottom: 7px; font-size: 12px; color: var(--muted); }
+.rt-action { margin-left: auto; align-self: end; }
+
+.rt-wrap { border: 1px solid var(--line); border-radius: 13px; overflow: hidden; background: var(--surface); }
+.rt { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.rt th { text-align: left; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--surface-2); white-space: nowrap; }
+.rt td { padding: 10px 12px; border-top: 1px solid var(--line); vertical-align: top; line-height: 1.45; }
+.rt tbody tr:first-child td { border-top: 0; }
+.rt tbody tr:hover { background: var(--surface-2); }
+.rt a { color: var(--brand-2); text-decoration: none; }
+.rt a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.rt-owner { font-weight: 750; white-space: nowrap; }
+.rt-due { white-space: nowrap; }
+.rt-late { color: var(--crit); font-weight: 750; }
+.rt-unknown { color: var(--muted); font-style: italic; }
+.rt-right { text-align: right; white-space: nowrap; }
+.rt-empty { font-size: 14px; color: var(--muted); padding: 18px 2px; }
+.rt-foot { margin: 10px 2px 0; font-size: 12px; color: var(--muted); }
+
+/* An editable assignment cell: reads as text, becomes a select on click. */
+.rt-assign { border: 0; background: none; font: inherit; font-size: inherit; color: inherit; padding: 1px 3px; margin: -1px -3px; border-radius: 6px; cursor: pointer; text-align: left; }
+.rt-assign:hover { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); }
+.rt-assign.rt-unknown { font-style: italic; }
+.rt-assign select { font: inherit; font-size: 13px; }
+
+/* The add button the registers carry in the top right. */
+.rt-add { border: 0; border-radius: 8px; background: var(--brand); color: #fff; font: inherit; font-size: 13px; font-weight: 650; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
+.rt-add:disabled { opacity: .6; cursor: default; }
+.rt-ref { display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: .04em; color: var(--muted); border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 5px; margin-right: 8px; }
+.rt-do { display: inline-flex; gap: 6px; }
+.rt-do form { display: contents; }
+.rt-do button { border: 1px solid var(--line-2); background: var(--surface); border-radius: 7px; font: inherit; font-size: 11.5px; font-weight: 650; color: var(--muted); padding: 4px 9px; cursor: pointer; }
+.rt-do button:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+.rt-do button:disabled { opacity: .5; cursor: default; }
+.mr-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.mr-grid > span { display: block; }
+.rt-status { font: inherit; font-size: 12.5px; padding: 3px 6px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--surface); color: var(--ink); }
+.rt-sub { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.rt-actions { display: inline-flex; gap: 8px; align-items: center; }
+
+/* Discussions: what keeps coming up and has no owner yet. */
+.disc { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.disc > li { padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.disc > li:last-child { padding-bottom: 0; border-bottom: 0; }
+.disc-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 9px; }
+.disc-head b { font-size: 14.5px; font-weight: 750; }
+.disc-at { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 6px; text-decoration: none; }
+.disc-at:hover { border-color: var(--brand); color: var(--brand); }
+.disc-head em { font-style: normal; font-size: 11.5px; color: var(--muted); margin-left: auto; }
+.disc > li > p { margin: 5px 0 0; font-size: 13.5px; line-height: 1.55; color: var(--muted); max-width: 95ch; }
+
+/* The readiness matrix. Cells are buttons: the number you are looking at when
+   you notice it is wrong is the number you should be able to fix. */
+.rx-wrap { overflow-x: auto; }
+.rx th em { display: block; font-style: normal; font-size: 9.5px; font-weight: 700; color: var(--line-2); margin-top: 2px; }
+.rx td { vertical-align: middle; }
+.rx-name { min-width: 220px; }
+.rx-status { color: var(--muted); white-space: nowrap; font-size: 12.5px; }
+.rx-cell { display: inline-block; min-width: 52px; text-align: center; border: 1px solid transparent; border-radius: 7px; font: inherit; font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; padding: 4px 8px; cursor: pointer; }
+.rx-cell:disabled { cursor: default; opacity: .55; }
+.rx-flat { cursor: default; }
+.rx-good { background: color-mix(in srgb, var(--c5) 16%, transparent); color: var(--c5); border-color: color-mix(in srgb, var(--c5) 35%, transparent); }
+.rx-warn { background: color-mix(in srgb, var(--c2) 16%, transparent); color: var(--c2); border-color: color-mix(in srgb, var(--c2) 35%, transparent); }
+.rx-crit { background: color-mix(in srgb, var(--crit) 14%, transparent); color: var(--crit); border-color: color-mix(in srgb, var(--crit) 32%, transparent); }
+.rx-none { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
+.rx-cell:not(:disabled):hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 28%, transparent); }
+
+.rx-group { margin-top: 14px; }
+.rx-group h4 { margin: 0 0 6px; font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.rx-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.rx-items li { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+.rx-items li.rx-busy { opacity: .6; }
+.rx-items span { flex: 1; min-width: 0; }
+.rx-items span.rx-done { color: var(--muted); text-decoration: line-through; }
+.rx-items em { font-style: normal; font-size: 10.5px; color: var(--line-2); margin-left: 6px; }
+.rx-box { width: 18px; height: 18px; flex: none; border: 1.6px solid var(--line-2); border-radius: 5px; background: var(--surface); cursor: pointer; display: grid; place-items: center; color: #fff; font-size: 11px; padding: 0; }
+.rx-box:hover { border-color: var(--brand); }
+.rx-box.on { background: var(--c5); border-color: var(--c5); }
+.rx-na { flex: none; border: 1px solid var(--line-2); background: var(--surface); border-radius: 6px; font: inherit; font-size: 10.5px; font-weight: 700; color: var(--muted); padding: 2px 6px; cursor: pointer; }
+.rx-na.on { background: var(--c1); border-color: var(--c1); color: #fff; }
+.rx-err { color: var(--crit); }
+
+/* The timeline. One row per initiative, project or workstream; inside each,
+   a bar per child, and every milestone from underneath rolled up onto it. */
+.tl { border: 1px solid var(--line); border-radius: 13px; background: var(--surface); overflow: hidden; }
+.tl-head { display: flex; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+.tl-names { width: 240px; flex: none; }
+.tl-cols { flex: 1; display: flex; min-width: 0; }
+.tl-col { flex: 1; min-width: 0; padding: 7px 4px; text-align: center; border-left: 1px solid var(--line); }
+.tl-col b { display: block; font-size: 10.5px; font-weight: 700; color: var(--muted); }
+.tl-col em { display: block; font-style: normal; font-size: 9px; font-weight: 800; letter-spacing: .05em; color: var(--line-2); }
+.tl-col.q { border-left-color: var(--line-2); }
+
+.tl-body { display: flex; }
+.tl-body .tl-names { border-right: 1px solid var(--line); }
+.tl-name { position: relative; display: flex; align-items: center; padding: 0 10px 0 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.tl-name:last-child { border-bottom: 0; }
+.tl-name a { color: var(--ink); text-decoration: none; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-name a:hover { color: var(--brand); }
+.tl-name.held { opacity: .45; }
+.tl-name.over-above::before, .tl-name.over-below::after { content: ''; position: absolute; left: 0; right: 0; height: 3px; background: var(--brand); z-index: 4; }
+.tl-name.over-above::before { top: -1px; }
+.tl-name.over-below::after { bottom: -1px; }
+/* To the left of the name, exactly where a hand reaches for a row. */
+.tl-grip { position: absolute; left: 0; top: 0; bottom: 0; width: 14px; cursor: grab; background: linear-gradient(var(--line-2), var(--line-2)) center / 2px 60% no-repeat; opacity: .5; }
+.tl-grip:hover { opacity: 1; background-color: color-mix(in srgb, var(--brand) 12%, transparent); }
+.tl-grip:active { cursor: grabbing; }
+
+.tl-plot { position: relative; flex: 1; min-width: 0; }
+.tl-grid { position: absolute; inset: 0; display: flex; }
+.tl-grid span { flex: 1; border-left: 1px solid var(--line); }
+.tl-grid span.q { border-left-color: var(--line-2); }
+.tl-today { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--brand); opacity: .55; z-index: 3; }
+.tl-row { position: absolute; left: 0; right: 0; border-bottom: 1px solid var(--line); }
+.tl-row:last-child { border-bottom: 0; }
+
+.tl-bar { position: absolute; text-decoration: none; height: 22px; border-radius: 6px; display: flex; align-items: center; padding: 0 7px; overflow: hidden; }
+.tl-bar em { font-style: normal; font-size: 11px; font-weight: 650; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Green on track, red in trouble, blue finished. There is deliberately no
+   fourth colour for "nothing known" — see lib/timeline-model.ts. */
+.tl-bar.tl-good { background: var(--c5); }
+.tl-bar.tl-crit { background: var(--crit); }
+.tl-bar.tl-done { background: var(--c1); }
+.tl-bar.clip-s { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.tl-bar.clip-e { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.tl-bar:hover { filter: brightness(1.08); }
+
+.tl-mark { position: absolute; width: 13px; height: 13px; margin-left: -6.5px; transform: rotate(45deg); border-radius: 2px; border: 1.5px solid var(--surface); z-index: 2; }
+.tl-mark.tl-good { background: var(--c5); }
+.tl-mark.tl-crit { background: var(--crit); }
+.tl-mark.tl-done { background: var(--c1); }
+
+.tl-links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
+.tl-link { fill: none; stroke: var(--line-2); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.tl-link.late { stroke: var(--crit); stroke-dasharray: none; stroke-width: 2; }
+
+.tl-toggle { display: flex; align-items: center; gap: 6px; align-self: end; padding-bottom: 7px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+.tl-toggle input { accent-color: var(--brand); }
+.tile-add { border: 1px solid var(--line-2); background: var(--surface); border-radius: 7px; font: inherit; font-size: 11px; font-weight: 700; color: var(--muted); padding: 3px 8px; cursor: pointer; }
+.tile-add:hover { border-color: var(--brand); color: var(--brand); }
