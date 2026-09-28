@@ -28,6 +28,8 @@ import {
   workstreams,
 } from '@/db/schema'
 import { ENDED_PROJECT_STATUS } from './domain'
+import { getCardOrder } from './card-order'
+import { blockedAtOrBelow } from './blocked'
 
 // The vocabulary lives in home-types.ts, which imports nothing, so client
 // components can use it without dragging this module's database import into
@@ -247,6 +249,20 @@ export const getHomeCards = cache(async (
     projByInitiative.set(p.initiativeId, [...(projByInitiative.get(p.initiativeId) ?? []), p])
   }
 
+  /**
+   * Is this project standing still — itself, or anything inside it?
+   *
+   * A blocker is filed where the work is stuck, which is a workstream. Asking
+   * only whether the project row carries one says "on track" about a project
+   * whose every workstream is jammed.
+   */
+  const blockedProject = (projectId: string): boolean =>
+    blockedAtOrBelow(
+      projectId,
+      (wsByProject.get(projectId) ?? []).map((w) => w.id),
+      blockedIds,
+    )
+
   const obsFor = new Map<string, (typeof obs)[number]>()
   for (const o of obs) {
     const key = `${o.entityType}:${o.entityId}`
@@ -431,10 +447,19 @@ export const getHomeCards = cache(async (
       // In-progress work splits on whether anything is standing in its way.
       // `blockedIds` is every entity carrying an open blocker, computed once
       // for the whole board rather than per card.
+      //
+      // "In its way" means anywhere at or beneath it, which is the fix for a
+      // bar that read 6 projects on track under an initiative flagged Blocked
+      // with fourteen open blockers. Blockers are filed against the workstream
+      // where the work is stuck, almost never against the project above it, so
+      // asking only whether the project row itself carried one made a project
+      // look fine while everything inside it was jammed — and it made the two
+      // halves of the same card disagree in public.
       const byStatus = new Map<string, MixMember[]>()
       for (const b of below as Array<MixMember & { status: string }>) {
+        const stuck = level === 'initiative' ? blockedProject(b.id) : blockedIds.has(b.id)
         const key = isInProgress(b.status)
-          ? blockedIds.has(b.id)
+          ? stuck
             ? IN_PROGRESS_BLOCKED
             : IN_PROGRESS_OK
           : b.status
@@ -516,15 +541,32 @@ export const getHomeCards = cache(async (
 
   // Most active first by default. A silent piece of work sinks and is
   // flagged, rather than sitting at the top because its name starts with A.
+  //
+  // Custom is this reader's own arrangement, if they have one. Two things it
+  // has to get right, and both are about a board that has changed since they
+  // last dragged it:
+  //
+  //   - a card they have never placed goes to the END, not to position zero.
+  //     A new project appearing silently at the top of somebody's hand-made
+  //     order would look like the app had rearranged their board.
+  //   - a card in their saved list that no longer exists is simply absent;
+  //     the ones after it keep their relative order.
+  //
+  // With no saved arrangement at all, it falls back to `sort_order` — the
+  // column that has always carried "the order these read in" — so Custom
+  // opens as something to rearrange rather than as an empty-looking board.
   const rank = new Map(rows.map((r) => [r.id, r.rank]))
+  const mine = sort === 'custom' ? await getCardOrder(level) : null
+  const placed = new Map(mine?.map((id, ix) => [id, ix]))
+  const customRank = (c: HomeCard) => (mine ? (placed.get(c.id) ?? Number.MAX_SAFE_INTEGER) : (rank.get(c.id) ?? 0))
 
   return wanted.sort((a, b) => {
     if (sort === 'name') return a.name.localeCompare(b.name)
     if (sort === 'quiet') return busy(a) - busy(b) || a.name.localeCompare(b.name)
-    // Anything never dragged has rank 0, so a board nobody has arranged
-    // falls back to alphabetical rather than to insertion order, which looks
-    // random to a reader.
-    if (sort === 'custom') return (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0) || a.name.localeCompare(b.name)
+    // The name tiebreak matters for the unplaced ones, which all share the
+    // same rank: without it their order among themselves is whatever the
+    // database happened to return.
+    if (sort === 'custom') return customRank(a) - customRank(b) || a.name.localeCompare(b.name)
     return busy(b) - busy(a) || a.name.localeCompare(b.name)
   })
 })
