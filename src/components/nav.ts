@@ -6,18 +6,18 @@
  * They are grouped here by the question somebody arrived with, not by what
  * the data is:
  *
- *   Home          Where are we. The one everybody opens first.
- *   The work      The three tiers and the calendar they sit on.
- *   Needs a call  Everything waiting on a person to decide or do something.
- *   Inbound       Work that has not started and is asking to.
- *   Reference     True, occasionally needed, never urgent.
- *   Activity      The log, last and unlabelled.
+ *   Home              Where are we. The one everybody opens first.
+ *   The work          The three tiers and the calendar they sit on.
+ *   Work in progress  Everything waiting on a person to decide or do something.
+ *   Inbound           Work that has not started and is asking to.
+ *   Reference         True, occasionally needed, never urgent.
+ *   Activity          The log, last and unlabelled.
  *
- * "Needs a call" is the group that earns its place. Blockers, decisions,
- * action items, dependencies and readiness gates are four different tables
- * and one question — what is stuck on a human — and having them adjacent is
- * the difference between finding the stuck thing and remembering to look for
- * it.
+ * "Work in progress" is the group that earns its place. Blockers, action
+ * items, dependencies, readiness gates and the topics that keep coming up are
+ * five different tables and one question — what is stuck on a human — and
+ * having them adjacent is the difference between finding the stuck thing and
+ * remembering to look for it.
  *
  * Kept separate from shell.tsx so the structure can be read without reading
  * the layout, and changed without touching it.
@@ -74,12 +74,18 @@ export const NAV: NavSection[] = [
   },
   {
     id: 'decide',
-    label: 'Needs a call',
+    label: 'Work in progress',
     items: [
-      { href: '/decisions', label: 'Register', icon: IconRegister, hint: 'Decisions and blockers' },
+      { href: '/blockers', label: 'Blockers', icon: IconRegister, hint: 'What is stuck, and whose it is' },
       { href: '/actions', label: 'Action items', icon: IconActions, hint: 'What people said they would do' },
       { href: '/dependencies', label: 'Dependencies', icon: IconDependencies },
       { href: '/readiness', label: 'Readiness', icon: IconReadiness, hint: 'Gates before a launch' },
+      {
+        href: '/discussions',
+        label: 'Discussions',
+        icon: IconConversations,
+        hint: 'What keeps coming up and has no owner yet',
+      },
     ],
   },
   {
@@ -95,7 +101,6 @@ export const NAV: NavSection[] = [
     label: 'Reference',
     items: [
       { href: '/contention', label: 'People', icon: IconPeople, hint: 'Who is being pulled in two directions' },
-      { href: '/sources', label: 'Conversations', icon: IconConversations, hint: 'Where the evidence came from' },
       { href: '/templates', label: 'Templates', icon: IconTemplates },
     ],
   },

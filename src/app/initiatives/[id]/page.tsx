@@ -17,6 +17,7 @@ import { MilestoneEditor } from '@/components/milestone-editor'
 import { milestoneRows } from '@/lib/milestone-rows'
 import { getDetail } from '@/lib/detail'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { addContext } from '@/lib/add-context'
 import { EditInitiative } from './edit'
 
 export const dynamic = 'force-dynamic'
@@ -43,11 +44,12 @@ export default async function InitiativeDetailPage({ params }: { params: Promise
   const [row] = await db.select().from(initiatives).where(eq(initiatives.id, id)).limit(1)
   if (!row) notFound()
 
-  const [mine, data, plan, user] = await Promise.all([
+  const [mine, data, plan, user, adding] = await Promise.all([
     db.select().from(projects).where(eq(projects.initiativeId, id)).orderBy(asc(projects.name)),
     getDetail('initiative', id),
     milestoneRows('initiative', id),
     getCurrentUser(),
+    addContext(),
   ])
 
   const streams = mine.length
@@ -99,6 +101,7 @@ export default async function InitiativeDetailPage({ params }: { params: Promise
         data={data}
         canEdit={Boolean(user.personId)}
         entity={{ entityType: 'initiative', entityId: id }}
+        adding={{ level: 'initiative', entityId: id, ...adding }}
       />
 
       <EditInitiative
