@@ -46,6 +46,12 @@ const MS_COLOR: Record<string, string> = {
   planning: 'var(--line-2)',
   // workstream and project statuses
   completed: 'var(--c1)',
+  // In-progress work, split by whether anything is in its way. Red here is
+  // the one place it is earned on this bar: somebody has raised a blocker and
+  // it is still open, which is precisely "needs attention".
+  in_progress_on_track: 'var(--c5)',
+  in_progress_blocked: 'var(--c3)',
+  // Kept for any row whose blocker state could not be determined.
   in_progress: 'var(--c5)',
   active: 'var(--c5)',
   paused: 'var(--c2)',

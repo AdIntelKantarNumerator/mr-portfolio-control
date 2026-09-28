@@ -121,3 +121,42 @@ export function edgeColor(
   if (rag === 'green') return 'var(--good)'
   return null
 }
+
+/**
+ * A milestone name cut down to a few words, for the caption under a ring.
+ *
+ * Milestone names in this portfolio run long and front-load the context -
+ * "Insight Studio - Client Launch (MVP)", "Board sign-off on the Q1 shape".
+ * The distinguishing part is almost always at the end, but truncating from
+ * the left reads as a bug, so this drops the parts that carry no information
+ * instead: the entity name before a dash, bracketed asides, and the small
+ * words that only exist to join the others.
+ *
+ * It is deliberately not clever. Anything it cannot shorten is returned with
+ * an ellipsis, and the full name is on the row above and in the title
+ * attribute, so a bad abbreviation costs nothing.
+ */
+const FILLER = new Set([
+  'a', 'an', 'the', 'of', 'for', 'to', 'on', 'in', 'at', 'by', 'and', 'with', 'from', 'into', 'our',
+])
+
+export function shortMilestone(name: string, words = 3): string {
+  // "Project - Thing that matters" keeps the part after the last dash, which
+  // is the part that is not already the row's own title.
+  const tail = name.split(/\s+[-–—]\s+/).pop() ?? name
+  const cleaned = tail
+    .replace(/\([^)]*\)/g, ' ')  // bracketed asides
+    .replace(/[^\p{L}\p{N}+/&.'\u2019\s-]/gu, ' ')  // apostrophes stay: "Nat'l" is one word
+    .trim()
+
+  const parts = cleaned.split(/\s+/).filter(Boolean)
+  // Filler only goes if something survives it; "State of the Union" should
+  // not become "State Union" when the whole name is four words of filler.
+  const meaty = parts.filter((w, i) => i === 0 || !FILLER.has(w.toLowerCase()))
+  const use = (meaty.length ? meaty : parts).slice(0, words)
+  if (use.length === 0) return name.slice(0, 24)
+
+  const out = use.join(' ')
+  const dropped = (meaty.length ? meaty : parts).length > use.length
+  return dropped ? `${out}…` : out
+}

@@ -57,9 +57,28 @@ export interface MixGroup {
  * Statuses not listed here keep their relative order after the ones that are,
  * so a new status added to the lifecycle appears rather than vanishing.
  */
+/**
+ * In-progress work, split by whether anything is standing in its way.
+ *
+ * "In progress" was the biggest segment on most cards and said the least: a
+ * workstream shipping cleanly and one that has been stuck behind a blocker
+ * for three weeks are both in progress, and the bar coloured them the same
+ * green. The split is on open blockers, which is the same evidence `healthOf`
+ * uses, so the bar and the card's health cannot disagree.
+ */
+export const IN_PROGRESS_OK = 'in_progress_on_track'
+export const IN_PROGRESS_BLOCKED = 'in_progress_blocked'
+
+/** The statuses that mean work is actively happening, whatever the tier calls it. */
+export function isInProgress(status: string): boolean {
+  return status === 'in_progress' || status === 'active'
+}
+
 export const MIX_ORDER = [
   'complete',
   'completed',
+  IN_PROGRESS_OK,
+  IN_PROGRESS_BLOCKED,
   'in_progress',
   'on_track',
   'active',
@@ -90,6 +109,8 @@ const STATUS_WORDS: Record<string, string> = {
   complete: 'complete',
   completed: 'completed',
   in_progress: 'in progress',
+  in_progress_on_track: 'in progress \u2013 on track',
+  in_progress_blocked: 'in progress \u2013 blocked',
   on_track: 'on track',
   at_risk: 'at risk',
   blocked: 'blocked',

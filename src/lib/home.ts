@@ -48,7 +48,18 @@ export {
   type Sort,
   type HealthFilter,
 } from './home-types'
-import { mixRank, statusLabel, type HealthFilter, type Level, type MixGroup, type MixMember, type Sort } from './home-types'
+import {
+  IN_PROGRESS_BLOCKED,
+  IN_PROGRESS_OK,
+  isInProgress,
+  mixRank,
+  statusLabel,
+  type HealthFilter,
+  type Level,
+  type MixGroup,
+  type MixMember,
+  type Sort,
+} from './home-types'
 
 export interface Signal {
   kind: 'blocker' | 'decision' | 'action'
@@ -213,6 +224,15 @@ export const getHomeCards = cache(async (
   ])
 
   const personName = new Map(peeps.map((p) => [p.id, p.name]))
+
+  // Everything carrying an open blocker, by entity id. Used to split the
+  // in-progress segment of the mix bar, and computed once here rather than
+  // per card because every card would otherwise rescan the same table.
+  const blockedIds = new Set(
+    decs
+      .filter((d) => d.kind === 'blocker' && d.status !== 'resolved' && d.status !== 'closed' && d.entityId)
+      .map((d) => d.entityId as string),
+  )
 
   // Which workstreams sit under which project, and which projects under which
   // initiative — the only two joins the whole page needs.
@@ -400,9 +420,17 @@ export const getHomeCards = cache(async (
                 href: `/workstreams/${r.id}`,
               }))
 
+      // In-progress work splits on whether anything is standing in its way.
+      // `blockedIds` is every entity carrying an open blocker, computed once
+      // for the whole board rather than per card.
       const byStatus = new Map<string, MixMember[]>()
       for (const b of below as Array<MixMember & { status: string }>) {
-        byStatus.set(b.status, [...(byStatus.get(b.status) ?? []), { id: b.id, name: b.name, href: b.href }])
+        const key = isInProgress(b.status)
+          ? blockedIds.has(b.id)
+            ? IN_PROGRESS_BLOCKED
+            : IN_PROGRESS_OK
+          : b.status
+        byStatus.set(key, [...(byStatus.get(key) ?? []), { id: b.id, name: b.name, href: b.href }])
       }
       const mix: MixGroup[] = [...byStatus.entries()]
         .map(([status, members]) => ({ status, label: statusLabel(status), members }))
