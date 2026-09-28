@@ -26,8 +26,10 @@ import {
   people,
   projects,
   workstreams,
+  dependencies,
 } from '@/db/schema'
 import { ENDED_PROJECT_STATUS } from './domain'
+import { lateDependencies } from './dependency-risk'
 import { getCardOrder } from './card-order'
 import { blockedAtOrBelow } from './blocked'
 
@@ -213,7 +215,7 @@ export const getHomeCards = cache(async (
 ): Promise<HomeCard[]> => {
   const now = Date.now()
 
-  const [inits, projs, wss, ms, obs, decs, acts, links, peeps] = await Promise.all([
+  const [inits, projs, wss, ms, obs, decs, acts, links, peeps, deps] = await Promise.all([
     db.select().from(initiatives),
     db.select().from(projects),
     db.select().from(workstreams),
@@ -223,6 +225,7 @@ export const getHomeCards = cache(async (
     db.select().from(actionItems).where(eq(actionItems.status, 'open')),
     db.select().from(actionItemLinks),
     db.select().from(people),
+    db.select().from(dependencies),
   ])
 
   const personName = new Map(peeps.map((p) => [p.id, p.name]))
@@ -235,6 +238,23 @@ export const getHomeCards = cache(async (
       .filter((d) => d.kind === 'blocker' && d.status !== 'resolved' && d.status !== 'closed' && d.entityId)
       .map((d) => d.entityId as string),
   )
+
+  /*
+   * A dependency with a date somebody is about to miss is a blocker too.
+   *
+   * The required date used to sit on the dependency row and be read by
+   * nothing: it stayed open and green while the date went past. The work that
+   * has to MOVE is the delivering end, so that is what goes red — marking the
+   * waiting end would light up a team who cannot do anything about it.
+   */
+  const plans = new Map<string, { targetDate: Date | null; done: boolean }>()
+  for (const p of projs) plans.set(`project:${p.id}`, { targetDate: p.targetDate, done: ENDED.has(p.status) })
+  for (const w of wss) plans.set(`workstream:${w.id}`, { targetDate: w.targetDate, done: ENDED.has(w.status) })
+  for (const i of inits) plans.set(`initiative:${i.id}`, { targetDate: i.targetDate, done: i.status === 'completed' || i.status === 'canceled' })
+  for (const m of ms) plans.set(`milestone:${m.id}`, { targetDate: m.targetDate, done: m.status === 'complete' })
+
+  const late = lateDependencies(deps, (type, id) => plans.get(`${type}:${id}`) ?? null)
+  for (const id of late.keys()) blockedIds.add(id)
 
   // Which workstreams sit under which project, and which projects under which
   // initiative — the only two joins the whole page needs.
