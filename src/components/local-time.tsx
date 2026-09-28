@@ -27,37 +27,13 @@
  * back a day earlier. Use `calendarDate` below for those.
  */
 
-/**
- * A date somebody typed, formatted without ever being converted.
- *
- * "14 November" means the fourteenth wherever it is read. Pushing it through
- * a timezone — which is right for an event that happened at an instant —
- * turns midnight UTC into the 13th for every reader west of Greenwich, so a
- * date somebody typed comes back a day earlier.
- *
- * It lives here beside `LocalTime` on purpose: the two rules are opposites,
- * and keeping them apart is how one of them quietly gets applied to the
- * wrong kind of value.
+/*
+ * `calendarDate` and `calendarRange` live in lib/calendar-date.ts. They are
+ * deliberately NOT re-exported from here: anything exported from a
+ * 'use client' module is a client reference, so a server component calling
+ * one through this file would fail exactly as it did before the move. Import
+ * them from '@/lib/calendar-date'.
  */
-export function calendarDate(iso: string | null | undefined, opts: { year?: boolean } = {}): string | null {
-  if (!iso) return null
-  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
-  if (!y || !m || !d) return iso.slice(0, 10)
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    ...(opts.year === false ? {} : { year: 'numeric' }),
-    timeZone: 'UTC',
-  }).format(new Date(Date.UTC(y, m - 1, d)))
-}
-
-/** `startDate → targetDate`, with an em dash for either end that is missing. */
-export function calendarRange(start: string | null, target: string | null): string {
-  const a = calendarDate(start, { year: false })
-  const b = calendarDate(target, { year: false })
-  if (!a && !b) return '—'
-  return `${a ?? '—'} → ${b ?? '—'}`
-}
 
 export interface LocalTimeProps {
   /** An ISO string. Dates are serialised before they cross into the client. */
@@ -68,10 +44,19 @@ export interface LocalTimeProps {
   year?: boolean
   /** What to render when there is no timestamp. */
   empty?: string
+  /**
+   * Append the zone abbreviation - EDT, GMT+2, JST.
+   *
+   * On a page of timestamps this belongs on the row rather than in a note at
+   * the top: a note is read once and then scrolled past, and the reader who
+   * needs to know whether 1:43 PM is their afternoon is the one arriving at
+   * row forty from a link.
+   */
+  zone?: boolean
   className?: string
 }
 
-export function LocalTime({ at, show = 'datetime', year = false, empty = '—', className }: LocalTimeProps) {
+export function LocalTime({ at, show = 'datetime', year = false, empty = '—', zone = false, className }: LocalTimeProps) {
   if (!at) return <span className={className}>{empty}</span>
 
   const d = new Date(at)
@@ -84,30 +69,15 @@ export function LocalTime({ at, show = 'datetime', year = false, empty = '—', 
         ? { month: 'short', day: 'numeric', ...(year ? { year: 'numeric' } : {}) }
         : { month: 'short', day: 'numeric', ...(year ? { year: 'numeric' } : {}), hour: 'numeric', minute: '2-digit' }
 
+  // `timeZoneName: 'short'` is what turns "1:43 PM" into "1:43 PM EDT", and
+  // it is correct for the date in question rather than for today - a row from
+  // January says EST while one from July says EDT, which is the whole point of
+  // printing it.
+  const withZone: Intl.DateTimeFormatOptions = zone ? { ...opts, timeZoneName: 'short' } : opts
+
   return (
     <time dateTime={d.toISOString()} className={className} suppressHydrationWarning>
-      {new Intl.DateTimeFormat('en-US', opts).format(d)}
+      {new Intl.DateTimeFormat('en-US', withZone).format(d)}
     </time>
-  )
-}
-
-/**
- * The reader's timezone, named, for a footnote.
- *
- * Same suppression for the same reason: on the server this is UTC and in the
- * browser it is wherever they are.
- */
-export function LocalZone({ className }: { className?: string }) {
-  let zone = 'UTC'
-  try {
-    zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-  } catch {
-    // A browser with no zone information is rare and not worth a fallback
-    // that says something less true than "UTC".
-  }
-  return (
-    <span className={className} suppressHydrationWarning>
-      {zone}
-    </span>
   )
 }

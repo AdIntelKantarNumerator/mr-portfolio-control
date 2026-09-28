@@ -14,7 +14,7 @@
  * Both happen here, from one Date, so the heading and the time can never
  * disagree.
  */
-import { LocalTime, LocalZone } from '@/components/local-time'
+import { LocalTime } from '@/components/local-time'
 import { Card, Chip, Empty, Muted, type Tone } from '@/components/ui'
 
 export interface ChangeEntry {
@@ -76,10 +76,6 @@ export function ChangeLog({ entries }: { entries: ChangeEntry[] }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <Muted>
-        Times are shown in <LocalZone />.
-      </Muted>
-
       {[...byDay.values()].map((day) => (
         <div key={day.label} suppressHydrationWarning>
           <div className="mb-2 flex items-baseline gap-2">
@@ -91,7 +87,7 @@ export function ChangeLog({ entries }: { entries: ChangeEntry[] }) {
             {day.items.map((e) => (
               <Card key={e.id}>
                 <div className="flex flex-wrap items-center gap-2">
-                  <LocalTime at={e.at} show="time" className="text-[11px] tabular-nums opacity-70" />
+                  <LocalTime at={e.at} show="time" zone className="text-[11px] tabular-nums opacity-70" />
                   <Chip tone={KIND_TONE[e.kind] ?? 'slate'}>{e.kind}</Chip>
                   <span className="text-[12px] font-semibold">{e.actor}</span>
                 </div>
