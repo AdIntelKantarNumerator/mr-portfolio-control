@@ -1,292 +1,146 @@
 /**
- * Workstream readiness against the documented lifecycle.
+ * Is the documented process actually being followed.
  *
- * Two views of the same fact, deliberately in this order. The matrix answers
- * "where is this workstream in the process"; the roll-up under it answers "which
- * step of the process is the portfolio skipping". The second question is the
- * one a program lead can actually act on — a missing Program Review slide on
- * six workstreams is one conversation, not six.
+ * The matrix, and nothing else. The four counter tiles counted what the matrix
+ * shows; the two paragraphs explained a rule the matrix does not depend on
+ * anybody remembering; the roll-up table under it asked a second question on a
+ * screen that already had one.
+ *
+ * WHY IT READS AT THREE LEVELS
+ *
+ * Readiness is recorded per workstream, which is where the work is. But the
+ * conversation is usually about a project or an initiative — "is GPC ready" —
+ * and answering it meant reading twelve rows and adding up. A project row is
+ * the sum of its workstreams, and clicking one of its cells opens the items of
+ * each workstream beneath it, named, so the level you can see the problem at is
+ * also the level you can fix it from.
  */
-import Link from 'next/link'
-import {
-  Card,
-  CardHeading,
-  Chip,
-  Empty,
-  Kicker,
-  Muted,
-  Pill,
-  ProgressBar,
-  SectionNote,
-  Stat,
-  type Tone,
-} from '@/components/ui'
+import { asc } from 'drizzle-orm'
+import { db } from '@/db/client'
+import { initiatives, projects, workstreams } from '@/db/schema'
+import { Kicker } from '@/components/ui'
 import { label } from '@/lib/domain'
-import { getPortfolio } from '@/lib/portfolio'
-import {
-  PHASE_LABEL,
-  gapsByItem,
-  getReadiness,
-  isActive,
-  scoreItems,
-  type ReadinessScore,
-  type ScorableProject,
-} from '@/lib/readiness'
+import { getReadiness, statusFor } from '@/lib/readiness'
+import { ReadinessMatrix, type GateHead, type ItemCell, type Level, type MatrixRow } from './matrix'
 
 export const metadata = { title: 'Readiness · Portfolio Control Room' }
 
-// Readiness is edited from the per-workstream screen; a cached render would show a
-// program review a checklist that has already moved.
+// Edited from here and from the per-workstream screen; a cached render would
+// show somebody a checklist that has already moved.
 export const dynamic = 'force-dynamic'
 
-/** Rows are grouped by how much the answer matters, not alphabetically. */
+const LEVELS: Level[] = ['initiative', 'project', 'workstream']
+const isLevel = (v: string | undefined): v is Level => LEVELS.includes(v as Level)
+
+/** Grouped by how much the answer matters, not alphabetically. */
 const STATUS_RANK: Record<string, number> = {
   in_progress: 0,
+  active: 0,
   planned: 1,
   paused: 2,
   backlog: 3,
   completed: 4,
 }
 
-/**
- * Completion colour.
- *
- * Nothing started reads as slate rather than red: a backlog workstream that has
- * not begun its kick-off has not failed at anything, and colouring it as a
- * failure is how a screen full of red stops being read at all.
- */
-function toneFor(score: ReadinessScore): Tone {
-  if (score.total === 0) return 'slate'
-  if (score.done === 0) return 'slate'
-  if (score.pct === 100) return 'green'
-  if (score.pct >= 67) return 'amber'
-  return 'red'
-}
+export default async function ReadinessPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ level?: string }>
+}) {
+  const { level: raw } = await searchParams
+  const level: Level = isLevel(raw) ? raw : 'workstream'
 
-function Cell({ score, title }: { score: ReadinessScore; title: string }) {
-  return (
-    <span className={`chip tone-${toneFor(score)} tabular-nums`} title={title}>
-      {score.done}/{score.total}
-    </span>
-  )
-}
+  const [model, inits, projs, wss] = await Promise.all([
+    getReadiness(),
+    db.select().from(initiatives).orderBy(asc(initiatives.name)),
+    db.select().from(projects).orderBy(asc(projects.name)),
+    db.select().from(workstreams).orderBy(asc(workstreams.name)),
+  ])
 
-export default async function ReadinessPage() {
-  const [p, model] = await Promise.all([getPortfolio(), getReadiness()])
+  const live = wss.filter((w) => w.status !== 'canceled')
 
-  const rows: ScorableProject[] = p.workstreams
-    .filter((pr) => pr.status !== 'canceled')
-    .map((pr) => ({ id: pr.id, key: pr.key, name: pr.name, status: pr.status }))
-    .sort((a, b) => {
-      const ra = STATUS_RANK[a.status] ?? 9
-      const rb = STATUS_RANK[b.status] ?? 9
-      return ra === rb ? a.name.localeCompare(b.name) : ra - rb
-    })
+  // Which workstreams roll up into each row at this level. Readiness only
+  // exists on a workstream, so every row is ultimately a set of them.
+  const beneath = (id: string): typeof live => {
+    if (level === 'workstream') return live.filter((w) => w.id === id)
+    if (level === 'project') return live.filter((w) => w.projectId === id)
+    const mine = new Set(projs.filter((p) => p.initiativeId === id).map((p) => p.id))
+    return live.filter((w) => w.projectId && mine.has(w.projectId))
+  }
 
-  const overall = new Map(rows.map((r) => [r.id, scoreItems(model, r.id, model.items)]))
-  const active = rows.filter(isActive)
-  const gaps = gapsByItem(model, rows)
+  const source =
+    level === 'initiative'
+      ? inits.filter((i) => i.status !== 'canceled').map((i) => ({ id: i.id, name: i.name, status: i.status, href: `/initiatives/${i.id}` }))
+      : level === 'project'
+        ? projs.filter((p) => p.status !== 'canceled').map((p) => ({ id: p.id, name: p.name, status: p.status, href: `/projects/${p.id}` }))
+        : live.map((w) => ({ id: w.id, name: w.name, status: w.status, href: `/readiness/${w.id}` }))
 
-  const fullyReady = active.filter((r) => overall.get(r.id)!.pct === 100)
-  const untouched = active.filter((r) => overall.get(r.id)!.done === 0)
-  const openGapCount = gaps.reduce((n, g) => n + g.workstreams.length, 0)
-  const worst = gaps[0] ?? null
+  const gates: GateHead[] = model.gates.map((g) => ({ id: g.id, name: g.name, phase: g.phase }))
 
-  // Nothing recorded at all is a different situation from a portfolio that is
-  // genuinely behind, and the page must not accuse anyone of the latter when
-  // it is looking at the former.
-  const nothingRecorded = rows.every((r) => overall.get(r.id)!.done === 0)
+  const rows: MatrixRow[] = source.map((row) => {
+    const mine = beneath(row.id)
+    const cells: MatrixRow['cells'] = {}
+    let allDone = 0
+    let allTotal = 0
 
-  return (
-    <div className="grid gap-4">
-      <div>
-        <Kicker>Lifecycle readiness</Kicker>
-        <h2 className="m-0 mt-0.5 text-[18px] font-bold tracking-[-0.01em]">
-          Is the documented process actually being followed
-        </h2>
-        <p className="m-0 mt-1 max-w-[820px] text-[12.5px]" style={{ color: 'var(--muted)' }}>
-          Every cell counts required items only, and an item marked N/A counts as satisfied —
-          deciding something does not apply is a completed judgement, not an outstanding
-          obligation. Optional items appear on a workstream&apos;s own checklist but never move these
-          numbers.
-        </p>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat
-          value={`${fullyReady.length}/${active.length}`}
-          label="Active workstreams fully ready"
-          tone={fullyReady.length === active.length ? 'green' : 'amber'}
-          sub="Planned and in progress"
-        />
-        <Stat
-          value={openGapCount}
-          label="Required items outstanding"
-          tone={nothingRecorded ? 'slate' : openGapCount ? 'amber' : 'green'}
-          sub={nothingRecorded ? 'Nothing recorded yet' : 'Across every active workstream'}
-        />
-        <Stat
-          value={untouched.length}
-          label="Active with nothing done"
-          tone={nothingRecorded ? 'slate' : untouched.length ? 'red' : 'green'}
-          sub={nothingRecorded ? 'Nothing recorded yet' : 'In flight without a single gate cleared'}
-        />
-        <Stat
-          value={worst ? worst.workstreams.length : 0}
-          label="Most-skipped single item"
-          tone={!nothingRecorded && worst && worst.workstreams.length > 2 ? 'red' : 'slate'}
-          sub={worst ? worst.item.label : 'Nothing is being skipped'}
-        />
-      </div>
-
-      {nothingRecorded ? (
-        <SectionNote tone="blue">
-          Nothing has been recorded against this checklist yet, so every workstream reads as
-          outstanding. That is a blank slate, not a finding. Open a workstream below and start
-          marking items off; the roll-up becomes meaningful as soon as it has real answers in it.
-        </SectionNote>
-      ) : untouched.length ? (
-        <SectionNote tone="red">
-          {untouched.length} active {untouched.length === 1 ? 'workstream has' : 'workstreams have'} not
-          cleared a single required item —{' '}
-          {untouched.map((r) => r.name).join(', ')}. Work is moving without a business case behind
-          it.
-        </SectionNote>
-      ) : null}
-
-      <Card>
-        <CardHeading
-          title="Readiness matrix"
-          sub="Workstreams down, lifecycle gates across. Each cell is required items done over required items owed."
-          right={
-            <span className="flex flex-wrap items-center gap-1.5">
-              <Chip tone="green">complete</Chip>
-              <Chip tone="amber">mostly</Chip>
-              <Chip tone="red">partial</Chip>
-              <Chip tone="slate">not started</Chip>
-            </span>
+    for (const gate of model.gates) {
+      const items: ItemCell[] = []
+      let done = 0
+      let total = 0
+      for (const w of mine) {
+        for (const item of gate.items) {
+          const status = statusFor(model, w.id, item.id)
+          // Only required items are counted, and `na` counts as satisfied:
+          // deciding something does not apply is a completed judgement, not an
+          // outstanding obligation. Optional items are still offered in the
+          // popup — they are just not what the number is about.
+          if (item.required) {
+            total += 1
+            if (status === 'done' || status === 'na') done += 1
           }
-        />
-        <div className="scroll-x">
-          <table className="dtable">
-            <thead>
-              <tr>
-                <th className="min-w-[220px]">Workstream</th>
-                <th className="min-w-[90px]">Status</th>
-                {model.gates.map((g) => (
-                  <th key={g.id} className="min-w-[130px]" title={g.description ?? undefined}>
-                    <div>{g.name}</div>
-                    <Muted>{PHASE_LABEL[g.phase] ?? g.phase}</Muted>
-                  </th>
-                ))}
-                <th className="min-w-[150px]">Overall</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const total = overall.get(r.id)!
-                return (
-                  <tr key={r.id}>
-                    <td>
-                      <Link href={`/readiness/${r.id}`} className="font-semibold hover:underline">
-                        {r.name}
-                      </Link>
-                    </td>
-                    <td>
-                      <Muted>{label('projectStatus', r.status)}</Muted>
-                    </td>
-                    {model.gates.map((g) => {
-                      const score = scoreItems(model, r.id, g.items)
-                      return (
-                        <td key={g.id}>
-                          <Cell
-                            score={score}
-                            title={
-                              score.missingRequired.length
-                                ? `Missing: ${score.missingRequired.map((i) => i.label).join(', ')}`
-                                : `${g.name} — nothing outstanding`
-                            }
-                          />
-                        </td>
-                      )
-                    })}
-                    <td>
-                      <ProgressBar value={total.pct / 100} tone={toneFor(total)} />
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          items.push({
+            itemId: item.id,
+            label: item.label,
+            required: item.required,
+            status,
+            workstreamId: w.id,
+            workstreamName: w.name,
+          })
+        }
+      }
+      cells[gate.id] = { done, total, items }
+      allDone += done
+      allTotal += total
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      status: label('projectStatus', row.status) || row.status,
+      href: row.href,
+      cells,
+      overall: { done: allDone, total: allTotal },
+    }
+  })
+
+  rows.sort((a, b) => {
+    const ra = STATUS_RANK[a.status.toLowerCase().replace(' ', '_')] ?? 9
+    const rb = STATUS_RANK[b.status.toLowerCase().replace(' ', '_')] ?? 9
+    return ra === rb ? a.name.localeCompare(b.name) : ra - rb
+  })
+
+  const statuses = [...new Set(rows.map((r) => r.status))].sort((a, b) => a.localeCompare(b))
+
+  return (
+    <div className="stack">
+      <div className="titlerow">
+        <div>
+          <Kicker>Work in progress</Kicker>
+          <h1>Readiness</h1>
         </div>
-        {rows.length === 0 ? <Empty>No workstreams to score.</Empty> : null}
-      </Card>
-
-      <div>
-        <CardHeading
-          title="Where the process is being skipped"
-          sub="Every active workstream missing a required item, grouped by the item rather than the workstream. Ordered by how many workstreams skipped it."
-        />
-        {gaps.length === 0 ? (
-          <Empty>Every active workstream has cleared every required item.</Empty>
-        ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {gaps.map((g) => (
-              <Card
-                key={g.item.id}
-                tone={g.workstreams.length >= 3 ? 'alert' : 'default'}
-                className="flex flex-col gap-2"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <Pill tone={g.workstreams.length >= 3 ? 'red' : 'amber'}>
-                    {g.workstreams.length} workstream{g.workstreams.length === 1 ? '' : 's'}
-                  </Pill>
-                  {g.gate ? (
-                    <Chip tone="blue" title={g.gate.description ?? undefined}>
-                      {g.gate.name}
-                    </Chip>
-                  ) : null}
-                  {g.item.ownerRole ? <Chip tone="violet">{g.item.ownerRole}</Chip> : null}
-                </div>
-
-                <div>
-                  <h3 className="m-0 text-[13.5px] font-semibold leading-snug">{g.item.label}</h3>
-                  {g.item.description ? (
-                    <p
-                      className="m-0 mt-1 text-[12px] leading-relaxed"
-                      style={{ color: 'var(--muted)' }}
-                    >
-                      {g.item.description}
-                    </p>
-                  ) : null}
-                </div>
-
-                {g.item.templateUrl ? (
-                  <a
-                    href={g.item.templateUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[12px] font-semibold underline"
-                    style={{ color: 'var(--brand-2)' }}
-                  >
-                    Template
-                  </a>
-                ) : (
-                  <Muted>No template — this one is a conversation, not a document.</Muted>
-                )}
-
-                <div className="flex flex-wrap gap-1.5">
-                  {g.workstreams.map((pr) => (
-                    <Link key={pr.id} href={`/readiness/${pr.id}`} title={label('projectStatus', pr.status)}>
-                      <Chip tone="slate">{pr.name}</Chip>
-                    </Link>
-                  ))}
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
       </div>
+
+      <ReadinessMatrix rows={rows} gates={gates} level={level} statuses={statuses} />
     </div>
   )
 }

@@ -26,7 +26,6 @@ import {
   Pill,
   SectionNote,
   SourceBadge,
-  Stat,
   type Tone,
 } from '@/components/ui'
 import { approveAndConvert, moveRequest, recordDecisionNote } from './actions'
@@ -254,8 +253,6 @@ export default async function IntakePage() {
 
   const live = requests.filter((r) => !['rejected', 'converted'].includes(r.status))
   const costumedDates = live.filter((r) => r.hardDate && !r.hardDateReason?.trim())
-  const unsized = live.filter((r) => !r.tshirt)
-  const awaitingConversion = requests.filter((r) => r.status === 'approved')
 
   return (
     <div className="grid gap-4">
@@ -263,37 +260,10 @@ export default async function IntakePage() {
         <div className="min-w-0">
           <Kicker>Intake</Kicker>
           <h2 className="m-0 mt-0.5 text-[18px] font-bold tracking-[-0.01em]">Triage queue</h2>
-          <p className="m-0 mt-1 max-w-[760px] text-[12.5px]" style={{ color: 'var(--muted)' }}>
-            One door for every new ask, whether it arrived in this form, a Slack thread or a
-            spreadsheet. A request is only real once it has a sponsor, a rough size, and a date
-            somebody can defend.
-          </p>
         </div>
         <Link href="/intake/new" className="btn btn-primary no-print">
           New request
         </Link>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat value={live.length} label="Open requests" sub="Not rejected, not yet converted" />
-        <Stat
-          value={awaitingConversion.length}
-          label="Approved, no workstream"
-          tone={awaitingConversion.length ? 'amber' : undefined}
-          sub="Approval that has not been turned into work"
-        />
-        <Stat
-          value={costumedDates.length}
-          label="Hard dates with no reason"
-          tone={costumedDates.length ? 'red' : 'green'}
-          sub="A preference wearing a costume"
-        />
-        <Stat
-          value={unsized.length}
-          label="Unsized"
-          tone={unsized.length ? 'amber' : 'green'}
-          sub="Cannot be placed against the cut line"
-        />
       </div>
 
       {costumedDates.length ? (

@@ -25,6 +25,12 @@ import {
   syncRuns,
   teams,
 } from '@/db/schema'
+import {
+  capabilitiesFrom,
+  pick,
+  type IntrospectionResult,
+  type LinearCapabilities,
+} from './graphql-schema'
 import { logChange } from '../portfolio'
 import { slugify } from '../util'
 import {
@@ -102,12 +108,12 @@ async function gql<T>(query: string, variables: Record<string, unknown> = {}): P
 // Capability probe
 // ---------------------------------------------------------------------------
 
-export interface LinearCapabilities {
-  types: Map<string, Set<string>>
-  has(type: string, field: string): boolean
-  hasQuery(name: string): boolean
-}
-
+/*
+ * Field names alone were not enough — see lib/sources/graphql-schema.ts for
+ * the outage that taught us. Each field's type comes back too, unwrapped past
+ * NON_NULL and LIST to the named type underneath, so an object is never asked
+ * for bare.
+ */
 const INTROSPECTION = `
   query Caps {
     __schema {
@@ -115,38 +121,17 @@ const INTROSPECTION = `
       types {
         name
         kind
-        fields(includeDeprecated: false) { name }
+        fields(includeDeprecated: false) {
+          name
+          type { kind name ofType { kind name ofType { kind name ofType { kind name } } } }
+        }
       }
     }
   }
 `
 
 export async function introspect(): Promise<LinearCapabilities> {
-  const data = await gql<{
-    __schema: {
-      queryType: { name: string }
-      types: { name: string; kind: string; fields: { name: string }[] | null }[]
-    }
-  }>(INTROSPECTION)
-
-  const types = new Map<string, Set<string>>()
-  for (const t of data.__schema.types) {
-    if (!t.fields) continue
-    types.set(t.name, new Set(t.fields.map((f) => f.name)))
-  }
-  const rootName = data.__schema.queryType.name
-  const root = types.get(rootName) ?? new Set<string>()
-
-  return {
-    types,
-    has: (type, field) => types.get(type)?.has(field) ?? false,
-    hasQuery: (name) => root.has(name),
-  }
-}
-
-/** Keep only the fields the live schema actually exposes. */
-function pick(caps: LinearCapabilities, type: string, candidates: string[]): string[] {
-  return candidates.filter((f) => caps.has(type, f.split(/[\s({]/)[0]))
+  return capabilitiesFrom(await gql<IntrospectionResult>(INTROSPECTION))
 }
 
 // ---------------------------------------------------------------------------
@@ -419,7 +404,7 @@ export async function syncLinear(opts: SyncOptions = {}): Promise<SyncResult> {
         'url',
         'sortOrder',
         'updatedAt',
-      ])
+      ], { status: 'status { name type }' }, (_f, why) => warnings.push(why))
       const ownerSel = caps.has('Project', 'owner') ? ' owner { id }' : ''
       for await (const nodes of paged<Record<string, unknown>>(
         'projects',
@@ -539,7 +524,7 @@ export async function upsertInitiative(n: Record<string, unknown>, counters: Cou
   const values = {
     name: n.name as string,
     description: (n.description as string) ?? null,
-    status: mapInitiativeStatus(n.status as string),
+    status: mapInitiativeStatus(n.status as string | { name?: string; type?: string } | null),
     startDate: date(n.startedAt as string),
     targetDate: date(n.targetDate as string),
     ownerId: ownerLocal?.entityId ?? null,

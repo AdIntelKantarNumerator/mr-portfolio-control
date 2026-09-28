@@ -36,10 +36,28 @@ export function mapProjectStatus(state?: string | null, statusType?: string | nu
   }
 }
 
-export function mapInitiativeStatus(v?: string | null): string {
-  switch ((v ?? '').toLowerCase()) {
+/**
+ * Linear's initiative status, whichever shape this version of their API sends.
+ *
+ * It was an enum string. It is now an object — `{ name: "In Progress", type:
+ * "started" }` — and the day that changed, every sync returned 400 because the
+ * query still asked for it as a leaf. Accepting both shapes here means the
+ * next move in either direction is a no-op rather than an outage, and `type`
+ * is preferred over `name` because names are workspace-editable and types are
+ * the fixed vocabulary.
+ */
+export function mapInitiativeStatus(v?: string | null | { name?: string; type?: string }): string {
+  const raw = typeof v === 'string' || v == null ? v : (v.type ?? v.name)
+  switch ((raw ?? '').toLowerCase()) {
+    // The object form's `type` vocabulary, which the enum did not have.
+    case 'started':
+    case 'inprogress':
+    case 'in_progress':
     case 'active':
       return 'active'
+    case 'backlog':
+    case 'planned':
+      return 'planned'
     case 'completed':
       return 'completed'
     case 'canceled':
