@@ -146,3 +146,78 @@ export async function setHealth(_prev: HealthState, formData: FormData): Promise
 
   return { ok: true, stamp: Date.now(), message: `Recorded as ${RAG_WORD[rag] ?? rag}.` }
 }
+
+/**
+ * Correcting the sentence an agent wrote, in place.
+ *
+ * WHY THIS IS ALLOWED AND WHAT IT COSTS
+ *
+ * Reviewing says "I read this and I stand behind it", which is the right act
+ * when the sentence is right. It is the wrong act when the sentence is nearly
+ * right and fixing it would take ten seconds — and the alternative on offer
+ * was writing a whole second assessment, which nobody does, so a slightly
+ * wrong sentence would sit there being reviewed or ignored.
+ *
+ * The moment somebody edits it, it stops being the agent's reading and
+ * becomes theirs: `authoredBy` changes to their name, and the card stops
+ * labelling it as machine-written. That matters in both directions. A human
+ * correction hiding behind an agent's byline would break the one promise this
+ * app makes about its own text, and an agent's guess wearing a person's name
+ * would be worse.
+ *
+ * The original is not thrown away - it goes into the changelog, so "what did
+ * she actually say" has an answer six weeks later.
+ */
+export async function editAssessmentText(_prev: HealthState, formData: FormData): Promise<HealthState> {
+  const id = String(formData.get('id') ?? '')
+  const text = String(formData.get('rationale') ?? '').trim()
+
+  if (!id) return { error: 'Nothing to edit.' }
+  if (!text) return { error: 'It cannot be empty. To withdraw the assessment, change the health instead.' }
+  if (text.length > 600) return { error: 'Keep it to a few lines; the card shows it inline.' }
+
+  const [row] = await db
+    .select({
+      id: assessments.id,
+      entityType: assessments.entityType,
+      entityId: assessments.entityId,
+      rationale: assessments.rationale,
+      authoredBy: assessments.authoredBy,
+    })
+    .from(assessments)
+    .where(and(eq(assessments.id, id), eq(assessments.current, true)))
+    .limit(1)
+  if (!row) return { error: 'That assessment has been superseded — reload the page.' }
+  if (row.rationale === text) return { ok: true, stamp: Date.now(), message: 'Unchanged.' }
+
+  const who = await actorName()
+  const personId = await actorPersonId()
+
+  await db
+    .update(assessments)
+    .set({
+      rationale: text,
+      authoredBy: who,
+      // Editing it is a stronger statement than reviewing it, so the review
+      // is implied rather than left outstanding next to your own words.
+      reviewedBy: personId,
+      reviewedAt: new Date(),
+    })
+    .where(eq(assessments.id, id))
+
+  await logChange({
+    actor: who,
+    kind: 'assessment',
+    summary: `Assessment rewritten by ${who}`,
+    detail: `${row.authoredBy} wrote: ${row.rationale}`,
+    entityType: row.entityType,
+    entityId: row.entityId,
+  })
+
+  revalidatePath('/')
+  revalidatePath('/changes')
+  revalidatePath(`/${row.entityType}s`)
+  revalidatePath(`/${row.entityType}s/${row.entityId}`)
+
+  return { ok: true, stamp: Date.now(), message: 'Saved as yours.' }
+}
