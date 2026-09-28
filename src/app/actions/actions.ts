@@ -13,9 +13,9 @@
  * explanation, and demanding one is how a register stops being kept current.
  */
 import { revalidatePath } from 'next/cache'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { actionItemLinks, actionItems, people } from '@/db/schema'
+import { actionItemLinks, actionItems, initiatives, people, projects, workstreams } from '@/db/schema'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
 
@@ -140,4 +140,64 @@ export async function claimAction(_prev: ActionState, formData: FormData): Promi
 
   refresh()
   return { ok: true, stamp: Date.now(), message: 'Saved.' }
+}
+
+/**
+ * Filing an action item against a piece of work.
+ *
+ * WHY THIS IS THREE SEPARATE ASSIGNMENTS AND NOT ONE
+ *
+ * The list shows initiative, project and workstream as three columns, and a
+ * commitment can legitimately be known at one level and not the others: "the
+ * GPC initiative" is all anybody said in the meeting, and pretending to know
+ * which workstream would be inventing a fact. So each level is set on its own
+ * and "Unknown" is a real, reportable state rather than a gap to be filled in
+ * by guessing.
+ *
+ * Links are stored one row per level in `action_item_links`, which the table
+ * already allowed — nothing here changes shape, it is just now reachable from
+ * the page instead of only from Yaara.
+ */
+export async function assignAction(
+  id: string,
+  level: string,
+  entityId: string,
+): Promise<ActionState> {
+  if (!['initiative', 'project', 'workstream'].includes(level)) return { error: 'Unknown level.' }
+
+  const [row] = await db.select().from(actionItems).where(eq(actionItems.id, id)).limit(1)
+  if (!row) return { error: 'That action item no longer exists.' }
+
+  const table = level === 'initiative' ? initiatives : level === 'project' ? projects : workstreams
+  let name = 'Unknown'
+  if (entityId) {
+    const [found] = await db.select({ name: table.name }).from(table).where(eq(table.id, entityId)).limit(1)
+    if (!found) return { error: 'That record no longer exists — reload the page.' }
+    name = found.name
+  }
+
+  const [existing] = await db
+    .select()
+    .from(actionItemLinks)
+    .where(and(eq(actionItemLinks.actionItemId, id), eq(actionItemLinks.level, level)))
+    .limit(1)
+
+  if (existing?.entityId === entityId) return { ok: true, stamp: Date.now(), message: 'Already there.' }
+
+  // One link per level: replaced rather than added to, because the column
+  // shows one value and a second row would make the page disagree with itself.
+  if (existing) await db.delete(actionItemLinks).where(eq(actionItemLinks.id, existing.id))
+  if (entityId) await db.insert(actionItemLinks).values({ actionItemId: id, level, entityId })
+
+  await logChange({
+    actor: await actorName(),
+    kind: 'change',
+    summary: `${row.ref ?? id}: ${level} set to ${entityId ? name : 'unknown'}`,
+    detail: row.text.slice(0, 160),
+    entityType: entityId ? level : null,
+    entityId: entityId || null,
+  })
+
+  refresh()
+  return { ok: true, stamp: Date.now(), message: entityId ? `Filed under ${name}.` : 'Cleared.' }
 }
