@@ -264,12 +264,20 @@ export const getHomeCards = cache(async (
     }
   }
 
-  const rows: Array<{ id: string; name: string; ownerId: string | null; startDate: Date | null; status: string }> =
+  const rows: Array<{
+    id: string
+    name: string
+    ownerId: string | null
+    startDate: Date | null
+    status: string
+    /** The hand-arranged position, for sort=custom. */
+    rank: number
+  }> =
     level === 'initiative'
-      ? inits.map((i) => ({ id: i.id, name: i.name, ownerId: i.ownerId, startDate: i.startDate, status: i.status }))
+      ? inits.map((i) => ({ id: i.id, name: i.name, ownerId: i.ownerId, startDate: i.startDate, status: i.status, rank: i.sortOrder }))
       : level === 'project'
-        ? projs.map((p) => ({ id: p.id, name: p.name, ownerId: p.ownerId, startDate: p.startDate, status: p.status }))
-        : wss.map((w) => ({ id: w.id, name: w.name, ownerId: w.leadId, startDate: w.startDate, status: w.status }))
+        ? projs.map((p) => ({ id: p.id, name: p.name, ownerId: p.ownerId, startDate: p.startDate, status: p.status, rank: p.sortOrder }))
+        : wss.map((w) => ({ id: w.id, name: w.name, ownerId: w.leadId, startDate: w.startDate, status: w.status, rank: w.sortOrder }))
 
   const cards: HomeCard[] = rows
     .filter((r) => !ENDED.has(r.status))
@@ -508,9 +516,15 @@ export const getHomeCards = cache(async (
 
   // Most active first by default. A silent piece of work sinks and is
   // flagged, rather than sitting at the top because its name starts with A.
+  const rank = new Map(rows.map((r) => [r.id, r.rank]))
+
   return wanted.sort((a, b) => {
     if (sort === 'name') return a.name.localeCompare(b.name)
     if (sort === 'quiet') return busy(a) - busy(b) || a.name.localeCompare(b.name)
+    // Anything never dragged has rank 0, so a board nobody has arranged
+    // falls back to alphabetical rather than to insertion order, which looks
+    // random to a reader.
+    if (sort === 'custom') return (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0) || a.name.localeCompare(b.name)
     return busy(b) - busy(a) || a.name.localeCompare(b.name)
   })
 })

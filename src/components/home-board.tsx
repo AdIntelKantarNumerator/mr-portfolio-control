@@ -12,7 +12,7 @@ import { useRouter } from 'next/navigation'
 import type { HomeCard } from '@/lib/home'
 import type { HealthFilter, Level, Sort } from '@/lib/home-types'
 import { HOME_PREFS_COOKIE, serialiseHomePrefs, type HomePrefs } from '@/lib/home-prefs'
-import { InitiativeCard } from './initiative-card'
+import { SortableCards } from './sortable-cards'
 
 const LABEL: Record<Level, { one: string; many: string; beneath: string }> = {
   initiative: { one: 'Initiative', many: 'Active initiatives', beneath: 'projects' },
@@ -24,6 +24,7 @@ const SORT_LABEL: Record<Sort, string> = {
   active: 'Most active',
   quiet: 'Least active',
   name: 'Name',
+  custom: 'Custom',
 }
 
 const HEALTH_LABEL: Record<HealthFilter, string> = {
@@ -147,7 +148,12 @@ export function HomeBoard({
           )}
         </div>
       ) : (
-        cards.map((c) => <InitiativeCard key={c.id} card={c} onOpen={(t, b) => setModal({ title: t, body: b })} />)
+        <SortableCards
+          cards={cards}
+          level={level}
+          draggable={prefs.sort === 'custom'}
+          onOpen={(t, b) => setModal({ title: t, body: b })}
+        />
       )}
 
       {level === 'initiative' && ungrouped.length > 0 && (

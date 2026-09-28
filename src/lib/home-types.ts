@@ -24,10 +24,18 @@ export function isLevel(v: string | undefined): v is Level {
  * asked for — filtering after render means the first paint is a board the
  * reader did not choose.
  */
-export type Sort = 'active' | 'quiet' | 'name'
-export const SORTS: Sort[] = ['active', 'quiet', 'name']
+/**
+ * 'custom' is an order somebody dragged into place, kept in each table's
+ * `sortOrder` column. It is deliberately a property of the portfolio rather
+ * than of the reader: the order initiatives are discussed in is an editorial
+ * decision a team makes together, the same way theme order already is, and a
+ * per-browser copy would mean the board looked different in the meeting than
+ * it did to the person who arranged it.
+ */
+export type Sort = 'active' | 'quiet' | 'name' | 'custom'
+export const SORTS: Sort[] = ['active', 'quiet', 'name', 'custom']
 export function isSort(v: string | undefined): v is Sort {
-  return v === 'active' || v === 'quiet' || v === 'name'
+  return v === 'active' || v === 'quiet' || v === 'name' || v === 'custom'
 }
 
 /** 'all', or one of the health states a card can be in. */
