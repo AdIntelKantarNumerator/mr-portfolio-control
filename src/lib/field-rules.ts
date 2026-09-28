@@ -30,7 +30,15 @@ export interface FieldSpec {
  * because a list row is a bad place to do something you cannot see the
  * consequences of.
  */
-export const FIELDS: Record<'project' | 'workstream', Record<string, FieldSpec>> = {
+export const FIELDS: Record<'initiative' | 'project' | 'workstream', Record<string, FieldSpec>> = {
+  // The grouping tier. Same four fields as a project, because the question
+  // "who owns this and when does it land" does not change with the tier.
+  initiative: {
+    status: { column: 'status', allowed: new Set<string>(PROJECT_STATUS) },
+    owner: { column: 'ownerId', person: true },
+    startDate: { column: 'startDate', date: true },
+    targetDate: { column: 'targetDate', date: true },
+  },
   project: {
     status: { column: 'status', allowed: new Set<string>(PROJECT_STATUS) },
     owner: { column: 'ownerId', person: true },
@@ -51,7 +59,7 @@ export const FIELDS: Record<'project' | 'workstream', Record<string, FieldSpec>>
 export type Level = keyof typeof FIELDS
 
 export function isLevel(v: string): v is Level {
-  return v === 'project' || v === 'workstream'
+  return v === 'initiative' || v === 'project' || v === 'workstream'
 }
 
 export function specFor(level: Level, field: string): FieldSpec | undefined {

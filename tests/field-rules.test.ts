@@ -13,11 +13,15 @@ import { FIELDS, isLevel, isSameValue, parseDate, parsePercent, specFor } from '
 import { PRIORITY, PROJECT_STATUS, WORKSTREAM_STATUS_SET } from '../src/lib/domain'
 
 test('the editable surface', async (t) => {
-  await t.test('only the two levels that have list rows', () => {
+  await t.test('all three tiers, and nothing else', () => {
+    // The initiative tier joined when the detail pages were unified: the
+    // status pill is the control on all three, so all three have to accept a
+    // status write. A milestone is not a tier and never gets one.
+    assert.ok(isLevel('initiative'))
     assert.ok(isLevel('project'))
     assert.ok(isLevel('workstream'))
-    assert.ok(!isLevel('initiative'))
     assert.ok(!isLevel('milestone'))
+    assert.ok(!isLevel('theme'))
   })
 
   await t.test('an unknown field is not editable by accident', () => {
@@ -29,6 +33,7 @@ test('the editable surface', async (t) => {
   await t.test('every vocabulary comes from domain.ts, not a second list', () => {
     // A copy here would drift, and the failure is a status the UI offers and
     // the server refuses.
+    assert.deepEqual([...FIELDS.initiative.status!.allowed!].sort(), [...PROJECT_STATUS].sort())
     assert.deepEqual([...FIELDS.project.status!.allowed!].sort(), [...PROJECT_STATUS].sort())
     assert.deepEqual([...FIELDS.workstream.status!.allowed!].sort(), [...WORKSTREAM_STATUS_SET].sort())
     assert.deepEqual([...FIELDS.workstream.priority!.allowed!].sort(), [...PRIORITY].sort())

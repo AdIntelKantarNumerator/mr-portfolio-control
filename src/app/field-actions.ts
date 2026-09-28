@@ -24,7 +24,7 @@
 import { revalidatePath } from 'next/cache'
 import { asc, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { people, projects, workstreams } from '@/db/schema'
+import { initiatives, people, projects, workstreams } from '@/db/schema'
 import { isLevel, isSameValue, parseDate, parsePercent, specFor } from '@/lib/field-rules'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
@@ -61,7 +61,7 @@ export async function setField(_prev: FieldState, formData: FormData): Promise<F
   const spec = specFor(level, field)
   if (!spec) return { error: `A ${level} has no editable "${field}".` }
 
-  const table = level === 'project' ? projects : workstreams
+  const table = level === 'initiative' ? initiatives : level === 'project' ? projects : workstreams
   const [row] = await db.select().from(table).where(eq(table.id, id)).limit(1)
   if (!row) return { error: `That ${level} no longer exists — reload the page.` }
 

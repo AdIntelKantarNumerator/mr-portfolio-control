@@ -21,7 +21,7 @@ import { setField, type FieldState } from '@/app/field-actions'
 const EMPTY: FieldState = {}
 
 export interface EditableProps {
-  level: 'project' | 'workstream'
+  level: 'initiative' | 'project' | 'workstream'
   id: string
   field: string
   /** What it says now. Null renders the prompt. */
