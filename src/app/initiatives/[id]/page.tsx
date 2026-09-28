@@ -94,7 +94,12 @@ export default async function InitiativeDetailPage({ params }: { params: Promise
 
       <MilestoneEditor level="initiative" entityId={id} milestones={plan} />
 
-      <DetailBody tier="Initiative" data={data} canEdit={Boolean(user.personId)} />
+      <DetailBody
+        tier="Initiative"
+        data={data}
+        canEdit={Boolean(user.personId)}
+        entity={{ entityType: 'initiative', entityId: id }}
+      />
 
       <EditInitiative
         initiative={{ id: row.id, name: row.name, description: row.description ?? '', status: row.status }}
