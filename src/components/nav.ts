@@ -26,7 +26,6 @@ import type { ComponentType, SVGProps } from 'react'
 import {
   IconActions,
   IconActivity,
-  IconApplications,
   IconConversations,
   IconDependencies,
   IconHome,
@@ -95,7 +94,6 @@ export const NAV: NavSection[] = [
     id: 'reference',
     label: 'Reference',
     items: [
-      { href: '/applications', label: 'By application', icon: IconApplications },
       { href: '/contention', label: 'People', icon: IconPeople, hint: 'Who is being pulled in two directions' },
       { href: '/sources', label: 'Conversations', icon: IconConversations, hint: 'Where the evidence came from' },
       { href: '/templates', label: 'Templates', icon: IconTemplates },

@@ -10,7 +10,7 @@
  */
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
-import { NextMilestoneRing, edgeColor } from '@/components/ring'
+import { NextMilestoneRing, edgeColor, shortMilestone } from '@/components/ring'
 import { Grouping } from './grouping'
 
 export interface InitiativeRow {
@@ -106,11 +106,17 @@ export function InitiativeList({
             </select>
           </span>
         </label>
-        <button type="button" className={`fpill as-btn${editing ? ' active' : ''}`} onClick={() => setEditing(!editing)}>
-          <span>
-            <span className="lab">Grouping</span>
-            <span className="val">{editing ? 'Close' : 'Edit initiatives'}</span>
-          </span>
+        {/* A button, not a filter pill: it does not narrow what you are
+            looking at, it opens a form. Wearing the same chrome as Find and
+            Showing said otherwise, and it sits on the right because it acts
+            on the page rather than describing it. */}
+        <button
+          type="button"
+          className={`btn-primary push-right${editing ? ' on' : ''}`}
+          onClick={() => setEditing(!editing)}
+          aria-expanded={editing}
+        >
+          {editing ? 'Close' : 'Edit Initiatives'}
         </button>
       </div>
 
@@ -142,7 +148,14 @@ export function InitiativeList({
                       –
                     </span>
                   )}
-                  {r.next && <span className="ir-due">{r.next.due ?? 'no date'}</span>}
+                  {r.next && (
+                    <>
+                      <span className="ir-short" title={r.next.name}>
+                        {shortMilestone(r.next.name)}
+                      </span>
+                      <span className="ir-due">{r.next.due ?? 'no date'}</span>
+                    </>
+                  )}
                 </div>
 
                 <div className="ir-body">

@@ -7,7 +7,7 @@ import { LogoMark } from './logo'
 import { IconCaret, IconPanel } from './icons'
 import { NAV, isActive, sectionFor } from './nav'
 import { usePreference } from '@/lib/use-preference'
-import { BRAND_NAME, BRAND_TAGLINE } from '@/lib/brand'
+import { BRAND_NAME, BRAND_CREDIT, BRAND_CREDIT_TAG } from '@/lib/brand'
 
 export interface ShellUser {
   name: string
@@ -103,7 +103,6 @@ export function Shell({ children, user }: { children: ReactNode; user: ShellUser
             <LogoMark size={collapsed ? 30 : 34} />
             <span className="brand-words">
               <span className="brand-name">{BRAND_NAME}</span>
-              {BRAND_TAGLINE ? <span className="brand-tag">{BRAND_TAGLINE}</span> : null}
             </span>
           </Link>
           <button
@@ -161,6 +160,21 @@ export function Shell({ children, user }: { children: ReactNode; user: ShellUser
           })}
         </nav>
 
+        {/* Hidden when the rail is collapsed to icons: there is no room for
+            it, and a truncated joke is worse than no joke. */}
+        {!collapsed && (
+          <p className="side-credit">
+            {/* Plain <img>, not next/image: this is a 64px decorative mark
+                that ships with the app, and the optimiser would add a request
+                and a layout box to save nothing. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/yaara-64.png" alt="" width={30} height={30} />
+            <span>
+              <b>{BRAND_CREDIT}</b>
+              <em>{BRAND_CREDIT_TAG}</em>
+            </span>
+          </p>
+        )}
       </aside>
 
       {/* Phone and narrow-tablet only: the rail becomes a drawer, and this is
@@ -217,15 +231,6 @@ export function Shell({ children, user }: { children: ReactNode; user: ShellUser
         </div>
 
         {children}
-        {/* Kept from the old frame. It is the one piece of standing text that
-            answers a question people actually ask — why a number here differs
-            from the tracker — and it earns its place at the bottom in a way
-            the blurb at the top never did. */}
-        <footer className="page-foot">
-          Delivery layer syncs from your tracker. Health assessments, decisions, dependencies,
-          contention and intake are entered here, because no upstream tool holds them. Conflicts
-          between a source and an assessment are flagged rather than silently resolved.
-        </footer>
       </main>
     </div>
   )

@@ -9,7 +9,17 @@
  * The mark itself is in src/components/logo.tsx.
  */
 export const BRAND_NAME = 'MR Portfolio Control'
-export const BRAND_TAGLINE = "Yael's Always Right"
+
+/**
+ * The joke, at the foot of the rail rather than under the name.
+ *
+ * In the header it sat directly beneath the product name, where a reader
+ * trying to work out what this app is had to get past it first. At the bottom
+ * of the navigation it is found by anyone who looks and is in nobody's way,
+ * which is where a joke belongs.
+ */
+export const BRAND_CREDIT = 'Site Powered by Yaara'
+export const BRAND_CREDIT_TAG = "Yael's Absolutely Always Right Actually"
 
 /**
  * Only the sign-in page still says who this belongs to.
