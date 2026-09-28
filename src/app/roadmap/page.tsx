@@ -9,20 +9,19 @@ import { fmtDate } from '@/lib/util'
 export const metadata = { title: 'Timeline' }
 export const dynamic = 'force-dynamic'
 
-type Search = { theme?: string; risk?: string }
+type Search = { risk?: string }
 
 export default async function RoadmapPage({
   searchParams,
 }: {
   searchParams: Promise<Search>
 }) {
-  const { theme, risk } = await searchParams
+  const { risk } = await searchParams
   const portfolio = await getPortfolio()
   const settingRows = await db.select().from(settingsTable)
   const setting = (k: string) => settingRows.find((s) => s.key === k)?.value ?? null
 
   let projects = portfolio.projects
-  if (theme) projects = projects.filter((i) => i.theme?.key === theme)
   if (risk === '1') projects = projects.filter((i) => i.health.rag === 'red' || i.health.rag === 'amber')
 
   const horizon = horizonFor(portfolio, {
@@ -38,16 +37,8 @@ export default async function RoadmapPage({
   const nextMilestone = model.keyDates.find((k) => k.milestone.status !== 'done')
   const atRisk = risks(portfolio).filter((r) => r.rag === 'red')
 
-  const themeHref = (key?: string) => {
-    const params = new URLSearchParams()
-    if (key) params.set('theme', key)
-    if (risk === '1') params.set('risk', '1')
-    const qs = params.toString()
-    return qs ? `/roadmap?${qs}` : '/roadmap'
-  }
   const riskHref = () => {
     const params = new URLSearchParams()
-    if (theme) params.set('theme', theme)
     if (risk !== '1') params.set('risk', '1')
     const qs = params.toString()
     return qs ? `/roadmap?${qs}` : '/roadmap'
@@ -83,14 +74,6 @@ export default async function RoadmapPage({
           }
           right={
             <div className="no-print flex flex-wrap items-center gap-1.5">
-              <FilterLink href={themeHref()} active={!theme}>
-                All themes
-              </FilterLink>
-              {portfolio.themes.map((t) => (
-                <FilterLink key={t.id} href={themeHref(t.key)} active={theme === t.key}>
-                  {t.name}
-                </FilterLink>
-              ))}
               <FilterLink href={riskHref()} active={risk === '1'}>
                 Only at risk
               </FilterLink>

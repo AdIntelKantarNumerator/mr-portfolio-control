@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { asc } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { appAreas, projects, themes } from '@/db/schema'
+import { projects } from '@/db/schema'
 import { Kicker, Muted } from '@/components/ui'
 import { RequestForm } from './request-form'
 
@@ -12,9 +12,7 @@ export const metadata = { title: 'New request · Portfolio Control Room' }
 export const dynamic = 'force-dynamic'
 
 export default async function NewRequestPage() {
-  const [themeRows, areaRows, initiativeRows] = await Promise.all([
-    db.select({ id: themes.id, name: themes.name }).from(themes).orderBy(asc(themes.sortOrder)),
-    db.select({ id: appAreas.id, name: appAreas.name }).from(appAreas).orderBy(asc(appAreas.sortOrder)),
+  const [initiativeRows] = await Promise.all([
     db
       .select({ id: projects.id, name: projects.name })
       .from(projects)
@@ -37,7 +35,7 @@ export default async function NewRequestPage() {
         </Link>
       </div>
 
-      <RequestForm themes={themeRows} appAreas={areaRows} projects={initiativeRows} />
+      <RequestForm projects={initiativeRows} />
     </div>
   )
 }

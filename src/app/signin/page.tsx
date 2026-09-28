@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { LogoMark } from '@/components/logo'
-import { BRAND_NAME, BRAND_ORG, BRAND_TAGLINE } from '@/lib/brand'
+import { BRAND_NAME, BRAND_ORG, BRAND_CREDIT_TAG } from '@/lib/brand'
 import { getAuthConfig } from '@/lib/auth/config'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { safeReturnTo } from '@/lib/auth/oidc'
@@ -64,12 +64,14 @@ export default async function SignInPage({
           {BRAND_ORG}
         </div>
         <h1 className="m-0 mt-1 text-[20px] font-bold tracking-[-0.02em]">{BRAND_NAME}</h1>
-        {BRAND_TAGLINE ? (
+        {/* One wording of the joke, here and at the foot of the rail. Two
+            versions of the same line reads as a mistake by whoever sees both. */}
+        {BRAND_CREDIT_TAG ? (
           <div
             className="mt-1 text-[12.5px] italic"
             style={{ color: 'var(--muted)', fontFamily: 'var(--font-display)' }}
           >
-            {BRAND_TAGLINE}
+            {BRAND_CREDIT_TAG}
           </div>
         ) : null}
 

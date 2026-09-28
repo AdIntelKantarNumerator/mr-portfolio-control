@@ -11,6 +11,7 @@
 import { Card, CardHeading, Chip, Empty, Muted, SectionNote } from '@/components/ui'
 import type { AgentAssessmentRow, ObservationRow } from '@/lib/observations'
 import { MarkReviewedButton } from '@/app/projects/[id]/review-action'
+import { AssessmentText } from '@/components/assessment-text'
 
 const KIND_LABEL: Record<string, string> = {
   progress: 'progress',
@@ -144,7 +145,7 @@ export function Observations({
         >
           <Chip tone={RAG_TONE[assessment.rag] ?? 'slate'}>{assessment.rag}</Chip>
           <Muted>{assessment.confidence} confidence</Muted>
-          <span className="text-[12.5px]">{assessment.rationale}</span>
+          <AssessmentText id={assessment.id} text={assessment.rationale} canEdit={canReview} />
           <span className="ml-auto flex items-center gap-2">
             {assessment.reviewedAt ? (
               <Chip tone="green">

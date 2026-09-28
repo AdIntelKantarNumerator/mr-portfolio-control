@@ -644,7 +644,7 @@ export default async function DecisionsPage({
         <Card>
           <CardHeading
             title="Also being discussed"
-            sub="Themes read out of shared documents. Nobody owns these — they are here so a recurring topic is visible before it becomes a blocker."
+            sub="Recurring topics read out of shared documents. Nobody owns these — they are here so something that keeps coming up is visible before it becomes a blocker."
           />
           <div className="flex flex-col gap-2.5">
             {themes.map((t) => {

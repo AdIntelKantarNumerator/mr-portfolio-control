@@ -67,12 +67,8 @@ function Field({
 }
 
 export function RequestForm({
-  themes,
-  appAreas,
   projects,
 }: {
-  themes: Option[]
-  appAreas: Option[]
   projects: Option[]
 }) {
   const [state, formAction, pending] = useActionState(createRequest, INITIAL)
@@ -174,26 +170,6 @@ export function RequestForm({
           sub="Both taxonomies are optional — the program team re-routes in triage."
         />
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field name="themeId" label="Theme" errors={state.errors}>
-            <select {...text('themeId')}>
-              <option value="">Not sure</option>
-              {themes.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field name="appAreaId" label="Application area" errors={state.errors}>
-            <select {...text('appAreaId')}>
-              <option value="">Not sure</option>
-              {appAreas.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </Field>
           <Field name="proposedInitiativeId" label="Proposed project" errors={state.errors}>
             <select {...text('proposedInitiativeId')}>
               <option value="">None proposed</option>

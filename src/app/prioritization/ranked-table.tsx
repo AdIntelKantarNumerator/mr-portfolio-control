@@ -183,7 +183,6 @@ export function RankedTable({
               <th className="whitespace-nowrap">#</th>
               <th className="whitespace-nowrap">Ref</th>
               <th>Request</th>
-              <th className="whitespace-nowrap">Theme</th>
               {criteria.map((c) => (
                 <th
                   key={c.id}

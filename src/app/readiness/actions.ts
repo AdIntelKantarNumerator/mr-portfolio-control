@@ -81,3 +81,59 @@ export async function updateReadiness(formData: FormData) {
   revalidatePath(`/readiness/${workstreamId}`)
   revalidatePath('/changes')
 }
+
+/**
+ * One checkbox, saved the moment it is clicked.
+ *
+ * The full form above is still the place to record a link and a note, and it
+ * is still the honest way to mark something done. But a checklist you can
+ * only change by opening a form on another page is a checklist that goes
+ * stale, and a stale readiness score is worse than none: it is a green number
+ * next to work nobody has checked.
+ *
+ * So this moves the status alone and leaves the link and note exactly as they
+ * were. It cannot be used to claim "done" with no evidence where evidence was
+ * already recorded, and where none was recorded it changes nothing about what
+ * the row says.
+ */
+export interface ReadinessToggleState {
+  error?: string
+  stamp?: number
+}
+
+export async function toggleReadinessItem(
+  _prev: ReadinessToggleState,
+  formData: FormData,
+): Promise<ReadinessToggleState> {
+  const workstreamId = String(formData.get('workstreamId') ?? '')
+  const itemId = String(formData.get('itemId') ?? '')
+  const status = String(formData.get('status') ?? '')
+  if (!workstreamId || !itemId) return { error: 'Nothing to change.' }
+  if (!isReadinessStatus(status)) return { error: `"${status}" is not a readiness state.` }
+
+  const [existing] = await db
+    .select({ link: projectReadiness.link, note: projectReadiness.note })
+    .from(projectReadiness)
+    .where(and(eq(projectReadiness.workstreamId, workstreamId), eq(projectReadiness.itemId, itemId)))
+    .limit(1)
+
+  const fd = new FormData()
+  fd.set('workstreamId', workstreamId)
+  fd.set('itemId', itemId)
+  fd.set('status', status)
+  // Carried through rather than cleared: the whole-row action treats an absent
+  // field as "set it to null", and a tick should not silently delete the link
+  // somebody attached last month.
+  if (existing?.link) fd.set('link', existing.link)
+  if (existing?.note) fd.set('note', existing.note)
+
+  await updateReadiness(fd)
+
+  // The detail pages render this checklist too, and the whole-row action only
+  // knew about /readiness. Without these, ticking a box here left the page
+  // showing the old state until a hard reload.
+  revalidatePath('/workstreams', 'layout')
+  revalidatePath('/projects', 'layout')
+
+  return { stamp: Date.now() }
+}

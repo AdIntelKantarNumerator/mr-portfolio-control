@@ -10,7 +10,7 @@
 import Link from 'next/link'
 import { asc, desc } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { appAreas, intakeRequests, themes } from '@/db/schema'
+import { intakeRequests } from '@/db/schema'
 import { INTAKE_STATUS, LABELS, TSHIRT_WEEKS, type IntakeStatus, type Tshirt } from '@/lib/domain'
 import { getScoringContext, scoreForRequest, type ScoringContext } from '@/lib/scoring'
 import { fmtDate, relativeDays } from '@/lib/util'
@@ -92,13 +92,9 @@ function ScoreReadout({ ctx, requestId }: { ctx: ScoringContext; requestId: stri
 function RequestCard({
   r,
   ctx,
-  themeName,
-  areaName,
 }: {
   r: IntakeRow
   ctx: ScoringContext
-  themeName: string | null
-  areaName: string | null
 }) {
   const costumedDate = r.hardDate && !r.hardDateReason?.trim()
   const weeks = r.tshirt ? TSHIRT_WEEKS[r.tshirt as Tshirt] : null
@@ -138,8 +134,6 @@ function RequestCard({
             no sponsor
           </GapFlag>
         )}
-        {themeName ? <Chip tone="violet">{themeName}</Chip> : <GapFlag>no theme</GapFlag>}
-        {areaName ? <Chip tone="accent">{areaName}</Chip> : <GapFlag>no app area</GapFlag>}
         {r.tshirt ? (
           <Chip tone="slate" title={`About ${weeks} engineer-weeks`}>
             {LABELS.tshirt[r.tshirt as Tshirt]} · ~{weeks}w
@@ -248,15 +242,11 @@ function RequestCard({
 }
 
 export default async function IntakePage() {
-  const [requests, themeRows, areaRows, ctx] = await Promise.all([
+  const [requests, ctx] = await Promise.all([
     db.select().from(intakeRequests).orderBy(desc(intakeRequests.createdAt), asc(intakeRequests.ref)),
-    db.select({ id: themes.id, name: themes.name }).from(themes).orderBy(asc(themes.sortOrder)),
-    db.select({ id: appAreas.id, name: appAreas.name }).from(appAreas).orderBy(asc(appAreas.sortOrder)),
     getScoringContext(),
   ])
 
-  const themeName = new Map(themeRows.map((t) => [t.id, t.name]))
-  const areaName = new Map(areaRows.map((a) => [a.id, a.name]))
 
   const byStatus = new Map<IntakeStatus, IntakeRow[]>()
   for (const s of INTAKE_STATUS) byStatus.set(s, [])
@@ -348,8 +338,6 @@ export default async function IntakePage() {
                     key={r.id}
                     r={r}
                     ctx={ctx}
-                    themeName={r.themeId ? (themeName.get(r.themeId) ?? null) : null}
-                    areaName={r.appAreaId ? (areaName.get(r.appAreaId) ?? null) : null}
                   />
                 ))}
               </div>
