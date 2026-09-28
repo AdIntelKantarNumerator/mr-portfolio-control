@@ -1104,3 +1104,50 @@ a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }
 .dfacts { margin-top: 8px; }
 .dnote { margin: 8px 0 0; font-size: 13px; color: var(--muted); max-width: 90ch; line-height: 1.5; }
 .dpriority .ed-val { font-size: 11.5px; font-weight: 700; color: var(--muted); }
+
+/* Detail tiles: the same breathing room the home cards have between them,
+   and an inset so a tile edge is never flush with the page edge. */
+.tiles { gap: 16px; padding: 0 2px; margin-bottom: 2px; }
+/* The right column can hold one tile (a workstream has nothing beneath it) or
+   two (updates, then the tier below), and either way it ends level with the
+   health tile beside it. A column shorter than its neighbour leaves a slab of
+   empty page that reads as a missing tile.
+   Flex, not grid: the column has to hand its spare height to exactly one
+   child, and `flex: 1` on the last tile says that in one line. The earlier
+   grid version needed `align-content` and `height: 100%` to agree with each
+   other, and they did not. */
+.tiles-even { align-items: stretch; }
+.tilecol { display: flex; flex-direction: column; gap: 16px; }
+.tilecol > .tile:last-child { flex: 1; display: flex; flex-direction: column; }
+/* The list takes the growth, so the tile's heading stays put and the extra
+   height falls below the last line rather than spreading between rows. */
+.tilecol > .tile:last-child > .tile-list { flex: 1; align-content: start; }
+
+/* Dragging the board into an order, under the Custom sort only. */
+.dragnote { margin: -4px 0 12px; font-size: 12px; color: var(--muted); }
+.dragnote b { color: var(--crit); font-weight: 650; }
+.dragwrap { position: relative; }
+.dragwrap.held { opacity: .45; }
+/* The gap between cards is the drop target's only visible edge, so the line
+   is drawn in it — above the target when the card is coming up the list,
+   below when it is going down, because that is where the card will end up. */
+.dragwrap.over-above::before, .dragwrap.over-below::after {
+  content: ''; position: absolute; left: 0; right: 0; height: 3px;
+  border-radius: 99px; background: var(--brand); z-index: 4;
+}
+.dragwrap.over-above::before { top: -8px; }
+.dragwrap.over-below::after { bottom: -8px; }
+/* A frame down the top and both sides: the edges of a card that carry no
+   controls, which is also where a hand reaches for one. */
+.grip {
+  position: absolute; inset: 0 0 auto 0; height: 100%;
+  border-top: 14px solid transparent; border-left: 10px solid transparent; border-right: 10px solid transparent;
+  cursor: grab; z-index: 3; pointer-events: none;
+}
+.grip::before, .grip::after, .grip { background-clip: padding-box; }
+/* Only the frame itself takes the pointer; the card's middle stays clickable. */
+.grip { pointer-events: none; }
+.dragwrap .grip { pointer-events: auto; clip-path: polygon(
+  0 0, 100% 0, 100% 100%, calc(100% - 10px) 100%, calc(100% - 10px) 14px, 10px 14px, 10px 100%, 0 100%); }
+.grip:active { cursor: grabbing; }
+.dragwrap:hover .grip { background: color-mix(in srgb, var(--brand) 9%, transparent); }

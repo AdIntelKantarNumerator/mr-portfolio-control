@@ -267,18 +267,49 @@ while ((Get-Date) -lt $deadline) {
 Write-Host ''
 
 if ($status -ne 'Succeeded') {
-  # Fetch the log to a file rather than to the console: writing it to the
-  # terminal is the operation that cannot survive a non-UTF-8 code page, and
-  # a build that failed for a real reason deserves a readable reason.
+  # Fetch the log WITHOUT asking az to print it.
+  #
+  # The previous version redirected `az acr task logs` into a file and
+  # assumed that was enough. It is not: the encoder runs inside the CLI,
+  # which writes its stdout through the console's legacy code page, so a
+  # Next.js log opening with "▲ Next.js" kills the command with
+  # UnicodeEncodeError before PowerShell sees a single byte. Redirection
+  # cannot save something that dies while producing the output. The result
+  # was a log file containing the traceback of the failure to write the log,
+  # and no sign of why the build actually failed.
+  #
+  # ACR hands out a short-lived link to the log blob. That link is ASCII, so
+  # printing it is safe on any code page, and PowerShell downloads the blob
+  # as bytes - nothing decodes the log until it is on disk.
   $logFile = Join-Path (Get-Location) "acr-build-$runId.log"
+  $got = $false
   try {
-    & az acr task logs -r $Registry --run-id $runId 2>&1 |
-      Out-File -FilePath $logFile -Encoding utf8
-    Note "Log written to $logFile"
+    $registryId = (& az acr show -n $Registry --query id -o tsv 2>$null | Out-String).Trim()
+    if ($registryId) {
+      $sasUrl = "https://management.azure.com$registryId/runs/$runId/listLogSasUrl?api-version=2019-06-01-preview"
+      $link = (& az rest --method post --url $sasUrl --query logLink -o tsv 2>$null | Out-String).Trim()
+      if ($link) {
+        Invoke-WebRequest -Uri $link -OutFile $logFile -UseBasicParsing | Out-Null
+        $got = Test-Path -LiteralPath $logFile
+      }
+    }
   } catch {
-    Note 'Could not download the log. It is in the Azure portal under the registry, Tasks, Runs.'
+    $got = $false
   }
-  throw "Build run $runId ended as '$status'. The reason is in:`n  $logFile"
+
+  if ($got) {
+    Note "Log written to $logFile"
+    Write-Host ''
+    Write-Host '--- last 30 lines of the build log ---' -ForegroundColor Yellow
+    Get-Content -LiteralPath $logFile | Select-Object -Last 30 | ForEach-Object { Write-Host $_ }
+    Write-Host ''
+    throw "Build run $runId ended as '$status'. The whole log is in:`n  $logFile"
+  }
+
+  Note 'Could not download the log automatically.'
+  Note "Try:  .\get-acr-log.ps1 -RunId $runId"
+  Note 'Or open the Azure portal: the registry, then Tasks, then Runs.'
+  throw "Build run $runId ended as '$status'."
 }
 Note "Run $runId succeeded."
 
