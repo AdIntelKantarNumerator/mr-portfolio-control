@@ -19,6 +19,7 @@ import {
   index,
   integer,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -1551,4 +1552,30 @@ export const groupingSuggestions = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index('grouping_suggestions_status_idx').on(t.status, t.createdAt)],
+)
+
+/**
+ * How one reader has arranged the home board, under the Custom sort.
+ *
+ * A view preference, not a portfolio fact. The three tables all carry a
+ * `sortOrder` column and this deliberately does not write it: that column
+ * means "the order these read in" for everybody, and an arrangement one
+ * person dragged for their own Monday is not that.
+ *
+ * `orderedIds` is comma-separated, read whole and written whole. See
+ * drizzle/0015_card_order.sql for why the list lives in one row rather than
+ * one row per card, and why nothing here references `people.id`.
+ */
+export const cardOrders = pgTable(
+  'card_orders',
+  {
+    /** `people.id`, or 'local' when auth is switched off for development. */
+    personId: text('person_id').notNull(),
+    /** initiative | project | workstream. Each board is arranged separately. */
+    level: text('level').notNull(),
+    /** Comma-separated entity ids, first to last. */
+    orderedIds: text('ordered_ids').notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ name: 'card_orders_person_level_pk', columns: [t.personId, t.level] })],
 )
