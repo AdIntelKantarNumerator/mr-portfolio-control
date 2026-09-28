@@ -155,6 +155,11 @@ export type Tshirt = (typeof TSHIRT)[number]
 export const TSHIRT_WEEKS: Record<Tshirt, number> = { xs: 1, s: 3, m: 8, l: 20, xl: 45 }
 
 export const ENTITY_TYPE = [
+  // 'initiative' joined when dependencies became something a person files by
+  // hand. "The GPC initiative is waiting on the vendor feed" is a real
+  // sentence people say, and before this the only way to record it was to
+  // pick one project underneath and hope somebody read it as the whole thing.
+  'initiative',
   'project',
   'workstream',
   'milestone',
