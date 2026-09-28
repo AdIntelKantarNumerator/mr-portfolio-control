@@ -16,9 +16,12 @@
  * held, because "why didn't my Linear change come through" is otherwise an
  * unanswerable question.
  */
+import Link from 'next/link'
 import { useActionState, useState } from 'react'
 import { deleteMilestone, saveMilestone, type MilestoneState } from '@/app/milestone-actions'
-import { LocalTime, calendarDate } from './local-time'
+import { LocalTime } from './local-time'
+import { calendarDate } from '@/lib/calendar-date'
+import { IconMilestone } from './detail/icons'
 
 const EMPTY: MilestoneState = {}
 
@@ -56,6 +59,11 @@ export interface MilestoneRow {
   /** ISO. */
   editedAt: string | null
   authoredBy: string | null
+  /** Which entity actually owns this row - what an edit is posted against. */
+  ownerLevel: 'initiative' | 'project' | 'workstream'
+  ownerId: string
+  /** Set only when the row was borrowed from beneath. Null on the page's own. */
+  from: { level: 'initiative' | 'project' | 'workstream'; id: string; name: string } | null
 }
 
 export function MilestoneEditor({
@@ -69,15 +77,19 @@ export function MilestoneEditor({
 }) {
   const [open, setOpen] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const borrowed = milestones.filter((m) => m.from).length
 
   return (
     <section className="ms-panel">
       <div className="ms-head">
+        <IconMilestone />
         <h2>Milestones</h2>
         <span className="muted">
           {milestones.length === 0
             ? 'Nothing committed yet'
-            : `${milestones.length} on this ${level}`}
+            : borrowed === 0
+              ? `${milestones.length} on this ${level}`
+              : `${milestones.length} in scope \u2014 ${milestones.length - borrowed} on this ${level}, ${borrowed} from beneath`}
         </span>
         <button type="button" className="ms-add" onClick={() => setAdding(!adding)}>
           {adding ? 'Cancel' : 'Add a milestone'}
@@ -105,6 +117,10 @@ export function MilestoneEditor({
             const held = (m.editedFields ?? '').split(',').filter(Boolean)
             return (
               <li key={m.id}>
+                {/* The row is a flex line rather than one big button, because
+                    the source has to be a link and a link inside a button is
+                    invalid markup that browsers render unclickable. */}
+                <div className="ms-line">
                 <button type="button" className="ms-row" onClick={() => setOpen(open === m.id ? null : m.id)}>
                   <i style={{ background: STATUS_COLOR[m.status] ?? 'var(--line-2)' }} />
                   <span className="n">{m.name}</span>
@@ -113,16 +129,28 @@ export function MilestoneEditor({
                     {m.targetLabel ?? (m.targetDate ? calendarDate(m.targetDate) : 'no date')}
                     {m.contested ? ' · contested' : ''}
                   </span>
+
                   {held.length > 0 && (
                     <span className="e" title={`Held here, not overwritten by a sync: ${held.join(', ')}`}>
                       edited
                     </span>
                   )}
                 </button>
+                <span className="f">
+                  {m.from ? (
+                    <Link href={`/${m.from.level}s/${m.from.id}`}>{m.from.name}</Link>
+                  ) : (
+                    <em className="own">this {level}</em>
+                  )}
+                </span>
+                </div>
                 {open === m.id && (
+                  // Posted against the entity that owns the row, not the page
+                  // being viewed: a workstream's milestone edited from the
+                  // project page is still the workstream's milestone.
                   <MilestoneForm
-                    level={level}
-                    entityId={entityId}
+                    level={m.ownerLevel}
+                    entityId={m.ownerId}
                     row={m}
                     onDone={() => setOpen(null)}
                   />
