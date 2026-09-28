@@ -18,10 +18,10 @@
  */
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
-import { NextMilestoneRing, edgeColor } from '@/components/ring'
+import { NextMilestoneRing, edgeColor, shortMilestone } from '@/components/ring'
 import { Editable } from '@/components/editable'
 import { HealthEditable } from '@/components/health-editable'
-import { calendarDate } from '@/components/local-time'
+import { calendarDate } from '@/lib/calendar-date'
 
 export interface WorkstreamRow {
   id: string
@@ -184,7 +184,14 @@ export function ProjectList({
                       –
                     </span>
                   )}
-                  {r.next && <span className="ir-due">{r.next.due ?? 'no date'}</span>}
+                  {r.next && (
+                    <>
+                      <span className="ir-short" title={r.next.name}>
+                        {shortMilestone(r.next.name)}
+                      </span>
+                      <span className="ir-due">{r.next.due ?? 'no date'}</span>
+                    </>
+                  )}
                 </div>
 
                 <div className="ir-body">
