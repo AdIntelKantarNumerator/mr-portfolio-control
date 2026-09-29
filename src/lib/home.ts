@@ -33,6 +33,7 @@ import { lateDependencies } from './dependency-risk'
 import { activitySeries } from './activity-series'
 import { getCardOrder } from './card-order'
 import { blockedAtOrBelow } from './blocked'
+import { byTargetDate } from './milestone-order'
 
 // The vocabulary lives in home-types.ts, which imports nothing, so client
 // components can use it without dragging this module's database import into
@@ -326,7 +327,10 @@ export const getHomeCards = cache(async (
       const own = ms.filter((m) => m.level === level && m.entityId === r.id)
       // Its own milestones if it has any; otherwise the ones underneath, so an
       // initiative with nothing authored still shows the work's real dates.
-      const railSource = (own.length ? own : mine).slice().sort((a, b) => a.sortOrder - b.sortOrder)
+      // By date, not by the order somebody arranged them in on the editor —
+      // the rail is a run of time, and the first open mark on it is the card's
+      // "next milestone". See lib/milestone-order.ts.
+      const railSource = byTargetDate(own.length ? own : mine)
 
       const openNext = railSource.find((m) => m.status !== 'complete') ?? null
       const due = openNext?.targetDate ?? null
