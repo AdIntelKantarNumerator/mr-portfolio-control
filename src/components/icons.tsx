@@ -98,6 +98,15 @@ export const IconRegister = (p: IconProps) => (
   </Glyph>
 )
 
+/** Decisions — a fork, and the two ways it could go. */
+export const IconDecisions = (p: IconProps) => (
+  <Glyph {...p}>
+    <path d="M8 14.4V9.2m0 0L4.4 5.6V3.4M8 9.2l3.6-3.6V3.4" />
+    <circle cx="4.4" cy="2.4" r="1.4" />
+    <circle cx="11.6" cy="2.4" r="1.4" />
+  </Glyph>
+)
+
 /** Action items — a commitment, ticked. */
 export const IconActions = (p: IconProps) => (
   <Glyph {...p}>

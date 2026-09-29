@@ -27,6 +27,7 @@ import {
   IconActions,
   IconActivity,
   IconConversations,
+  IconDecisions,
   IconDependencies,
   IconHome,
   IconInitiatives,
@@ -76,6 +77,7 @@ export const NAV: NavSection[] = [
     label: 'Work in progress',
     items: [
       { href: '/blockers', label: 'Blockers', icon: IconRegister, hint: 'What is stuck, and whose it is' },
+      { href: '/decisions', label: 'Decisions', icon: IconDecisions, hint: 'What is outstanding, and who owes the answer' },
       { href: '/actions', label: 'Action items', icon: IconActions, hint: 'What people said they would do' },
       { href: '/dependencies', label: 'Dependencies', icon: IconDependencies },
       { href: '/readiness', label: 'Readiness', icon: IconReadiness, hint: 'Gates before a launch' },

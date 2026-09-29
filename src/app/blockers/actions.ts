@@ -38,14 +38,14 @@ function refresh() {
 }
 
 /** A short handle people can say out loud. Collisions resolve by suffix. */
-async function nextRef(): Promise<string> {
+async function nextRef(prefix: string): Promise<string> {
   const rows = await db.select({ ref: decisions.ref }).from(decisions)
   const used = new Set(rows.map((r) => r.ref))
   for (let n = 1; n < 10_000; n++) {
-    const ref = `B${n}`
+    const ref = `${prefix}${n}`
     if (!used.has(ref)) return ref
   }
-  return `B-${Date.now()}`
+  return `${prefix}-${Date.now()}`
 }
 
 export async function createBlocker(_prev: BlockerState, formData: FormData): Promise<BlockerState> {
@@ -55,6 +55,10 @@ export async function createBlocker(_prev: BlockerState, formData: FormData): Pr
   const ownerId = String(formData.get('ownerId') ?? '').trim()
   const dueBy = String(formData.get('dueBy') ?? '').trim()
   const category = String(formData.get('category') ?? 'delivery')
+  // Blockers and decisions are one table and one shape - see the note on
+  // db/schema.ts. Which word the page used decides the kind and the prefix,
+  // and nothing else differs.
+  const kind = String(formData.get('kind') ?? 'blocker') === 'decision' ? 'decision' : 'blocker'
 
   if (title.length < 3) return { error: 'Say what is blocked, in a few words.' }
   // The body is what somebody reads in three weeks when the title has stopped
@@ -73,11 +77,11 @@ export async function createBlocker(_prev: BlockerState, formData: FormData): Pr
     entityId = id
   }
 
-  const ref = await nextRef()
+  const ref = await nextRef(kind === 'decision' ? 'D' : 'B')
   const who = await actorName()
   await db.insert(decisions).values({
     ref,
-    kind: 'blocker',
+    kind,
     category: ['strategic', 'delivery', 'risk'].includes(category) ? category : 'delivery',
     title,
     body,
@@ -93,7 +97,7 @@ export async function createBlocker(_prev: BlockerState, formData: FormData): Pr
   await logChange({
     actor: who,
     kind: 'change',
-    summary: `${ref}: blocker raised — ${title.slice(0, 80)}`,
+    summary: `${ref}: ${kind} raised — ${title.slice(0, 80)}`,
     detail: body.slice(0, 400),
     entityType,
     entityId,

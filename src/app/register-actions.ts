@@ -262,7 +262,15 @@ export async function addDependency(input: {
 // deleting the same thing twice.
 // ---------------------------------------------------------------------------
 
-export type EntryKind = 'blocker' | 'dependency'
+/*
+ * A decision is a blocker seen from the other end: one table, one shape, one
+ * set of rules. Everything below treats the two together and branches only
+ * where the word on screen differs.
+ */
+export type EntryKind = 'blocker' | 'decision' | 'dependency'
+
+/** True for the two kinds that live in `decisions`. */
+const isRegister = (k: EntryKind) => k === 'blocker' || k === 'decision'
 
 export interface LoadedEntry {
   kind: EntryKind
@@ -319,7 +327,7 @@ async function endpointName(type: string, entityId: string): Promise<string | nu
  * for, but showing the second one a stale form would be.
  */
 export async function loadRegisterEntry(kind: EntryKind, id: string): Promise<LoadedEntry | { error: string }> {
-  if (kind === 'blocker') {
+  if (isRegister(kind)) {
     const [row] = await db.select().from(decisions).where(eq(decisions.id, id)).limit(1)
     if (!row) return { error: 'That entry no longer exists — reload the page.' }
     return {
@@ -396,7 +404,7 @@ export async function editRegisterEntry(input: {
   description?: string | null
   dueDate?: string | null
 }): Promise<RegisterState> {
-  if (input.kind === 'blocker') {
+  if (isRegister(input.kind)) {
     const [before] = await db.select().from(decisions).where(eq(decisions.id, input.id)).limit(1)
     if (!before) return { error: 'That entry no longer exists — reload the page.' }
 
@@ -487,7 +495,7 @@ export async function editRegisterEntry(input: {
 }
 
 export async function deleteRegisterEntry(kind: EntryKind, id: string): Promise<RegisterState> {
-  if (kind === 'blocker') {
+  if (isRegister(kind)) {
     const [before] = await db.select().from(decisions).where(eq(decisions.id, id)).limit(1)
     if (!before) return { error: 'That entry no longer exists — reload the page.' }
 

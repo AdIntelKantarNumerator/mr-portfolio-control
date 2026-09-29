@@ -1,15 +1,11 @@
 /**
- * Blockers: what is stuck, and whose it is.
+ * Decisions: what is outstanding, and who owes the answer.
  *
- * This replaces the Register, which put decisions and blockers on one screen
- * with a shared set of filters, a "what has to be true" preamble, four counter
- * tiles and a "also being discussed" section at the foot. One page answering
- * three questions answers none of them first, and the one people came for was
- * always this one.
- *
- * The recurring-topics readout that used to sit at the foot is now its own
- * page — Discussions — and decisions remain on the detail page of whatever
- * they were filed against.
+ * The same page as Blockers, because they are the same table and the same
+ * shape - see components/records/register-list.tsx. Decisions had no page at
+ * all after the Register was split up; they were visible only on the detail
+ * page of whatever they were filed against, and the home board's links to
+ * them 404'd.
  */
 import { asc, desc, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
@@ -20,10 +16,10 @@ import { scopeFilter } from '@/lib/scope-filter'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { RegisterList, type BlockerRow, type Named } from '@/components/records/register-list'
 
-export const metadata = { title: 'Blockers' }
+export const metadata = { title: 'Decisions' }
 export const dynamic = 'force-dynamic'
 
-export default async function BlockersPage({
+export default async function DecisionsPage({
   searchParams,
 }: {
   searchParams: Promise<{ show?: string; scope?: string }>
@@ -36,10 +32,10 @@ export default async function BlockersPage({
       ? db
           .select()
           .from(decisions)
-          .where(eq(decisions.kind, 'blocker'))
+          .where(eq(decisions.kind, 'decision'))
           .orderBy(desc(decisions.resolvedAt))
           .limit(300)
-      : db.select().from(decisions).where(eq(decisions.kind, 'blocker')),
+      : db.select().from(decisions).where(eq(decisions.kind, 'decision')),
     db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives).orderBy(asc(initiatives.name)),
     db
       .select({ id: projects.id, name: projects.name, initiativeId: projects.initiativeId })
@@ -101,12 +97,12 @@ export default async function BlockersPage({
       <div className="titlerow">
         <div>
           <Kicker>Work in progress</Kicker>
-          <h1>Blockers</h1>
+          <h1>Decisions</h1>
         </div>
       </div>
 
       <RegisterList
-        kind="blocker"
+        kind="decision"
         rows={items}
         initiatives={inits}
         projects={projs}
@@ -114,7 +110,7 @@ export default async function BlockersPage({
         people={folk}
         closed={closed}
         editing={user.personId ? { people: ctx.people, endpoints: ctx.endpoints } : null}
-        scope={narrow.label && scope ? { label: narrow.label, clear: '/blockers', param: scope } : null}
+        scope={narrow.label && scope ? { label: narrow.label, clear: '/decisions', param: scope } : null}
       />
     </div>
   )

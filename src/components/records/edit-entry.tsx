@@ -44,7 +44,11 @@ export interface EditContext {
   endpoints: Array<{ value: string; label: string; group: string }>
 }
 
-const TITLE: Record<EntryKind, string> = { blocker: 'Edit blocker', dependency: 'Edit dependency' }
+const TITLE: Record<EntryKind, string> = {
+  blocker: 'Edit blocker',
+  decision: 'Edit decision',
+  dependency: 'Edit dependency',
+}
 
 export function EditEntryButton({
   kind,
@@ -112,7 +116,7 @@ function EditDialog({
     setBusy(true)
     const get = (k: string) => String(form.get(k) ?? '')
     const res = await editRegisterEntry(
-      kind === 'blocker'
+      kind !== 'dependency'
         ? {
             kind,
             id,
@@ -210,15 +214,15 @@ function EditDialog({
           <p className="mr-hint">{state.error ?? 'Reading it…'}</p>
         ) : (
           <form action={submit}>
-            {kind === 'blocker' ? (
+            {kind !== 'dependency' ? (
               <>
                 <label className="mr-label" htmlFor="ee-title">
-                  What is blocked
+                  {kind === 'decision' ? 'What has to be decided' : 'What is blocked'}
                 </label>
                 <input id="ee-title" name="title" required defaultValue={entry.title ?? ''} />
 
                 <label className="mr-label" htmlFor="ee-body">
-                  What is in the way
+                  {kind === 'decision' ? 'What the options are' : 'What is in the way'}
                 </label>
                 <input id="ee-body" name="body" required defaultValue={entry.body ?? ''} />
 
@@ -235,7 +239,7 @@ function EditDialog({
                     <select id="ee-status" name="status" defaultValue={entry.status}>
                       <option value="open">Open</option>
                       <option value="watch">Watching</option>
-                      <option value="decided">Resolved</option>
+                      <option value="decided">{kind === 'decision' ? 'Decided' : 'Resolved'}</option>
                       <option value="dropped">Dropped</option>
                     </select>
                   </span>
