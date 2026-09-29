@@ -44,10 +44,12 @@ export interface DetailHeadProps {
   }
   /** Anything else that belongs on the title line: priority, source links. */
   pills?: React.ReactNode
+  /** The edit-details control, when this reader can write. */
+  edit?: React.ReactNode
   children?: React.ReactNode
 }
 
-export function DetailHead({ tier, name, parent, orphan, status, pills, children }: DetailHeadProps) {
+export function DetailHead({ tier, name, parent, orphan, status, pills, edit, children }: DetailHeadProps) {
   return (
     <div className="dhead">
       {/* Singular: this is one of them, not the list. The link still goes to
@@ -74,6 +76,7 @@ export function DetailHead({ tier, name, parent, orphan, status, pills, children
           />
         )}
         {pills}
+        {edit ? <span className="dhead-right">{edit}</span> : null}
       </div>
 
       {(parent || orphan) && (

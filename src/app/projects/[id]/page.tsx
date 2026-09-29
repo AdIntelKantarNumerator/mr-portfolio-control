@@ -19,6 +19,7 @@ import { getDetail } from '@/lib/detail'
 import { getPortfolio } from '@/lib/portfolio'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { addContext } from '@/lib/add-context'
+import { EditRecordButton } from '@/components/detail/edit-record'
 import { HealthEditable } from '@/components/health-editable'
 import { Editable } from '@/components/editable'
 import { SourceBadge } from '@/components/ui'
@@ -70,6 +71,18 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   return (
     <div className="stack">
       <DetailHead
+        edit={
+          user.personId ? (
+            <EditRecordButton
+              level="project"
+              id={id}
+              name={i.name}
+              description={i.description ?? ''}
+              parentId={i.initiativeId ?? null}
+              parents={adding.initiatives}
+            />
+          ) : null
+        }
         tier={{ label: 'Project', href: '/projects' }}
         name={i.name}
         parent={parent ? { label: 'in', name: parent.name, href: `/initiatives/${parent.id}` } : null}

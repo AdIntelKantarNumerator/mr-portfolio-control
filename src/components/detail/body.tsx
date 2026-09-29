@@ -1,5 +1,6 @@
 import { HealthTile } from './health-tile'
 import { AddEntry, type AddContext, type EntryKind } from './add-entry'
+import { NewChildButton } from './edit-record'
 import { ListTile } from './tile'
 import { ReadinessTile } from './readiness-tile'
 import type { DetailData } from '@/lib/detail'
@@ -84,6 +85,15 @@ export function DetailBody({
               items={data.children.items}
               perPage={8}
               empty={`No ${data.children.title.toLowerCase()} yet.`}
+              add={
+                canEdit && (entity.entityType === 'initiative' || entity.entityType === 'project') ? (
+                  <NewChildButton
+                    level={entity.entityType === 'initiative' ? 'project' : 'workstream'}
+                    parentId={entity.entityId}
+                    label={data.children.title}
+                  />
+                ) : undefined
+              }
             />
           )}
         </div>

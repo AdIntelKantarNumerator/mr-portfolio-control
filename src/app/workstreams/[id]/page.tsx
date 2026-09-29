@@ -10,6 +10,7 @@ import { getDetail } from '@/lib/detail'
 import { getPortfolio } from '@/lib/portfolio'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { addContext } from '@/lib/add-context'
+import { EditRecordButton } from '@/components/detail/edit-record'
 import { HealthEditable } from '@/components/health-editable'
 import { Editable } from '@/components/editable'
 import { SourceBadge } from '@/components/ui'
@@ -64,6 +65,18 @@ export default async function WorkstreamDetailPage({ params }: { params: Promise
   return (
     <div className="stack">
       <DetailHead
+        edit={
+          user.personId ? (
+            <EditRecordButton
+              level="workstream"
+              id={id}
+              name={w.name}
+              description={w.description ?? ''}
+              parentId={w.projectId ?? null}
+              parents={adding.projects}
+            />
+          ) : null
+        }
         tier={{ label: 'Workstream', href: '/workstreams' }}
         name={w.name}
         parent={parent ? { label: 'in', name: parent.name, href: `/projects/${parent.id}` } : null}
