@@ -53,7 +53,21 @@ test('the rail covers every page a person can reach', () => {
     }
   })
 
+  /*
+   * Pages deliberately kept out of the rail.
+   *
+   * This list is the whole value of the exception: an unlinked page is
+   * normally an accident, and the only way to tell an accident from a
+   * decision is that somebody wrote the decision down. Anything not named
+   * here still fails.
+   */
+  const UNLINKED: Record<string, string> = {
+    // Taken out of Reference on request — the page still answers who is
+    // committed to two things at once, and nobody was opening it.
+    contention: 'People: removed from the rail, kept so the answer is not lost',
+  }
+
   const linked = new Set(navHrefs().map((h) => h.replace(/^\//, '')))
-  const orphans = top.filter((d) => !linked.has(d))
+  const orphans = top.filter((d) => !linked.has(d) && !(d in UNLINKED))
   assert.deepEqual(orphans, [], `reachable but not in the rail: ${orphans.join(', ')}`)
 })
