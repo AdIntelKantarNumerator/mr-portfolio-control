@@ -31,6 +31,15 @@ const SYNC_TONE: Record<string, Tone> = {
  * swallowed — a sync log that quietly hides a malformed payload is worse than
  * no log.
  */
+/**
+ * The per-table counters a sync run recorded.
+ *
+ * Null means the text would not parse. An EMPTY LIST means it parsed and had
+ * nothing in it, which is what a run that failed before it wrote anything
+ * leaves behind — and which the page used to report as "could not be read as
+ * JSON", sending whoever read it to look for a corrupt column that was in
+ * fact a perfectly good "{}".
+ */
 function parseStats(raw: string | null): { group: string; parts: string[] }[] | null {
   if (!raw) return null
   let value: unknown
@@ -113,10 +122,14 @@ function SyncPanel({ run }: { run: typeof syncRuns.$inferSelect | null }) {
             </span>
           ))}
         </div>
-      ) : run.stats ? (
+      ) : stats === null && run.stats ? (
         <Muted>Counters were recorded but could not be read as JSON.</Muted>
       ) : (
-        <Muted>No counters recorded for this run.</Muted>
+        <Muted>
+          {run.status === 'failed'
+            ? 'Nothing was counted: the run failed before it wrote anything.'
+            : 'No counters recorded for this run.'}
+        </Muted>
       )}
     </Card>
   )
