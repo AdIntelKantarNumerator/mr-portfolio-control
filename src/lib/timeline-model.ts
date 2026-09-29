@@ -193,35 +193,6 @@ export function markHealth(status: string, target: Date | null, now: Date): Heal
   return healthOf(status, null, target, now)
 }
 
-/**
- * The window a piece of work actually occupies.
- *
- * Its own dates when it has them, and otherwise the span of everything
- * underneath — the same roll-up the detail page shows as "rolled up". They
- * disagreed: a project with no dates of its own had its milestones moved, the
- * detail page said June 17 to Nov 2, and the timeline went on drawing the
- * stored dates, which were nothing. One function, used by both, is the only
- * way those two stay the same number.
- *
- * `beneath` is every date known below: a child's start or end, a milestone's
- * target. Order does not matter; the span is the extremes.
- */
-export function effectiveWindow(
-  own: { startDate: Date | null; targetDate: Date | null },
-  beneath: ReadonlyArray<Date | null | undefined>,
-): { start: Date | null; end: Date | null; rolledUp: boolean } {
-  const stamps = beneath.filter(Boolean).map((d) => (d as Date).getTime())
-  const low = stamps.length ? new Date(Math.min(...stamps)) : null
-  const high = stamps.length ? new Date(Math.max(...stamps)) : null
-
-  // Each end falls back on its own. A project with a real start date and no
-  // target should extend to its last milestone rather than losing the start
-  // somebody typed.
-  const start = own.startDate ?? low
-  const end = own.targetDate ?? high
-  return { start, end, rolledUp: (!own.startDate && low !== null) || (!own.targetDate && high !== null) }
-}
-
 export interface SourceChild {
   id: string
   name: string
