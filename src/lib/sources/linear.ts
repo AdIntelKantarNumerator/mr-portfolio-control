@@ -28,6 +28,7 @@ import {
 import {
   capabilitiesFrom,
   pick,
+  shrinkPage,
   type IntrospectionResult,
   type LinearCapabilities,
 } from './graphql-schema'
@@ -215,12 +216,28 @@ interface PageOptions {
  * Cursor pagination (not offset) because the portfolio changes while the sync
  * runs; offsets would silently skip or duplicate rows mid-walk.
  */
+/**
+ * "Query too complex", and what to do about it.
+ *
+ * Linear scores a query by multiplying the page sizes down every nested
+ * connection. Fifty workstreams, each with fifty milestones, five teams and
+ * five projects is 50 x 50 x 5 x 5 = 62,500 against a ceiling of 10,000, and
+ * the whole sync 400s — which is what happened the day a workspace grew
+ * enough for the nesting to matter.
+ *
+ * Picking a smaller constant would work until the next time. Linear's error
+ * states both numbers, so the right page size is arithmetic rather than
+ * guesswork: scale by the ratio it reports, with a margin, and try again.
+ */
+const TOO_COMPLEX = /too complex/i
+
 async function* paged<T>(
   queryName: string,
   selection: string,
   opts: PageOptions = {},
 ): AsyncGenerator<T[]> {
-  const { filterType, filter, pageSize = 50 } = opts
+  const { filterType, filter, pageSize: requested = 50 } = opts
+  let pageSize = requested
   const useFilter = Boolean(filterType && filter)
   const decl = useFilter ? `, $filter: ${filterType}` : ''
   const arg = useFilter ? ', filter: $filter' : ''
@@ -238,11 +255,26 @@ async function* paged<T>(
 
   let after: string | null = null
   for (;;) {
-    const data: Record<string, Connection> = await gql<Record<string, Connection>>(query, {
-      first: pageSize,
-      after,
-      ...(useFilter ? { filter } : {}),
-    })
+    let data: Record<string, Connection> | null = null
+    // Three shrinks is plenty: each one cuts the page by the ratio Linear
+    // asked for, so the first is almost always enough and the rest are there
+    // for a ceiling that moves while a sync is running.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        data = await gql<Record<string, Connection>>(query, {
+          first: pageSize,
+          after,
+          ...(useFilter ? { filter } : {}),
+        })
+        break
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        const next = TOO_COMPLEX.test(message) ? shrinkPage(pageSize, message) : null
+        if (next === null) throw err
+        pageSize = next
+      }
+    }
+    if (!data) throw new LinearError(`${queryName}: could not find a page size Linear would accept.`)
     const conn: Connection = data[queryName]
     if (conn.nodes.length) yield conn.nodes
     if (!conn.pageInfo.hasNextPage) return
@@ -443,10 +475,13 @@ export async function syncLinear(opts: SyncOptions = {}): Promise<SyncResult> {
     const projExtra = [
       caps.has('Workstream', 'lead') ? 'lead { id }' : '',
       caps.has('Workstream', 'status') ? 'status { name type }' : '',
-      caps.has('Workstream', 'teams') ? 'teams(first: 5) { nodes { id } }' : '',
-      caps.has('Workstream', 'projects') ? 'projects(first: 5) { nodes { id } }' : '',
+      // Only the first of each is ever read (see upsertProject), so asking
+      // for five was paying a fivefold complexity multiplier for four values
+      // nothing looks at.
+      caps.has('Workstream', 'teams') ? 'teams(first: 1) { nodes { id } }' : '',
+      caps.has('Workstream', 'projects') ? 'projects(first: 1) { nodes { id } }' : '',
       caps.has('Workstream', 'projectMilestones')
-        ? 'projectMilestones(first: 50) { nodes { id name description targetDate sortOrder } }'
+        ? 'projectMilestones(first: 25) { nodes { id name description targetDate sortOrder } }'
         : '',
     ].filter(Boolean)
 

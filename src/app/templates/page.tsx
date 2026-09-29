@@ -1,5 +1,10 @@
 /**
- * The template library and the discovery question bank.
+ * The template library: where the canonical copy of each document lives.
+ *
+ * The discovery question bank used to sit underneath it — a second page's
+ * worth of prompts under a page that is a list of links. It is still in the
+ * database and still seeded; it simply has no screen, which is the honest
+ * state for something nobody was opening.
  *
  * Both halves exist for the same reason: the program team already wrote these
  * down, and a document nobody can find is functionally a document nobody
@@ -9,18 +14,13 @@
  */
 import {
   Card,
-  CardHeading,
   Chip,
   Empty,
   Kicker,
-  Muted,
   SectionNote,
   type Tone,
 } from '@/components/ui'
 import {
-  WORKSTREAM_LABEL,
-  WORKSTREAM_ORDER,
-  getDiscoveryTopics,
   getTemplates,
 } from '@/lib/readiness'
 
@@ -38,31 +38,13 @@ const KIND_TONE: Record<string, Tone> = {
 }
 
 export default async function TemplatesPage() {
-  const [templates, topicsByWorkstream] = await Promise.all([getTemplates(), getDiscoveryTopics()])
-
-  // Any milestone the seed did not anticipate still renders, after the known
-  // ones, rather than silently disappearing from the bank.
-  const milestones = [
-    ...WORKSTREAM_ORDER.filter((w) => topicsByWorkstream.has(w)),
-    ...[...topicsByWorkstream.keys()].filter(
-      (w) => !(WORKSTREAM_ORDER as readonly string[]).includes(w),
-    ),
-  ]
-
-  const questionCount = [...topicsByWorkstream.values()].reduce((n, q) => n + q.length, 0)
+  const templates = await getTemplates()
 
   return (
     <div className="grid gap-4">
       <div>
-        <Kicker>Standard templates</Kicker>
-        <h2 className="m-0 mt-0.5 text-[18px] font-bold tracking-[-0.01em]">
-          The documents every workstream is expected to have
-        </h2>
-        <p className="m-0 mt-1 max-w-[820px] text-[12.5px]" style={{ color: 'var(--muted)' }}>
-          One place for the canonical links, so a kick-off does not start with someone hunting
-          Drive for last quarter&apos;s charter. The readiness checklist points at these same
-          documents.
-        </p>
+        <Kicker>Reference</Kicker>
+        <h2 className="m-0 mt-0.5 text-[18px] font-bold tracking-[-0.01em]">Project Documents</h2>
       </div>
 
       <SectionNote tone="amber">Make copies of these — do not alter the templates.</SectionNote>
@@ -95,52 +77,6 @@ export default async function TemplatesPage() {
         </div>
       )}
 
-      <div className="mt-2">
-        <Kicker>Discovery question bank</Kicker>
-        <h2 className="m-0 mt-0.5 text-[18px] font-bold tracking-[-0.01em]">
-          What a data workstream has to answer before it commits to a date
-        </h2>
-        <p className="m-0 mt-1 max-w-[820px] text-[12.5px]" style={{ color: 'var(--muted)' }}>
-          {questionCount} questions across {milestones.length} milestones. These are prompts, not
-          fields — the value is in a team having to say &ldquo;we don&apos;t know yet&rdquo; out
-          loud while that is still cheap.
-        </p>
-      </div>
-
-      {milestones.length === 0 ? (
-        <Empty>The question bank is empty.</Empty>
-      ) : (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {milestones.map((w) => {
-            const questions = topicsByWorkstream.get(w) ?? []
-            return (
-              <Card key={w}>
-                <CardHeading
-                  title={WORKSTREAM_LABEL[w] ?? w}
-                  right={
-                    <Muted>
-                      {questions.length} question{questions.length === 1 ? '' : 's'}
-                    </Muted>
-                  }
-                />
-                <ol className="m-0 grid list-none gap-1.5 p-0">
-                  {questions.map((q, ix) => (
-                    <li key={q.id} className="flex gap-2 text-[12.5px] leading-relaxed">
-                      <span
-                        className="shrink-0 tabular-nums font-semibold"
-                        style={{ color: 'var(--brand-2)' }}
-                      >
-                        {ix + 1}.
-                      </span>
-                      <span>{q.question}</span>
-                    </li>
-                  ))}
-                </ol>
-              </Card>
-            )
-          })}
-        </div>
-      )}
     </div>
   )
 }

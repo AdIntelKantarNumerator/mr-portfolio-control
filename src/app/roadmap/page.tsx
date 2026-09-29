@@ -34,7 +34,7 @@ import { isNull } from 'drizzle-orm'
 import { Kicker } from '@/components/ui'
 import { getCardOrder } from '@/lib/card-order'
 import { lateness } from '@/lib/dependency-risk'
-import { addMonths, buildTimeline, type DepInput, type SourceRow } from '@/lib/timeline-model'
+import { addMonths, buildTimeline, effectiveWindow, type DepInput, type SourceRow } from '@/lib/timeline-model'
 import { HOME_PREFS_COOKIE, resolveHomePrefs } from '@/lib/home-prefs'
 import { TimelineControls } from './controls'
 import { TimelineView } from '@/components/timeline-view'
@@ -109,15 +109,37 @@ export default async function RoadmapPage({
     ])
   }
 
-  const child = (row: { id: string; name: string; status: string; startDate: Date | null; targetDate: Date | null }, kind: keyof typeof HREF) => ({
-    id: row.id,
-    name: row.name,
-    href: `${HREF[kind]}/${row.id}`,
-    status: row.status,
-    rag: ragOf.get(`${kind}:${row.id}`) ?? null,
-    startDate: row.startDate,
-    targetDate: row.targetDate,
-  })
+  // Every date known beneath a record: its milestones, and — for a project —
+  // its workstreams' windows too. This is what makes the bar agree with the
+  // "rolled up" window the detail page shows; they used to disagree, because
+  // the chart read the stored dates and nothing else.
+  const msFor = (id: string) => ms.filter((m) => m.entityId === id).map((m) => m.targetDate)
+  const beneathOf = (kind: keyof typeof HREF, id: string): Array<Date | null> => {
+    const own = msFor(id)
+    if (kind === 'workstream') return own
+    if (kind === 'project') {
+      const kids = wsByProject.get(id) ?? []
+      return [...own, ...kids.flatMap((w) => [w.startDate, w.targetDate, ...msFor(w.id)])]
+    }
+    const kids = projByInit.get(id) ?? []
+    return [...own, ...kids.flatMap((p) => [p.startDate, p.targetDate, ...beneathOf('project', p.id)])]
+  }
+
+  const child = (
+    row: { id: string; name: string; status: string; startDate: Date | null; targetDate: Date | null },
+    kind: keyof typeof HREF,
+  ) => {
+    const window = effectiveWindow(row, beneathOf(kind, row.id))
+    return {
+      id: row.id,
+      name: row.name,
+      href: `${HREF[kind]}/${row.id}`,
+      status: row.status,
+      rag: ragOf.get(`${kind}:${row.id}`) ?? null,
+      startDate: window.start,
+      targetDate: window.end,
+    }
+  }
 
   const source: SourceRow[] = (
     level === 'initiative' ? liveInits : level === 'project' ? liveProjs : liveWs

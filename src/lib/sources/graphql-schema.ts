@@ -126,3 +126,43 @@ export function pick(
   }
   return out
 }
+
+/**
+ * "Query too complex": how much smaller the next page has to be.
+ *
+ * Linear scores a query by multiplying the page sizes down every nested
+ * connection, and its error states both the score and the ceiling. That makes
+ * the right page size arithmetic rather than guesswork — which matters,
+ * because the alternative is a smaller constant that works until the next
+ * time a workspace grows or somebody adds a field.
+ *
+ * Lives here with the other rules about talking to a GraphQL server, so it
+ * can be tested without a network or a database.
+ */
+export function complexityRatio(message: string): number | null {
+  /*
+   * One regex for both numbers, in order, rather than two.
+   *
+   * Two separate searches looked right and were not: "Complexity:" also
+   * occurs inside "Maximum allowed complexity:", so a message whose first
+   * number was malformed matched the ceiling twice and returned a ratio of
+   * 1 — a "shrink" to the same size, which is a retry loop.
+   */
+  const m = /\bComplexity:\s*(\d+)\D+?maximum allowed complexity:\s*(\d+)/i.exec(message)
+  if (!m) return null
+  const from = Number(m[1])
+  const to = Number(m[2])
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from <= 0 || to <= 0) return null
+  return to / from
+}
+
+/** The page size to try next, or null when there is no smaller one worth trying. */
+export function shrinkPage(pageSize: number, message: string): number | null {
+  const ratio = complexityRatio(message)
+  if (ratio === null || pageSize <= 1) return null
+  // 0.8 of what would just fit: the score is not perfectly linear in the page
+  // size, and landing exactly on the ceiling is how this comes back the first
+  // time somebody adds a field.
+  const next = Math.max(1, Math.floor(pageSize * ratio * 0.8))
+  return next < pageSize ? next : null
+}
