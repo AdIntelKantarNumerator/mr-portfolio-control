@@ -47,12 +47,22 @@ export interface EndpointOption {
   group: string
 }
 
+/*
+ * In workflow order, which is also the order the Status column sorts in. The
+ * rank comes from this object's own keys, so there is no second list to drift
+ * from it.
+ */
 const STATUS_LABEL: Record<string, string> = {
   open: 'Open',
   at_risk: 'At risk',
   resolved: 'Resolved',
   accepted_risk: 'Accepted risk',
 }
+
+const STATUS_RANK = Object.keys(STATUS_LABEL)
+
+/** Worst first, which is what a criticality column is for. */
+const CRITICALITY_RANK = ['critical', 'high', 'normal']
 
 const LATE_LABEL: Record<string, string> = {
   overdue: 'Date passed',
@@ -78,6 +88,7 @@ export function DependencyList({
       key: 'from',
       label: 'Delivering',
       filter: 'select',
+      sort: 'text',
       value: (r) => r.from.label,
       cell: (r) => (r.from.href ? <Link href={r.from.href}>{r.from.label}</Link> : r.from.label),
     },
@@ -85,22 +96,31 @@ export function DependencyList({
       key: 'to',
       label: 'Waiting',
       filter: 'select',
+      sort: 'text',
       value: (r) => r.to.label,
       cell: (r) => (r.to.href ? <Link href={r.to.href}>{r.to.label}</Link> : r.to.label),
     },
-    { key: 'kind', label: 'Kind', filter: 'select', value: (r) => r.kind },
+    { key: 'kind', label: 'Kind', filter: 'select', sort: 'text', value: (r) => r.kind },
     {
       key: 'status',
       label: 'Status',
       filter: 'select',
+      sort: { kind: 'number', by: (r) => STATUS_RANK.indexOf(r.status) + 1 || null },
       value: (r) => STATUS_LABEL[r.status] ?? r.status,
       cell: (r) => <StatusCell row={r} />,
     },
-    { key: 'criticality', label: 'Criticality', filter: 'select', value: (r) => r.criticality },
+    {
+      key: 'criticality',
+      label: 'Criticality',
+      filter: 'select',
+      sort: { kind: 'number', by: (r) => CRITICALITY_RANK.indexOf(r.criticality) + 1 || null },
+      value: (r) => r.criticality,
+    },
     {
       key: 'owner',
       label: 'Owner',
       filter: 'select',
+      sort: { kind: 'text', by: (r) => r.owner },
       value: (r) => r.owner ?? 'Nobody named',
       className: 'rt-owner',
       cell: (r) => (r.owner ? r.owner : <span className="rt-unknown">Nobody named</span>),
@@ -109,6 +129,9 @@ export function DependencyList({
       key: 'required',
       label: 'Required by',
       filter: 'select',
+      // On the date, not on the "Date passed / On track / No date" bucket the
+      // filter offers. Undated rows go to the bottom either way.
+      sort: { kind: 'date', by: (r) => r.required },
       value: (r) => (r.late ? (LATE_LABEL[r.late] ?? 'Late') : r.required ? 'On track' : 'No date'),
       className: 'rt-due',
       cell: (r) =>
@@ -120,7 +143,7 @@ export function DependencyList({
           <span className="rt-unknown">No date</span>
         ),
     },
-    { key: 'description', label: 'Notes', filter: 'text', value: (r) => r.description ?? '' },
+    { key: 'description', label: 'Notes', filter: 'text', sort: 'text', value: (r) => r.description ?? '' },
   ]
 
   // Last, and unfilterable: it is a control, not a fact about the row.

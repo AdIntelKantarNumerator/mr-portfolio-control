@@ -25,8 +25,18 @@
  * A select can only offer values that are actually in the data, so it cannot
  * be filled in with something that matches nothing. Free text is offered only
  * where the column is prose.
+ *
+ * SORTING IS IN THE BROWSER FOR THE SAME REASON, AND IS OPT-IN PER COLUMN
+ *
+ * A column says whether it can be sorted and on what. Most sort on the value
+ * they already show; the date columns sort on the date behind a filter bucket
+ * like "Past due", and the status columns on the workflow order rather than
+ * the alphabet, because Resolved does not come before Watching in any sense a
+ * reader means. A column of controls sorts on nothing and its heading stays a
+ * heading.
  */
 import { useMemo, useState } from 'react'
+import { nextOrder, sortRows, type Order, type SortKind, type SortValue } from '@/lib/record-sort'
 
 export interface Column<T> {
   key: string
@@ -36,8 +46,14 @@ export interface Column<T> {
    * 'text' matches anywhere in the value. Omitted means it does not filter.
    */
   filter?: 'select' | 'text'
-  /** The plain value, used for filtering and sorting. */
+  /** The plain value, used for filtering and as the default sort key. */
   value: (row: T) => string | null
+  /**
+   * Makes the heading a sort control. A kind on its own sorts by `value`; pass
+   * `{ by }` where the displayed value is a bucket rather than the fact — the
+   * Due column filters on "Past due / Dated / Unknown" and sorts on the date.
+   */
+  sort?: SortKind | { kind: SortKind; by: (row: T) => SortValue }
   /** What is drawn. Defaults to the value. */
   cell?: (row: T) => React.ReactNode
   /** A CSS width for the column, when the content needs one. */
@@ -63,6 +79,7 @@ export function RecordTable<T>({
   footNote?: React.ReactNode
 }) {
   const [filters, setFilters] = useState<Record<string, string>>({})
+  const [order, setOrder] = useState<Order | null>(null)
 
   const options = useMemo(() => {
     const out: Record<string, string[]> = {}
@@ -90,6 +107,20 @@ export function RecordTable<T>({
       ),
     [rows, columns, filters],
   )
+
+  /*
+   * Sorted after filtering, and only when a heading has been clicked: with no
+   * order of its own the table shows the rows in the order the page sent them,
+   * which each page has thought about. See lib/record-sort.ts.
+   */
+  const ordered = useMemo(() => {
+    if (!order) return shown
+    const col = columns.find((c) => c.key === order.key)
+    if (!col?.sort) return shown
+    const kind = typeof col.sort === 'string' ? col.sort : col.sort.kind
+    const by = typeof col.sort === 'string' ? col.value : col.sort.by
+    return sortRows(shown, by, kind, order.dir)
+  }, [shown, columns, order])
 
   const filtering = Object.values(filters).some(Boolean)
   const set = (key: string, value: string) => setFilters((f) => ({ ...f, [key]: value }))
@@ -145,15 +176,43 @@ export function RecordTable<T>({
           <table className="rt">
             <thead>
               <tr>
-                {columns.map((c) => (
-                  <th key={c.key} style={c.width ? { width: c.width } : undefined} className={c.className}>
-                    {c.label}
-                  </th>
-                ))}
+                {columns.map((c) => {
+                  const on = order?.key === c.key ? order.dir : null
+                  return (
+                    <th
+                      key={c.key}
+                      style={c.width ? { width: c.width } : undefined}
+                      className={c.className}
+                      // Announced to a screen reader, which otherwise has no
+                      // way to know the list is ordered by this column.
+                      aria-sort={on === 1 ? 'ascending' : on === -1 ? 'descending' : undefined}
+                    >
+                      {c.sort ? (
+                        <button
+                          type="button"
+                          className={`rt-sort${on ? ' on' : ''}`}
+                          onClick={() => setOrder((o) => nextOrder(o, c.key))}
+                          title={
+                            on === 1
+                              ? `Sorted by ${c.label || 'this column'} — click for the reverse`
+                              : on === -1
+                                ? 'Click to go back to the page order'
+                                : `Sort by ${c.label || 'this column'}`
+                          }
+                        >
+                          {c.label}
+                          <span aria-hidden="true">{on === 1 ? '\u2191' : on === -1 ? '\u2193' : '\u2195'}</span>
+                        </button>
+                      ) : (
+                        c.label
+                      )}
+                    </th>
+                  )
+                })}
               </tr>
             </thead>
             <tbody>
-              {shown.map((row) => (
+              {ordered.map((row) => (
                 <tr key={getId(row)}>
                   {columns.map((c) => (
                     <td key={c.key} className={c.className}>
