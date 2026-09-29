@@ -8,6 +8,9 @@
  *   2. The Readiness page's dialog held the ROW OBJECT it was opened with, so
  *      the refresh that followed a save never reached the checkboxes inside
  *      it and every tick reverted about a second later.
+ *   3. `useOptimistic` — which is right for one write at a time, and wrong for
+ *      a dozen: the transitions end against a prop that has not caught up, so
+ *      ticking a whole checklist unticked the whole checklist.
  *
  * The toggle rule is a pure function in lib/readiness-status and is tested as
  * one. The second is a rendering fault that neither the typechecker nor a pure
@@ -18,7 +21,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { nextStatus } from '../src/lib/readiness-status'
+import { editKey, nextStatus, settled, settleStatus } from '../src/lib/readiness-status'
 
 test('checking an unstarted item marks it done', () => {
   assert.equal(nextStatus('not_started', 'done'), 'done')
@@ -66,4 +69,60 @@ test('neither surface disables its checkbox while saving', () => {
     const src = readFileSync(file, 'utf8')
     assert.ok(!/disabled=\{pending\}/.test(src), `${file} disables the control while saving`)
   }
+})
+
+
+// --- keeping a change until the server answers -------------------------------
+
+test('the reported case: a tick holds while the server still says the old thing', () => {
+  // Fourteen writes in a few seconds, and the page refreshes they trigger are
+  // coalesced. An optimistic value ends its transition against a prop that is
+  // still what the page first rendered with — so every tick reverts at once.
+  assert.equal(settleStatus('not_started', { want: 'done', base: 'not_started' }), 'done')
+})
+
+test('once the server catches up, the server is what is drawn', () => {
+  assert.equal(settleStatus('done', { want: 'done', base: 'not_started' }), 'done')
+  assert.ok(settled('done', { want: 'done', base: 'not_started' }))
+})
+
+test("somebody else's change wins over a click that is still in the air", () => {
+  // The server has moved to something we did not ask for, which means it knows
+  // something we do not.
+  assert.equal(settleStatus('na', { want: 'done', base: 'not_started' }), 'na')
+  assert.ok(settled('na', { want: 'done', base: 'not_started' }))
+})
+
+test('with nothing in flight, the server is simply the answer', () => {
+  assert.equal(settleStatus('done', undefined), 'done')
+  assert.ok(settled('done', undefined))
+})
+
+test('clicking twice keeps waiting on the same answer', () => {
+  // Tick, untick, tick again is one edit against one base, not three.
+  const edit = { want: 'not_started', base: 'not_started' }
+  assert.equal(settleStatus('not_started', edit), 'not_started')
+  assert.equal(settled('not_started', edit), false, 'still waiting')
+})
+
+test('an edit is held per workstream as well as per item', () => {
+  // The Readiness page shows the same checklist item for many workstreams at
+  // once; keyed on the item alone, ticking one row would tick another.
+  assert.notEqual(editKey('ws-a', 'item-1'), editKey('ws-b', 'item-1'))
+})
+
+// --- the tile that moved under the reader ------------------------------------
+
+test('a finished checklist is still shown, and does not hop to another workstream', () => {
+  // readinessFor used to return "the first workstream with something
+  // outstanding", recomputed every render — so ticking the last box swapped
+  // the tile to a different workstream whose boxes were all empty, or on a
+  // workstream page made the tile vanish. Both read as "it unchecked
+  // everything", which is how it was reported.
+  const src = readFileSync('src/lib/detail.ts', 'utf8')
+  assert.ok(!/if \(!behind\) return null/.test(src), 'the tile can still vanish when complete')
+  assert.ok(src.includes('streams'), 'every workstream should be offered, not just one')
+
+  const tile = readFileSync('src/components/detail/readiness-tile.tsx', 'utf8')
+  assert.ok(/useState\(workstreamId\)/.test(tile), 'the shown workstream must be held, not recomputed')
 })

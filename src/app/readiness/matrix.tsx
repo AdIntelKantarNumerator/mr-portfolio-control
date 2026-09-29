@@ -27,7 +27,7 @@
  * mean seeing the problem at the level where you cannot do anything about it.
  */
 import { useMemo, useState } from 'react'
-import { nextStatus, useReadinessToggle } from '@/components/readiness-toggle'
+import { nextStatus, useReadinessBoard, type ReadinessBoard } from '@/components/readiness-toggle'
 import Link from 'next/link'
 import {} from './actions'
 
@@ -98,6 +98,7 @@ export function ReadinessMatrix({
    * data reaches the checkboxes, which is the whole point of refreshing it.
    */
   const [openAt, setOpenAt] = useState<{ rowId: string; gateId: string } | null>(null)
+  const board = useReadinessBoard()
 
   const shown = useMemo(
     () =>
@@ -210,13 +211,23 @@ export function ReadinessMatrix({
       )}
 
       {openRow && openGate && (
-        <GateDialog row={openRow} gate={openGate} onClose={() => setOpenAt(null)} />
+        <GateDialog row={openRow} gate={openGate} onClose={() => setOpenAt(null)} board={board} />
       )}
     </>
   )
 }
 
-function GateDialog({ row, gate, onClose }: { row: MatrixRow; gate: GateHead; onClose: () => void }) {
+function GateDialog({
+  row,
+  gate,
+  onClose,
+  board,
+}: {
+  row: MatrixRow
+  gate: GateHead
+  onClose: () => void
+  board: ReadinessBoard
+}) {
   const cell = row.cells[gate.id] ?? { done: 0, total: 0, items: [] }
   // Grouped by workstream, because at project level the same item name appears
   // several times and an ungrouped list of identical labels is unreadable.
@@ -246,7 +257,7 @@ function GateDialog({ row, gate, onClose }: { row: MatrixRow; gate: GateHead; on
             {groups.length > 1 ? <h4>{workstream}</h4> : null}
             <ul className="rx-items">
               {items.map((item) => (
-                <ItemToggle key={item.itemId} item={item} />
+                <ItemToggle key={item.itemId} item={item} board={board} />
               ))}
             </ul>
           </div>
@@ -264,10 +275,13 @@ function GateDialog({ row, gate, onClose }: { row: MatrixRow; gate: GateHead; on
  * people to mark things done instead — which is how it stops telling the
  * truth.
  */
-function ItemToggle({ item }: { item: ItemCell }) {
-  // One rule for both screens that draw this checklist — see
-  // components/readiness-toggle.ts for why it is not a useState copy.
-  const { status, pending, error, set } = useReadinessToggle(item.workstreamId, item.itemId, item.status)
+function ItemToggle({ item, board }: { item: ItemCell; board: ReadinessBoard }) {
+  // The board belongs to the matrix, which stays mounted; this row and the
+  // dialog around it do not. See components/readiness-toggle.ts.
+  const status = board.statusOf(item.workstreamId, item.itemId, item.status)
+  const pending = board.savingOf(item.workstreamId, item.itemId)
+  const error = board.errorOf(item.workstreamId, item.itemId)
+  const set = (next: string) => board.set(item.workstreamId, item.itemId, item.status, next)
 
   const done = status === 'done'
   const na = status === 'na'

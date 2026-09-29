@@ -19,7 +19,7 @@
  */
 import Link from 'next/link'
 import { useState } from 'react'
-import { nextStatus, useReadinessToggle } from '@/components/readiness-toggle'
+import { nextStatus, useReadinessBoard, type ReadinessBoard } from '@/components/readiness-toggle'
 import { Tile } from './tile'
 
 
@@ -38,15 +38,32 @@ export interface ReadinessGateView {
   items: ReadinessItemView[]
 }
 
-function Item({ workstreamId, item }: { workstreamId: string; item: ReadinessItemView }) {
-  // Same rule the Readiness page uses — see components/readiness-toggle.ts.
-  // This tile used to draw item.done straight from the server, so a click did
-  // nothing at all until the page had been round-tripped.
-  const { status, pending, error, set } = useReadinessToggle(
-    workstreamId,
-    item.id,
-    item.done ? 'done' : 'not_started',
-  )
+/** One workstream's whole checklist, with its required-item count. */
+export interface ReadinessStream {
+  id: string
+  name: string
+  gates: ReadinessGateView[]
+  done: number
+  total: number
+}
+
+function Item({
+  workstreamId,
+  item,
+  board,
+}: {
+  workstreamId: string
+  item: ReadinessItemView
+  board: ReadinessBoard
+}) {
+  // The board is held by the tile, not by this row: a row unmounts whenever
+  // its section is closed, and an edit held on it would go with it. See
+  // components/readiness-toggle.ts.
+  const server = item.done ? 'done' : 'not_started'
+  const status = board.statusOf(workstreamId, item.id, server)
+  const pending = board.savingOf(workstreamId, item.id)
+  const error = board.errorOf(workstreamId, item.id)
+  const set = (next: string) => board.set(workstreamId, item.id, server, next)
   const done = status === 'done'
 
   return (
@@ -73,17 +90,29 @@ function Item({ workstreamId, item }: { workstreamId: string; item: ReadinessIte
 
 export function ReadinessTile({
   workstreamId,
-  gates,
-  href,
+  streams,
 }: {
-  /** Readiness is recorded per workstream; a project rolls its own up. */
+  /** Where to start. A checklist belongs to a workstream, never to a project. */
   workstreamId: string
-  gates: ReadinessGateView[]
-  /** The full page, where links and notes are edited. */
-  href: string
+  /** Every workstream this page covers, each with its own checklist. */
+  streams: ReadinessStream[]
 }) {
   const [open, setOpen] = useState<string | null>(null)
+  /*
+   * Which workstream is being shown, held HERE.
+   *
+   * It used to be decided on the server as "the first one with something
+   * outstanding", recomputed on every render — so ticking the last box on a
+   * project page swapped the tile to a different workstream whose boxes were
+   * all empty. Fourteen ticks, and all fourteen appear to undo themselves.
+   * Once the reader is looking at a checklist it stays put until they say
+   * otherwise.
+   */
+  const [picked, setPicked] = useState(workstreamId)
+  const shown = streams.find((s) => s.id === picked) ?? streams[0]!
+  const board = useReadinessBoard()
 
+  const gates = shown.gates
   const required = gates.flatMap((g) => g.items.filter((i) => i.required))
   const done = required.filter((i) => i.done).length
   const pct = required.length === 0 ? 100 : Math.round((done / required.length) * 100)
@@ -94,11 +123,27 @@ export function ReadinessTile({
       icon="readiness"
       className="tile-wide"
       right={
-        <Link className="tile-link" href={href}>
+        <Link className="tile-link" href={`/readiness/${shown.id}`}>
           Links and notes →
         </Link>
       }
     >
+      {streams.length > 1 && (
+        /* Named, and switchable. A page covering six workstreams showing one
+           unlabelled checklist is a checklist you cannot trust: there is no
+           way to tell whose it is, or that it is not all of them. */
+        <label className="rk-pick">
+          <span>Workstream</span>
+          <select value={shown.id} onChange={(e) => setPicked(e.target.value)}>
+            {streams.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} — {s.done}/{s.total}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
       <div className="rk-bar" title={`${done} of ${required.length} required items done`}>
         <span style={{ width: `${pct}%` }} />
       </div>
@@ -121,7 +166,7 @@ export function ReadinessTile({
               {open === g.id && (
                 <ul className="rk-items">
                   {g.items.map((it) => (
-                    <Item key={it.id} workstreamId={workstreamId} item={it} />
+                    <Item key={it.id} workstreamId={shown.id} item={it} board={board} />
                   ))}
                 </ul>
               )}

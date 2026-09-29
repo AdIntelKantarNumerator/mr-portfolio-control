@@ -26,6 +26,8 @@ import { and, eq, inArray, isNull, desc } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { actionItemLinks, actionItems, agentObservations, assessments, people } from '@/db/schema'
 import { getPortfolio } from './portfolio'
+import { timelineModel } from './timeline-source'
+import type { TimelineModel } from './timeline-model'
 import { getReadiness, statusFor, type ReadinessModel } from './readiness'
 import type { TileItem } from '@/components/detail/tile'
 import { progressPercent } from './progress'
@@ -82,8 +84,19 @@ export interface DetailData {
   decisions: TileItem[]
   actions: TileItem[]
   dependencies: TileItem[]
-  /** Null when there is nothing outstanding, or nothing to be ready for. */
-  readiness: { workstreamId: string; gates: ReadinessGateView[] } | null
+  /**
+   * This record's own lane on the timeline chart — the same drawing the
+   * Timeline page makes, narrowed to the thing being looked at.
+   */
+  timeline: TimelineModel | null
+  /**
+   * Null only when this page covers no workstream that has a checklist at all.
+   * `workstreamId` is where to start; `streams` is everything it could show.
+   */
+  readiness: {
+    workstreamId: string
+    streams: Array<{ id: string; name: string; gates: ReadinessGateView[]; done: number; total: number }>
+  } | null
   /**
    * The tier directly beneath, linked.
    *
@@ -99,55 +112,99 @@ function scopeOf(
   level: Level,
   id: string,
   p: Awaited<ReturnType<typeof getPortfolio>>,
-): { ids: Set<string>; workstreamIds: string[] } {
-  if (level === 'workstream') return { ids: new Set([id]), workstreamIds: [id] }
+): { ids: Set<string>; workstreams: Array<{ id: string; name: string }> } {
+  if (level === 'workstream') {
+    const w = p.projects.flatMap((x) => x.workstreams).find((x) => x.id === id)
+    return { ids: new Set([id]), workstreams: w ? [{ id: w.id, name: w.name }] : [] }
+  }
 
   if (level === 'project') {
     const proj = p.projects.find((x) => x.id === id)
-    const ws = proj?.workstreams.map((w) => w.id) ?? []
-    return { ids: new Set([id, ...ws]), workstreamIds: ws }
+    const ws = proj?.workstreams.map((w) => ({ id: w.id, name: w.name })) ?? []
+    return { ids: new Set([id, ...ws.map((w) => w.id)]), workstreams: ws }
   }
 
   const projs = p.projects.filter((x) => x.initiativeId === id)
-  const ws = projs.flatMap((x) => x.workstreams.map((w) => w.id))
-  return { ids: new Set([id, ...projs.map((x) => x.id), ...ws]), workstreamIds: ws }
+  const ws = projs.flatMap((x) => x.workstreams.map((w) => ({ id: w.id, name: w.name })))
+  return { ids: new Set([id, ...projs.map((x) => x.id), ...ws.map((w) => w.id)]), workstreams: ws }
 }
 
-function readinessFor(model: ReadinessModel, workstreamIds: string[]): DetailData['readiness'] {
-  if (workstreamIds.length === 0) return null
+/**
+ * The readiness checklist for a detail page.
+ *
+ * WHAT WAS WRONG
+ *
+ * A checklist belongs to a workstream — the tick has to be against a specific
+ * piece of work — but a project or initiative page covers several. This used to
+ * resolve that by showing "the first workstream that still has something
+ * outstanding", and returning null when there was none.
+ *
+ * Both halves of that misbehave at exactly the moment somebody finishes a
+ * checklist, which is the worst possible moment. Tick the last box on a project
+ * page and the tile silently swapped to a DIFFERENT workstream, whose boxes are
+ * all empty: you ticked fourteen things and watched all fourteen go blank. On a
+ * workstream page it did not swap, it disappeared. Both read as "it unchecked
+ * everything", and both were reported as that.
+ *
+ * So: every workstream this page covers is returned, each with its own
+ * checklist and its own count, and the tile lets the reader choose between them
+ * and holds that choice. The default is still the first one with something
+ * outstanding, because that is the useful place to land — but it is now a
+ * starting point rather than something that moves underneath them.
+ */
+function readinessFor(
+  model: ReadinessModel,
+  streams: Array<{ id: string; name: string }>,
+): DetailData['readiness'] {
+  if (streams.length === 0) return null
 
-  // One workstream's checklist is the checklist. Several roll up to the first
-  // one that still has something outstanding, because a merged checklist
-  // across six workstreams is a list nobody can act on — the tick has to
-  // belong to a specific piece of work.
-  const behind = workstreamIds.find((wid) =>
-    model.items.some((it) => it.required && statusFor(model, wid, it.id) !== 'done' && statusFor(model, wid, it.id) !== 'na'),
-  )
-  if (!behind) return null
+  const gatesFor = (wid: string): ReadinessGateView[] =>
+    model.gates
+      .map((g) => ({
+        id: g.id,
+        label: g.name,
+        items: g.items.map((it) => {
+          const s = statusFor(model, wid, it.id)
+          const row = model.byProject.get(wid)?.get(it.id)
+          return {
+            id: it.id,
+            label: it.label,
+            required: it.required,
+            done: s === 'done' || s === 'na',
+            detail: [row?.note, row?.link].filter(Boolean).join(' · ') || undefined,
+          }
+        }),
+      }))
+      .filter((g) => g.items.length > 0)
 
-  const gates: ReadinessGateView[] = model.gates.map((g) => ({
-    id: g.id,
-    label: g.name,
-    items: g.items.map((it) => {
-      const s = statusFor(model, behind, it.id)
-      const row = model.byProject.get(behind)?.get(it.id)
+  const views = streams
+    .map((w) => {
+      const gates = gatesFor(w.id)
+      const required = gates.flatMap((g) => g.items.filter((i) => i.required))
       return {
-        id: it.id,
-        label: it.label,
-        required: it.required,
-        done: s === 'done' || s === 'na',
-        detail: [row?.note, row?.link].filter(Boolean).join(' · ') || undefined,
+        id: w.id,
+        name: w.name,
+        gates,
+        done: required.filter((i) => i.done).length,
+        total: required.length,
       }
-    }),
-  }))
-  return { workstreamId: behind, gates: gates.filter((g) => g.items.length > 0) }
+    })
+    .filter((v) => v.gates.length > 0)
+
+  if (views.length === 0) return null
+
+  // The first with something left to do, or — when everything is finished —
+  // the first, so that a completed checklist is still shown as completed
+  // rather than vanishing.
+  const start = views.find((v) => v.done < v.total) ?? views[0]!
+  return { workstreamId: start.id, streams: views }
 }
 
 export const getDetail = cache(async (level: Level, id: string): Promise<DetailData> => {
   // getHomeCards used to be in here, for the two numbers the health ring
   // needed. The ring is gone, and with it a whole board computation on every
   // detail page render.
-  const [p, model, obsRows, assessRows, folk] = await Promise.all([
+  const [p, model, obsRows, assessRows, folk, timeline] = await Promise.all([
     getPortfolio(),
     getReadiness(),
     db
@@ -157,9 +214,19 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
       .orderBy(desc(agentObservations.generatedAt)),
     db.select().from(assessments).where(eq(assessments.current, true)).orderBy(desc(assessments.asOf)),
     db.select({ id: people.id, name: people.name }).from(people),
+    /*
+     * This record's own lane, drawn the way the Timeline page draws it.
+     *
+     * `includeEnded` because a detail page is about one thing and its
+     * finished children are part of its story — hiding them here would leave
+     * gaps in a chart whose whole job is to show the shape of the work. The
+     * whole-board view filters them because it is a screen full of other
+     * people's work; this is not.
+     */
+    timelineModel({ level, only: id, includeEnded: true }),
   ])
 
-  const { ids, workstreamIds } = scopeOf(level, id, p)
+  const { ids, workstreams: scopeStreams } = scopeOf(level, id, p)
   const personName = new Map(folk.map((x) => [x.id, x.name]))
 
   // --- what Yaara said -----------------------------------------------------
@@ -345,7 +412,8 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
     decisions,
     actions,
     dependencies,
-    readiness: readinessFor(model, workstreamIds),
+    readiness: readinessFor(model, scopeStreams),
+    timeline,
     children:
       level === 'initiative'
         ? {

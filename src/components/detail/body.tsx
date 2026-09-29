@@ -3,6 +3,7 @@ import { AddEntry, type AddContext, type EntryKind } from './add-entry'
 import { NewChildButton } from './edit-record'
 import { ListTile } from './tile'
 import { ReadinessTile } from './readiness-tile'
+import { TimelineView } from '@/components/timeline-view'
 import type { DetailData } from '@/lib/detail'
 
 /**
@@ -43,6 +44,10 @@ export function DetailBody({
   // offered a pencil that fails on save.
   const editable = (kind: 'blocker' | 'dependency') =>
     canEdit && adding ? { kind, ctx: { people: adding.people, endpoints: adding.endpoints } } : undefined
+
+  // The tier as the timeline names it — the header says "Project", the chart
+  // wants 'project'.
+  const tierLevel = tier.toLowerCase() as 'initiative' | 'project' | 'workstream'
 
   return (
     <>
@@ -138,12 +143,30 @@ export function DetailBody({
         />
       </div>
 
+      {data.timeline && data.timeline.rows.length > 0 && (
+        /*
+         * This record against the calendar, between the promises above it and
+         * the checklist below. The registers say what is outstanding and the
+         * checklist says what has to be true before it ships; neither says
+         * WHEN, and "when" is the question a reader has usually come with by
+         * the time they have read the other two.
+         *
+         * It is the Timeline page's own chart, narrowed to this record — the
+         * same bars, the same milestone marks, the same dependency lines — so
+         * nobody has to learn a second way of reading it. Not draggable: the
+         * order of one lane is not a thing to arrange.
+         */
+        <section className="dt-timeline">
+          <h2>On the calendar</h2>
+          <TimelineView model={data.timeline} level={tierLevel} draggable={false} showLinks />
+        </section>
+      )}
+
       {data.readiness && (
         <div className="tiles">
           <ReadinessTile
             workstreamId={data.readiness.workstreamId}
-            gates={data.readiness.gates}
-            href={`/readiness/${data.readiness.workstreamId}`}
+            streams={data.readiness.streams}
           />
         </div>
       )}
