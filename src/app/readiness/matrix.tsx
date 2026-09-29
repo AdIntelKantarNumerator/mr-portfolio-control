@@ -26,11 +26,11 @@
  * beneath it, named. Rolling up a number but not the way to change it would
  * mean seeing the problem at the level where you cannot do anything about it.
  */
-import { useActionState, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { nextStatus, useReadinessToggle } from '@/components/readiness-toggle'
 import Link from 'next/link'
-import { toggleReadinessItem, type ReadinessToggleState } from './actions'
+import {} from './actions'
 
-const EMPTY: ReadinessToggleState = {}
 
 export type Level = 'initiative' | 'project' | 'workstream'
 
@@ -87,7 +87,17 @@ export function ReadinessMatrix({
 }) {
   const [find, setFind] = useState('')
   const [status, setStatus] = useState('')
-  const [open, setOpen] = useState<{ row: MatrixRow; gate: GateHead } | null>(null)
+  /*
+   * The open dialog is held as IDS, not as the row and gate objects.
+   *
+   * Holding the objects froze them at the moment the cell was clicked. Ticking
+   * an item off refreshed the page's data underneath, but the dialog went on
+   * rendering the snapshot — so each checkbox's server value stayed whatever
+   * it had been when the dialog opened, and the tick reverted the moment its
+   * save completed. Looking the row up by id every render means the refreshed
+   * data reaches the checkboxes, which is the whole point of refreshing it.
+   */
+  const [openAt, setOpenAt] = useState<{ rowId: string; gateId: string } | null>(null)
 
   const shown = useMemo(
     () =>
@@ -97,6 +107,11 @@ export function ReadinessMatrix({
       ),
     [rows, find, status],
   )
+
+  // From the unfiltered rows, so typing in the filter box does not shut a
+  // dialog the reader has open.
+  const openRow = openAt ? (rows.find((r) => r.id === openAt.rowId) ?? null) : null
+  const openGate = openAt ? (gates.find((g) => g.id === openAt.gateId) ?? null) : null
 
   return (
     <>
@@ -173,7 +188,7 @@ export function ReadinessMatrix({
                         <button
                           type="button"
                           className={`rx-cell rx-${tone(cell.done, cell.total)}`}
-                          onClick={() => setOpen({ row: r, gate: g })}
+                          onClick={() => setOpenAt({ rowId: r.id, gateId: g.id })}
                           title={`${cell.done} of ${cell.total} required items — click to tick them off`}
                           disabled={cell.items.length === 0}
                         >
@@ -194,7 +209,9 @@ export function ReadinessMatrix({
         </div>
       )}
 
-      {open && <GateDialog row={open.row} gate={open.gate} onClose={() => setOpen(null)} />}
+      {openRow && openGate && (
+        <GateDialog row={openRow} gate={openGate} onClose={() => setOpenAt(null)} />
+      )}
     </>
   )
 }
@@ -248,29 +265,21 @@ function GateDialog({ row, gate, onClose }: { row: MatrixRow; gate: GateHead; on
  * truth.
  */
 function ItemToggle({ item }: { item: ItemCell }) {
-  const [state, send, busy] = useActionState(toggleReadinessItem, EMPTY)
-  const [shown, setShown] = useState(item.status)
+  // One rule for both screens that draw this checklist — see
+  // components/readiness-toggle.ts for why it is not a useState copy.
+  const { status, pending, error, set } = useReadinessToggle(item.workstreamId, item.itemId, item.status)
 
-  const set = (status: string) => {
-    setShown(status)
-    const fd = new FormData()
-    fd.set('workstreamId', item.workstreamId)
-    fd.set('itemId', item.itemId)
-    fd.set('status', status)
-    send(fd)
-  }
-
-  const done = shown === 'done'
-  const na = shown === 'na'
+  const done = status === 'done'
+  const na = status === 'na'
 
   return (
-    <li className={busy ? 'rx-busy' : undefined}>
+    <li className={pending ? 'rx-busy' : undefined}>
       <button
         type="button"
         className={`rx-box${done ? ' on' : ''}`}
-        onClick={() => set(done ? 'not_started' : 'done')}
+        onClick={() => set(nextStatus(status, 'done'))}
         aria-label={done ? `Mark ${item.label} not started` : `Mark ${item.label} done`}
-        disabled={busy}
+        aria-pressed={done}
       >
         {done ? '✓' : ''}
       </button>
@@ -281,13 +290,13 @@ function ItemToggle({ item }: { item: ItemCell }) {
       <button
         type="button"
         className={`rx-na${na ? ' on' : ''}`}
-        onClick={() => set(na ? 'not_started' : 'na')}
-        disabled={busy}
+        onClick={() => set(nextStatus(status, 'na'))}
+        aria-pressed={na}
         title="Does not apply to this work"
       >
         N/A
       </button>
-      {state.error ? <em className="rx-err">{state.error}</em> : null}
+      {error ? <em className="rx-err">{error}</em> : null}
     </li>
   )
 }

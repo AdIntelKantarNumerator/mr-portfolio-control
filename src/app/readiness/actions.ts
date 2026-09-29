@@ -129,11 +129,25 @@ export async function toggleReadinessItem(
 
   await updateReadiness(fd)
 
-  // The detail pages render this checklist too, and the whole-row action only
-  // knew about /readiness. Without these, ticking a box here left the page
-  // showing the old state until a hard reload.
-  revalidatePath('/workstreams', 'layout')
-  revalidatePath('/projects', 'layout')
+  /*
+   * The detail pages render this checklist too, so they have to be refreshed —
+   * but by path, not by layout.
+   *
+   * These were `revalidatePath('/workstreams', 'layout')` and the same for
+   * projects, which invalidates every page under those segments. Ticking one
+   * box threw away the rendered output of every workstream and every project
+   * in the portfolio, and the reader waited for their own page to be built
+   * again from nothing. One extra query to find the parent is a great deal
+   * cheaper than that.
+   */
+  const [row] = await db
+    .select({ projectId: workstreams.projectId })
+    .from(workstreams)
+    .where(eq(workstreams.id, workstreamId))
+    .limit(1)
+
+  revalidatePath(`/workstreams/${workstreamId}`)
+  if (row?.projectId) revalidatePath(`/projects/${row.projectId}`)
 
   return { stamp: Date.now() }
 }

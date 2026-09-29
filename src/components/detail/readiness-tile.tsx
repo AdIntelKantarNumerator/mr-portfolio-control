@@ -18,11 +18,10 @@
  * that page, and ticking here leaves both alone.
  */
 import Link from 'next/link'
-import { useActionState, useState } from 'react'
-import { toggleReadinessItem, type ReadinessToggleState } from '@/app/readiness/actions'
+import { useState } from 'react'
+import { nextStatus, useReadinessToggle } from '@/components/readiness-toggle'
 import { Tile } from './tile'
 
-const EMPTY: ReadinessToggleState = {}
 
 export interface ReadinessItemView {
   id: string
@@ -40,27 +39,34 @@ export interface ReadinessGateView {
 }
 
 function Item({ workstreamId, item }: { workstreamId: string; item: ReadinessItemView }) {
-  const [state, act, busy] = useActionState(toggleReadinessItem, EMPTY)
+  // Same rule the Readiness page uses — see components/readiness-toggle.ts.
+  // This tile used to draw item.done straight from the server, so a click did
+  // nothing at all until the page had been round-tripped.
+  const { status, pending, error, set } = useReadinessToggle(
+    workstreamId,
+    item.id,
+    item.done ? 'done' : 'not_started',
+  )
+  const done = status === 'done'
+
   return (
-    <li title={item.detail || undefined}>
-      <form action={act}>
-        <input type="hidden" name="workstreamId" value={workstreamId} />
-        <input type="hidden" name="itemId" value={item.id} />
-        {/* The next state travels with the form, so the button is a plain
-            submit and there is no click handler deciding what "toggle" means
-            in two places. */}
-        <input type="hidden" name="status" value={item.done ? 'not_started' : 'done'} />
-        <button type="submit" className={`rk-box${item.done ? ' on' : ''}`} disabled={busy} aria-pressed={item.done}>
-          {item.done ? (
-            <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M2.5 8.5l3.4 3.4 7.6-8" stroke="currentColor" strokeWidth="2.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          ) : null}
-        </button>
-      </form>
-      <span className={item.done ? 'done' : undefined}>{item.label}</span>
+    <li title={item.detail || undefined} className={pending ? 'rk-busy' : undefined}>
+      <button
+        type="button"
+        className={`rk-box${done ? ' on' : ''}`}
+        onClick={() => set(nextStatus(status, 'done'))}
+        aria-pressed={done}
+        aria-label={done ? `Mark ${item.label} not started` : `Mark ${item.label} done`}
+      >
+        {done ? (
+          <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2.5 8.5l3.4 3.4 7.6-8" stroke="currentColor" strokeWidth="2.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ) : null}
+      </button>
+      <span className={done ? 'done' : undefined}>{item.label}</span>
       {!item.required && <em>optional</em>}
-      {state.error && <em className="err">{state.error}</em>}
+      {error && <em className="err">{error}</em>}
     </li>
   )
 }
