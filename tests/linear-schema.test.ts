@@ -121,3 +121,59 @@ test('the selection set', async (t) => {
     assert.deepEqual(pick(caps, 'Project', ['status { type }']), ['status { type }'])
   })
 })
+
+// ---------------------------------------------------------------------------
+// "Query too complex"
+// ---------------------------------------------------------------------------
+
+import { complexityRatio, shrinkPage } from '../src/lib/sources/graphql-schema'
+
+/** The message Linear actually sent, from the failing run. */
+const REAL =
+  'Linear returned 400: {"errors":[{"message":"Query too complex","extensions":{"type":"invalid input",' +
+  '"code":"INPUT_ERROR","statusCode":400,"userError":true,"userPresentableMessage":"The query is too complex. ' +
+  'Complexity: 65536. Maximum allowed complexity: 10000.","http":{"status":400}}}]}'
+
+test('shrinking a page Linear refused', async (t) => {
+  await t.test('reads both numbers out of the real message', () => {
+    const ratio = complexityRatio(REAL)
+    assert.ok(ratio !== null)
+    assert.ok(Math.abs(ratio! - 10000 / 65536) < 1e-9)
+  })
+
+  await t.test('the next page is small enough, with room to spare', () => {
+    // 50 x (10000/65536) x 0.8 = 6. Six workstreams a page against a score
+    // that was six and a half times the ceiling.
+    const next = shrinkPage(50, REAL)
+    assert.equal(next, 6)
+    // And the score that follows is comfortably under, not on, the line.
+    assert.ok((next! / 50) * 65536 < 10000)
+  })
+
+  await t.test('a message about something else does not shrink anything', () => {
+    assert.equal(shrinkPage(50, 'Linear returned 400: field "status" must have a selection of subfields'), null)
+    assert.equal(complexityRatio('no numbers here'), null)
+  })
+
+  await t.test('a page of one cannot shrink, so the error is raised instead', () => {
+    assert.equal(shrinkPage(1, REAL), null)
+  })
+
+  await t.test('a ratio that would not actually shrink stops rather than looping', () => {
+    // Already under the ceiling: retrying at the same size would spin.
+    assert.equal(shrinkPage(4, 'Complexity: 100. Maximum allowed complexity: 10000.'), null)
+  })
+
+  await t.test('nonsense numbers are refused rather than producing a zero page', () => {
+    assert.equal(complexityRatio('Complexity: 0. Maximum allowed complexity: 10000.'), null)
+    assert.equal(complexityRatio('Complexity: abc. Maximum allowed complexity: 10000.'), null)
+  })
+})
+
+test('the ceiling is never mistaken for the score', () => {
+  // "Complexity:" occurs inside "Maximum allowed complexity:" too. Reading
+  // them with two separate searches matched the ceiling twice and returned a
+  // ratio of 1 — a shrink to the same size, which is a retry loop.
+  assert.equal(complexityRatio('Complexity: abc. Maximum allowed complexity: 10000.'), null)
+  assert.equal(complexityRatio('Maximum allowed complexity: 10000.'), null)
+})
