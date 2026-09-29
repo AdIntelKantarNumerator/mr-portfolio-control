@@ -15,6 +15,8 @@ import { asc, desc, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { decisions, initiatives, people, projects, workstreams } from '@/db/schema'
 import { Kicker } from '@/components/ui'
+import { addContext } from '@/lib/add-context'
+import { getCurrentUser } from '@/lib/auth/current-user'
 import { BlockerList, type BlockerRow, type Named } from './list'
 
 export const metadata = { title: 'Blockers' }
@@ -28,7 +30,7 @@ export default async function BlockersPage({
   const { show } = await searchParams
   const closed = show === 'closed'
 
-  const [rows, inits, projs, wss, folk] = await Promise.all([
+  const [rows, inits, projs, wss, folk, ctx, user] = await Promise.all([
     closed
       ? db
           .select()
@@ -41,6 +43,10 @@ export default async function BlockersPage({
     db.select({ id: projects.id, name: projects.name }).from(projects).orderBy(asc(projects.name)),
     db.select({ id: workstreams.id, name: workstreams.name }).from(workstreams).orderBy(asc(workstreams.name)),
     db.select({ id: people.id, name: people.name }).from(people).orderBy(asc(people.name)),
+    // The same context the detail-page dialogs use, so the two surfaces offer
+    // the same options rather than two lists that drift.
+    addContext(),
+    getCurrentUser(),
   ])
 
   const nameOf = new Map(folk.map((p) => [p.id, p.name]))
@@ -88,6 +94,7 @@ export default async function BlockersPage({
         workstreams={wss}
         people={folk}
         closed={closed}
+        editing={user.personId ? { people: ctx.people, endpoints: ctx.endpoints } : null}
       />
     </div>
   )

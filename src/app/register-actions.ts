@@ -22,6 +22,7 @@ import { db } from '@/db/client'
 import { actionItemLinks, actionItems, decisions, dependencies, initiatives, projects, workstreams } from '@/db/schema'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
+import { blockerPatch, dependencyPatch, describeChange } from '@/lib/register-edit'
 
 export interface RegisterState {
   ok?: boolean
@@ -37,7 +38,9 @@ const isLevel = (v: string): v is Level => v === 'initiative' || v === 'project'
 function refresh(level: string, id: string) {
   try {
     revalidatePath('/')
-    revalidatePath(`/${level}s/${id}`)
+    // A record filed against nothing in particular still changes the
+    // registers; there is simply no detail page to rebuild.
+    if (level && id) revalidatePath(`/${level}s/${id}`)
     revalidatePath('/blockers')
     revalidatePath('/actions')
     revalidatePath('/dependencies')
@@ -231,4 +234,318 @@ export async function addDependency(input: {
 
   refresh(input.level, input.entityId)
   return { ok: true, stamp: Date.now(), message: 'Recorded.' }
+}
+
+// ---------------------------------------------------------------------------
+// Changing one, and removing one
+//
+// WHY BOTH SCREENS CALL THESE
+//
+// A blocker appears on the work's own page and on the Blockers page, and a
+// dependency likewise. Editing was available on neither, and the two screens
+// that did offer something — a status select here, an "Against" picker there —
+// had already grown apart. Adding an edit path to each page separately would
+// have made that three ways to change one row.
+//
+// WHAT DELETE MEANS
+//
+// It removes the row. Not a "dropped" status, which both registers already
+// have and which is the right answer for something that was real and is now
+// moot: delete is for an entry that should never have existed — a duplicate,
+// a mis-read, a test. The changelog keeps what it said, so the record of the
+// removal survives the record.
+//
+// A deleted entry can come back. Yaara matches what she reports against an
+// existing entry by its ref; a ref that no longer exists is recorded as new,
+// with a note saying so. That is the correct behaviour — she is reporting
+// something she has just read in a document — and it is worth knowing before
+// deleting the same thing twice.
+// ---------------------------------------------------------------------------
+
+export type EntryKind = 'blocker' | 'dependency'
+
+export interface LoadedEntry {
+  kind: EntryKind
+  id: string
+  /** Blockers only: the handle people say out loud. Shown, never edited. */
+  ref?: string
+  title?: string
+  body?: string
+  status: string
+  category?: string
+  ownerId: string | null
+  dueBy?: string | null
+  /** "project:abc", or '' — where a blocker is filed. */
+  at?: string
+  /** What that work is called, for when the live list leaves it out. */
+  atLabel?: string
+  /** Dependencies: "project:abc" at each end. */
+  from?: string
+  to?: string
+  /**
+   * What each end is called, for the one option a picker cannot offer.
+   *
+   * An end can point at something the live list leaves out — work that has
+   * ended, or an `external` thing that only exists as a label on this row.
+   * The dialog still has to name it, and naming it after the whole row ("BiS
+   * data feed → GPC" in the Delivering box) reads as though one field holds
+   * both ends.
+   */
+  fromLabel?: string
+  toLabel?: string
+  depKind?: string
+  criticality?: string
+  description?: string | null
+  /** yyyy-mm-dd for a date input. */
+  dueDate?: string
+}
+
+const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : '')
+
+/** The name of whatever an endpoint points at, or null when it is not work. */
+async function endpointName(type: string, entityId: string): Promise<string | null> {
+  if (!isLevel(type)) return null
+  const table = LEVELS[type]
+  const [row] = await db.select({ name: table.name }).from(table).where(eq(table.id, entityId)).limit(1)
+  return row?.name ?? null
+}
+
+/**
+ * The record as it stands, for the dialog to open on.
+ *
+ * Read here rather than carried in the row, so the dialog always opens on what
+ * is in the database rather than on whatever the page was rendered with. Two
+ * people editing the same blocker an hour apart is not a race worth locking
+ * for, but showing the second one a stale form would be.
+ */
+export async function loadRegisterEntry(kind: EntryKind, id: string): Promise<LoadedEntry | { error: string }> {
+  if (kind === 'blocker') {
+    const [row] = await db.select().from(decisions).where(eq(decisions.id, id)).limit(1)
+    if (!row) return { error: 'That entry no longer exists — reload the page.' }
+    return {
+      kind,
+      id: row.id,
+      ref: row.ref,
+      title: row.title,
+      body: row.body,
+      status: row.status,
+      category: row.category,
+      ownerId: row.ownerId,
+      dueBy: row.dueBy,
+      at: row.entityType && row.entityId ? `${row.entityType}:${row.entityId}` : '',
+      atLabel:
+        row.entityType && row.entityId
+          ? ((await endpointName(row.entityType, row.entityId)) ?? 'The work it is filed against')
+          : undefined,
+    }
+  }
+
+  const [row] = await db.select().from(dependencies).where(eq(dependencies.id, id)).limit(1)
+  if (!row) return { error: 'That dependency no longer exists — reload the page.' }
+  return {
+    kind,
+    id: row.id,
+    status: row.status,
+    ownerId: row.ownerId,
+    from: `${row.fromType}:${row.fromId}`,
+    to: `${row.toType}:${row.toId}`,
+    fromLabel: (await endpointName(row.fromType, row.fromId)) ?? row.fromLabel ?? row.fromId,
+    toLabel: (await endpointName(row.toType, row.toId)) ?? row.toLabel ?? row.toId,
+    depKind: row.kind,
+    criticality: row.criticality,
+    description: row.description,
+    dueDate: day(row.dueDate),
+  }
+}
+
+const BLOCKER_LABELS = {
+  title: 'Title',
+  body: 'Detail',
+  status: 'Status',
+  category: 'Category',
+  dueBy: 'Needed by',
+  ownerId: 'Owner',
+  entityId: 'Filed against',
+}
+
+const DEP_LABELS = {
+  fromId: 'Delivering',
+  toId: 'Waiting',
+  kind: 'Kind',
+  status: 'Status',
+  criticality: 'Criticality',
+  dueDate: 'Required by',
+  description: 'Notes',
+  ownerId: 'Owner',
+}
+
+export async function editRegisterEntry(input: {
+  kind: EntryKind
+  id: string
+  title?: string
+  body?: string
+  status?: string
+  category?: string
+  ownerId?: string | null
+  dueBy?: string | null
+  at?: string | null
+  from?: string
+  to?: string
+  depKind?: string
+  criticality?: string
+  description?: string | null
+  dueDate?: string | null
+}): Promise<RegisterState> {
+  if (input.kind === 'blocker') {
+    const [before] = await db.select().from(decisions).where(eq(decisions.id, input.id)).limit(1)
+    if (!before) return { error: 'That entry no longer exists — reload the page.' }
+
+    const checked = blockerPatch(input)
+    if (!checked.ok) return { error: checked.error.message }
+    const next = checked.value
+
+    if (next.level && next.entityId && !(await entityExists(next.level as Level, next.entityId))) {
+      return { error: 'That record no longer exists — reload the page.' }
+    }
+
+    const closing = next.status === 'decided' || next.status === 'dropped'
+    await db
+      .update(decisions)
+      .set({
+        title: next.title,
+        body: next.body,
+        status: next.status,
+        category: next.category,
+        ownerId: next.ownerId,
+        // An owner picked from the roster replaces a free-text one; leaving
+        // both would show two owners on a row that has one.
+        ownerText: next.ownerId ? null : before.ownerText,
+        dueBy: next.dueBy,
+        entityType: next.level,
+        entityId: next.entityId,
+        resolvedAt: closing ? (before.resolvedAt ?? new Date()) : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(decisions.id, input.id))
+
+    const said = describeChange(before, { ...next, entityId: next.entityId }, BLOCKER_LABELS)
+    if (said.length) {
+      await logChange({
+        actor: await actorName(),
+        kind: 'change',
+        summary: `${before.ref}: edited — ${said[0]}`,
+        detail: said.join('; ').slice(0, 400),
+        entityType: next.level,
+        entityId: next.entityId,
+      })
+    }
+
+    refreshBoth(before.entityType, before.entityId, next.level, next.entityId)
+    return { ok: true, stamp: Date.now(), message: said.length ? 'Saved.' : 'Nothing changed.' }
+  }
+
+  const [before] = await db.select().from(dependencies).where(eq(dependencies.id, input.id)).limit(1)
+  if (!before) return { error: 'That dependency no longer exists — reload the page.' }
+
+  const checked = dependencyPatch({ ...input, kind: input.depKind })
+  if (!checked.ok) return { error: checked.error.message }
+  const next = checked.value
+
+  /*
+   * A label belongs to the endpoint it was written for.
+   *
+   * `fromLabel`/`toLabel` name an `external` end — a vendor feed, another
+   * org's deliverable — because there is no record to read a name from. Move
+   * that end onto a real workstream and the old label is not just redundant,
+   * it is wrong: the page prefers the stored label when it has one, so the row
+   * would go on calling a workstream "BiS data feed".
+   */
+  const moved = (a: string, b: string, c: string, d: string) => a !== c || b !== d
+  await db
+    .update(dependencies)
+    .set({
+      ...next,
+      ...(moved(before.fromType, before.fromId, next.fromType, next.fromId) ? { fromLabel: null } : {}),
+      ...(moved(before.toType, before.toId, next.toType, next.toId) ? { toLabel: null } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(dependencies.id, input.id))
+
+  const said = describeChange(before, next, DEP_LABELS)
+  if (said.length) {
+    await logChange({
+      actor: await actorName(),
+      kind: 'change',
+      summary: `Dependency edited — ${said[0]}`,
+      detail: said.join('; ').slice(0, 400),
+    })
+  }
+
+  refreshBoth(before.fromType, before.fromId, next.fromType, next.fromId)
+  refreshBoth(before.toType, before.toId, next.toType, next.toId)
+  return { ok: true, stamp: Date.now(), message: said.length ? 'Saved.' : 'Nothing changed.' }
+}
+
+export async function deleteRegisterEntry(kind: EntryKind, id: string): Promise<RegisterState> {
+  if (kind === 'blocker') {
+    const [before] = await db.select().from(decisions).where(eq(decisions.id, id)).limit(1)
+    if (!before) return { error: 'That entry no longer exists — reload the page.' }
+
+    await db.delete(decisions).where(eq(decisions.id, id))
+    await logChange({
+      actor: await actorName(),
+      kind: 'change',
+      // The title goes in the summary on purpose: after the row is gone this
+      // line is the only place the thing is named.
+      summary: `${before.ref}: ${before.kind} deleted — ${before.title.slice(0, 80)}`,
+      detail: before.body.slice(0, 400),
+      entityType: before.entityType,
+      entityId: before.entityId,
+    })
+    refreshBoth(before.entityType, before.entityId, null, null)
+    return { ok: true, stamp: Date.now(), message: `${before.ref} deleted.` }
+  }
+
+  const [before] = await db.select().from(dependencies).where(eq(dependencies.id, id)).limit(1)
+  if (!before) return { error: 'That dependency no longer exists — reload the page.' }
+
+  await db.delete(dependencies).where(eq(dependencies.id, id))
+  await logChange({
+    actor: await actorName(),
+    kind: 'change',
+    summary: 'Dependency deleted',
+    detail: before.description?.slice(0, 400) ?? null,
+  })
+  refreshBoth(before.fromType, before.fromId, before.toType, before.toId)
+  return { ok: true, stamp: Date.now(), message: 'Deleted.' }
+}
+
+/**
+ * Both ends of a move.
+ *
+ * A record that changes which work it is filed against leaves one detail page
+ * and arrives on another, and revalidating only where it landed leaves it
+ * visible on the page it left until something else happens to rebuild that
+ * page.
+ */
+function refreshBoth(
+  wasLevel: string | null,
+  wasId: string | null,
+  isLevel: string | null,
+  isId: string | null,
+) {
+  const seen = new Set<string>()
+  for (const [level, id] of [
+    [wasLevel, wasId],
+    [isLevel, isId],
+  ] as const) {
+    if (!level || !id) continue
+    const key = `${level}:${id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    refresh(level, id)
+  }
+  // Nothing was filed at either end — a dependency on an external thing, or a
+  // blocker against nothing in particular — but the registers still changed.
+  if (seen.size === 0) refresh('', '')
 }

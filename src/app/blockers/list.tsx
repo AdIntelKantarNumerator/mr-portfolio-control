@@ -14,6 +14,7 @@
 import { useActionState, useState } from 'react'
 import { RecordTable, type Column } from '@/components/records/table'
 import { AssignCell } from '@/components/records/assign'
+import { EditEntryButton, type EditContext } from '@/components/records/edit-entry'
 import { createBlocker, fileBlockerAt, setBlockerStatus, type BlockerState } from './actions'
 
 const EMPTY: BlockerState = {}
@@ -52,6 +53,7 @@ export function BlockerList({
   workstreams,
   people,
   closed,
+  editing,
 }: {
   rows: BlockerRow[]
   initiatives: Named[]
@@ -59,6 +61,8 @@ export function BlockerList({
   workstreams: Named[]
   people: Named[]
   closed: boolean
+  /** What the edit dialog needs, or null for a reader who cannot write. */
+  editing: EditContext | null
 }) {
   const [adding, setAdding] = useState(false)
 
@@ -124,6 +128,17 @@ export function BlockerList({
       ),
     },
   ]
+
+  // Last, and unfilterable: it is a control, not a fact about the row.
+  if (editing) {
+    columns.push({
+      key: 'edit',
+      label: '',
+      className: 'rt-edit',
+      value: () => '',
+      cell: (r) => <EditEntryButton kind="blocker" id={r.id} ctx={editing} label={r.title} />,
+    })
+  }
 
   return (
     <>
