@@ -20,9 +20,10 @@
  * The response says what was dropped and why. A caller that silently loses half
  * its bullets learns nothing; one that gets told will get fixed.
  */
+import { readTier, vocabularyOf } from '@/lib/tier-aliases'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { agentObservations, assessments, projects, workstreams } from '@/db/schema'
+import { agentObservations, assessments, initiatives, projects } from '@/db/schema'
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
 
 export const runtime = 'nodejs'
@@ -31,10 +32,10 @@ export const dynamic = 'force-dynamic'
 const KINDS = new Set(['progress', 'blocker', 'decision_needed', 'decision_made', 'risk', 'change'])
 const AUDIENCES = new Set(['engineering', 'stakeholder'])
 const RAGS = new Set(['green', 'amber', 'red', 'unknown'])
-// Initiatives are here now. They are the tier the home page leads with, and
-// an initiative that cannot carry an assessment shows "No assessment yet"
-// forever while every project inside it has one.
-const ENTITY_TYPES = new Set(['initiative', 'project', 'workstream'])
+// Objectives are here now. They are the tier the home page leads with, and
+// an objective that cannot carry an assessment shows "No assessment yet"
+// forever while every initiative inside it has one.
+const ENTITY_TYPES = new Set(['objective', 'initiative', 'project'])
 
 interface Incoming {
   entityType?: string
@@ -71,11 +72,19 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Body must be JSON.' }, { status: 400 })
   }
 
-  const entityType = String(body.entityType ?? '')
+  const read = readTier(body.entityType == null ? null : String(body.entityType), vocabularyOf(req.headers))
+  const entityType = read.tier ?? ''
   const entityId = String(body.entityId ?? '')
   if (!ENTITY_TYPES.has(entityType) || !entityId) {
     return Response.json(
-      { error: 'entityType must be "project" or "workstream", and entityId is required.' },
+      {
+        // The shim's message when it has one: "workstream is now project" is
+        // a great deal more use to a stale caller than a list of the words it
+        // did not send.
+        error:
+          read.problem ??
+          'entityType must be "objective", "initiative" or "project", and entityId is required.',
+      },
       { status: 400 },
     )
   }
@@ -132,7 +141,7 @@ export async function POST(req: Request) {
 
   // The score is arithmetic the caller did, and it is clamped rather than
   // trusted: a front page ordered by an unbounded number a caller supplies is
-  // one bad payload away from one workstream pinned to the top forever.
+  // one bad payload away from one project pinned to the top forever.
   const rawScore = Number(body.activity?.score ?? 0)
   const activityScore = Number.isFinite(rawScore) ? Math.max(0, Math.min(rawScore, 1000)) : 0
   const rawWindow = Number(body.activity?.windowHours ?? 0)
@@ -267,13 +276,13 @@ export async function GET(req: Request) {
       .where(isNull(agentObservations.supersededAt))
       .orderBy(desc(agentObservations.generatedAt)),
     db.select().from(assessments).where(eq(assessments.current, true)).orderBy(desc(assessments.asOf)),
+    db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives),
     db.select({ id: projects.id, name: projects.name }).from(projects),
-    db.select({ id: workstreams.id, name: workstreams.name }).from(workstreams),
   ])
 
   const nameOf = new Map<string, string>([
-    ...inits.map((i) => [`project:${i.id}`, i.name] as const),
-    ...projs.map((p) => [`workstream:${p.id}`, p.name] as const),
+    ...inits.map((i) => [`initiative:${i.id}`, i.name] as const),
+    ...projs.map((p) => [`project:${p.id}`, p.name] as const),
   ])
 
   const assessmentFor = new Map<string, (typeof current)[number]>()

@@ -25,8 +25,8 @@
  *
  * WHY AN ITEM CAN HANG OFF THREE LEVELS AT ONCE
  *
- * One commitment can be relevant to a workstream, its project, and the
- * initiative above it, and forcing a single home means somebody reading at the
+ * One commitment can be relevant to a project, its initiative, and the
+ * objective above it, and forcing a single home means somebody reading at the
  * wrong level never sees it. Links are a separate table for that reason, and
  * every level named has to exist — an item attached to nothing is an item that
  * appears on no page.
@@ -37,9 +37,10 @@
  * does not exist, and a source with no title. It never deletes and never
  * reopens: closing an action item is a person's call, made on the page.
  */
+import { readTier, vocabularyOf } from '@/lib/tier-aliases'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { actionItems, actionItemLinks, initiatives, projects, people, workstreams } from '@/db/schema'
+import { actionItems, actionItemLinks, objectives, initiatives, people, projects } from '@/db/schema'
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
 import { logChange } from '@/lib/portfolio'
 import { nextRef } from '@/lib/util'
@@ -48,7 +49,7 @@ import { closest, exact } from '@/lib/match-name'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const LEVELS = new Set(['initiative', 'project', 'workstream'])
+const LEVELS = new Set(['objective', 'initiative', 'project'])
 const MAX_TEXT = 300
 
 interface IncomingLink {
@@ -129,6 +130,10 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   if (!machineCallerAuthorised(req)) return unauthorised()
 
+  // Read once for the whole request: a caller speaks one vocabulary, not one
+  // per link.
+  const legacy = vocabularyOf(req.headers)
+
   let body: Incoming
   try {
     body = (await req.json()) as Incoming
@@ -153,12 +158,12 @@ export async function POST(req: Request) {
   const [existing, folk, groups, projs, streams] = await Promise.all([
     db.select().from(actionItems),
     db.select({ id: people.id, name: people.name }).from(people),
+    db.select({ id: objectives.id, name: objectives.name }).from(objectives),
     db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives),
     db.select({ id: projects.id, name: projects.name }).from(projects),
-    db.select({ id: workstreams.id, name: workstreams.name }).from(workstreams),
   ])
 
-  const byLevel = { initiative: groups, project: projs, workstream: streams } as const
+  const byLevel = { objective: groups, initiative: projs, project: streams } as const
   const realIds = new Map<string, Set<string>>(
     Object.entries(byLevel).map(([level, rows]) => [level, new Set(rows.map((r) => r.id))]),
   )
@@ -188,11 +193,15 @@ export async function POST(req: Request) {
     // worse than being told it was dropped.
     const wanted: { level: string; entityId: string }[] = []
     for (const l of raw.links ?? []) {
-      const level = String(l.level ?? '')
-      if (!LEVELS.has(level)) {
-        dropped.push(`"${text.slice(0, 40)}…" — "${level}" is not a level`)
+      // Read through the vocabulary shim, so a Yaara that has not been
+      // redeployed yet can still file against the tier she means. See
+      // lib/tier-aliases.ts.
+      const read = readTier(l.level == null ? null : String(l.level), legacy)
+      if (!read.tier || !LEVELS.has(read.tier)) {
+        dropped.push(`"${text.slice(0, 40)}…" — ${read.problem ?? `"${String(l.level)}" is not a level`}`)
         continue
       }
+      const level = read.tier
       const rows = byLevel[level as keyof typeof byLevel]
       let id = l.entityId ? String(l.entityId) : ''
       if (id && !realIds.get(level)!.has(id)) id = ''
