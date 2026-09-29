@@ -30,6 +30,7 @@ import {
 } from '@/db/schema'
 import { ENDED_PROJECT_STATUS } from './domain'
 import { lateDependencies } from './dependency-risk'
+import { activitySeries } from './activity-series'
 import { getCardOrder } from './card-order'
 import { blockedAtOrBelow } from './blocked'
 
@@ -538,7 +539,10 @@ export const getHomeCards = cache(async (
         rail,
         signals,
         mix,
-        activity: recent.length ? [1, 2, 3, 4, 5, 6, 7, 8].map(() => Math.round(activityScore)) : [0, 0, 0, 0, 0, 0, 0, 0],
+        // What happened per week over the last eight, not the score repeated
+        // eight times — which is what this was, and why every card on the
+        // board drew an identical block of bars. See lib/activity-series.ts.
+        activity: activitySeries(recent, new Date(now)),
         activityDelta: activityScore > 0 ? `${Math.round(activityScore)}` : '0',
         href:
           level === 'initiative' ? `/initiatives/${r.id}` : level === 'project' ? `/projects/${r.id}` : `/workstreams/${r.id}`,
