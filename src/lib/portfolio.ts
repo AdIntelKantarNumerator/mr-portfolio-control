@@ -31,6 +31,7 @@ import {
   milestonePhases,
 } from '@/db/schema'
 import { loadOverrides, applyOverrides, type OverrideMap } from './overrides'
+import { rollUpWindow } from './rollup-window'
 import { resolveHealth, type Rag, type ResolvedHealth } from './domain'
 
 export type Row<T> = T extends { $inferSelect: infer S } ? S : never
@@ -239,8 +240,22 @@ export const getPortfolio = cache(async (): Promise<Portfolio> => {
     const merged = applyOverrides(row, 'project', initiativeOverrides, INITIATIVE_DATE_FIELDS)
     const v = merged.value
     const kids = projectsByInitiative.get(v.id) ?? []
-    const starts = kids.map((k) => k.startDate).filter(Boolean) as Date[]
-    const targets = kids.map((k) => k.targetDate).filter(Boolean) as Date[]
+    /*
+     * Everything dated underneath, not just the children's own dates.
+     *
+     * A project whose workstreams carry no dates but whose milestones do was
+     * reading as undated — which on a chart is indistinguishable from work
+     * nobody has planned. And the roll-up counts ENDED children too: a window
+     * is a fact about the work, not about which rows a screen is currently
+     * listing. See lib/rollup-window.ts, which the timeline uses as well, so
+     * the two cannot drift apart again.
+     */
+    const beneath: Array<Date | null> = [
+      ...kids.flatMap((k) => [k.startDate, k.targetDate]),
+      ...kids.flatMap((k) => (milestonesByProject.get(k.id) ?? []).map((m) => m.targetDate)),
+      ...(milestonesByProject.get(v.id) ?? []).map((m) => m.targetDate),
+    ]
+    const window = rollUpWindow({ startDate: v.startDate, targetDate: v.targetDate }, beneath)
     return {
       ...v,
       health: resolveHealth({
@@ -254,8 +269,10 @@ export const getPortfolio = cache(async (): Promise<Portfolio> => {
       overridden: [...merged.overridden],
       sourceValues: merged.sourceValues,
       sources: initiativeSources.get(v.id) ?? [],
-      derivedStart: starts.length ? new Date(Math.min(...starts.map((d) => d.getTime()))) : null,
-      derivedTarget: targets.length ? new Date(Math.max(...targets.map((d) => d.getTime()))) : null,
+      // Only the rolled-up halves: `derivedX` means "nobody typed this", and
+      // the callers show a "rolled up" badge off exactly that.
+      derivedStart: v.startDate ? null : window.start,
+      derivedTarget: v.targetDate ? null : window.end,
     }
   })
 

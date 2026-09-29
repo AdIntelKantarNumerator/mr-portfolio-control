@@ -34,7 +34,8 @@ import { isNull } from 'drizzle-orm'
 import { Kicker } from '@/components/ui'
 import { getCardOrder } from '@/lib/card-order'
 import { lateness } from '@/lib/dependency-risk'
-import { addMonths, buildTimeline, effectiveWindow, type DepInput, type SourceRow } from '@/lib/timeline-model'
+import { addMonths, buildTimeline, type DepInput, type SourceRow } from '@/lib/timeline-model'
+import { rollUpWindow } from '@/lib/rollup-window'
 import { HOME_PREFS_COOKIE, resolveHomePrefs } from '@/lib/home-prefs'
 import { TimelineControls } from './controls'
 import { TimelineView } from '@/components/timeline-view'
@@ -109,19 +110,37 @@ export default async function RoadmapPage({
     ])
   }
 
-  // Every date known beneath a record: its milestones, and — for a project —
-  // its workstreams' windows too. This is what makes the bar agree with the
-  // "rolled up" window the detail page shows; they used to disagree, because
-  // the chart read the stored dates and nothing else.
+  /*
+   * Every date known beneath a record, from the UNFILTERED lists.
+   *
+   * This is the half of the bug that was hardest to see. `wsByProject` and
+   * `projByInit` are built from the rows the chart is about to draw, so with
+   * Health set to "Live only" a completed workstream dropped out of its
+   * project's window — and the project's bar moved, or vanished, because of a
+   * filter that was only ever meant to change what was listed. A window is a
+   * fact about the work; which rows you are looking at is a question about
+   * the screen.
+   */
+  const allWsByProject = new Map<string, typeof wss>()
+  for (const w of wss) {
+    if (!w.projectId) continue
+    allWsByProject.set(w.projectId, [...(allWsByProject.get(w.projectId) ?? []), w])
+  }
+  const allProjByInit = new Map<string, typeof projs>()
+  for (const p of projs) {
+    if (!p.initiativeId) continue
+    allProjByInit.set(p.initiativeId, [...(allProjByInit.get(p.initiativeId) ?? []), p])
+  }
+
   const msFor = (id: string) => ms.filter((m) => m.entityId === id).map((m) => m.targetDate)
   const beneathOf = (kind: keyof typeof HREF, id: string): Array<Date | null> => {
     const own = msFor(id)
     if (kind === 'workstream') return own
     if (kind === 'project') {
-      const kids = wsByProject.get(id) ?? []
+      const kids = allWsByProject.get(id) ?? []
       return [...own, ...kids.flatMap((w) => [w.startDate, w.targetDate, ...msFor(w.id)])]
     }
-    const kids = projByInit.get(id) ?? []
+    const kids = allProjByInit.get(id) ?? []
     return [...own, ...kids.flatMap((p) => [p.startDate, p.targetDate, ...beneathOf('project', p.id)])]
   }
 
@@ -129,7 +148,7 @@ export default async function RoadmapPage({
     row: { id: string; name: string; status: string; startDate: Date | null; targetDate: Date | null },
     kind: keyof typeof HREF,
   ) => {
-    const window = effectiveWindow(row, beneathOf(kind, row.id))
+    const window = rollUpWindow(row, beneathOf(kind, row.id))
     return {
       id: row.id,
       name: row.name,
