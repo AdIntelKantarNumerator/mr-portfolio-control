@@ -21,6 +21,7 @@ import { useActionState, useState } from 'react'
 import { deleteMilestone, saveMilestone, type MilestoneState } from '@/app/milestone-actions'
 import { LocalTime } from './local-time'
 import { calendarDate } from '@/lib/calendar-date'
+import { byTargetDateText, pageOf } from '@/lib/milestone-order'
 import { IconMilestone } from './detail/icons'
 
 const EMPTY: MilestoneState = {}
@@ -66,6 +67,9 @@ export interface MilestoneRow {
   from: { level: 'initiative' | 'project' | 'workstream'; id: string; name: string } | null
 }
 
+/** How many milestones a tile shows before it pages. */
+const PER_PAGE = 6
+
 export function MilestoneEditor({
   level,
   entityId,
@@ -77,7 +81,17 @@ export function MilestoneEditor({
 }) {
   const [open, setOpen] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const [page, setPage] = useState(0)
   const borrowed = milestones.filter((m) => m.from).length
+
+  /*
+   * By date, soonest first, undated last — not the hand order the editor used
+   * to keep. A milestone list read top to bottom is a reading of time, and one
+   * arranged by hand claims a sequence the dates do not support. The rule is
+   * the one the home rail uses; see lib/milestone-order.ts.
+   */
+  const ordered = byTargetDateText(milestones)
+  const shown = pageOf(ordered, page, PER_PAGE)
 
   return (
     <section className="ms-panel">
@@ -113,7 +127,7 @@ export function MilestoneEditor({
         </p>
       ) : (
         <ul className="ms-list">
-          {milestones.map((m) => {
+          {shown.rows.map((m) => {
             const held = (m.editedFields ?? '').split(',').filter(Boolean)
             return (
               <li key={m.id}>
@@ -159,6 +173,27 @@ export function MilestoneEditor({
             )
           })}
         </ul>
+      )}
+
+      {shown.pages > 1 && (
+        /* A tile is a glance, and twenty milestones in one is a page in
+           disguise. Six at a time, in date order, with the range said out
+           loud so nobody has to count rows to know where they are. */
+        <div className="ms-pager">
+          <button type="button" onClick={() => setPage(shown.page - 1)} disabled={shown.page === 0}>
+            ← Earlier
+          </button>
+          <span>
+            {shown.from + 1}–{shown.to} of {ordered.length}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage(shown.page + 1)}
+            disabled={shown.page >= shown.pages - 1}
+          >
+            Later →
+          </button>
+        </div>
       )}
     </section>
   )

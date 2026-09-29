@@ -44,3 +44,50 @@ export function byTargetDate<T extends Dated>(ms: readonly T[]): T[] {
     return at - bt || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)
   })
 }
+
+/**
+ * The same order, for rows that carry the date as an ISO string.
+ *
+ * The editor is a client component and its rows cross the boundary as JSON, so
+ * the dates arrive as strings. Kept beside the Date version rather than
+ * written out again in the component: "undated is unscheduled, not early" is
+ * the rule worth having in one place, and a second copy is how a list ends up
+ * sorted two ways on two screens.
+ */
+export interface DatedText {
+  targetDate: string | null
+  sortOrder?: number
+  name: string
+}
+
+export function byTargetDateText<T extends DatedText>(ms: readonly T[]): T[] {
+  return ms.slice().sort((a, b) => {
+    const at = a.targetDate ?? null
+    const bt = b.targetDate ?? null
+    const order = (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
+    if (at === null && bt === null) return order || a.name.localeCompare(b.name)
+    if (at === null) return 1
+    if (bt === null) return -1
+    return at.localeCompare(bt) || order || a.name.localeCompare(b.name)
+  })
+}
+
+/**
+ * One page of a list, and how many pages there are.
+ *
+ * `page` is clamped rather than trusted: a list that shrinks under a reader
+ * sitting on page four should show them the last page, not an empty one.
+ */
+export function pageOf<T>(rows: readonly T[], page: number, size: number): {
+  rows: T[]
+  page: number
+  pages: number
+  from: number
+  to: number
+} {
+  const pages = Math.max(1, Math.ceil(rows.length / size))
+  const at = Math.min(Math.max(0, page), pages - 1)
+  const from = at * size
+  const to = Math.min(from + size, rows.length)
+  return { rows: rows.slice(from, to), page: at, pages, from, to }
+}

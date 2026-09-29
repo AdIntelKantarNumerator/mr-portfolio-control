@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { byTargetDate } from '../src/lib/milestone-order'
+import { byTargetDate, byTargetDateText, pageOf } from '../src/lib/milestone-order'
 
 const m = (name: string, sortOrder: number, date: string | null) => ({
   name,
@@ -53,4 +53,54 @@ test('sorting does not disturb the caller’s array', () => {
   const before = names(rail)
   byTargetDate(rail)
   assert.deepEqual(names(rail), before)
+})
+
+// --- the detail tile ---------------------------------------------------------
+
+test('the string-date order matches the Date order', () => {
+  // The editor is a client component, so its dates arrive as ISO strings. Two
+  // orderings of one list is how a rail and a tile end up disagreeing.
+  const rows = [
+    { name: 'undated', targetDate: null, sortOrder: 0 },
+    { name: 'oct', targetDate: '2026-10-11', sortOrder: 1 },
+    { name: 'sep', targetDate: '2026-09-24', sortOrder: 2 },
+  ]
+  assert.deepEqual(byTargetDateText(rows).map((r) => r.name), ['sep', 'oct', 'undated'])
+})
+
+test('two undated milestones keep the order somebody arranged them in', () => {
+  const rows = [
+    { name: 'b', targetDate: null, sortOrder: 2 },
+    { name: 'a', targetDate: null, sortOrder: 1 },
+  ]
+  assert.deepEqual(byTargetDateText(rows).map((r) => r.name), ['a', 'b'])
+})
+
+test('a tile shows six at a time and says where you are', () => {
+  const rows = Array.from({ length: 14 }, (_, i) => i)
+  const first = pageOf(rows, 0, 6)
+  assert.deepEqual(first.rows, [0, 1, 2, 3, 4, 5])
+  assert.equal(first.pages, 3)
+  assert.equal(`${first.from + 1}-${first.to}`, '1-6')
+
+  const last = pageOf(rows, 2, 6)
+  assert.deepEqual(last.rows, [12, 13])
+  assert.equal(`${last.from + 1}-${last.to}`, '13-14')
+})
+
+test('a page past the end shows the last page, not an empty one', () => {
+  // The list shrinks under a reader when somebody else deletes a milestone.
+  const out = pageOf([1, 2, 3], 9, 6)
+  assert.deepEqual(out.rows, [1, 2, 3])
+  assert.equal(out.page, 0)
+})
+
+test('an empty list is one page, not zero', () => {
+  const out = pageOf([], 0, 6)
+  assert.deepEqual(out.rows, [])
+  assert.equal(out.pages, 1)
+})
+
+test('six or fewer does not page at all', () => {
+  assert.equal(pageOf([1, 2, 3, 4, 5, 6], 0, 6).pages, 1)
 })
