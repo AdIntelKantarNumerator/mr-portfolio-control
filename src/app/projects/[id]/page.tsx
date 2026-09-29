@@ -44,6 +44,9 @@ const TONE: Record<string, string> = {
 }
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null)
+// What a <input type="date"> takes, and what an empty one means: no typed
+// date, so that end of the window comes from the work beneath.
+const ymd = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : '')
 
 export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -80,6 +83,12 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               description={i.description ?? ''}
               parentId={i.initiativeId ?? null}
               parents={adding.initiatives}
+              window={{
+                startDate: ymd(i.startDate),
+                targetDate: ymd(i.targetDate),
+                rolledStart: ymd(i.derivedStart),
+                rolledTarget: ymd(i.derivedTarget),
+              }}
             />
           ) : null
         }

@@ -39,6 +39,11 @@ export function DetailBody({
   const plus = (kind: EntryKind) =>
     canEdit && adding ? <AddEntry kind={kind} ctx={adding} /> : undefined
 
+  // The same condition as the "+": a reader who cannot write should not be
+  // offered a pencil that fails on save.
+  const editable = (kind: 'blocker' | 'dependency') =>
+    canEdit && adding ? { kind, ctx: { people: adding.people, endpoints: adding.endpoints } } : undefined
+
   return (
     <>
       {/* When there is a tier beneath, the right column carries the updates
@@ -106,6 +111,7 @@ export function DetailBody({
           items={data.blockers}
           empty="Nothing is blocked."
           add={plus('blocker')}
+          editable={editable('blocker')}
         />
         <ListTile
           title="Decisions"
@@ -130,6 +136,7 @@ export function DetailBody({
           items={data.dependencies}
           empty="Nothing is waiting on anything."
           add={plus('dependency')}
+          editable={editable('dependency')}
         />
       </div>
 

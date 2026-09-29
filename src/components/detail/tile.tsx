@@ -20,6 +20,8 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { MisroutedButton, type Misroute } from './misrouted'
+import { EditEntryButton, type EditContext } from '@/components/records/edit-entry'
+import type { EntryKind } from '@/app/register-actions'
 import {
   IconAction,
   IconBlocker,
@@ -114,6 +116,7 @@ export function ListTile({
   empty,
   correctable,
   add,
+  editable,
 }: {
   title: string
   icon?: IconName
@@ -124,6 +127,15 @@ export function ListTile({
   correctable?: { entityType: string; entityId: string }
   /** A control for the tile's header — the "+ Add" on a register. */
   add?: React.ReactNode
+  /**
+   * What these rows are, when a reader may change or remove them.
+   *
+   * Only the two registers whose rows are records in their own right. An
+   * update is Yaara's reading of a document and is corrected by saying it is
+   * on the wrong work; a child row is a whole piece of work with its own page.
+   * Neither is edited from a bulleted list.
+   */
+  editable?: { kind: EntryKind; ctx: EditContext }
 }) {
   const [page, setPage] = useState(0)
   const pages = Math.max(1, Math.ceil(items.length / perPage))
@@ -171,6 +183,9 @@ export function ListTile({
                       entityId={correctable.entityId}
                       label={it.text}
                     />
+                  ) : null}
+                  {editable ? (
+                    <EditEntryButton kind={editable.kind} id={it.id} ctx={editable.ctx} label={it.text} />
                   ) : null}
                 </span>
               </li>

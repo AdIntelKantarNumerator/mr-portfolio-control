@@ -15,6 +15,7 @@ import { HealthEditable } from '@/components/health-editable'
 import { Editable } from '@/components/editable'
 import { SourceBadge } from '@/components/ui'
 import { calendarRange } from '@/lib/calendar-date'
+import { rollUpWindow } from '@/lib/rollup-window'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,6 +46,9 @@ const TONE: Record<string, string> = {
 }
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null)
+// What a <input type="date"> takes; empty means nobody typed one, so that end
+// of the window comes from the work beneath.
+const ymd = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : '')
 
 export default async function WorkstreamDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -62,6 +66,20 @@ export default async function WorkstreamDetailPage({ params }: { params: Promise
   const parent = w.projectId ? (p.projects.find((x) => x.id === w.projectId) ?? null) : null
   const people = p.people.map((x) => ({ id: x.id, name: x.name }))
 
+  /*
+   * A workstream's window rolls up too — from its own milestones.
+   *
+   * It was the one tier that did not. The timeline has always drawn a
+   * workstream bar across its milestones, so a workstream with dated
+   * milestones and no typed dates appeared on the chart and read as undated on
+   * its own page: the same disagreement the tiers above had, one tier down.
+   * Same function, so it stays fixed. See lib/rollup-window.ts.
+   */
+  const win = rollUpWindow(
+    { startDate: w.startDate, targetDate: w.targetDate },
+    plan.map((m) => (m.targetDate ? new Date(m.targetDate) : null)),
+  )
+
   return (
     <div className="stack">
       <DetailHead
@@ -74,6 +92,12 @@ export default async function WorkstreamDetailPage({ params }: { params: Promise
               description={w.description ?? ''}
               parentId={w.projectId ?? null}
               parents={adding.projects}
+              window={{
+                startDate: ymd(w.startDate),
+                targetDate: ymd(w.targetDate),
+                rolledStart: w.startDate ? '' : ymd(win.start),
+                rolledTarget: w.targetDate ? '' : ymd(win.end),
+              }}
             />
           ) : null
         }
@@ -131,7 +155,10 @@ export default async function WorkstreamDetailPage({ params }: { params: Promise
           ) : null}
           <span>
             <i>Window</i>
-            {calendarRange(iso(w.startDate), iso(w.targetDate))}
+            {calendarRange(iso(win.start), iso(win.end))}
+            {win.rolledUp ? (
+              <b title="Rolled up from the milestones beneath; nobody typed it.">rolled up</b>
+            ) : null}
           </span>
         </div>
       </DetailHead>

@@ -21,6 +21,23 @@ export interface Named {
   name: string
 }
 
+/**
+ * The window, as the dialog has to talk about it.
+ *
+ * Two dates and, for each end, what it would fall back to. A reader looking at
+ * "Jun 17 → Oct 12 (rolled up)" and opening this dialog finds the fields empty,
+ * which is correct — nobody typed those dates — and would be baffling without
+ * the roll-up shown beside them as what emptiness currently means.
+ */
+export interface WindowEdit {
+  /** yyyy-mm-dd, or '' when this end is rolled up. */
+  startDate: string
+  targetDate: string
+  /** yyyy-mm-dd the roll-up gives when the field above is empty. */
+  rolledStart: string
+  rolledTarget: string
+}
+
 export function EditRecordButton({
   level,
   id,
@@ -28,6 +45,7 @@ export function EditRecordButton({
   description,
   parentId,
   parents,
+  window,
 }: {
   level: 'initiative' | 'project' | 'workstream'
   id: string
@@ -36,6 +54,7 @@ export function EditRecordButton({
   /** Null for an initiative, which rolls up to nothing. */
   parentId: string | null
   parents: Named[]
+  window: WindowEdit
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -51,6 +70,7 @@ export function EditRecordButton({
           description={description}
           parentId={parentId}
           parents={parents}
+          window={window}
           onClose={() => setOpen(false)}
         />
       )}
@@ -67,6 +87,7 @@ function EditDialog({
   description,
   parentId,
   parents,
+  window: win,
   onClose,
 }: {
   level: 'initiative' | 'project' | 'workstream'
@@ -75,6 +96,7 @@ function EditDialog({
   description: string
   parentId: string | null
   parents: Named[]
+  window: WindowEdit
   onClose: () => void
 }) {
   const router = useRouter()
@@ -88,6 +110,8 @@ function EditDialog({
       id,
       name: String(form.get('name') ?? ''),
       description: String(form.get('description') ?? ''),
+      startDate: String(form.get('startDate') ?? ''),
+      targetDate: String(form.get('targetDate') ?? ''),
       // Left out entirely for an initiative, so the action does not treat an
       // absent field as "detach from everything".
       ...(level === 'initiative' ? {} : { parentId: String(form.get('parentId') ?? '') }),
@@ -131,6 +155,44 @@ function EditDialog({
               </select>
             </>
           )}
+
+          <div className="mr-grid">
+            <span>
+              <label className="mr-label" htmlFor="er-start">
+                Start
+              </label>
+              <input id="er-start" type="date" name="startDate" defaultValue={win.startDate} />
+            </span>
+            <span>
+              <label className="mr-label" htmlFor="er-target">
+                Target
+              </label>
+              <input id="er-target" type="date" name="targetDate" defaultValue={win.targetDate} />
+            </span>
+            <span />
+          </div>
+          <p className="mr-hint">
+            {win.startDate || win.targetDate ? (
+              <>
+                Typed dates win over the work beneath. Empty a field to give that end back to the roll-up
+                {win.rolledStart || win.rolledTarget ? (
+                  <>
+                    {' '}
+                    (which today would be {win.rolledStart || '—'} → {win.rolledTarget || '—'})
+                  </>
+                ) : null}
+                .
+              </>
+            ) : win.rolledStart || win.rolledTarget ? (
+              <>
+                Both ends are rolled up from the work beneath — {win.rolledStart || '—'} →{' '}
+                {win.rolledTarget || '—'}. Typing a date here replaces that end and stops it moving when the
+                work below does.
+              </>
+            ) : (
+              <>Nothing beneath carries a date, so this window is whatever you type here.</>
+            )}
+          </p>
 
           <label className="mr-label" htmlFor="er-desc">
             Description
