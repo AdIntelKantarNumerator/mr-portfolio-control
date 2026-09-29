@@ -466,6 +466,9 @@ table.dtable thead th {
 .rcap { font-size: 12px; font-weight: 700; color: var(--ink-2, var(--muted)); display: flex; align-items: center; gap: 3px; }
 .ringwrap:hover .rcap { color: var(--brand); }
 .rsub { font-size: 11.5px; color: var(--muted); text-align: center; line-height: 1.35; }
+/* What the ring's number actually is — a count, or the calendar. The two look
+   identical and mean quite different things. */
+.rbasis { font-size: 10px; color: var(--muted); opacity: .8; text-align: center; line-height: 1.3; margin-top: 2px; }
 
 .vwrap { display: flex; align-items: flex-start; gap: 4px; margin: -4px 0 12px -10px; }
 .verdict { flex: 1; text-align: left; border: 0; background: transparent; cursor: pointer; padding: 8px 10px; border-radius: 9px; font-family: var(--font-display); font-size: 21px; line-height: 1.3; font-weight: 400; letter-spacing: 0; color: var(--ink); }
@@ -1181,6 +1184,22 @@ a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }
 .mr-go { border: 0; border-radius: 8px; white-space: nowrap; background: var(--brand); color: #fff; font: inherit; font-size: 13px; font-weight: 650; padding: 8px 14px; cursor: pointer; }
 .mr-go:disabled { opacity: .6; cursor: default; }
 .mr-hint { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+
+/* Editing a register entry: the pencil on a row, and the two buttons that are
+   not the primary action. `mr-danger` is armed by a first press elsewhere, so
+   it is never the thing a stray click lands on. */
+.row-edit { border: 0; background: none; padding: 0 2px; margin-left: 6px; font: inherit; font-size: 11px; line-height: 1; color: var(--muted); cursor: pointer; opacity: 0; transition: opacity .12s; }
+li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opacity: 1; }
+.row-edit:hover { color: var(--brand); }
+/* Touch has no hover, so the control would be unreachable. */
+@media (hover: none) { .row-edit { opacity: .7; } }
+.rt-edit { width: 34px; text-align: right; }
+.rt-edit .row-edit { font-size: 13px; opacity: .7; margin: 0; }
+.mr-quiet { border: 1px solid var(--line-2); background: var(--surface); border-radius: 8px; font: inherit; font-size: 13px; color: var(--muted); padding: 7px 12px; cursor: pointer; }
+.mr-quiet:hover { border-color: var(--muted); color: var(--fg); }
+.mr-danger { border: 0; border-radius: 8px; background: var(--c3); color: #fff; font: inherit; font-size: 13px; font-weight: 650; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
+.mr-danger:disabled, .mr-quiet:disabled { opacity: .6; cursor: default; }
+.modal-ref { margin-left: 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .mr-said { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink); }
 .mr-said.mr-bad { color: var(--crit); }
 
