@@ -23,7 +23,22 @@
  * because "in trouble" is one state to a reader scanning a year at a glance.
  */
 
-export type Health = 'good' | 'crit' | 'done'
+/**
+ * Five states, because four of them are decisions somebody could act on and
+ * the fifth is the absence of one.
+ *
+ *   done    finished, and no longer anybody's problem
+ *   late    the date has passed and it has not happened
+ *   risk    assessed as in trouble, but the date has not passed yet
+ *   planned committed to, not started
+ *   good    running, and nothing says otherwise
+ *
+ * `late` and `risk` were one colour, which is the distinction that matters
+ * most on a chart of a year: a thing that is going to be late and a thing
+ * that already is call for different conversations, and painting both red
+ * means the second is never found among the first.
+ */
+export type Health = 'good' | 'risk' | 'late' | 'planned' | 'done'
 
 export interface TimelineColumn {
   key: string
@@ -141,27 +156,70 @@ export function pct(date: Date, start: Date, span: number) {
   return ((date.getTime() - start.getTime()) / span) * 100
 }
 
+const DONE = new Set(['completed', 'complete', 'done', 'closed', 'canceled', 'cancelled', 'shipped'])
+const NOT_STARTED = new Set(['planned', 'backlog', 'pending', 'not_started', 'proposed', 'draft'])
+const TROUBLE = new Set(['blocked', 'at_risk', 'missed', 'paused'])
+
 /**
  * The colour a piece of work draws in.
  *
- * Finished beats everything: a completed workstream that was red the week
- * before it landed is not a problem, and drawing it red is how a chart of a
- * delivered quarter still looks like a disaster.
+ * The order is the whole rule, and each step earns its place:
+ *
+ *   1. Finished beats everything. A workstream that was red the week before
+ *      it landed is not a problem, and drawing it red is how a chart of a
+ *      delivered quarter still looks like a disaster.
+ *   2. Then overdue, which is not a matter of opinion: the date has passed
+ *      and the thing has not happened.
+ *   3. Then what somebody assessed — in trouble, but there is still time.
+ *   4. Then not started, which is not the same as on track and was being
+ *      drawn as though it were.
  */
-export function healthOf(status: string, rag: string | null | undefined): Health {
-  if (status === 'completed' || status === 'complete' || status === 'done') return 'done'
-  if (rag === 'red' || rag === 'amber') return 'crit'
+export function healthOf(
+  status: string,
+  rag: string | null | undefined,
+  target?: Date | null,
+  now?: Date,
+): Health {
+  const state = (status ?? '').toLowerCase()
+  if (DONE.has(state)) return 'done'
+  if (target && now && target < now) return 'late'
+  if (rag === 'red' || rag === 'amber' || TROUBLE.has(state)) return 'risk'
+  if (NOT_STARTED.has(state)) return 'planned'
   return 'good'
 }
 
-/** A milestone's colour, which has one extra way of being in trouble. */
+/** A milestone, by the same rule. Its status vocabulary is its own. */
 export function markHealth(status: string, target: Date | null, now: Date): Health {
-  if (status === 'complete' || status === 'done') return 'done'
-  // Overdue is trouble whatever anybody has assessed: the date has passed and
-  // the thing has not happened, which is not a matter of opinion.
-  if (target && target < now) return 'crit'
-  if (status === 'blocked' || status === 'at_risk' || status === 'missed') return 'crit'
-  return 'good'
+  return healthOf(status, null, target, now)
+}
+
+/**
+ * The window a piece of work actually occupies.
+ *
+ * Its own dates when it has them, and otherwise the span of everything
+ * underneath — the same roll-up the detail page shows as "rolled up". They
+ * disagreed: a project with no dates of its own had its milestones moved, the
+ * detail page said June 17 to Nov 2, and the timeline went on drawing the
+ * stored dates, which were nothing. One function, used by both, is the only
+ * way those two stay the same number.
+ *
+ * `beneath` is every date known below: a child's start or end, a milestone's
+ * target. Order does not matter; the span is the extremes.
+ */
+export function effectiveWindow(
+  own: { startDate: Date | null; targetDate: Date | null },
+  beneath: ReadonlyArray<Date | null | undefined>,
+): { start: Date | null; end: Date | null; rolledUp: boolean } {
+  const stamps = beneath.filter(Boolean).map((d) => (d as Date).getTime())
+  const low = stamps.length ? new Date(Math.min(...stamps)) : null
+  const high = stamps.length ? new Date(Math.max(...stamps)) : null
+
+  // Each end falls back on its own. A project with a real start date and no
+  // target should extend to its last milestone rather than losing the start
+  // somebody typed.
+  const start = own.startDate ?? low
+  const end = own.targetDate ?? high
+  return { start, end, rolledUp: (!own.startDate && low !== null) || (!own.targetDate && high !== null) }
 }
 
 export interface SourceChild {
@@ -238,7 +296,7 @@ export function buildTimeline(
         href: child.href,
         leftPct: left,
         widthPct: Math.max(1.2, right - left),
-        health: healthOf(child.status, child.rag),
+        health: healthOf(child.status, child.rag, child.targetDate, now),
         status: child.status,
         clippedStart: from < start,
         clippedEnd: to > end,

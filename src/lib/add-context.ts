@@ -30,6 +30,11 @@ export const addContext = cache(async () => {
   // either history or a mistake, and offering it invites the mistake.
   return {
     people: folk,
+    // The records something could be moved under. Both lists, because the
+    // caller knows which tier it is and picking the wrong one here would be
+    // a silent mis-parenting rather than a type error.
+    initiatives: inits.map((i) => ({ id: i.id, name: i.name })),
+    projects: projs.map((p) => ({ id: p.id, name: p.name })),
     endpoints: [
       ...inits.filter((i) => !ENDED.has(i.status)).map((i) => ({ value: `initiative:${i.id}`, label: i.name, group: 'Initiatives' })),
       ...projs.filter((p) => !ENDED.has(p.status)).map((p) => ({ value: `project:${p.id}`, label: p.name, group: 'Projects' })),

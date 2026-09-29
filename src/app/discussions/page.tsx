@@ -4,16 +4,18 @@
  * What keeps coming up in the meetings Yaara reads, and has not become a
  * decision or a blocker. Nobody owns these, which is the point: something
  * raised in three consecutive weeklies with no owner is the shape a blocker
- * has before anybody has called it one, and it was previously visible only at
- * the foot of the register, below everything that already had a name.
+ * has before anybody has called it one.
  *
- * There is no explanatory paragraph under the title. A page whose whole
- * content is "here is what keeps coming up" does not need one, and the reader
- * who needed it needed it once.
+ * The work each is tagged against is a guess made from the text, so each row
+ * can be corrected — and says so afterwards, because a line a person fixed
+ * and a line read off a document carry different authority.
  */
-import Link from 'next/link'
-import { getPortfolio, labelForEndpoint, recentThemes } from '@/lib/portfolio'
+import { asc } from 'drizzle-orm'
+import { db } from '@/db/client'
+import { initiatives, projects, workstreams } from '@/db/schema'
+import { recentThemes } from '@/lib/portfolio'
 import { Kicker } from '@/components/ui'
+import { DiscussionsList, type TopicRow } from './list'
 
 export const metadata = { title: 'Discussions' }
 export const dynamic = 'force-dynamic'
@@ -25,7 +27,36 @@ const HREF: Record<string, string> = {
 }
 
 export default async function DiscussionsPage() {
-  const [p, themes] = await Promise.all([getPortfolio(), recentThemes(60)])
+  const [themes, inits, projs, wss] = await Promise.all([
+    recentThemes(60),
+    db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives).orderBy(asc(initiatives.name)),
+    db.select({ id: projects.id, name: projects.name }).from(projects).orderBy(asc(projects.name)),
+    db.select({ id: workstreams.id, name: workstreams.name }).from(workstreams).orderBy(asc(workstreams.name)),
+  ])
+
+  const named = new Map<string, string>()
+  for (const i of inits) named.set(`initiative:${i.id}`, i.name)
+  for (const p of projs) named.set(`project:${p.id}`, p.name)
+  for (const w of wss) named.set(`workstream:${w.id}`, w.name)
+
+  const topics: TopicRow[] = themes.map((t) => {
+    const key = t.entityId ? `${t.entityType}:${t.entityId}` : ''
+    const where = key ? (named.get(key) ?? null) : null
+    return {
+      id: t.id,
+      theme: t.theme,
+      summary: t.summary,
+      mentions: t.mentions,
+      lastMeeting: t.lastMeeting,
+      at: t.lastSeenAt ? t.lastSeenAt.toISOString().slice(0, 10) : '',
+      where,
+      // Only when the record is still there: a link to something deleted is
+      // worse than none, and the name being absent is itself worth seeing.
+      href: where && HREF[t.entityType] ? `${HREF[t.entityType]}/${t.entityId}` : null,
+      editedBy: t.editedBy,
+      editedAt: t.editedAt ? t.editedAt.toISOString().slice(0, 10) : null,
+    }
+  })
 
   return (
     <div className="stack">
@@ -40,41 +71,7 @@ export default async function DiscussionsPage() {
         <div className="tile-head">
           <h2>Active recurring topics</h2>
         </div>
-
-        {themes.length === 0 ? (
-          <p className="tile-empty">
-            Nothing recurring yet. These are read out of shared documents — if meetings are happening and nothing
-            is here, check whether Yaara has the notes.
-          </p>
-        ) : (
-          <ul className="disc">
-            {themes.map((t) => {
-              const where = labelForEndpoint(p, t.entityType, t.entityId)
-              const href = t.entityType && HREF[t.entityType] ? `${HREF[t.entityType]}/${t.entityId}` : null
-              return (
-                <li key={t.id}>
-                  <div className="disc-head">
-                    <b>{t.theme}</b>
-                    {where ? (
-                      href ? (
-                        <Link className="disc-at" href={href}>
-                          {where}
-                        </Link>
-                      ) : (
-                        <span className="disc-at">{where}</span>
-                      )
-                    ) : null}
-                    <em>
-                      {t.mentions === 1 ? 'mentioned once' : `${t.mentions} mentions`}
-                      {t.lastMeeting ? ` · last in ${t.lastMeeting}` : ''}
-                    </em>
-                  </div>
-                  {t.summary ? <p>{t.summary}</p> : null}
-                </li>
-              )
-            })}
-          </ul>
-        )}
+        <DiscussionsList topics={topics} initiatives={inits} projects={projs} workstreams={wss} />
       </section>
     </div>
   )
