@@ -97,7 +97,10 @@ export async function setField(_prev: FieldState, formData: FormData): Promise<F
   } else if (spec.percent) {
     const n = parsePercent(raw)
     if (!n.ok) return { error: n.why }
-    value = n.value
+    // Stored as a fraction, which is the scale Linear syncs in. Typing 62
+    // used to store 62 into a column the sync fills with 0.62, so one column
+    // held two scales and every reader had to guess. See lib/progress.ts.
+    value = n.value / 100
   } else {
     value = raw.trim() || null
   }

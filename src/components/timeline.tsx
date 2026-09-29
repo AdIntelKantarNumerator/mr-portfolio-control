@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type { TimelineModel } from '@/lib/timeline'
 import { RAG_BAR_COLOR } from '@/lib/timeline'
 import { label as vocab } from '@/lib/domain'
+import { progressPercent } from '@/lib/progress'
 import { fmtDate, fmtRange, relativeDays } from '@/lib/util'
 import { Chip, Muted, Pill } from './ui'
 
@@ -176,7 +177,7 @@ export function Timeline({ model }: { model: TimelineModel }) {
                   }}
                   title={[
                     bar.workstream.name,
-                    `${vocab('projectStatus', bar.workstream.status)} · ${Math.round(bar.workstream.progress * 100)}%`,
+                    `${vocab('projectStatus', bar.workstream.status)} · ${progressPercent(bar.workstream.progress)}%`,
                     fmtRange(bar.workstream.startDate, bar.workstream.targetDate),
                     bar.workstream.lead ? `Lead: ${bar.workstream.lead.name}` : 'No lead',
                     bar.workstream.health.rationale ?? '',
