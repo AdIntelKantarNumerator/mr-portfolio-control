@@ -26,9 +26,9 @@ import { and, eq, inArray, isNull, desc } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { actionItemLinks, actionItems, agentObservations, assessments, people } from '@/db/schema'
 import { getPortfolio } from './portfolio'
-import { getHomeCards } from './home'
 import { getReadiness, statusFor, type ReadinessModel } from './readiness'
 import type { TileItem } from '@/components/detail/tile'
+import { progressPercent } from './progress'
 import type { Evidence, UpdateBullet } from '@/components/detail/health-tile'
 import type { ReadinessGateView } from '@/components/detail/readiness-tile'
 
@@ -73,8 +73,6 @@ export interface DetailData {
     confidence: string | null
     summary: string | null
     authoredBy: string | null
-    pct: number
-    expected: number
   }
   stakeholder: UpdateBullet[]
   engineering: UpdateBullet[]
@@ -146,9 +144,11 @@ function readinessFor(model: ReadinessModel, workstreamIds: string[]): DetailDat
 }
 
 export const getDetail = cache(async (level: Level, id: string): Promise<DetailData> => {
-  const [p, cards, model, obsRows, assessRows, folk] = await Promise.all([
+  // getHomeCards used to be in here, for the two numbers the health ring
+  // needed. The ring is gone, and with it a whole board computation on every
+  // detail page render.
+  const [p, model, obsRows, assessRows, folk] = await Promise.all([
     getPortfolio(),
-    getHomeCards(level),
     getReadiness(),
     db
       .select()
@@ -160,7 +160,6 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
   ])
 
   const { ids, workstreamIds } = scopeOf(level, id, p)
-  const card = cards.find((c) => c.id === id) ?? null
   const personName = new Map(folk.map((x) => [x.id, x.name]))
 
   // --- what Yaara said -----------------------------------------------------
@@ -337,8 +336,6 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
       confidence: assess?.confidence ?? null,
       summary: assess?.rationale ?? null,
       authoredBy: assess?.authoredBy ?? null,
-      pct: card?.next?.pct ?? 0,
-      expected: card?.next?.expected ?? 0,
     },
     stakeholder: bulletsFor('stakeholder'),
     engineering: bulletsFor('engineering'),
@@ -373,7 +370,7 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
               items: (p.projects.find((x) => x.id === id)?.workstreams ?? []).map((w) => ({
                 id: w.id,
                 text: w.name,
-                meta: w.progress ? `${Math.round(w.progress)}%` : null,
+                meta: w.progress ? `${progressPercent(w.progress)}%` : null,
                 tone: RAG_TONE[w.health.rag] ?? 'var(--line-2)',
                 toneLabel: w.status,
                 detail: [w.lead?.name ? `Lead ${w.lead.name}` : 'No lead', w.health.rationale]
