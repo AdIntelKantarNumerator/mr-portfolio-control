@@ -34,8 +34,8 @@ import { lateDependencies } from './dependency-risk'
 import { activitySeries } from './activity-series'
 import { getCardOrder } from './card-order'
 import { blockedAtOrBelow } from './blocked'
-import { byTargetDate } from './milestone-order'
-import { basisLabel, concernOf, milestoneProgress, type Basis } from './milestone-progress'
+import { byTargetDate, nextUpcoming } from './milestone-order'
+import { basisLabel, milestoneProgress, nextConcern, type Basis } from './milestone-progress'
 
 // The vocabulary lives in home-types.ts, which imports nothing, so client
 // components can use it without dragging this module's database import into
@@ -353,7 +353,14 @@ export const getHomeCards = cache(async (
       // "next milestone". See lib/milestone-order.ts.
       const railSource = byTargetDate(own.length ? own : mine)
 
-      const openNext = railSource.find((m) => m.status !== 'complete') ?? null
+      /*
+       * The next milestone is the next one AHEAD, not the oldest one still
+       * open. See lib/milestone-order.ts: taking the oldest put a milestone
+       * from three months ago on the card and, because the plan line is the
+       * share of the calendar already gone, drew it at 100% and green.
+       */
+      const ahead = nextUpcoming(railSource, new Date(now))
+      const openNext = ahead?.milestone ?? null
       const due = openNext?.targetDate ?? null
       const counted = openNext ? tally.get(openNext.id) : undefined
       const progress = openNext
@@ -365,7 +372,42 @@ export const getHomeCards = cache(async (
           })
         : { pct: 100, basis: 'done' as const }
       const pct = progress.pct
-      const concern = openNext ? concernOf(openNext.status, expectedPct(r.startDate, openNext.targetDate, now)) : 'none'
+
+      /*
+       * What to worry about, in the order the worries outrank each other.
+       *
+       * Nothing left but missed dates is the loudest thing a card can say,
+       * and it is exactly the case the plan line cannot express: every
+       * overdue milestone measures 100%, so they all look finished.
+       *
+       * Then blockers on the work this milestone belongs to. A milestone is a
+       * date; what will or will not make it is the work underneath, and if
+       * that work is blocked the date is not on track whatever its own status
+       * field says. Only the work beneath THIS milestone counts — an
+       * initiative with a blocker on an unrelated project is not a reason to
+       * call this date at risk.
+       */
+      const milestoneScope = openNext
+        ? (() => {
+            const sub = scope(openNext.level as Level, openNext.entityId)
+            return new Set<string>([openNext.entityId, ...sub.projects, ...sub.workstreams])
+          })()
+        : new Set<string>()
+      // `blockedIds` is the board's one answer to "is this stuck": open
+      // blockers filed against the work, plus work that is going to miss a
+      // dependency's required date. The mix bar splits its in-progress segment
+      // on exactly this set, so a ring that disagreed with it would be two
+      // parts of one card contradicting each other.
+      const blockingNext = [...milestoneScope].some((id) => blockedIds.has(id))
+
+      const concern = openNext
+        ? nextConcern({
+            overdue: ahead!.overdue,
+            blocked: blockingNext,
+            status: openNext.status,
+            expected: expectedPct(r.startDate, openNext.targetDate, now),
+          })
+        : 'none'
       const expected = expectedPct(r.startDate, due, now)
 
       const rail: MilestoneMark[] = railSource.slice(0, 6).map((m, i, arr) => ({

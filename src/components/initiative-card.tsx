@@ -231,9 +231,6 @@ export function InitiativeCard({
                 <Chevron />
               </span>
               <span className="rsub">{card.next.name}</span>
-              {/* Never leave the number ambiguous: it is a count on some cards
-                  and the calendar on others, and they read identically. */}
-              <span className="rbasis">{card.next.basisLabel}</span>
             </button>
           ) : (
             <p className="empty">No milestone recorded. Nothing to measure health against.</p>
