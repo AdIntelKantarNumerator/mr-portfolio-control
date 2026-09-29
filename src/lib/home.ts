@@ -22,6 +22,7 @@ import {
   agentObservations,
   decisions,
   initiatives,
+  milestoneItems,
   milestones,
   people,
   projects,
@@ -34,11 +35,13 @@ import { activitySeries } from './activity-series'
 import { getCardOrder } from './card-order'
 import { blockedAtOrBelow } from './blocked'
 import { byTargetDate } from './milestone-order'
+import { basisLabel, concernOf, milestoneProgress, type Basis } from './milestone-progress'
 
 // The vocabulary lives in home-types.ts, which imports nothing, so client
 // components can use it without dragging this module's database import into
 // the browser bundle. Re-exported here so existing imports keep working.
 export {
+  healthOf,
   MIX_ORDER,
   mixRank,
   statusLabel,
@@ -55,6 +58,7 @@ export {
   type HealthFilter,
 } from './home-types'
 import {
+  healthOf,
   IN_PROGRESS_BLOCKED,
   IN_PROGRESS_OK,
   isInProgress,
@@ -107,7 +111,23 @@ export interface HomeCard {
   verdictRolledUp: string | null
   detail: string[]
   evidence: Array<{ source: string; text: string; url: string | null }>
-  next: { id: string; name: string; due: string | null; days: number | null; pct: number; expected: number } | null
+  next: {
+    id: string
+    name: string
+    due: string | null
+    days: number | null
+    pct: number
+    expected: number
+    /**
+     * Where `pct` came from, and what to put under the ring.
+     *
+     * The ring shows two different things depending on whether anybody has
+     * written a checklist, and a reader cannot be left to guess which. See
+     * lib/milestone-progress.ts.
+     */
+    basis: Basis
+    basisLabel: string
+  } | null
   rail: MilestoneMark[]
   signals: Signal[]
   /**
@@ -150,27 +170,13 @@ function parse<T>(raw: string | null, fallback: T): T {
   }
 }
 
-/**
- * Health, from the next milestone and from whether anything is happening.
+/*
+ * `healthOf` moved to lib/home-types.ts, which imports nothing.
  *
- * Counted where it can be counted. "Quiet" is not a shade of green: an entity
- * nobody has touched in a fortnight has no health to report, and saying so is
- * more useful than reporting the last thing that was true.
+ * It is a pure rule and its tests were pulling a database client in through
+ * this module's imports just to call it — the same reason the board's
+ * vocabulary lives there. Re-exported below so existing imports keep working.
  */
-export function healthOf(
-  next: HomeCard['next'],
-  openBlockers: number,
-  activityScore: number,
-  ageDays: number,
-): HomeCard['health'] {
-  if (activityScore === 0 && ageDays >= 14) return 'quiet'
-  if (openBlockers > 0 && next && next.days !== null && next.days <= 14) return 'crit'
-  if (!next) return openBlockers > 0 ? 'warn' : 'good'
-  const behind = next.expected - next.pct
-  if (behind > 15) return 'crit'
-  if (behind > 4) return 'warn'
-  return 'good'
-}
 
 /**
  * How far through a milestone the calendar says we should be.
@@ -205,10 +211,13 @@ function dueLabel(d: Date, now: number): string {
   })
 }
 
-/** A milestone's own completeness, from the items beneath it. */
-function pctFromStatus(status: string): number {
-  return status === 'complete' ? 100 : status === 'on_track' ? 55 : status === 'at_risk' ? 40 : status === 'blocked' ? 25 : 10
-}
+/*
+ * `pctFromStatus` lived here: a lookup returning 55 for on_track, 40 for
+ * at_risk, 25 for blocked and 10 for everything else. It was compared against
+ * a real elapsed-time figure and coloured the card off the difference, so the
+ * ring measured a constant against a clock. See lib/milestone-progress.ts for
+ * what replaced it and why.
+ */
 
 export const getHomeCards = cache(async (
   level: Level,
@@ -217,11 +226,14 @@ export const getHomeCards = cache(async (
 ): Promise<HomeCard[]> => {
   const now = Date.now()
 
-  const [inits, projs, wss, ms, obs, decs, acts, links, peeps, deps] = await Promise.all([
+  const [inits, projs, wss, ms, items, obs, decs, acts, links, peeps, deps] = await Promise.all([
     db.select().from(initiatives),
     db.select().from(projects),
     db.select().from(workstreams),
     db.select().from(milestones),
+    // The checklists. One query for all of them: every card would otherwise
+    // rescan the same table for its own milestone.
+    db.select({ milestoneId: milestoneItems.milestoneId, state: milestoneItems.state }).from(milestoneItems),
     db.select().from(agentObservations).where(isNull(agentObservations.supersededAt)).orderBy(desc(agentObservations.generatedAt)),
     db.select().from(decisions),
     db.select().from(actionItems).where(eq(actionItems.status, 'open')),
@@ -231,6 +243,15 @@ export const getHomeCards = cache(async (
   ])
 
   const personName = new Map(peeps.map((p) => [p.id, p.name]))
+
+  /** Items done and items total, per milestone — the ring's one real number. */
+  const tally = new Map<string, { done: number; total: number }>()
+  for (const it of items) {
+    const at = tally.get(it.milestoneId) ?? { done: 0, total: 0 }
+    at.total += 1
+    if (it.state === 'completed') at.done += 1
+    tally.set(it.milestoneId, at)
+  }
 
   // Everything carrying an open blocker, by entity id. Used to split the
   // in-progress segment of the mix bar, and computed once here rather than
@@ -334,7 +355,17 @@ export const getHomeCards = cache(async (
 
       const openNext = railSource.find((m) => m.status !== 'complete') ?? null
       const due = openNext?.targetDate ?? null
-      const pct = openNext ? pctFromStatus(openNext.status) : 100
+      const counted = openNext ? tally.get(openNext.id) : undefined
+      const progress = openNext
+        ? milestoneProgress({
+            status: openNext.status,
+            done: counted?.done,
+            total: counted?.total,
+            expected: expectedPct(r.startDate, openNext.targetDate, now),
+          })
+        : { pct: 100, basis: 'done' as const }
+      const pct = progress.pct
+      const concern = openNext ? concernOf(openNext.status, expectedPct(r.startDate, openNext.targetDate, now)) : 'none'
       const expected = expectedPct(r.startDate, due, now)
 
       const rail: MilestoneMark[] = railSource.slice(0, 6).map((m, i, arr) => ({
@@ -508,10 +539,22 @@ export const getHomeCards = cache(async (
         owner: r.ownerId ? (personName.get(r.ownerId) ?? null) : null,
         beneath,
         health: healthOf(
-          openNext ? { id: openNext.id, name: openNext.name, due: null, days: null, pct, expected } : null,
+          openNext
+            ? {
+                id: openNext.id,
+                name: openNext.name,
+                due: null,
+                days: null,
+                pct,
+                expected,
+                basis: progress.basis,
+                basisLabel: basisLabel(progress),
+              }
+            : null,
           blockers.length,
           activityScore,
           ageDays,
+          concern,
         ),
         // Her synthesis if she wrote one, then a child's, and only then the
         // first bullet. That last fallback is why an entity with four updates
@@ -538,6 +581,8 @@ export const getHomeCards = cache(async (
               days: due ? Math.round((due.getTime() - now) / DAY) : null,
               pct,
               expected,
+              basis: progress.basis,
+              basisLabel: basisLabel(progress),
             }
           : null,
         rail,

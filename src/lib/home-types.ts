@@ -135,3 +135,66 @@ const STATUS_WORDS: Record<string, string> = {
 export function statusLabel(status: string): string {
   return STATUS_WORDS[status] ?? status.replace(/_/g, ' ')
 }
+
+
+/**
+ * The next milestone, as the health rule reads it.
+ *
+ * Declared here rather than imported from lib/home.ts so this module keeps
+ * importing nothing — see the note at the top. lib/home.ts builds the full
+ * card shape on top of it.
+ */
+export interface NextMilestone {
+  id: string
+  name: string
+  due: string | null
+  days: number | null
+  pct: number
+  expected: number
+  basis: 'items' | 'plan' | 'done'
+  basisLabel: string
+}
+
+export type Health = 'good' | 'warn' | 'crit' | 'quiet'
+
+/**
+ * Health, from the next milestone and from whether anything is happening.
+ *
+ * Counted where it can be counted. "Quiet" is not a shade of green: an entity
+ * nobody has touched in a fortnight has no health to report, and saying so is
+ * more useful than reporting the last thing that was true.
+ */
+export function healthOf(
+  next: NextMilestone | null,
+  openBlockers: number,
+  activityScore: number,
+  ageDays: number,
+  /**
+   * What the milestone's own status says, when the ring is drawing the plan
+   * rather than a count.
+   *
+   * Without this the colour came from `expected - pct`, and with no checklist
+   * those two are now the same number — so every card would be green. Worse,
+   * the old arithmetic could not say "blocked, and early": subtracting a fixed
+   * shortfall from a small expected clamps at zero and reads as barely behind.
+   * A status is a person's judgement and outranks a gap either way.
+   */
+  concern: 'none' | 'warn' | 'crit' = 'none',
+): Health {
+  if (activityScore === 0 && ageDays >= 14) return 'quiet'
+  if (openBlockers > 0 && next && next.days !== null && next.days <= 14) return 'crit'
+  if (!next) return openBlockers > 0 ? 'warn' : 'good'
+
+  if (concern === 'crit') return 'crit'
+
+  // A counted percentage can disagree with the calendar, and that gap is the
+  // one real measurement on this card. Only meaningful when something was
+  // actually counted.
+  if (next.basis === 'items') {
+    const behind = next.expected - next.pct
+    if (behind > 15) return 'crit'
+    if (behind > 4) return 'warn'
+  }
+
+  return concern === 'warn' ? 'warn' : 'good'
+}

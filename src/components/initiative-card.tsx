@@ -197,11 +197,22 @@ export function InitiativeCard({
               onClick={() =>
                 provenance(
                   'this number',
-                  <p>
-                    <b>{card.next!.pct}% complete</b> against <b>{card.next!.expected}% expected</b> by today. Completion
-                    is read from the milestones underneath — it is not a figure anybody typed in. Expected is a straight
-                    line from the start date to {card.next!.due ?? 'the target'}, which is a reference, not a forecast.
-                  </p>,
+                  card.next!.basis === 'items' ? (
+                    <p>
+                      <b>{card.next!.basisLabel}</b> on {card.next!.name} — {card.next!.pct}% — against{' '}
+                      <b>{card.next!.expected}% expected</b> by today. Both sides are counted, so the gap between them
+                      means something. Expected is a straight line from the start date to{' '}
+                      {card.next!.due ?? 'the target'}: a reference, not a forecast.
+                    </p>
+                  ) : (
+                    <p>
+                      Nobody has written a checklist for {card.next!.name}, so there is no measured progress to show.
+                      This is the <b>plan line</b>: {card.next!.expected}% of the time between the start date and{' '}
+                      {card.next!.due ?? 'the target'} has gone. The colour comes from the milestone&apos;s status, which
+                      is somebody&apos;s judgement rather than a measurement. Add items to the milestone and this
+                      becomes a real count that can disagree with the plan.
+                    </p>
+                  ),
                 )
               }
             >
@@ -210,7 +221,9 @@ export function InitiativeCard({
                 <span className="pct" style={{ color: pace }}>
                   {card.next.pct}%
                 </span>
-                <span className="of">{card.next.expected}% expected</span>
+                <span className="of">
+                  {card.next.basis === 'items' ? `${card.next.expected}% expected` : 'of the plan'}
+                </span>
               </span>
               <span className="rcap">
                 {card.next.due ?? 'no date'}
@@ -218,6 +231,9 @@ export function InitiativeCard({
                 <Chevron />
               </span>
               <span className="rsub">{card.next.name}</span>
+              {/* Never leave the number ambiguous: it is a count on some cards
+                  and the calendar on others, and they read identically. */}
+              <span className="rbasis">{card.next.basisLabel}</span>
             </button>
           ) : (
             <p className="empty">No milestone recorded. Nothing to measure health against.</p>
