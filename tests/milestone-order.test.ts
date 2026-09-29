@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { byTargetDate } from '../src/lib/milestone-order'
+import { byTargetDate, nextUpcoming } from '../src/lib/milestone-order'
 
 const m = (name: string, sortOrder: number, date: string | null) => ({
   name,
@@ -53,4 +53,57 @@ test('sorting does not disturb the caller’s array', () => {
   const before = names(rail)
   byTargetDate(rail)
   assert.deepEqual(names(rail), before)
+})
+
+// --- which one goes on the card -------------------------------------------
+
+const at = (name: string, date: string | null, status = 'on_track', sortOrder = 0) => ({
+  name,
+  sortOrder,
+  status,
+  targetDate: date ? new Date(`${date}T00:00:00Z`) : null,
+})
+
+const today = new Date('2026-09-29T14:00:00Z')
+
+test('the reported case: a milestone three weeks past is not the next one', () => {
+  // Insights Studio GPC read "3 Sept · -26d" and "100%", because the oldest
+  // open milestone was chosen and the plan line for a past date is all of it.
+  const got = nextUpcoming([at('Taste', '2026-09-03'), at('Data Model', '2026-11-15')], today)
+  assert.equal(got?.milestone.name, 'Data Model')
+  assert.equal(got?.overdue, false)
+})
+
+test('a milestone due today is still ahead, all day', () => {
+  const got = nextUpcoming([at('Today', '2026-09-29'), at('Later', '2026-10-30')], today)
+  assert.equal(got?.milestone.name, 'Today')
+})
+
+test('the soonest one ahead wins, not the first one written down', () => {
+  const got = nextUpcoming([at('Dec', '2026-12-01', 'on_track', 0), at('Oct', '2026-10-01', 'on_track', 1)], today)
+  assert.equal(got?.milestone.name, 'Oct')
+})
+
+test('completed milestones are never next, whatever their date', () => {
+  const got = nextUpcoming([at('Done', '2026-11-01', 'complete'), at('Open', '2026-12-01')], today)
+  assert.equal(got?.milestone.name, 'Open')
+})
+
+test('when everything left is overdue it says so rather than showing nothing', () => {
+  // Hiding it would be worse than the bug: a plan entirely in the past is the
+  // single most important thing that card could tell anybody.
+  const got = nextUpcoming([at('June', '2026-06-01'), at('August', '2026-08-01')], today)
+  assert.equal(got?.milestone.name, 'August', 'the most recently missed, not the oldest')
+  assert.equal(got?.overdue, true)
+})
+
+test('an undated milestone counts as ahead, but only once the dated ones run out', () => {
+  assert.equal(nextUpcoming([at('Someday', null), at('Soon', '2026-10-05')], today)?.milestone.name, 'Soon')
+  assert.equal(nextUpcoming([at('Someday', null), at('Past', '2026-06-05')], today)?.milestone.name, 'Someday')
+  assert.equal(nextUpcoming([at('Someday', null), at('Past', '2026-06-05')], today)?.overdue, false)
+})
+
+test('nothing open at all is nothing to show', () => {
+  assert.equal(nextUpcoming([at('Done', '2026-06-01', 'complete')], today), null)
+  assert.equal(nextUpcoming([], today), null)
 })

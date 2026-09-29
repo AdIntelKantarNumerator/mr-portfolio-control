@@ -44,3 +44,49 @@ export function byTargetDate<T extends Dated>(ms: readonly T[]): T[] {
     return at - bt || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)
   })
 }
+
+/**
+ * The one to put on the card: the next milestone that is actually ahead.
+ *
+ * WHAT WAS WRONG
+ *
+ * The card took the first incomplete milestone in date order, which is the
+ * OLDEST incomplete one — routinely months past. Two things then went wrong
+ * together. It called a milestone from June "next", and the plan line it was
+ * measured against is the share of the calendar already gone, which for a
+ * past date is all of it: the ring read 100% and went green. A card could
+ * say "3 Sept · -26d" and "100%" at the same time, and mean neither.
+ *
+ * So: the soonest one still ahead of today. Undated milestones are ahead in
+ * the sense that matters — nothing has passed — and sort last among
+ * themselves, so they are taken only when no dated one is left.
+ *
+ * WHEN EVERYTHING LEFT IS OVERDUE
+ *
+ * There is still something to say, and saying nothing would hide it. The most
+ * recent overdue one is returned with `overdue` set, and the caller colours
+ * the card by that rather than by the plan line — which at that point is a
+ * flat 100% for every one of them and can no longer tell them apart.
+ */
+export interface Upcoming<T> {
+  milestone: T
+  /** True when nothing is left ahead and this is the last one already missed. */
+  overdue: boolean
+}
+
+export function nextUpcoming<T extends Dated & { status: string }>(
+  ms: readonly T[],
+  now: Date,
+  isDone: (status: string) => boolean = (s) => s === 'complete',
+): Upcoming<T> | null {
+  // Midnight, not this instant: a milestone due today is due today all day,
+  // and "overdue by four hours" is not a thing anybody means.
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  const open = byTargetDate(ms).filter((m) => !isDone(m.status))
+
+  const ahead = open.find((m) => !m.targetDate || m.targetDate.getTime() >= today)
+  if (ahead) return { milestone: ahead, overdue: false }
+
+  const last = open.at(-1)
+  return last ? { milestone: last, overdue: true } : null
+}
