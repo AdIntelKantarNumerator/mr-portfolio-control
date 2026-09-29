@@ -7,12 +7,13 @@
  * page of whatever they were filed against, and the home board's links to
  * them 404'd.
  */
-import { asc, desc, eq } from 'drizzle-orm'
+import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { decisions, initiatives, people, projects, workstreams } from '@/db/schema'
+import { decisionEvents, decisions, initiatives, people, projects, sourceDocuments, workstreams } from '@/db/schema'
 import { Kicker } from '@/components/ui'
 import { addContext } from '@/lib/add-context'
 import { scopeFilter } from '@/lib/scope-filter'
+import { provenanceOfEntry, type Mention } from '@/lib/provenance'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { RegisterList, type BlockerRow, type Named } from '@/components/records/register-list'
 
@@ -52,6 +53,33 @@ export default async function DecisionsPage({
     getCurrentUser(),
   ])
 
+  /*
+   * Where each entry was raised. Two more queries rather than a join, because
+   * the register reads whole rows already and both of these are small: one
+   * mention row per time a thing was discussed, and one document row per
+   * meeting somebody read. See lib/provenance.ts for what is made of them.
+   */
+  const ids = rows.map((d) => d.id)
+  const [events, docs] = await Promise.all([
+    ids.length ? db.select().from(decisionEvents).where(inArray(decisionEvents.decisionId, ids)) : [],
+    db.select().from(sourceDocuments),
+  ])
+  const docById = new Map(docs.map((d) => [d.id, d]))
+  const eventsFor = new Map<string, Mention[]>()
+  for (const e of events) {
+    eventsFor.set(e.decisionId, [
+      ...(eventsFor.get(e.decisionId) ?? []),
+      {
+        kind: e.kind,
+        where: e.meeting ?? docById.get(e.documentId ?? '')?.title ?? null,
+        when: e.occurredAt ? e.occurredAt.toISOString().slice(0, 10) : null,
+        who: e.actor,
+        note: e.note,
+        url: e.url ?? docById.get(e.documentId ?? '')?.url ?? null,
+      },
+    ])
+  }
+
   const nameOf = new Map(folk.map((p) => [p.id, p.name]))
   const named = new Map<string, Named>()
   for (const i of inits) named.set(`initiative:${i.id}`, i)
@@ -85,6 +113,16 @@ export default async function DecisionsPage({
       raisedAt: d.raisedAt ? d.raisedAt.toISOString().slice(0, 10) : null,
       level: d.entityType,
       entity: d.entityType && d.entityId ? (named.get(`${d.entityType}:${d.entityId}`) ?? null) : null,
+      source: provenanceOfEntry({
+        evidence: d.evidence,
+        raisedAtMeeting: d.raisedAtMeeting,
+        raisedAt: d.raisedAt,
+        raisedBy: d.raisedById ? (nameOf.get(d.raisedById) ?? d.raisedByText) : d.raisedByText,
+        document: d.raisedDocumentId ? (docById.get(d.raisedDocumentId) ?? null) : null,
+        resolvedAtMeeting: d.resolvedAtMeeting,
+        resolvedAt: d.resolvedAt,
+        events: eventsFor.get(d.id) ?? [],
+      }),
     }))
 
   // Open before watching, then oldest first: a blocker's age is the thing

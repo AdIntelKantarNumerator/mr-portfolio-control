@@ -19,6 +19,8 @@
  */
 import { useActionState, useState } from 'react'
 import { RecordTable, type Column } from '@/components/records/table'
+import { SourceHover } from '@/components/records/source-hover'
+import type { Provenance } from '@/lib/provenance'
 import { AssignCell } from '@/components/records/assign'
 import { EditEntryButton, type EditContext } from '@/components/records/edit-entry'
 import { createBlocker, fileBlockerAt, setBlockerStatus, type BlockerState } from '@/app/blockers/actions'
@@ -97,6 +99,8 @@ export interface BlockerRow {
   raisedAt: string | null
   level: string | null
   entity: Named | null
+  /** Where this was raised, for the hover card. */
+  source: Provenance
 }
 
 /*
@@ -214,10 +218,10 @@ export function RegisterList({
       sort: { kind: 'text', by: (r) => r.title },
       value: (r) => `${r.title} ${r.body}`,
       cell: (r) => (
-        <>
+        <SourceHover source={r.source}>
           <b>{r.title}</b>
           {r.body ? <span className="rt-sub">{r.body}</span> : null}
-        </>
+        </SourceHover>
       ),
     },
   ]
