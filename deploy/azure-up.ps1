@@ -228,6 +228,56 @@ if ($SkipBuild) {
   Note "Using $image`:latest"
 } else {
 
+Step 'Checking this folder is actually the code'
+# WHY THIS IS HERE
+#
+# A build was sent to Azure from a folder where one new file had landed and one
+# existing file had not, because the zip had been extracted by hand and Windows
+# skipped the overwrites. Two minutes later ACR failed with
+#
+#   Module './actions' has no exported member 'assignAction'
+#
+# which reads like a code bug and is not one: the new file was importing from
+# the old one. Every zip carries MANIFEST.sha256, so the tree can simply be
+# asked whether it is what was sent, and the answer costs a second instead of
+# a round trip to a build agent.
+#
+# Advisory when the manifest is missing — a hand-built tree is allowed — and
+# fatal when it is present and wrong, because that is the state nobody means
+# to be in.
+$manifest = Join-Path $PWD 'MANIFEST.sha256'
+if (-not (Test-Path -LiteralPath $manifest)) {
+  Note "No MANIFEST.sha256 here, so this folder cannot be checked against a build. Continuing."
+} else {
+  $bad = New-Object System.Collections.Generic.List[string]
+  $missing = New-Object System.Collections.Generic.List[string]
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  foreach ($line in [System.IO.File]::ReadLines($manifest)) {
+    if ($line -notmatch '^([0-9a-f]{64})\s+\*?\.?[\\/]?(.+)$') { continue }
+    $want = $Matches[1]
+    $rel  = $Matches[2].Trim()
+    if ($rel -eq 'MANIFEST.sha256') { continue }
+    $path = Join-Path $PWD ($rel -replace '/', '\')
+    if (-not (Test-Path -LiteralPath $path)) { $missing.Add($rel); continue }
+    $stream = [System.IO.File]::OpenRead($path)
+    try { $got = ([BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '').ToLower() }
+    finally { $stream.Dispose() }
+    if ($got -ne $want) { $bad.Add($rel) }
+  }
+
+  if ($missing.Count -gt 0 -or $bad.Count -gt 0) {
+    Write-Host ''
+    Write-Host '  This folder is not the code that was sent.' -ForegroundColor Red
+    foreach ($f in $missing | Select-Object -First 12) { Write-Host "    missing  $f" -ForegroundColor Red }
+    foreach ($f in $bad     | Select-Object -First 12) { Write-Host "    differs  $f" -ForegroundColor Red }
+    $more = ($missing.Count + $bad.Count) - 24
+    if ($more -gt 0) { Write-Host "    ... and $more more" -ForegroundColor Red }
+    Write-Host ''
+    throw "$($missing.Count) missing and $($bad.Count) changed against MANIFEST.sha256. Extract the newest zip with .\sync-portfolio.ps1 rather than by hand - Windows skips existing files - then run this again. If you changed these files on purpose, delete MANIFEST.sha256 to say so."
+  }
+  Note "Every file matches MANIFEST.sha256."
+}
+
 Step 'Building the image in Azure (several minutes the first time)'
 # Built remotely from the current folder, so no local Docker is needed and the
 # build does not depend on what is installed on this laptop. .dockerignore
