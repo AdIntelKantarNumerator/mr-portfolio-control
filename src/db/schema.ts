@@ -836,6 +836,18 @@ export const entityThemes = pgTable(
       onDelete: 'set null',
     }),
     authoredBy: text('authored_by'),
+    /**
+     * Who corrected this by hand, and which fields they touched.
+     *
+     * A topic is attached to a piece of work by guessing from the text, and
+     * some of those guesses are wrong. An edit records who fixed it — so a
+     * reader knows the line has a person behind it rather than a document —
+     * and which fields, so the next sync leaves those alone instead of
+     * rewriting the correction. Comma-separated, like milestones.editedFields.
+     */
+    editedBy: text('edited_by'),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+    editedFields: text('edited_fields'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
