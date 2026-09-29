@@ -210,7 +210,7 @@ function RequestCard({
             </form>
           ) : null}
 
-          {r.convertedInitiativeId ? (
+          {r.convertedProjectId ? (
             <span className="ml-auto">
               <Chip tone="green" title="A project exists for this request.">
                 project created

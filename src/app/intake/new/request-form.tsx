@@ -170,8 +170,8 @@ export function RequestForm({
           sub="Both taxonomies are optional — the program team re-routes in triage."
         />
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field name="proposedObjectiveId" label="Proposed initiative" errors={state.errors}>
-            <select {...text('proposedObjectiveId')}>
+          <Field name="proposedInitiativeId" label="Proposed initiative" errors={state.errors}>
+            <select {...text('proposedInitiativeId')}>
               <option value="">None proposed</option>
               {initiatives.map((i) => (
                 <option key={i.id} value={i.id}>

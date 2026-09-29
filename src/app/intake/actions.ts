@@ -142,7 +142,7 @@ export async function createRequest(
     stakeholders: blankToNull(formData.get('stakeholders')),
     themeId: blankToNull(formData.get('themeId')),
     appAreaId: blankToNull(formData.get('appAreaId')),
-    proposedObjectiveId: blankToNull(formData.get('proposedObjectiveId')),
+    proposedInitiativeId: blankToNull(formData.get('proposedInitiativeId')),
     desiredDate: blankToNull(formData.get('desiredDate')),
     hardDate: formData.get('hardDate') === 'on',
     hardDateReason: blankToNull(formData.get('hardDateReason')),
@@ -187,7 +187,7 @@ export async function createRequest(
         stakeholders: data.stakeholders ?? null,
         themeId: data.themeId ?? null,
         appAreaId: data.appAreaId ?? null,
-        proposedObjectiveId: data.proposedObjectiveId ?? null,
+        proposedInitiativeId: data.proposedInitiativeId ?? null,
         desiredDate: data.desiredDate,
         hardDate: data.hardDate,
         hardDateReason: data.hardDateReason ?? null,
@@ -242,7 +242,7 @@ export async function approveAndConvert(formData: FormData) {
   const [row] = await db.select().from(intakeRequests).where(eq(intakeRequests.id, id)).limit(1)
   // Converting anything but an approved request would turn intake into a side
   // door around the decision it exists to record.
-  if (!row || row.status !== 'approved' || row.convertedInitiativeId) return
+  if (!row || row.status !== 'approved' || row.convertedProjectId) return
 
   const existing = await db
     .select({ key: projects.key, sortOrder: projects.sortOrder })
@@ -268,7 +268,7 @@ export async function approveAndConvert(formData: FormData) {
       description: row.problem,
       status: 'backlog',
       progress: 0,
-      initiativeId: row.proposedObjectiveId,
+      initiativeId: row.proposedInitiativeId,
       appAreaId: row.appAreaId,
       targetDate: row.desiredDate,
       sortOrder: (existing[0]?.sortOrder ?? 0) + 1,
@@ -280,7 +280,7 @@ export async function approveAndConvert(formData: FormData) {
 
   await db
     .update(intakeRequests)
-    .set({ status: 'converted', convertedInitiativeId: projectId })
+    .set({ status: 'converted', convertedProjectId: projectId })
     .where(eq(intakeRequests.id, id))
 
   await logChange({
@@ -289,7 +289,7 @@ export async function approveAndConvert(formData: FormData) {
     summary: `${row.ref} approved and converted to project "${row.title}"`,
     detail: [
       `Project key ${key}`,
-      row.proposedObjectiveId ? 'Linked to the proposed initiative' : 'No initiative linked yet',
+      row.proposedInitiativeId ? 'Linked to the proposed initiative' : 'No initiative linked yet',
       row.desiredDate ? `Target date carried over from the desired date` : 'No target date set',
     ].join(' · '),
     entityType: ENTITY,

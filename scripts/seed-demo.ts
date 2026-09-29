@@ -536,10 +536,10 @@ async function main() {
     id: id(), ref: r.ref, title: r.title, problem: r.problem, outcome: r.outcome ?? null,
     requesterName: r.requesterName, requesterEmail: null, sponsor: r.sponsor ?? null,
     stakeholders: null, themeId: r.themeId ?? null, appAreaId: r.appAreaId ?? null,
-    proposedObjectiveId: null, desiredDate: r.desiredDate ?? null,
+    proposedInitiativeId: null, desiredDate: r.desiredDate ?? null,
     hardDate: r.hardDate ?? false, hardDateReason: r.hardDateReason ?? null,
     tshirt: r.tshirt ?? null, businessCase: r.businessCase ?? null, status: r.status,
-    decisionNote: null, convertedInitiativeId: null, source: r.source,
+    decisionNote: null, convertedProjectId: null, source: r.source,
   }))
   await db.insert(s.intakeRequests).values(requestRows)
 

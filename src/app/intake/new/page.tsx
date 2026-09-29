@@ -12,7 +12,7 @@ export const metadata = { title: 'New request · Portfolio Control Room' }
 export const dynamic = 'force-dynamic'
 
 export default async function NewRequestPage() {
-  const [objectiveRows] = await Promise.all([
+  const [initiativeRows] = await Promise.all([
     db
       .select({ id: initiatives.id, name: initiatives.name })
       .from(initiatives)
@@ -35,7 +35,7 @@ export default async function NewRequestPage() {
         </Link>
       </div>
 
-      <RequestForm initiatives={objectiveRows} />
+      <RequestForm initiatives={initiativeRows} />
     </div>
   )
 }

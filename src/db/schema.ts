@@ -903,7 +903,7 @@ export const intakeRequests = pgTable(
     themeId: text('theme_id').references(() => themes.id, { onDelete: 'set null' }),
     appAreaId: text('app_area_id').references(() => appAreas.id, { onDelete: 'set null' }),
     /** Where the requester thinks it belongs; the program team can re-route. */
-    proposedObjectiveId: text('proposed_objective_id').references(() => initiatives.id, {
+    proposedInitiativeId: text('proposed_initiative_id').references(() => initiatives.id, {
       onDelete: 'set null',
     }),
 
@@ -918,7 +918,7 @@ export const intakeRequests = pgTable(
     /** new | triage | scoring | ranked | approved | rejected | deferred | converted */
     status: text('status').notNull().default('new'),
     decisionNote: text('decision_note'),
-    convertedInitiativeId: text('converted_initiative_id').references(() => projects.id, {
+    convertedProjectId: text('converted_project_id').references(() => projects.id, {
       onDelete: 'set null',
     }),
 
@@ -1233,12 +1233,12 @@ export const allocationsRelations = relations(allocations, ({ one }) => ({
 export const intakeRequestsRelations = relations(intakeRequests, ({ one, many }) => ({
   theme: one(themes, { fields: [intakeRequests.themeId], references: [themes.id] }),
   appArea: one(appAreas, { fields: [intakeRequests.appAreaId], references: [appAreas.id] }),
-  proposedObjective: one(initiatives, {
-    fields: [intakeRequests.proposedObjectiveId],
+  proposedInitiative: one(initiatives, {
+    fields: [intakeRequests.proposedInitiativeId],
     references: [initiatives.id],
   }),
-  convertedInitiative: one(projects, {
-    fields: [intakeRequests.convertedInitiativeId],
+  convertedProject: one(projects, {
+    fields: [intakeRequests.convertedProjectId],
     references: [projects.id],
   }),
   scores: many(scores),

@@ -474,7 +474,7 @@ export const intakeInput = z.object({
   stakeholders: z.string().optional().nullable(),
   themeId: z.string().optional().nullable(),
   appAreaId: z.string().optional().nullable(),
-  proposedObjectiveId: z.string().optional().nullable(),
+  proposedInitiativeId: z.string().optional().nullable(),
   desiredDate: optionalDate,
   hardDate: z.boolean().default(false),
   hardDateReason: z.string().optional().nullable(),
