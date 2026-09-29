@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { basisLabel, concernOf, milestoneProgress } from '../src/lib/milestone-progress'
+import { basisLabel, concernOf, milestoneProgress, nextConcern } from '../src/lib/milestone-progress'
 
 test('the reported case: on-track work reads as on track, not as 55%', () => {
   // Sports, the day before its milestone: status on_track, 99% of the calendar
@@ -81,7 +81,36 @@ test('an unfamiliar status is not treated as trouble', () => {
   assert.equal(concernOf('in_review', 50), 'none')
 })
 
-test('the label always says where the number came from', () => {
-  assert.equal(basisLabel(milestoneProgress({ status: 'on_track', expected: 99 })), 'no checklist — this is the plan')
+test('a counted ring gets a label; an uncounted one says nothing', () => {
+  // The caption sat under every ring saying the same thing, which is
+  // furniture. "of the plan" beside the number already distinguishes them.
+  assert.equal(basisLabel(milestoneProgress({ status: 'on_track', expected: 99 })), '')
+  assert.equal(basisLabel(milestoneProgress({ status: 'on_track', done: 2, total: 5, expected: 99 })), '2 of 5 done')
   assert.equal(basisLabel(milestoneProgress({ status: 'complete', expected: 99 })), 'complete')
+})
+
+// --- what outranks what ----------------------------------------------------
+
+test('the reported case: a blocker under the next milestone makes it red', () => {
+  // The milestone's own status says on track, and it is comfortably ahead of
+  // its date. The work beneath it cannot move. The status was somebody's
+  // judgement days ago; the blocker is now.
+  assert.equal(nextConcern({ overdue: false, blocked: true, status: 'on_track', expected: 40 }), 'crit')
+})
+
+test('nothing left but missed dates is the loudest thing on the card', () => {
+  assert.equal(nextConcern({ overdue: true, blocked: false, status: 'on_track', expected: 100 }), 'crit')
+})
+
+test('with nothing overdue and nothing blocked, the status decides', () => {
+  assert.equal(nextConcern({ overdue: false, blocked: false, status: 'on_track', expected: 99 }), 'none')
+  assert.equal(nextConcern({ overdue: false, blocked: false, status: 'at_risk', expected: 20 }), 'warn')
+  assert.equal(nextConcern({ overdue: false, blocked: false, status: 'blocked', expected: 20 }), 'crit')
+})
+
+test('a blocker outranks a healthy status rather than averaging with it', () => {
+  const healthy = nextConcern({ overdue: false, blocked: false, status: 'on_track', expected: 10 })
+  const blocked = nextConcern({ overdue: false, blocked: true, status: 'on_track', expected: 10 })
+  assert.equal(healthy, 'none')
+  assert.equal(blocked, 'crit')
 })

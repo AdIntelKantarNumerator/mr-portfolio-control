@@ -99,9 +99,49 @@ export function concernOf(status: string, expected: number): 'none' | 'warn' | '
   return 'none'
 }
 
-/** What the card says under the ring, so the number is never ambiguous. */
+/**
+ * How to name a counted ring: "3 of 7 done".
+ *
+ * Empty when there is nothing counted. The card carried a caption saying so
+ * under every ring — true, and on every card at once, which made it furniture
+ * rather than information. The ring's own "of the plan" already says which
+ * number it is, and the full explanation is one click away on the ring
+ * itself.
+ */
 export function basisLabel(p: Progress): string {
   if (p.basis === 'done') return 'complete'
   if (p.basis === 'items') return `${p.done} of ${p.total} done`
-  return 'no checklist — this is the plan'
+  return ''
+}
+
+/**
+ * Everything that decides whether the next milestone is in trouble, in the
+ * order those things outrank each other.
+ *
+ * Extracted because it is a rule, and it was four conditions deep inside the
+ * function that builds a card — where the only way to exercise it was to
+ * construct a portfolio in a database and look at the colour of a ring.
+ *
+ * The order is the whole content:
+ *
+ *   1. Nothing left but missed dates. This is the case the plan line cannot
+ *      express at all — every overdue milestone measures 100% of its calendar,
+ *      so a board full of them looks finished.
+ *   2. The work beneath it is blocked. A milestone is a date; what does or
+ *      does not make it is the work underneath, and if that work is blocked
+ *      the date is not on track whatever the milestone's own status says.
+ *      A person set that status days ago; the blocker is now.
+ *   3. Otherwise what the status says — see `concernOf`.
+ */
+export function nextConcern(input: {
+  /** Nothing is left ahead; this is the last one already missed. */
+  overdue: boolean
+  /** Something beneath this milestone carries an open blocker. */
+  blocked: boolean
+  status: string
+  expected: number
+}): 'none' | 'warn' | 'crit' {
+  if (input.overdue) return 'crit'
+  if (input.blocked) return 'crit'
+  return concernOf(input.status, input.expected)
 }
