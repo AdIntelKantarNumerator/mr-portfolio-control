@@ -64,50 +64,50 @@ async function main() {
     -- at migration 0010, before the rotation. The assertions below are written
     -- in the new one.
     INSERT INTO people (id, name) VALUES ('p-priya','Priya Raman'), ('p-dan','Dan Okoro');
-    INSERT INTO initiatives (id, key, name, status, sort_order)
+    INSERT INTO objectives (id, key, name, status, sort_order)
       VALUES ('i-360','I-1','360 Data','active',1), ('i-gpc','I-2','GPC','active',2);
-    INSERT INTO projects (id, key, name, status, initiative_id, sort_order)
+    INSERT INTO initiatives (id, key, name, status, objective_id, sort_order)
       VALUES ('pr-videoamp','P-1','VideoAmp Integration','in_progress','i-360',1),
              ('pr-taxonomy','P-2','Taxonomy','in_progress','i-gpc',2),
              ('pr-orphan','P-3','Export API','in_progress',NULL,3);
-    INSERT INTO milestones (id, project_id, name, status, sort_order)
+    INSERT INTO milestones (id, initiative_id, name, status, sort_order)
       VALUES ('m-old','pr-videoamp','Schema signed off','done',1),
              ('m-old2','pr-taxonomy','Trees merged','missed',2);
-    INSERT INTO workstreams (id, project_id, name, status, sort_order)
+    INSERT INTO projects (id, initiative_id, name, status, sort_order)
       VALUES ('w-ingest','pr-videoamp','Ratings Ingest','at_risk',1);
-    INSERT INTO workstream_items (id, workstream_id, state, text, sort_order)
+    INSERT INTO project_items (id, project_id, state, text, sort_order)
       VALUES ('wi-1','w-ingest','completed','Nielsen daily pull live',1);
-    INSERT INTO workstream_phases (id, workstream_id, phase, from_period, to_period)
+    INSERT INTO project_phases (id, project_id, phase, from_period, to_period)
       VALUES ('wp-1','w-ingest','development','2026-08','2026-10');
     INSERT INTO decisions (id, ref, kind, title, body, entity_type, entity_id)
-      VALUES ('d-1','B12','blocker','SMTP relay','...','project','pr-videoamp'),
-             ('d-2','D7','decision','National only','...','initiative','i-360');
+      VALUES ('d-1','B12','blocker','SMTP relay','...','initiative','pr-videoamp'),
+             ('d-2','D7','decision','National only','...','objective','i-360');
     INSERT INTO agent_observations (id, entity_type, entity_id, items, evidence, model)
-      VALUES ('o-1','project','pr-videoamp','[]','[]','claude'),
-             ('o-2','initiative','i-360','[]','[]','claude');
+      VALUES ('o-1','initiative','pr-videoamp','[]','[]','claude'),
+             ('o-2','objective','i-360','[]','[]','claude');
     INSERT INTO field_overrides (id, entity_type, entity_id, field, value)
-      VALUES ('f-1','project','pr-videoamp','name','"Renamed"');
+      VALUES ('f-1','initiative','pr-videoamp','name','"Renamed"');
   `)
 
   // --- half two: the rotation ---
   await migrate(db, { migrationsFolder: 'drizzle' })
   console.log('ran migration 0011\n')
 
-  const ws = await q<{ id: string; name: string; project_id: string | null }>(
-    `SELECT id, name, project_id FROM workstreams ORDER BY id`)
-  check('yesterday\u2019s projects are today\u2019s workstreams', ws.length === 3, `${ws.length} rows`)
-  check('a workstream kept its id and name',
-    ws.some((r) => r.id === 'pr-videoamp' && r.name === 'VideoAmp Integration'))
-  check('its parent moved from initiative_id to project_id',
-    ws.find((r) => r.id === 'pr-videoamp')?.project_id === 'i-360')
-
-  const pj = await q<{ id: string; name: string; initiative_id: string | null }>(
+  const ws = await q<{ id: string; name: string; initiative_id: string | null }>(
     `SELECT id, name, initiative_id FROM projects ORDER BY id`)
-  check('yesterday\u2019s initiatives are today\u2019s projects', pj.length === 2, `${pj.length} rows`)
-  check('and they start with no initiative above them', pj.every((r) => r.initiative_id === null))
+  check('yesterday\u2019s initiatives are today\u2019s projects', ws.length === 3, `${ws.length} rows`)
+  check('a project kept its id and name',
+    ws.some((r) => r.id === 'pr-videoamp' && r.name === 'VideoAmp Integration'))
+  check('its parent moved from objective_id to initiative_id',
+    ws.find((r) => r.id === 'pr-videoamp')?.initiative_id === 'i-360')
 
-  const inits = await q(`SELECT * FROM initiatives`)
-  check('the new initiative layer exists and is empty', inits.length === 0)
+  const pj = await q<{ id: string; name: string; objective_id: string | null }>(
+    `SELECT id, name, objective_id FROM initiatives ORDER BY id`)
+  check('yesterday\u2019s objectives are today\u2019s initiatives', pj.length === 2, `${pj.length} rows`)
+  check('and they start with no objective above them', pj.every((r) => r.objective_id === null))
+
+  const inits = await q(`SELECT * FROM objectives`)
+  check('the new objective layer exists and is empty', inits.length === 0)
 
   const ms = await q<{ id: string; level: string; entity_id: string; name: string; status: string }>(
     `SELECT id, level, entity_id, name, status FROM milestones ORDER BY id`)
@@ -118,7 +118,7 @@ async function main() {
   check('and its status was mapped onto the deck vocabulary',
     ms.find((m) => m.id === 'm-old')?.status === 'complete' &&
     ms.find((m) => m.id === 'm-old2')?.status === 'at_risk')
-  check('every migrated milestone sits at workstream level', ms.every((m) => m.level === 'workstream'))
+  check('every migrated milestone sits at project level', ms.every((m) => m.level === 'project'))
 
   const kids = await q(`SELECT milestone_id FROM milestone_items`)
   check('milestone items followed their parent', kids.length === 1)
@@ -127,21 +127,21 @@ async function main() {
 
   // The discriminator rewrite — the part with the ordering trap.
   const dec = await q<{ id: string; entity_type: string }>(`SELECT id, entity_type FROM decisions ORDER BY id`)
-  check('a decision on a project now reads workstream',
-    dec.find((d) => d.id === 'd-1')?.entity_type === 'workstream')
   check('a decision on an initiative now reads project',
-    dec.find((d) => d.id === 'd-2')?.entity_type === 'project')
+    dec.find((d) => d.id === 'd-1')?.entity_type === 'project')
+  check('a decision on an objective now reads initiative',
+    dec.find((d) => d.id === 'd-2')?.entity_type === 'initiative')
   check('nothing collapsed to a single value',
     new Set(dec.map((d) => d.entity_type)).size === 2,
-    'if both read workstream, the CASE was applied as two sequential updates')
+    'if both read project, the CASE was applied as two sequential updates')
 
   const obs = await q<{ id: string; entity_type: string }>(`SELECT id, entity_type FROM agent_observations ORDER BY id`)
   check('observations were rewritten the same way',
-    obs.find((o) => o.id === 'o-1')?.entity_type === 'workstream' &&
-    obs.find((o) => o.id === 'o-2')?.entity_type === 'project')
+    obs.find((o) => o.id === 'o-1')?.entity_type === 'project' &&
+    obs.find((o) => o.id === 'o-2')?.entity_type === 'initiative')
 
   const ov = await q<{ entity_type: string }>(`SELECT entity_type FROM field_overrides`)
-  check('so were field overrides', ov[0]?.entity_type === 'workstream')
+  check('so were field overrides', ov[0]?.entity_type === 'project')
 
   const cols = await q<{ table_name: string }>(`
     SELECT table_name FROM information_schema.columns
@@ -149,10 +149,10 @@ async function main() {
   const missed: string[] = []
   for (const t of cols) {
     const rows = await q<{ n: string }>(
-      `SELECT count(*)::text AS n FROM "${t.table_name}" WHERE entity_type = 'initiative'`)
+      `SELECT count(*)::text AS n FROM "${t.table_name}" WHERE entity_type = 'objective'`)
     if (Number(rows[0]!.n) > 0) missed.push(t.table_name)
   }
-  check('no table still says "initiative" about the old meaning', missed.length === 0, missed.join(', '))
+  check('no table still says "objective" about the old meaning', missed.length === 0, missed.join(', '))
 
   const ai = await q(`SELECT * FROM action_items`)
   const al = await q(`SELECT * FROM action_item_links`)

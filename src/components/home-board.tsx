@@ -7,6 +7,7 @@
  * open, and giving every card its own would mean twenty dialogs in the DOM
  * competing for the same escape key.
  */
+import { TIER_LABEL, TIER_PLURAL } from '@/lib/home-types'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { HomeCard } from '@/lib/home'
@@ -15,9 +16,9 @@ import { HOME_PREFS_COOKIE, serialiseHomePrefs, type HomePrefs } from '@/lib/hom
 import { SortableCards } from './sortable-cards'
 
 const LABEL: Record<Level, { one: string; many: string; beneath: string }> = {
+  objective: { one: TIER_LABEL.objective, many: 'Active strategic objectives', beneath: 'initiatives' },
   initiative: { one: 'Initiative', many: 'Active initiatives', beneath: 'projects' },
-  project: { one: 'Project', many: 'Active projects', beneath: 'workstreams' },
-  workstream: { one: 'Workstream', many: 'Active workstreams', beneath: 'milestones' },
+  project: { one: 'Project', many: 'Active projects', beneath: 'milestones' },
 }
 
 const SORT_LABEL: Record<Sort, string> = {
@@ -40,7 +41,7 @@ export function HomeBoard({
 }: {
   cards: HomeCard[]
   prefs: HomePrefs
-  ungrouped: { id: string; name: string; workstreams: number }[]
+  ungrouped: { id: string; name: string; projects: number }[]
 }) {
   const [modal, setModal] = useState<{ title: string; body: React.ReactNode } | null>(null)
   const router = useRouter()
@@ -79,9 +80,9 @@ export function HomeBoard({
               className="fsel"
               aria-label="Which level to show"
             >
+              <option value="objective">{TIER_PLURAL.objective}</option>
               <option value="initiative">Initiatives</option>
               <option value="project">Projects</option>
-              <option value="workstream">Workstreams</option>
             </select>
           </span>
         </label>
@@ -125,7 +126,7 @@ export function HomeBoard({
         <div className="blank">
           {/* An empty board because of a filter is a different fact from an
               empty board because there is no work, and telling somebody to
-              go create an initiative when they have simply filtered them all
+              go create an objective when they have simply filtered them all
               out is the sort of thing that makes people stop reading empty
               states. */}
           {prefs.health !== 'all' ? (
@@ -140,8 +141,8 @@ export function HomeBoard({
             <>
               <h2>No active {LABEL[level].many.toLowerCase().replace('active ', '')} yet</h2>
               <p>
-                {level === 'initiative'
-                  ? 'Initiatives group projects together — five to ten active is the working number. Nothing has been grouped yet, so every project below is ungrouped. Create one, or ask Yaara which projects belong together.'
+                {level === 'objective'
+                  ? 'Objectives group initiatives together — five to ten active is the working number. Nothing has been grouped yet, so every initiative below is ungrouped. Create one, or ask Yaara which initiatives belong together.'
                   : `Nothing active at this level. Switch the "Showing" picker above to see another level.`}
               </p>
             </>
@@ -156,15 +157,15 @@ export function HomeBoard({
         />
       )}
 
-      {level === 'initiative' && ungrouped.length > 0 && (
+      {level === 'objective' && ungrouped.length > 0 && (
         <section className="orphan">
           <div className="oh">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M8 2l6.4 11.4H1.6L8 2z" stroke="var(--warn)" strokeWidth="1.6" strokeLinejoin="round" />
               <path d="M8 6.4v3.1M8 11.4v.05" stroke="var(--warn)" strokeWidth="1.7" strokeLinecap="round" />
             </svg>
-            <h2>Not in an initiative</h2>
-            <span className="status quiet">{ungrouped.length} projects</span>
+            <h2>Not in an objective</h2>
+            <span className="status quiet">{ungrouped.length} initiatives</span>
           </div>
           <div className="ob">
             <p className="lead">
@@ -173,9 +174,9 @@ export function HomeBoard({
             </p>
             <div className="chips">
               {ungrouped.map((p) => (
-                <a key={p.id} href={`/projects/${p.id}`}>
+                <a key={p.id} href={`/initiatives/${p.id}`}>
                   {p.name}
-                  <span className="w">{p.workstreams} WS</span>
+                  <span className="w">{p.projects} WS</span>
                 </a>
               ))}
             </div>

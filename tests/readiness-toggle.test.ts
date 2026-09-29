@@ -105,24 +105,24 @@ test('clicking twice keeps waiting on the same answer', () => {
   assert.equal(settled('not_started', edit), false, 'still waiting')
 })
 
-test('an edit is held per workstream as well as per item', () => {
-  // The Readiness page shows the same checklist item for many workstreams at
+test('an edit is held per project as well as per item', () => {
+  // The Readiness page shows the same checklist item for many projects at
   // once; keyed on the item alone, ticking one row would tick another.
   assert.notEqual(editKey('ws-a', 'item-1'), editKey('ws-b', 'item-1'))
 })
 
 // --- the tile that moved under the reader ------------------------------------
 
-test('a finished checklist is still shown, and does not hop to another workstream', () => {
-  // readinessFor used to return "the first workstream with something
+test('a finished checklist is still shown, and does not hop to another project', () => {
+  // readinessFor used to return "the first project with something
   // outstanding", recomputed every render — so ticking the last box swapped
-  // the tile to a different workstream whose boxes were all empty, or on a
-  // workstream page made the tile vanish. Both read as "it unchecked
+  // the tile to a different project whose boxes were all empty, or on a
+  // project page made the tile vanish. Both read as "it unchecked
   // everything", which is how it was reported.
   const src = readFileSync('src/lib/detail.ts', 'utf8')
   assert.ok(!/if \(!behind\) return null/.test(src), 'the tile can still vanish when complete')
-  assert.ok(src.includes('streams'), 'every workstream should be offered, not just one')
+  assert.ok(src.includes('streams'), 'every project should be offered, not just one')
 
   const tile = readFileSync('src/components/detail/readiness-tile.tsx', 'utf8')
-  assert.ok(/useState\(workstreamId\)/.test(tile), 'the shown workstream must be held, not recomputed')
+  assert.ok(/useState\(projectId\)/.test(tile), 'the shown project must be held, not recomputed')
 })

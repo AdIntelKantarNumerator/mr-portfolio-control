@@ -135,7 +135,7 @@ export function HealthTile({
   evidence,
   canEdit,
 }: {
-  /** "Project", "Workstream", "Initiative" — the tile is titled after it. */
+  /** "Initiative", "Project", "Strategic Objective" — the tile is titled after it. */
   tier: string
   assessmentId: string | null
   rag: string | null

@@ -26,7 +26,7 @@
  * Two changes, both about where things live rather than which hook is used.
  *
  * THE STATE LIVES ON THE SURFACE, NOT ON THE ITEM. One board per page holds
- * every unconfirmed edit, keyed by workstream and item. The checklist closes a
+ * every unconfirmed edit, keyed by project and item. The checklist closes a
  * section when you open another, which unmounts its rows — and state held on a
  * row goes with it, which is why a section you came back to had forgotten what
  * you did in it.
@@ -59,13 +59,13 @@ const SETTLE = 450
 
 export interface ReadinessBoard {
   /** What to draw for this item, given what the server currently says. */
-  statusOf: (workstreamId: string, itemId: string, server: string) => string
+  statusOf: (projectId: string, itemId: string, server: string) => string
   /** True while this item's write is in the air. */
-  savingOf: (workstreamId: string, itemId: string) => boolean
+  savingOf: (projectId: string, itemId: string) => boolean
   /** What went wrong with this item's last write, if anything. */
-  errorOf: (workstreamId: string, itemId: string) => string | null
+  errorOf: (projectId: string, itemId: string) => string | null
   /** Set an item's status. Safe to call again before the last one lands. */
-  set: (workstreamId: string, itemId: string, server: string, next: string) => void
+  set: (projectId: string, itemId: string, server: string, next: string) => void
 }
 
 /** The same map without one key, leaving the original alone. */
@@ -91,8 +91,8 @@ export function useReadinessBoard(): ReadinessBoard {
   }, [router])
 
   const set = useCallback(
-    (workstreamId: string, itemId: string, server: string, next: string) => {
-      const key = editKey(workstreamId, itemId)
+    (projectId: string, itemId: string, server: string, next: string) => {
+      const key = editKey(projectId, itemId)
 
       setEdits((e) => ({
         ...e,
@@ -106,7 +106,7 @@ export function useReadinessBoard(): ReadinessBoard {
 
       void (async () => {
         const fd = new FormData()
-        fd.set('workstreamId', workstreamId)
+        fd.set('projectId', projectId)
         fd.set('itemId', itemId)
         fd.set('status', next)
         let failed: string | null = null
@@ -140,8 +140,8 @@ export function useReadinessBoard(): ReadinessBoard {
   }, [])
 
   const statusOf = useCallback(
-    (workstreamId: string, itemId: string, server: string) => {
-      const key = editKey(workstreamId, itemId)
+    (projectId: string, itemId: string, server: string) => {
+      const key = editKey(projectId, itemId)
       const edit = edits[key]
       if (edit && settled(server, edit)) queueMicrotask(() => forget(key))
       return settleStatus(server, edit)

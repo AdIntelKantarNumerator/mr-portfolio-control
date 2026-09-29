@@ -2,7 +2,7 @@
  * Linear webhook receiver.
  *
  * Point a Linear webhook at POST /api/webhooks/linear and subscribe to
- * Workstreams, Projects and Workstream milestones. Set LINEAR_WEBHOOK_SECRET to
+ * Projects, Initiatives and Project milestones. Set LINEAR_WEBHOOK_SECRET to
  * the signing secret Linear shows when you create the webhook.
  *
  * Security notes, because this endpoint is necessarily public:
@@ -15,9 +15,9 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import {
   archiveByExternalId,
-  upsertInitiative,
+  upsertObjective,
   upsertMilestone,
-  upsertProject,
+  upsertInitiative,
 } from '@/lib/sources/linear'
 import { logChange } from '@/lib/portfolio'
 import { db } from '@/db/client'
@@ -109,15 +109,6 @@ async function handle(payload: LinearWebhook) {
   }
 
   switch (type) {
-    case 'Workstream': {
-      await upsertProject(data)
-      await logChange({
-        actor: 'linear-webhook',
-        kind: 'sync',
-        summary: `Workstream "${data.name ?? id}" ${action}d in Linear`,
-      })
-      return
-    }
     case 'Project': {
       await upsertInitiative(data)
       await logChange({
@@ -127,19 +118,28 @@ async function handle(payload: LinearWebhook) {
       })
       return
     }
-    case 'ProjectMilestone': {
+    case 'Initiative': {
+      await upsertObjective(data)
+      await logChange({
+        actor: 'linear-webhook',
+        kind: 'sync',
+        summary: `Initiative "${data.name ?? id}" ${action}d in Linear`,
+      })
+      return
+    }
+    case 'InitiativeMilestone': {
       // The webhook gives the parent by external id; resolve it to ours.
-      const projectExternalId = (data.workstreamId ?? (data.workstream as { id?: string })?.id) as
+      const initiativeExternalId = (data.projectId ?? (data.project as { id?: string })?.id) as
         | string
         | undefined
-      if (!projectExternalId) return
+      if (!initiativeExternalId) return
       const [link] = await db
         .select({ entityId: sourceRecords.entityId })
         .from(sourceRecords)
         .where(
           and(
             eq(sourceRecords.system, 'linear'),
-            eq(sourceRecords.externalId, projectExternalId),
+            eq(sourceRecords.externalId, initiativeExternalId),
           ),
         )
         .limit(1)

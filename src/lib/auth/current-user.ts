@@ -65,7 +65,7 @@ export async function actorPersonId(): Promise<string | null> {
 
 /**
  * Links a Google identity to a row in `people`, so an edit made by someone who
- * also leads projects in Linear is attributed to the same person rather than a
+ * also leads initiatives in Linear is attributed to the same person rather than a
  * duplicate.
  *
  * Matching is by email, which is the only identifier the two systems share.

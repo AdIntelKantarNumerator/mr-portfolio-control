@@ -41,7 +41,7 @@ const WORD: Record<string, string> = {
 }
 
 export interface HealthEditableProps {
-  level: 'initiative' | 'project' | 'workstream'
+  level: 'objective' | 'initiative' | 'project'
   id: string
   rag: string
   rationale?: string | null

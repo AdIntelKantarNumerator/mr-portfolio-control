@@ -12,6 +12,7 @@
  * is rendered on the server and because a particular view of the timeline is
  * the kind of thing people send each other.
  */
+import { TIER_PLURAL } from '@/lib/home-types'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
 
@@ -48,9 +49,9 @@ export function TimelineControls({
       <label className="rt-f">
         <span>Showing</span>
         <select value={level} onChange={(e) => go({ level: e.target.value })}>
+          <option value="objective">{TIER_PLURAL.objective}</option>
           <option value="initiative">Initiatives</option>
           <option value="project">Projects</option>
-          <option value="workstream">Workstreams</option>
         </select>
       </label>
 

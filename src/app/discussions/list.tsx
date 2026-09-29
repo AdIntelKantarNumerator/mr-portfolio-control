@@ -18,6 +18,7 @@
  * it is. It also stops the next sync overwriting the correction — see
  * discussions/actions.ts.
  */
+import { TIER_PLURAL } from '@/lib/home-types'
 import { useState } from 'react'
 import Link from 'next/link'
 import { editTopic, type TopicState } from './actions'
@@ -42,14 +43,14 @@ export interface Named {
 
 export function DiscussionsList({
   topics,
+  objectives,
   initiatives,
   projects,
-  workstreams,
 }: {
   topics: TopicRow[]
+  objectives: Named[]
   initiatives: Named[]
   projects: Named[]
-  workstreams: Named[]
 }) {
   const [editing, setEditing] = useState<TopicRow | null>(null)
 
@@ -108,9 +109,9 @@ export function DiscussionsList({
       {editing && (
         <EditDialog
           topic={editing}
+          objectives={objectives}
           initiatives={initiatives}
           projects={projects}
-          workstreams={workstreams}
           onClose={() => setEditing(null)}
         />
       )}
@@ -120,15 +121,15 @@ export function DiscussionsList({
 
 function EditDialog({
   topic,
+  objectives,
   initiatives,
   projects,
-  workstreams,
   onClose,
 }: {
   topic: TopicRow
+  objectives: Named[]
   initiatives: Named[]
   projects: Named[]
-  workstreams: Named[]
   onClose: () => void
 }) {
   const [state, setState] = useState<TopicState>({})
@@ -148,12 +149,12 @@ function EditDialog({
   }
 
   const current =
-    topic.href?.startsWith('/initiatives/')
-      ? `initiative:${topic.href.split('/').pop()}`
-      : topic.href?.startsWith('/projects/')
-        ? `project:${topic.href.split('/').pop()}`
-        : topic.href?.startsWith('/workstreams/')
-          ? `workstream:${topic.href.split('/').pop()}`
+    topic.href?.startsWith('/objectives/')
+      ? `objective:${topic.href.split('/').pop()}`
+      : topic.href?.startsWith('/initiatives/')
+        ? `initiative:${topic.href.split('/').pop()}`
+        : topic.href?.startsWith('/projects/')
+          ? `project:${topic.href.split('/').pop()}`
           : ''
 
   return (
@@ -172,6 +173,13 @@ function EditDialog({
           </label>
           <select id="dt-at" name="at" defaultValue={current}>
             <option value="">— nothing in particular —</option>
+            <optgroup label={TIER_PLURAL.objective}>
+              {objectives.map((o) => (
+                <option key={o.id} value={`objective:${o.id}`}>
+                  {o.name}
+                </option>
+              ))}
+            </optgroup>
             <optgroup label="Initiatives">
               {initiatives.map((o) => (
                 <option key={o.id} value={`initiative:${o.id}`}>
@@ -182,13 +190,6 @@ function EditDialog({
             <optgroup label="Projects">
               {projects.map((o) => (
                 <option key={o.id} value={`project:${o.id}`}>
-                  {o.name}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Workstreams">
-              {workstreams.map((o) => (
-                <option key={o.id} value={`workstream:${o.id}`}>
                   {o.name}
                 </option>
               ))}

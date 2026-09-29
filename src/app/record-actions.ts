@@ -7,8 +7,8 @@
  *
  * Everything in the portfolio arrived from Linear, from a document Yaara
  * read, or from the intake queue. That covers how work normally starts and
- * none of the ordinary corrections afterwards: a project that should sit
- * under a different initiative, a workstream somebody agreed to in a meeting
+ * none of the ordinary corrections afterwards: an initiative that should sit
+ * under a different objective, a project somebody agreed to in a meeting
  * and needs on the board now, a name that was a placeholder three months ago.
  * Each of those meant a trip to Linear, or waiting.
  *
@@ -21,7 +21,7 @@
 import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { initiatives, projects, workstreams } from '@/db/schema'
+import { objectives, initiatives, projects } from '@/db/schema'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
 import { slugify } from '@/lib/util'
@@ -35,14 +35,14 @@ export interface RecordState {
   stamp?: number
 }
 
-const TABLES = { initiative: initiatives, project: projects, workstream: workstreams } as const
+const TABLES = { objective: objectives, initiative: initiatives, project: projects } as const
 type Level = keyof typeof TABLES
-const isLevel = (v: string): v is Level => v === 'initiative' || v === 'project' || v === 'workstream'
+const isLevel = (v: string): v is Level => v === 'objective' || v === 'initiative' || v === 'project'
 
 const HREF: Record<Level, string> = {
+  objective: '/objectives',
   initiative: '/initiatives',
   project: '/projects',
-  workstream: '/workstreams',
 }
 
 function refresh(level: Level, id: string, parentHref?: string) {
@@ -73,7 +73,7 @@ async function uniqueKey(level: Level, name: string): Promise<string> {
 }
 
 /**
- * A new project under an initiative, or a new workstream under a project.
+ * A new initiative under an objective, or a new project under an initiative.
  *
  * The parent is required rather than optional: this is reached from the
  * parent's own page, so the one thing that is certainly known is where it
@@ -81,7 +81,7 @@ async function uniqueKey(level: Level, name: string): Promise<string> {
  * screens exist to clean up.
  */
 export async function createChild(input: {
-  level: 'project' | 'workstream'
+  level: 'initiative' | 'project'
   parentId: string
   name: string
   description?: string | null
@@ -89,7 +89,7 @@ export async function createChild(input: {
   const name = input.name.trim()
   if (name.length < 3) return { error: 'Give it a name — three characters or more.' }
 
-  const parentLevel: Level = input.level === 'project' ? 'initiative' : 'project'
+  const parentLevel: Level = input.level === 'initiative' ? 'objective' : 'initiative'
   const parentTable = TABLES[parentLevel]
   const [parent] = await db
     .select({ id: parentTable.id, name: parentTable.name })
@@ -100,9 +100,9 @@ export async function createChild(input: {
 
   const key = await uniqueKey(input.level, name)
   const values =
-    input.level === 'project'
-      ? { key, name, description: input.description?.trim() || null, status: 'planned', initiativeId: parent.id }
-      : { key, name, description: input.description?.trim() || null, status: 'planned', projectId: parent.id }
+    input.level === 'initiative'
+      ? { key, name, description: input.description?.trim() || null, status: 'planned', objectiveId: parent.id }
+      : { key, name, description: input.description?.trim() || null, status: 'planned', initiativeId: parent.id }
 
   const table = TABLES[input.level]
   const [created] = await db
@@ -127,7 +127,7 @@ export async function createChild(input: {
  * The name, the description, and what it rolls up to.
  *
  * Moving a record is the interesting one and the reason the parent is here:
- * a project under the wrong initiative makes every roll-up above it wrong,
+ * an initiative under the wrong objective makes every roll-up above it wrong,
  * and that was only fixable from the grouping screen, two clicks away from
  * wherever anybody noticed.
  */
@@ -199,9 +199,9 @@ export async function editRecord(input: {
     changes.push(description ? 'description edited' : 'description cleared')
   }
 
-  if (input.parentId !== undefined && input.level !== 'initiative') {
-    const field = input.level === 'project' ? 'initiativeId' : 'projectId'
-    const parentLevel: Level = input.level === 'project' ? 'initiative' : 'project'
+  if (input.parentId !== undefined && input.level !== 'objective') {
+    const field = input.level === 'initiative' ? 'objectiveId' : 'initiativeId'
+    const parentLevel: Level = input.level === 'initiative' ? 'objective' : 'initiative'
     const current = (row as Record<string, unknown>)[field] as string | null
     const wanted = input.parentId.trim() || null
 

@@ -14,34 +14,35 @@
  *
  * WHY THE CELL IS THE CONTROL
  *
- * Readiness went stale because marking an item off meant opening a workstream,
+ * Readiness went stale because marking an item off meant opening a project,
  * finding its checklist and coming back. The number you are looking at when
  * you notice it is wrong is the number you should be able to fix, so clicking
  * a cell opens exactly the items behind it and each tick lands immediately.
  *
  * WHY A HIGHER LEVEL SHOWS THE SAME CONTROL
  *
- * Readiness is recorded per workstream — that is where the work is. A project
- * row is the sum of its workstreams, so its popup lists the items of each one
+ * Readiness is recorded per project — that is where the work is. An initiative
+ * row is the sum of its projects, so its popup lists the items of each one
  * beneath it, named. Rolling up a number but not the way to change it would
  * mean seeing the problem at the level where you cannot do anything about it.
  */
+import { TIER_PLURAL } from '@/lib/home-types'
 import { useMemo, useState } from 'react'
 import { nextStatus, useReadinessBoard, type ReadinessBoard } from '@/components/readiness-toggle'
 import Link from 'next/link'
 import {} from './actions'
 
 
-export type Level = 'initiative' | 'project' | 'workstream'
+export type Level = 'objective' | 'initiative' | 'project'
 
 export interface ItemCell {
   itemId: string
   label: string
   required: boolean
   status: string
-  /** Which workstream this is recorded against — always a workstream. */
-  workstreamId: string
-  workstreamName: string
+  /** Which project this is recorded against — always a project. */
+  projectId: string
+  projectName: string
 }
 
 export interface GateCell {
@@ -125,9 +126,9 @@ export function ReadinessMatrix({
               window.location.search = `?level=${e.target.value}`
             }}
           >
+            <option value="objective">{TIER_PLURAL.objective}</option>
             <option value="initiative">Initiatives</option>
             <option value="project">Projects</option>
-            <option value="workstream">Workstreams</option>
           </select>
         </label>
 
@@ -229,12 +230,12 @@ function GateDialog({
   board: ReadinessBoard
 }) {
   const cell = row.cells[gate.id] ?? { done: 0, total: 0, items: [] }
-  // Grouped by workstream, because at project level the same item name appears
+  // Grouped by project, because at initiative level the same item name appears
   // several times and an ungrouped list of identical labels is unreadable.
   const groups = useMemo(() => {
     const out = new Map<string, ItemCell[]>()
     for (const item of cell.items) {
-      out.set(item.workstreamName, [...(out.get(item.workstreamName) ?? []), item])
+      out.set(item.projectName, [...(out.get(item.projectName) ?? []), item])
     }
     return [...out.entries()]
   }, [cell.items])
@@ -252,9 +253,9 @@ function GateDialog({
           {row.name} · {cell.done} of {cell.total} required
         </p>
 
-        {groups.map(([workstream, items]) => (
-          <div key={workstream} className="rx-group">
-            {groups.length > 1 ? <h4>{workstream}</h4> : null}
+        {groups.map(([project, items]) => (
+          <div key={project} className="rx-group">
+            {groups.length > 1 ? <h4>{project}</h4> : null}
             <ul className="rx-items">
               {items.map((item) => (
                 <ItemToggle key={item.itemId} item={item} board={board} />
@@ -278,10 +279,10 @@ function GateDialog({
 function ItemToggle({ item, board }: { item: ItemCell; board: ReadinessBoard }) {
   // The board belongs to the matrix, which stays mounted; this row and the
   // dialog around it do not. See components/readiness-toggle.ts.
-  const status = board.statusOf(item.workstreamId, item.itemId, item.status)
-  const pending = board.savingOf(item.workstreamId, item.itemId)
-  const error = board.errorOf(item.workstreamId, item.itemId)
-  const set = (next: string) => board.set(item.workstreamId, item.itemId, item.status, next)
+  const status = board.statusOf(item.projectId, item.itemId, item.status)
+  const pending = board.savingOf(item.projectId, item.itemId)
+  const error = board.errorOf(item.projectId, item.itemId)
+  const set = (next: string) => board.set(item.projectId, item.itemId, item.status, next)
 
   const done = status === 'done'
   const na = status === 'na'

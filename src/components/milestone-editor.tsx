@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * The plan for one initiative, project or workstream, editable in place.
+ * The plan for one objective, initiative or project, editable in place.
  *
  * It sits at the top of the detail page because it is the question everybody
  * arrives with: what is this thing supposed to deliver, and by when. Below it
@@ -61,10 +61,10 @@ export interface MilestoneRow {
   editedAt: string | null
   authoredBy: string | null
   /** Which entity actually owns this row - what an edit is posted against. */
-  ownerLevel: 'initiative' | 'project' | 'workstream'
+  ownerLevel: 'objective' | 'initiative' | 'project'
   ownerId: string
   /** Set only when the row was borrowed from beneath. Null on the page's own. */
-  from: { level: 'initiative' | 'project' | 'workstream'; id: string; name: string } | null
+  from: { level: 'objective' | 'initiative' | 'project'; id: string; name: string } | null
 }
 
 /** How many milestones a tile shows before it pages. */
@@ -75,7 +75,7 @@ export function MilestoneEditor({
   entityId,
   milestones,
 }: {
-  level: 'initiative' | 'project' | 'workstream'
+  level: 'objective' | 'initiative' | 'project'
   entityId: string
   milestones: MilestoneRow[]
 }) {
@@ -121,8 +121,8 @@ export function MilestoneEditor({
       {milestones.length === 0 && !adding ? (
         <p className="ms-empty">
           Nothing is recorded against this {level}.{' '}
-          {level === 'initiative'
-            ? 'Nothing upstream knows what an initiative is committed to — the grouping only exists here, so this is the only place it can be said.'
+          {level === 'objective'
+            ? 'Nothing upstream knows what an objective is committed to — the grouping only exists here, so this is the only place it can be said.'
             : 'Linear and program review decks write these, and you can add or correct them here.'}
         </p>
       ) : (
@@ -160,8 +160,8 @@ export function MilestoneEditor({
                 </div>
                 {open === m.id && (
                   // Posted against the entity that owns the row, not the page
-                  // being viewed: a workstream's milestone edited from the
-                  // project page is still the workstream's milestone.
+                  // being viewed: a project's milestone edited from the
+                  // initiative page is still the project's milestone.
                   <MilestoneForm
                     level={m.ownerLevel}
                     entityId={m.ownerId}

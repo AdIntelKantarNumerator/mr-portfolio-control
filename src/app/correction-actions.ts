@@ -1,7 +1,7 @@
 'use server'
 
 /**
- * "This update is on the wrong initiative."
+ * "This update is on the wrong objective."
  *
  * WHY THE CORRECTION IS MADE HERE AND NOT IN A SETTINGS SCREEN
  *
@@ -30,7 +30,7 @@
 import { revalidatePath } from 'next/cache'
 import { and, eq, isNull } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { initiatives, projects, workstreams, routingCorrections } from '@/db/schema'
+import { objectives, initiatives, projects, routingCorrections } from '@/db/schema'
 import { actorName } from '@/lib/auth/current-user'
 
 export interface CorrectionState {
@@ -40,11 +40,11 @@ export interface CorrectionState {
   stamp?: number
 }
 
-const TABLES = { initiative: initiatives, project: projects, workstream: workstreams } as const
+const TABLES = { objective: objectives, initiative: initiatives, project: projects } as const
 type Level = keyof typeof TABLES
 
 function isLevel(v: string): v is Level {
-  return v === 'initiative' || v === 'project' || v === 'workstream'
+  return v === 'objective' || v === 'initiative' || v === 'project'
 }
 
 export interface CorrectionInput {
@@ -143,7 +143,7 @@ export async function recordCorrection(input: CorrectionInput): Promise<Correcti
     createdBy: await actorName(),
   })
 
-  // The same guard initiatives/actions.ts carries: revalidatePath needs a
+  // The same guard objectives/actions.ts carries: revalidatePath needs a
   // request context and throws this one invariant without it, and the caller
   // with no request is scripts/check-corrections.ts. Every other error still
   // propagates.
@@ -168,20 +168,20 @@ export async function recordCorrection(input: CorrectionInput): Promise<Correcti
  * Everything a correction could point at, for the picker.
  *
  * All three tiers in one list because the reader is answering "where does this
- * belong", and the answer is sometimes a workstream and sometimes the
- * initiative two levels up. Making them choose a tier first would be asking
+ * belong", and the answer is sometimes a project and sometimes the
+ * objective two levels up. Making them choose a tier first would be asking
  * them to classify their own answer before giving it.
  */
 export async function correctionTargets(): Promise<Array<{ value: string; label: string }>> {
   const [inits, projs, wss] = await Promise.all([
+    db.select({ id: objectives.id, name: objectives.name }).from(objectives),
     db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives),
     db.select({ id: projects.id, name: projects.name }).from(projects),
-    db.select({ id: workstreams.id, name: workstreams.name }).from(workstreams),
   ])
   const sort = (a: { label: string }, b: { label: string }) => a.label.localeCompare(b.label)
   return [
-    ...inits.map((r) => ({ value: `initiative:${r.id}`, label: `${r.name} — initiative` })).sort(sort),
-    ...projs.map((r) => ({ value: `project:${r.id}`, label: `${r.name} — project` })).sort(sort),
-    ...wss.map((r) => ({ value: `workstream:${r.id}`, label: `${r.name} — workstream` })).sort(sort),
+    ...inits.map((r) => ({ value: `objective:${r.id}`, label: `${r.name} — objective` })).sort(sort),
+    ...projs.map((r) => ({ value: `initiative:${r.id}`, label: `${r.name} — initiative` })).sort(sort),
+    ...wss.map((r) => ({ value: `project:${r.id}`, label: `${r.name} — project` })).sort(sort),
   ]
 }

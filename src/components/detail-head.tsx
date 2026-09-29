@@ -6,8 +6,8 @@
  *
  * WHY ALL THREE TIERS SHARE ONE OF THESE
  *
- * The initiative page had a tier kicker and a heading; the project and
- * workstream pages had a small backlink and a breadcrumb that also carried a
+ * The objective page had a tier kicker and a heading; the initiative and
+ * project pages had a small backlink and a breadcrumb that also carried a
  * link to the Timeline. The same three facts were presented three ways, and
  * only one of them told you where you were without reading the URL.
  *
@@ -31,11 +31,11 @@ export interface DetailHeadProps {
   name: string
   /** What this rolls up to. Null renders the gap, which is worth seeing. */
   parent?: { label: string; name: string; href: string } | null
-  /** Said when there is no parent — "not in an initiative" is a real state. */
+  /** Said when there is no parent — "not in an objective" is a real state. */
   orphan?: string
   /** The editable status, shown as a pill beside the name. */
   status?: {
-    level: 'initiative' | 'project' | 'workstream'
+    level: 'objective' | 'initiative' | 'project'
     id: string
     value: string
     label: string

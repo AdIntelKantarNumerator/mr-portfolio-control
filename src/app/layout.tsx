@@ -7,7 +7,7 @@ import { getCurrentUser } from '@/lib/auth/current-user'
 export const metadata: Metadata = {
   title: { default: BRAND_NAME, template: `%s · ${BRAND_NAME}` },
   description:
-    'Project and workstream timelines, dependencies, prioritization and intake.',
+    'Initiative and project timelines, dependencies, prioritization and intake.',
 }
 
 /**

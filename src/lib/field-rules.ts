@@ -7,7 +7,7 @@
  * controls, the agent API and anything added later all read the same table
  * rather than each re-deciding what a valid status is.
  */
-import { PRIORITY, PROJECT_STATUS, WORKSTREAM_STATUS_SET } from './domain'
+import { PRIORITY, INITIATIVE_STATUS, PROJECT_STATUS_SET } from './domain'
 
 export interface FieldSpec {
   /** The column it lands in. */
@@ -30,24 +30,24 @@ export interface FieldSpec {
  * because a list row is a bad place to do something you cannot see the
  * consequences of.
  */
-export const FIELDS: Record<'initiative' | 'project' | 'workstream', Record<string, FieldSpec>> = {
-  // The grouping tier. Same four fields as a project, because the question
+export const FIELDS: Record<'objective' | 'initiative' | 'project', Record<string, FieldSpec>> = {
+  // The grouping tier. Same four fields as an initiative, because the question
   // "who owns this and when does it land" does not change with the tier.
-  initiative: {
-    status: { column: 'status', allowed: new Set<string>(PROJECT_STATUS) },
+  objective: {
+    status: { column: 'status', allowed: new Set<string>(INITIATIVE_STATUS) },
     owner: { column: 'ownerId', person: true },
     startDate: { column: 'startDate', date: true },
     targetDate: { column: 'targetDate', date: true },
   },
-  project: {
-    status: { column: 'status', allowed: new Set<string>(PROJECT_STATUS) },
+  initiative: {
+    status: { column: 'status', allowed: new Set<string>(INITIATIVE_STATUS) },
     owner: { column: 'ownerId', person: true },
     sponsor: { column: 'sponsorId', person: true },
     startDate: { column: 'startDate', date: true },
     targetDate: { column: 'targetDate', date: true },
   },
-  workstream: {
-    status: { column: 'status', allowed: new Set<string>(WORKSTREAM_STATUS_SET) },
+  project: {
+    status: { column: 'status', allowed: new Set<string>(PROJECT_STATUS_SET) },
     priority: { column: 'priority', allowed: new Set<string>(PRIORITY) },
     lead: { column: 'leadId', person: true },
     startDate: { column: 'startDate', date: true },
@@ -59,7 +59,7 @@ export const FIELDS: Record<'initiative' | 'project' | 'workstream', Record<stri
 export type Level = keyof typeof FIELDS
 
 export function isLevel(v: string): v is Level {
-  return v === 'initiative' || v === 'project' || v === 'workstream'
+  return v === 'objective' || v === 'initiative' || v === 'project'
 }
 
 export function specFor(level: Level, field: string): FieldSpec | undefined {

@@ -88,11 +88,11 @@ describe('what a status is called', () => {
 describe('moving an entry to the right work', () => {
   test('a target is parsed into a type and an id', async () => {
     const { parseEntityTarget } = await import('../src/lib/register')
-    assert.deepEqual(parseEntityTarget('workstream:abc-123'), { type: 'workstream', id: 'abc-123' })
-    assert.deepEqual(parseEntityTarget('project:i1'), { type: 'project', id: 'i1' })
+    assert.deepEqual(parseEntityTarget('project:abc-123'), { type: 'project', id: 'abc-123' })
+    assert.deepEqual(parseEntityTarget('initiative:i1'), { type: 'initiative', id: 'i1' })
     // Ids are uuids, which contain no colons — but splitting on the FIRST one
     // means an id that ever does contain one still survives intact.
-    assert.deepEqual(parseEntityTarget('workstream:a:b'), { type: 'workstream', id: 'a:b' })
+    assert.deepEqual(parseEntityTarget('project:a:b'), { type: 'project', id: 'a:b' })
   })
 
   test('anything that is not a real endpoint is refused', async () => {
@@ -100,7 +100,7 @@ describe('moving an entry to the right work', () => {
     // this app does not have is invisible on every screen.
     const { parseEntityTarget } = await import('../src/lib/register')
     assert.equal(parseEntityTarget('milestone:m1'), null)
-    assert.equal(parseEntityTarget('workstream:'), null)
+    assert.equal(parseEntityTarget('project:'), null)
     assert.equal(parseEntityTarget(':abc'), null)
     assert.equal(parseEntityTarget('abc'), null)
     assert.equal(parseEntityTarget(''), null)
@@ -111,7 +111,7 @@ describe('what counts as ended', () => {
   test('completed and canceled, and nothing else', async () => {
     // Withdrawn is canceled and closed is completed — same states, the words
     // people say out loud. Defined once because four screens and an agent all
-    // have to agree; the day two copies disagree, a workstream is hidden from a
+    // have to agree; the day two copies disagree, a project is hidden from a
     // page and still matched by Yaara.
     const { isEnded } = await import('../src/lib/domain')
     assert.equal(isEnded('completed'), true)
@@ -125,15 +125,15 @@ describe('what counts as ended', () => {
   })
 
   test('reopening lands somewhere live, per kind', async () => {
-    const { reopenedStatus, WORKSTREAM_STATUS_SET, PROJECT_STATUS, isEnded } = await import('../src/lib/domain')
-    assert.equal(reopenedStatus('workstream'), 'planned')
-    assert.equal(reopenedStatus('project'), 'active')
+    const { reopenedStatus, PROJECT_STATUS_SET, INITIATIVE_STATUS, isEnded } = await import('../src/lib/domain')
+    assert.equal(reopenedStatus('project'), 'planned')
+    assert.equal(reopenedStatus('initiative'), 'active')
     // Whatever these are, they must be real statuses and must not be ended —
     // reopening into a closed state would be a button that does nothing.
-    assert.ok((WORKSTREAM_STATUS_SET as readonly string[]).includes(reopenedStatus('workstream')))
-    assert.ok((PROJECT_STATUS as readonly string[]).includes(reopenedStatus('project')))
-    assert.equal(isEnded(reopenedStatus('workstream')), false)
+    assert.ok((PROJECT_STATUS_SET as readonly string[]).includes(reopenedStatus('project')))
+    assert.ok((INITIATIVE_STATUS as readonly string[]).includes(reopenedStatus('initiative')))
     assert.equal(isEnded(reopenedStatus('project')), false)
+    assert.equal(isEnded(reopenedStatus('initiative')), false)
   })
 })
 
@@ -152,13 +152,13 @@ describe('the program review plan', () => {
   })
 
   test('the deck legend is the deck legend, not the portfolio vocabulary', async () => {
-    // A milestone is "On Track"; a workstream is "In progress". Different
+    // A milestone is "On Track"; a project is "In progress". Different
     // statements about different things, and the deck is read by a room.
-    const { label, WORKSTREAM_STATUS } = await import('../src/lib/domain')
-    assert.deepEqual([...WORKSTREAM_STATUS], ['planning', 'on_track', 'at_risk', 'blocked', 'complete'])
-    assert.equal(label('workstreamStatus', 'on_track'), 'On Track')
-    assert.equal(label('workstreamStatus', 'at_risk'), 'At Risk')
-    assert.equal(label('workstreamPhase', 'testing'), 'Testing (QA)')
-    assert.equal(label('workstreamPhase', 'ga'), 'General Availability (GA)')
+    const { label, PROJECT_STATUS } = await import('../src/lib/domain')
+    assert.deepEqual([...PROJECT_STATUS], ['planning', 'on_track', 'at_risk', 'blocked', 'complete'])
+    assert.equal(label('projectStatus', 'on_track'), 'On Track')
+    assert.equal(label('projectStatus', 'at_risk'), 'At Risk')
+    assert.equal(label('projectPhase', 'testing'), 'Testing (QA)')
+    assert.equal(label('projectPhase', 'ga'), 'General Availability (GA)')
   })
 })

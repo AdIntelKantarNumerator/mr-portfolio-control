@@ -5,9 +5,9 @@
  *
  * WHAT IS ON IT NOW
  *
- * One row per initiative, project or workstream, whichever you asked for, and
+ * One row per objective, initiative or project, whichever you asked for, and
  * inside each row a bar for every child beneath it. Rolled-up milestones sit
- * on the row as diamonds, so an initiative shows what its projects have
+ * on the row as diamonds, so an objective shows what its initiatives have
  * committed to without anybody opening them.
  *
  * WHY THE DEPENDENCY LINES CAN BE TURNED OFF
@@ -31,7 +31,7 @@ import { setCardOrder } from '@/app/order-actions'
 /*
  * Row height is not fixed any more: a row whose bars overlap needs a lane for
  * each of them, and the alternative — drawing them on top of one another — is
- * how a row of six workstreams showed one name and five slivers.
+ * how a row of six projects showed one name and five slivers.
  */
 const LANE_H = 30
 const ROW_PAD = 14
@@ -59,7 +59,7 @@ export function TimelineView({
   showLinks,
 }: {
   model: TimelineModel
-  level: 'initiative' | 'project' | 'workstream'
+  level: 'objective' | 'initiative' | 'project'
   draggable: boolean
   showLinks: boolean
 }) {

@@ -4,7 +4,7 @@
  * The program team documented its lifecycle once, on an internal site, where it
  * is true but unenforceable. This module turns that document into a thing with
  * a numerator and a denominator, so "did we actually do the kick-off steps" has
- * an answer per workstream instead of a shrug.
+ * an answer per project instead of a shrug.
  *
  * Cached per request like `getPortfolio()` — the matrix screen reads the whole
  * model once and scores every cell against it in memory.
@@ -22,7 +22,7 @@ import {
 
 export type GateRow = typeof lifecycleGates.$inferSelect
 export type ReadinessItem = typeof readinessItems.$inferSelect
-export type ProjectReadinessRow = typeof projectReadiness.$inferSelect
+export type InitiativeReadinessRow = typeof projectReadiness.$inferSelect
 export type TemplateRow = typeof templates.$inferSelect
 export type DiscoveryTopicRow = typeof discoveryTopics.$inferSelect
 
@@ -54,7 +54,7 @@ export const PHASE_LABEL: Record<string, string> = {
   ongoing: 'Ongoing',
 }
 
-export const WORKSTREAM_LABEL: Record<string, string> = {
+export const PROJECT_LABEL: Record<string, string> = {
   ingestion: 'Data Ingestion',
   spend_methodology: 'Spend Methodology',
   classification: 'Attribution / Classification',
@@ -64,7 +64,7 @@ export const WORKSTREAM_LABEL: Record<string, string> = {
 }
 
 /** Order the question bank is read in — ingestion first, GTM last. */
-export const WORKSTREAM_ORDER = [
+export const PROJECT_ORDER = [
   'ingestion',
   'spend_methodology',
   'classification',
@@ -91,8 +91,8 @@ export interface ReadinessModel {
   items: ReadinessItem[]
   itemsById: Map<string, ReadinessItem>
   gatesByItemId: Map<string, GateRow>
-  /** workstreamId → itemId → stored row. An absent entry means `not_started`. */
-  byProject: Map<string, Map<string, ProjectReadinessRow>>
+  /** projectId → itemId → stored row. An absent entry means `not_started`. */
+  byInitiative: Map<string, Map<string, InitiativeReadinessRow>>
 }
 
 export const getReadiness = cache(async (): Promise<ReadinessModel> => {
@@ -117,33 +117,33 @@ export const getReadiness = cache(async (): Promise<ReadinessModel> => {
     if (g) gatesByItemId.set(item.id, g)
   }
 
-  const byProject = new Map<string, Map<string, ProjectReadinessRow>>()
+  const byInitiative = new Map<string, Map<string, InitiativeReadinessRow>>()
   for (const row of progressRows) {
-    if (!byProject.has(row.workstreamId)) byProject.set(row.workstreamId, new Map())
-    byProject.get(row.workstreamId)!.set(row.itemId, row)
+    if (!byInitiative.has(row.projectId)) byInitiative.set(row.projectId, new Map())
+    byInitiative.get(row.projectId)!.set(row.itemId, row)
   }
 
   // The gate order is the process order, so items come back column-ordered.
   const items = gates.flatMap((g) => g.items)
 
-  return { gates, items, itemsById: new Map(itemRows.map((i) => [i.id, i])), gatesByItemId, byProject }
+  return { gates, items, itemsById: new Map(itemRows.map((i) => [i.id, i])), gatesByItemId, byInitiative }
 })
 
 export function statusFor(
   model: ReadinessModel,
-  workstreamId: string,
+  projectId: string,
   itemId: string,
 ): ReadinessStatus {
-  const raw = model.byProject.get(workstreamId)?.get(itemId)?.status
+  const raw = model.byInitiative.get(projectId)?.get(itemId)?.status
   return raw && isReadinessStatus(raw) ? raw : 'not_started'
 }
 
 export function progressFor(
   model: ReadinessModel,
-  workstreamId: string,
+  projectId: string,
   itemId: string,
-): ProjectReadinessRow | null {
-  return model.byProject.get(workstreamId)?.get(itemId) ?? null
+): InitiativeReadinessRow | null {
+  return model.byInitiative.get(projectId)?.get(itemId) ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -159,17 +159,17 @@ export interface ReadinessScore {
 }
 
 /**
- * Score a workstream against a set of items.
+ * Score a project against a set of items.
  *
  * Only required items count, and `na` counts as satisfied: someone deciding an
- * item does not apply to this workstream is a completed act of judgement, not an
+ * item does not apply to this project is a completed act of judgement, not an
  * outstanding obligation. Counting it as a gap would teach people to mark
  * things done instead of marking them N/A, which is how a checklist stops
  * telling the truth.
  */
 export function scoreItems(
   model: ReadinessModel,
-  workstreamId: string,
+  projectId: string,
   items: ReadinessItem[],
 ): ReadinessScore {
   const required = items.filter((i) => i.required)
@@ -177,7 +177,7 @@ export function scoreItems(
   let done = 0
 
   for (const item of required) {
-    const status = statusFor(model, workstreamId, item.id)
+    const status = statusFor(model, projectId, item.id)
     if (status === 'done' || status === 'na') done += 1
     else missingRequired.push(item)
   }
@@ -187,65 +187,65 @@ export function scoreItems(
 }
 
 /**
- * Readiness for one workstream across the whole lifecycle.
+ * Readiness for one project across the whole lifecycle.
  *
- * Async so callers that only need one workstream do not have to hold the model;
+ * Async so callers that only need one project do not have to hold the model;
  * `getReadiness()` is request-cached, so this stays one set of queries however
  * many times it is called.
  */
-export async function readinessScore(workstreamId: string): Promise<ReadinessScore> {
+export async function readinessScore(projectId: string): Promise<ReadinessScore> {
   const model = await getReadiness()
-  return scoreItems(model, workstreamId, model.items)
+  return scoreItems(model, projectId, model.items)
 }
 
 // ---------------------------------------------------------------------------
 // Aggregation — the reason the screen exists
 // ---------------------------------------------------------------------------
 
-/** The minimum a workstream has to look like to be counted in the gaps roll-up. */
-export interface ScorableProject {
+/** The minimum a project has to look like to be counted in the gaps roll-up. */
+export interface ScorableInitiative {
   id: string
   key: string
   name: string
   status: string
 }
 
-/** Planned and in-progress work. Finished or abandoned workstreams owe nothing. */
-export const ACTIVE_PROJECT_STATUS = ['in_progress', 'planned'] as const
+/** Planned and in-progress work. Finished or abandoned projects owe nothing. */
+export const ACTIVE_INITIATIVE_STATUS = ['in_progress', 'planned'] as const
 
 export function isActive(p: { status: string }): boolean {
-  return (ACTIVE_PROJECT_STATUS as readonly string[]).includes(p.status)
+  return (ACTIVE_INITIATIVE_STATUS as readonly string[]).includes(p.status)
 }
 
 export interface ItemGap {
   item: ReadinessItem
   gate: GateRow | null
-  /** Active workstreams that have not satisfied this item, in portfolio order. */
-  workstreams: ScorableProject[]
+  /** Active projects that have not satisfied this item, in portfolio order. */
+  projects: ScorableInitiative[]
 }
 
 /**
- * Required items rolled up by item rather than by workstream.
+ * Required items rolled up by item rather than by project.
  *
- * Per workstream, a missing RACI is a small nag. Across the portfolio, "six active
- * workstreams have no Program Review slide" is a process failure with one owner
+ * Per project, a missing RACI is a small nag. Across the portfolio, "six active
+ * projects have no Program Review slide" is a process failure with one owner
  * and one fix — and it is invisible unless something counts it this way round.
  */
-export function gapsByItem(model: ReadinessModel, workstreams: ScorableProject[]): ItemGap[] {
-  const active = workstreams.filter(isActive)
+export function gapsByItem(model: ReadinessModel, projects: ScorableInitiative[]): ItemGap[] {
+  const active = projects.filter(isActive)
 
   return model.items
     .filter((item) => item.required)
     .map((item) => ({
       item,
       gate: model.gatesByItemId.get(item.id) ?? null,
-      workstreams: active.filter((p) => {
+      projects: active.filter((p) => {
         const status = statusFor(model, p.id, item.id)
         return status !== 'done' && status !== 'na'
       }),
     }))
-    .filter((g) => g.workstreams.length > 0)
-    .sort((a, b) => b.workstreams.length - a.workstreams.length)
+    .filter((g) => g.projects.length > 0)
+    .sort((a, b) => b.projects.length - a.projects.length)
 }
 
 // ---------------------------------------------------------------------------
@@ -259,10 +259,10 @@ export const getTemplates = cache(
 
 export const getDiscoveryTopics = cache(async (): Promise<Map<string, DiscoveryTopicRow[]>> => {
   const rows = await db.select().from(discoveryTopics).orderBy(asc(discoveryTopics.sortOrder))
-  const byWorkstream = new Map<string, DiscoveryTopicRow[]>()
+  const byProject = new Map<string, DiscoveryTopicRow[]>()
   for (const r of rows) {
-    if (!byWorkstream.has(r.workstream)) byWorkstream.set(r.workstream, [])
-    byWorkstream.get(r.workstream)!.push(r)
+    if (!byProject.has(r.project)) byProject.set(r.project, [])
+    byProject.get(r.project)!.push(r)
   }
-  return byWorkstream
+  return byProject
 })

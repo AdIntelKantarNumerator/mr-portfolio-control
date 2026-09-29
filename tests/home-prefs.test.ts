@@ -11,7 +11,7 @@ import {
 } from '../src/lib/home-prefs'
 
 test('a round trip survives', () => {
-  const p = { level: 'workstream', sort: 'name', health: 'crit' } as const
+  const p = { level: 'project', sort: 'name', health: 'crit' } as const
   assert.deepEqual(parseHomePrefs(serialiseHomePrefs(p)), p)
 })
 
@@ -23,8 +23,8 @@ test('no cookie is the default board', () => {
 test('a stale cookie degrades one field, not the board', () => {
   // A value written by an older build — say a sort that no longer exists —
   // must not take the level and the health filter down with it.
-  const p = parseHomePrefs('workstream.byVibes.crit')
-  assert.equal(p.level, 'workstream')
+  const p = parseHomePrefs('project.byVibes.crit')
+  assert.equal(p.level, 'project')
   assert.equal(p.sort, HOME_DEFAULTS.sort)
   assert.equal(p.health, 'crit')
 })
@@ -38,15 +38,15 @@ test('the URL beats the cookie, field by field', () => {
   // A shared link has to show the recipient the board it describes, whatever
   // their own last view was — otherwise it is not a link, it is a suggestion.
   // But only for the fields it actually names.
-  const cookie = serialiseHomePrefs({ level: 'project', sort: 'name', health: 'crit' })
-  const got = resolveHomePrefs({ level: 'workstream' }, cookie)
-  assert.equal(got.level, 'workstream', 'the URL said workstream')
+  const cookie = serialiseHomePrefs({ level: 'initiative', sort: 'name', health: 'crit' })
+  const got = resolveHomePrefs({ level: 'project' }, cookie)
+  assert.equal(got.level, 'project', 'the URL said project')
   assert.equal(got.sort, 'name', 'the URL said nothing about sort, so the cookie stands')
   assert.equal(got.health, 'crit')
 })
 
 test('an unrecognised query value falls back rather than erroring', () => {
-  const got = resolveHomePrefs({ level: 'galaxy', sort: 'sideways' }, 'project.name.all')
-  assert.equal(got.level, 'project')
+  const got = resolveHomePrefs({ level: 'galaxy', sort: 'sideways' }, 'initiative.name.all')
+  assert.equal(got.level, 'initiative')
   assert.equal(got.sort, 'name')
 })

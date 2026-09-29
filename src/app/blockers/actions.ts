@@ -17,7 +17,7 @@
 import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { decisions, initiatives, projects, workstreams } from '@/db/schema'
+import { decisions, objectives, initiatives, projects } from '@/db/schema'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
 
@@ -29,7 +29,7 @@ export interface BlockerState {
 }
 
 const STATUSES = new Set(['open', 'watch', 'decided', 'dropped'])
-const LEVELS = { initiative: initiatives, project: projects, workstream: workstreams } as const
+const LEVELS = { objective: objectives, initiative: initiatives, project: projects } as const
 
 function refresh() {
   revalidatePath('/')

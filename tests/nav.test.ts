@@ -3,7 +3,7 @@
  *
  * Twice in one week a link shipped to a route that did not exist: the home
  * cards linked to /actions for a day before that page was written, and the
- * nav linked to /initiatives through the whole hierarchy rotation. Both are
+ * nav linked to /objectives through the whole hierarchy rotation. Both are
  * invisible to the typechecker — an href is a string — and both are a 404 for
  * whoever clicks first.
  *

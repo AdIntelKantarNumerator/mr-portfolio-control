@@ -15,7 +15,7 @@
  * WHY THE URL STILL WINS
  *
  * The cookie is the fallback, not the truth. A link to
- * /?level=workstream&health=crit has to show that board to whoever opens it,
+ * /?level=project&health=crit has to show that board to whoever opens it,
  * including somebody whose own last view was something else — otherwise the
  * link is not a link, it is a suggestion.
  */
@@ -29,7 +29,7 @@ export interface HomePrefs {
   health: HealthFilter
 }
 
-export const HOME_DEFAULTS: HomePrefs = { level: 'initiative', sort: 'active', health: 'all' }
+export const HOME_DEFAULTS: HomePrefs = { level: 'objective', sort: 'active', health: 'all' }
 
 /**
  * Parse `level.sort.health`.

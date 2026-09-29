@@ -15,7 +15,7 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import { setCardOrder } from '../src/app/order-actions'
 import { db } from '../src/db/client'
-import { cardOrders, projects } from '../src/db/schema'
+import { cardOrders, initiatives } from '../src/db/schema'
 
 function check(label: string, ok: boolean, extra = '') {
   console.log(`${ok ? ' ok ' : 'FAIL'}  ${label}${extra ? ` — ${extra}` : ''}`)
@@ -52,9 +52,9 @@ async function writeAs(personId: string, level: string, ids: string[]) {
 }
 
 async function main() {
-  const rows = await db.select({ id: projects.id, name: projects.name, sortOrder: projects.sortOrder }).from(projects)
+  const rows = await db.select({ id: initiatives.id, name: initiatives.name, sortOrder: initiatives.sortOrder }).from(initiatives)
   if (rows.length < 3) {
-    console.log('Needs at least three projects. Seed the scratch database first.')
+    console.log('Needs at least three initiatives. Seed the scratch database first.')
     process.exitCode = 1
     return
   }
@@ -68,40 +68,40 @@ async function main() {
   const aliceOrder = [ids[2]!, ids[0]!, ids[1]!]
   const bobOrder = [ids[1]!, ids[2]!, ids[0]!]
 
-  await writeAs(alice, 'project', aliceOrder)
-  await writeAs(bob, 'project', bobOrder)
+  await writeAs(alice, 'initiative', aliceOrder)
+  await writeAs(bob, 'initiative', bobOrder)
 
-  check('each reader gets their own row', (await savedFor(alice, 'project')).join() === aliceOrder.join())
-  check("and one reader's drag does not move the other's", (await savedFor(bob, 'project')).join() === bobOrder.join())
+  check('each reader gets their own row', (await savedFor(alice, 'initiative')).join() === aliceOrder.join())
+  check("and one reader's drag does not move the other's", (await savedFor(bob, 'initiative')).join() === bobOrder.join())
 
   // Re-arranging replaces, rather than appending a second row for the same
   // reader and level - the primary key is what guarantees it.
   const again = [ids[0]!, ids[1]!, ids[2]!]
-  await writeAs(alice, 'project', again)
+  await writeAs(alice, 'initiative', again)
   const aliceRows = await db
     .select({ ids: cardOrders.orderedIds })
     .from(cardOrders)
-    .where(and(eq(cardOrders.personId, alice), eq(cardOrders.level, 'project')))
+    .where(and(eq(cardOrders.personId, alice), eq(cardOrders.level, 'initiative')))
   check('re-arranging overwrites rather than accumulating', aliceRows.length === 1, `${aliceRows.length} rows`)
-  check('and the newest arrangement is the one stored', (await savedFor(alice, 'project')).join() === again.join())
+  check('and the newest arrangement is the one stored', (await savedFor(alice, 'initiative')).join() === again.join())
 
   // Each board is arranged separately: the same reader at a different level
   // is a different row.
-  await writeAs(alice, 'initiative', [ids[1]!])
-  check('levels do not share an arrangement', (await savedFor(alice, 'project')).join() === again.join())
+  await writeAs(alice, 'objective', [ids[1]!])
+  check('levels do not share an arrangement', (await savedFor(alice, 'initiative')).join() === again.join())
 
   // --- the action itself ---
   //
   // With no session it runs as 'local', which is the development case. What
   // is being checked is that it wrote SOMEWHERE and did not touch sort_order.
-  const res = await setCardOrder('project', [ids[1]!, ids[0]!])
+  const res = await setCardOrder('initiative', [ids[1]!, ids[0]!])
   check('the action accepts a valid order', res.ok === true, res.error ?? '')
-  check('and writes it against the anonymous reader', (await savedFor('local', 'project')).join() === [ids[1], ids[0]].join())
+  check('and writes it against the anonymous reader', (await savedFor('local', 'initiative')).join() === [ids[1], ids[0]].join())
 
   const after = await db
-    .select({ id: projects.id, sortOrder: projects.sortOrder })
-    .from(projects)
-    .where(inArray(projects.id, ids))
+    .select({ id: initiatives.id, sortOrder: initiatives.sortOrder })
+    .from(initiatives)
+    .where(inArray(initiatives.id, ids))
   check(
     'sort_order is untouched — the arrangement is nobody else’s business',
     after.every((r) => r.sortOrder === sortBefore.get(r.id)),
@@ -113,15 +113,15 @@ async function main() {
 
   // Ids that have gone are dropped rather than stored, so a saved order never
   // disagrees with the board it describes.
-  const withGhost = await setCardOrder('project', [ids[0]!, 'no-such-project', ids[1]!])
+  const withGhost = await setCardOrder('initiative', [ids[0]!, 'no-such-initiative', ids[1]!])
   check('a deleted id is refused entry', withGhost.ok === true)
   check(
     'and only the live ids are stored',
-    (await savedFor('local', 'project')).join() === [ids[0], ids[1]].join(),
-    (await savedFor('local', 'project')).join(),
+    (await savedFor('local', 'initiative')).join() === [ids[0], ids[1]].join(),
+    (await savedFor('local', 'initiative')).join(),
   )
 
-  const allGone = await setCardOrder('project', ['nope-1', 'nope-2'])
+  const allGone = await setCardOrder('initiative', ['nope-1', 'nope-2'])
   check('an order of nothing that exists is refused', Boolean(allGone.error), allGone.error ?? '(no error)')
 
   check('an unknown level is refused', Boolean((await setCardOrder('theme', ids)).error))

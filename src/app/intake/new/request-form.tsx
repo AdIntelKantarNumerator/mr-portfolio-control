@@ -67,9 +67,9 @@ function Field({
 }
 
 export function RequestForm({
-  projects,
+  initiatives,
 }: {
-  projects: Option[]
+  initiatives: Option[]
 }) {
   const [state, formAction, pending] = useActionState(createRequest, INITIAL)
 
@@ -170,10 +170,10 @@ export function RequestForm({
           sub="Both taxonomies are optional — the program team re-routes in triage."
         />
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field name="proposedInitiativeId" label="Proposed project" errors={state.errors}>
-            <select {...text('proposedInitiativeId')}>
+          <Field name="proposedObjectiveId" label="Proposed initiative" errors={state.errors}>
+            <select {...text('proposedObjectiveId')}>
               <option value="">None proposed</option>
-              {projects.map((i) => (
+              {initiatives.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.name}
                 </option>

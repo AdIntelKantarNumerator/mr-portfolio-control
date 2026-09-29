@@ -1,86 +1,137 @@
 'use client'
 
 /**
- * The initiatives themselves, with a find box, a filter and the editing
- * machinery folded away.
+ * Initiatives, one row each, with their projects underneath.
  *
- * The create/move form used to sit above the list, so getting to the thing
- * you came for meant scrolling past a control you use once a month. It is
- * collapsed now, and the list is the page.
+ * Same shape as the objectives list on purpose: ring on the left saying how
+ * far along against how far along it should be, a coloured edge repeating it
+ * for anyone scanning, and the facts that decide anything — who owns it, when
+ * it lands, what is underneath — on the row itself rather than a click away.
+ *
+ * WHY EVERY VALUE HERE IS EDITABLE
+ *
+ * The owner, the status, the lead, the dates and the health are the fields
+ * that go stale, and they go stale because correcting one meant finding the
+ * screen that owned it. They are all `<Editable>` now, all writing through
+ * the one server action, so the place you notice a wrong value is the place
+ * you fix it.
  */
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { SortableRows, SortPicker } from '@/components/sortable-rows'
+import { progressPercent } from '@/lib/progress'
 import { HealthDot } from '@/components/health-state'
 import { edgeColor } from '@/lib/card-health'
-import { Grouping } from './grouping'
+import { Editable } from '@/components/editable'
+import { HealthEditable } from '@/components/health-editable'
+import { calendarDate } from '@/lib/calendar-date'
+
+export interface ProjectRow {
+  id: string
+  name: string
+  status: string
+  priority: string | null
+  progress: number
+  lead: string | null
+  startDate: string | null
+  targetDate: string | null
+  health: { rag: string; rationale: string | null; evidence: string | null; origin: string }
+}
 
 export interface InitiativeRow {
   id: string
   name: string
-  description: string | null
   status: string
   owner: string | null
-  projects: { id: string; name: string; workstreams: number }[]
-  workstreamCount: number
-  /** From the home board, so the ring and the border mean the same thing there. */
+  startDate: string | null
+  targetDate: string | null
+  /** True when the dates came from the projects rather than from anybody. */
+  datesRolledUp: boolean
+  /** Pace against the next milestone, from the home board. */
   health: 'good' | 'warn' | 'crit' | 'quiet' | null
+  /** The initiative's own assessed health, used for the edge when there is no pace. */
+  rag: string | null
   /** Why the row reads the way it does. See lib/card-health.ts. */
   reasons: { text: string; tone: 'crit' | 'warn' | 'muted' }[]
+  projects: ProjectRow[]
 }
 
 const ENDED = new Set(['completed', 'canceled', 'cancelled', 'withdrawn'])
 
-/* The edge for an unassessed row is neutral, not green: see the note in
-   projects/list.tsx. The word itself still gets its colour in `.ir-status`. */
-const EDGE_TONE: Record<string, string> = {
+/**
+ * The edge colour for a row nothing has been said about.
+ *
+ * Deliberately neutral for work that is merely running: green on this app
+ * means somebody assessed it and said it was fine, and an unassessed row
+ * wearing green is the exact claim the evidence does not support. Only the
+ * states that are themselves a statement get a colour - paused, finished,
+ * abandoned.
+ */
+const STATUS_TONE: Record<string, string> = {
+  active: 'var(--line-2)',
+  planned: 'var(--line-2)',
   paused: 'var(--c2)',
   completed: 'var(--c1)',
   canceled: 'var(--ended)',
-  withdrawn: 'var(--ended)',
 }
 
-const STATUS_TONE: Record<string, string> = {
-  active: 'var(--c5)',
-  paused: 'var(--c2)',
-  completed: 'var(--c1)',
-  canceled: 'var(--ended)',
-  withdrawn: 'var(--ended)',
-}
+const INITIATIVE_STATUS = [
+  { value: 'planned', label: 'Planned' },
+  { value: 'active', label: 'Active' },
+  { value: 'paused', label: 'Paused' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'canceled', label: 'Canceled' },
+]
+
+const PROJECT_STATUS = [
+  { value: 'backlog', label: 'Backlog' },
+  { value: 'planned', label: 'Planned' },
+  { value: 'in_progress', label: 'In progress' },
+  { value: 'paused', label: 'Paused' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'canceled', label: 'Canceled' },
+]
+
+const PRIORITY = [
+  { value: 'urgent', label: 'Urgent' },
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+  { value: 'no_priority', label: 'None' },
+]
+
+const STATUS_WORD = new Map([...INITIATIVE_STATUS, ...PROJECT_STATUS].map((s) => [s.value, s.label]))
 
 export function InitiativeList({
   rows,
-  loose,
-  options,
+  people,
   sort,
 }: {
   rows: InitiativeRow[]
+  people: { id: string; name: string }[]
   /** The sort the page applied; 'custom' is the one you can drag under. */
   sort: string
-  loose: { id: string; name: string; workstreams: number }[]
-  options: { id: string; name: string; initiativeId: string | null; workstreams: number }[]
 }) {
   const [find, setFind] = useState('')
   const [showEnded, setShowEnded] = useState(false)
-  const [editing, setEditing] = useState(false)
 
   const shown = useMemo(() => {
     const q = find.trim().toLowerCase()
     return rows.filter((r) => {
       if (!showEnded && ENDED.has(r.status)) return false
       if (!q) return true
-      // The projects inside count as part of an initiative's name for finding
-      // purposes: people look for an initiative by something they know is in
-      // it far more often than by what somebody called the grouping.
+      // A project's name counts as part of its initiative's, because people
+      // look for the work they know the name of, not the container it
+      // happens to sit in.
       return (
         r.name.toLowerCase().includes(q) ||
-        (r.description ?? '').toLowerCase().includes(q) ||
-        r.projects.some((p) => p.name.toLowerCase().includes(q))
+        (r.owner ?? '').toLowerCase().includes(q) ||
+        r.projects.some((w) => w.name.toLowerCase().includes(q))
       )
     })
   }, [rows, find, showEnded])
 
-  const hiddenByFilter = rows.length - shown.length
+  const hidden = rows.length - shown.length
 
   return (
     <>
@@ -93,7 +144,7 @@ export function InitiativeList({
               type="search"
               value={find}
               onChange={(e) => setFind(e.target.value)}
-              placeholder="Initiative or a project in it"
+              placeholder="Initiative, owner or a project in it"
               aria-label="Find an initiative"
             />
           </span>
@@ -108,34 +159,20 @@ export function InitiativeList({
               aria-label="Which initiatives to show"
             >
               <option value="live">Live only</option>
-              <option value="all">Closed and withdrawn too</option>
+              <option value="all">Closed and canceled too</option>
             </select>
           </span>
         </label>
-        {/* A button, not a filter pill: it does not narrow what you are
-            looking at, it opens a form. Wearing the same chrome as Find and
-            Showing said otherwise, and it sits on the right because it acts
-            on the page rather than describing it. */}
-        <button
-          type="button"
-          className={`btn-primary push-right${editing ? ' on' : ''}`}
-          onClick={() => setEditing(!editing)}
-          aria-expanded={editing}
-        >
-          {editing ? 'Close' : 'Edit Initiatives'}
-        </button>
         <SortPicker sort={sort} />
       </div>
-
-      {editing && <Grouping initiatives={rows.map((r) => ({ id: r.id, name: r.name }))} projects={options} />}
 
       {shown.length === 0 ? (
         <div className="blank">
           <h2>{find ? 'Nothing matches' : 'No initiatives yet'}</h2>
           <p>
             {find
-              ? `No initiative, description or project matches "${find}".`
-              : 'Open Edit initiatives above to create one, or ask Yaara which projects belong together.'}
+              ? `No initiative, owner or project matches "${find}".`
+              : 'Initiatives arrive from the sync, or are created on the Objectives page.'}
           </p>
         </div>
       ) : (
@@ -147,8 +184,8 @@ export function InitiativeList({
             render={(id) => {
             const r = shown.find((x) => x.id === id)!
             const edge =
-              edgeColor(r.health) ??
-              EDGE_TONE[r.status] ??
+              edgeColor(r.health, r.rag) ??
+              STATUS_TONE[r.status] ??
               'var(--line-2)'
             return (
               <div key={r.id} className="irow" style={{ borderLeftColor: edge }}>
@@ -161,31 +198,67 @@ export function InitiativeList({
                     <Link href={`/initiatives/${r.id}`} className="ir-name">
                       {r.name}
                     </Link>
-                    <span className="ir-status" style={{ color: STATUS_TONE[r.status] ?? 'var(--muted)' }}>
-                      {r.status}
-                    </span>
+                    <Editable
+                      level="initiative"
+                      id={r.id}
+                      field="status"
+                      kind="choice"
+                      options={INITIATIVE_STATUS}
+                      raw={r.status}
+                      value={STATUS_WORD.get(r.status) ?? r.status}
+                      className="ir-status-ed"
+                    />
                     <span className="ir-meta">
-                      {r.projects.length} project{r.projects.length === 1 ? '' : 's'} · {r.workstreamCount} workstream
-                      {r.workstreamCount === 1 ? '' : 's'}
-                      {r.owner ? ` · ${r.owner}` : ''}
+                      {r.projects.length} project{r.projects.length === 1 ? '' : 's'}
                     </span>
                   </div>
 
-                  {r.description && <p className="ir-desc">{r.description}</p>}
+                  <div className="ir-facts">
+                    <span>
+                      <i>Owner</i>
+                      <Editable
+                        level="initiative"
+                        id={r.id}
+                        field="owner"
+                        kind="person"
+                        people={people}
+                        value={r.owner}
+                        prompt="no owner"
+                      />
+                    </span>
+                    <span>
+                      <i>Dates</i>
+                      <Editable
+                        level="initiative"
+                        id={r.id}
+                        field="startDate"
+                        kind="date"
+                        raw={r.startDate}
+                        value={calendarDate(r.startDate, { year: false })}
+                        prompt="no start"
+                      />
+                      <em>→</em>
+                      <Editable
+                        level="initiative"
+                        id={r.id}
+                        field="targetDate"
+                        kind="date"
+                        raw={r.targetDate}
+                        value={calendarDate(r.targetDate, { year: false })}
+                        prompt="no target"
+                      />
+                      {r.datesRolledUp && <b title="Nobody typed these; they are the span of the projects.">rolled up</b>}
+                    </span>
+                  </div>
+
 
                   {r.projects.length === 0 ? (
                     <p className="ir-desc">
-                      Empty. An initiative with no projects is a card with nothing on it.
+                      Nothing in delivery yet — no projects roll up to this. That is a statement
+                      about the plan, not a missing row.
                     </p>
                   ) : (
-                    <div className="chips">
-                      {r.projects.map((p) => (
-                        <Link key={p.id} href={`/projects/${p.id}`}>
-                          {p.name}
-                          <span className="w">{p.workstreams} WS</span>
-                        </Link>
-                      ))}
-                    </div>
+                    <ProjectTable rows={r.projects} people={people} />
                   )}
                 </div>
               </div>
@@ -195,41 +268,150 @@ export function InitiativeList({
         </div>
       )}
 
-      {hiddenByFilter > 0 && !showEnded && (
+      {hidden > 0 && !showEnded && (
         <p className="ir-hidden">
-          {hiddenByFilter} closed or withdrawn {hiddenByFilter === 1 ? 'initiative is' : 'initiatives are'} hidden.
+          {hidden} closed or canceled {hidden === 1 ? 'initiative is' : 'initiatives are'} hidden.
         </p>
       )}
-
-      {loose.length > 0 && (
-        <div className="irow orphan-row" style={{ borderLeftColor: 'var(--crit)' }}>
-          <div className="ir-ring">
-            {/* Where the ring sits on every other row. Loose projects have no
-                milestone to measure, and the thing worth saying about them is
-                that they are loose. */}
-            <span className="ir-bang" aria-hidden="true">
-              !
-            </span>
-            <span className="ir-due">{loose.length} loose</span>
-          </div>
-          <div className="ir-body">
-            <div className="ir-top">
-              <strong className="ir-name">Not in an initiative</strong>
-              <span className="ir-meta">
-                Running, and on nobody&rsquo;s card — invisible to anyone reading the home page for a status.
-              </span>
-            </div>
-            <div className="chips">
-              {loose.map((p) => (
-                <Link key={p.id} href={`/projects/${p.id}`}>
-                  {p.name}
-                  <span className="w">{p.workstreams} WS</span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </>
+  )
+}
+
+/**
+ * The delivery work under one initiative.
+ *
+ * WHY THE COLUMNS ARE DECLARED AND THE LAYOUT IS FIXED
+ *
+ * The old table let the browser size its columns from the content, and the
+ * health badge sat inside the name cell. A badge reading "Needs input" is
+ * three times the width of one reading "On track", so the first column's
+ * width — and with it every heading to its right — moved depending on which
+ * rows happened to be unassessed. Health has a column of its own now, and
+ * `table-layout: fixed` with a declared `<colgroup>` means the headings are
+ * positioned by the colgroup and not by whatever is in the cells.
+ */
+function ProjectTable({
+  rows,
+  people,
+}: {
+  rows: ProjectRow[]
+  people: { id: string; name: string }[]
+}) {
+  return (
+    <div className="scroll-x">
+      <table className="dtable cols">
+        <colgroup>
+          <col style={{ width: 118 }} />
+          <col />
+          <col style={{ width: 116 }} />
+          <col style={{ width: 84 }} />
+          <col style={{ width: 128 }} />
+          <col style={{ width: 132 }} />
+          <col style={{ width: 168 }} />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Health</th>
+            <th>Project</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>Progress</th>
+            <th>Lead</th>
+            <th>Dates</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((w) => (
+            <tr key={w.id}>
+              <td>
+                <HealthEditable
+                  level="project"
+                  id={w.id}
+                  rag={w.health.rag}
+                  rationale={w.health.rationale}
+                  evidence={w.health.evidence}
+                  origin={w.health.origin}
+                />
+              </td>
+              <td>
+                <Link href={`/projects/${w.id}`} className="ws-name">
+                  {w.name}
+                </Link>
+              </td>
+              <td>
+                <Editable
+                  level="project"
+                  id={w.id}
+                  field="status"
+                  kind="choice"
+                  options={PROJECT_STATUS}
+                  raw={w.status}
+                  value={STATUS_WORD.get(w.status) ?? w.status}
+                />
+              </td>
+              <td>
+                <Editable
+                  level="project"
+                  id={w.id}
+                  field="priority"
+                  kind="choice"
+                  options={PRIORITY}
+                  raw={w.priority ?? 'medium'}
+                  value={w.priority ? (PRIORITY.find((p) => p.value === w.priority)?.label ?? w.priority) : null}
+                  prompt="unset"
+                />
+              </td>
+              <td>
+                <Editable
+                  level="project"
+                  id={w.id}
+                  field="progress"
+                  kind="number"
+                  raw={String(progressPercent(w.progress))}
+                  value={`${progressPercent(w.progress)}%`}
+                  after={
+                    <span className="wsbar" aria-hidden="true">
+                      <span style={{ width: `${progressPercent(w.progress)}%` }} />
+                    </span>
+                  }
+                />
+              </td>
+              <td>
+                <Editable
+                  level="project"
+                  id={w.id}
+                  field="lead"
+                  kind="person"
+                  people={people}
+                  value={w.lead}
+                  prompt="no lead"
+                />
+              </td>
+              <td className="tabular-nums">
+                <Editable
+                  level="project"
+                  id={w.id}
+                  field="startDate"
+                  kind="date"
+                  raw={w.startDate}
+                  value={calendarDate(w.startDate, { year: false })}
+                  prompt="—"
+                />
+                <em className="arrow">→</em>
+                <Editable
+                  level="project"
+                  id={w.id}
+                  field="targetDate"
+                  kind="date"
+                  raw={w.targetDate}
+                  value={calendarDate(w.targetDate, { year: false })}
+                  prompt="—"
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }

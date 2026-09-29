@@ -2,7 +2,7 @@
 
 A program-management tool for MediaRadar Product & Tech. It reads the delivery
 layer from Linear (and optionally Google Sheets), lets the program team enter
-the things no tracker holds, and renders initiative timelines, dependency
+the things no tracker holds, and renders objective timelines, dependency
 chains, contention, intake and prioritization off one model.
 
 ## Run it
@@ -17,7 +17,7 @@ Open http://localhost:3000. **The portfolio starts empty — that is the
 intended state.** No database to install, no credentials needed to get this
 far.
 
-No portfolio data is compiled into this app — every initiative, project,
+No portfolio data is compiled into this app — every objective, initiative,
 person, decision and dependency comes from the database. The name in the
 header is the one exception: it is three constants in `src/lib/brand.ts`,
 because a name that changes roughly never is not worth a configuration
@@ -36,7 +36,7 @@ Three independent things, in the order they usually happen:
 | Command | What it loads | When |
 |---|---|---|
 | `npm run setup` | Schema, lifecycle gates, templates, discovery questions, a starting scoring model | Once, at install |
-| `npm run sync:linear` | Initiatives, projects, milestones, dates, leads | Whenever; then on a schedule |
+| `npm run sync:linear` | Objectives, initiatives, milestones, dates, leads | Whenever; then on a schedule |
 | *(the app itself)* | Assessments, decisions, dependencies, contention, intake, readiness | Continuously, by the program team |
 
 `npm run seed:process` reloads only the process reference — safe to re-run on
@@ -88,7 +88,7 @@ So this app is built around a hard split:
 
 | Layer | Owner | Written by |
 |---|---|---|
-| Projects, initiatives, milestones, dates, leads | Linear / Sheets | sync only |
+| Initiatives, objectives, milestones, dates, leads | Linear / Sheets | sync only |
 | Health assessments, decisions, dependencies, contention, intake, readiness | the program team | this app only |
 | Field overrides | the program team | this app, merged over the sync at read time |
 
@@ -112,18 +112,18 @@ value itself moves — the most-recent-dated-source-wins rule, in code.
 | Route | What it answers |
 |---|---|
 | `/` | What is on fire, who is over-committed, what nobody has answered for |
-| `/roadmap` | Initiative lanes, project bars coloured by assessed health, milestone diamonds, dated commitments |
+| `/roadmap` | Objective lanes, initiative bars coloured by assessed health, milestone diamonds, dated commitments |
 | `/dependencies` | What has to be true first — layered graph, critical chain, cross-team matrix, manual entry |
-| `/initiatives` | Drill-down per initiative with assessment reasoning |
-| `/initiatives/<id>` | Everything about one initiative on one page: readiness, dependencies, decisions, people, prioritization, conversations — and the channels and meetings feeding it, editable in place |
-| `/projects/<id>` | The same for one project: readiness item by item, milestones, dependencies split by direction, decisions, the lead's load, conversations |
+| `/objectives` | Drill-down per objective with assessment reasoning |
+| `/objectives/<id>` | Everything about one objective on one page: readiness, dependencies, decisions, people, prioritization, conversations — and the channels and meetings feeding it, editable in place |
+| `/initiatives/<id>` | The same for one initiative: readiness item by item, milestones, dependencies split by direction, decisions, the lead's load, conversations |
 | `/sources` | Conversation sources, transcripts, and the briefs generated from them |
 | `/applications` | The same work by application, with the "who owes me an update" list |
-| `/contention` | Named people spread across the portfolio; teams × initiatives |
+| `/contention` | Named people spread across the portfolio; teams × objectives |
 | `/decisions` | The open-questions register, with contested items flagged |
-| `/intake` | Request form, triage queue, approve-to-project |
+| `/intake` | Request form, triage queue, approve-to-initiative |
 | `/prioritization` | Weighted scoring with a capacity cut line |
-| `/readiness` | The documented kick-off process, made checkable per project |
+| `/readiness` | The documented kick-off process, made checkable per initiative |
 | `/templates` | The standard template library and the discovery question bank |
 | `/changes` | Append-only log of every sync and hand edit |
 
@@ -150,7 +150,7 @@ leadership audience without maintaining a second set of screens.
 
 4. For live updates, add a webhook in Linear → Settings → API → Webhooks
    pointing at `https://<your-host>/api/webhooks/linear`, subscribed to
-   Projects, Initiatives and Project milestones. Put the signing secret in
+   Initiatives, Objectives and Initiative milestones. Put the signing secret in
    `LINEAR_WEBHOOK_SECRET`.
 
    The receiver verifies the HMAC against the raw body in constant time,
@@ -166,7 +166,7 @@ leadership audience without maintaining a second set of screens.
    ```
 
 Matching to existing records is by external id via the `source_records` table,
-so a project can be backed by a Linear project *and* a row in a spreadsheet
+so a initiative can be backed by a Linear project *and* a row in a spreadsheet
 without either source needing a special column.
 
 ## Other sources
@@ -175,7 +175,7 @@ without either source needing a special column.
 `{id, label, url, mapping}` (see `.env.example`) and POST `/api/sync/sheets`.
 It uses the CSV export endpoint rather than the Sheets API, so wiring up a
 tracker is a matter of sharing a link, not filing a Workspace admin ticket.
-Initiatives are matched by name, never created, so a typo in a spreadsheet
+Objectives are matched by name, never created, so a typo in a spreadsheet
 cannot fork the portfolio's structure.
 
 **Slack** — a slash command at `/api/slack/intake` files requests where the
@@ -200,7 +200,7 @@ decision and readiness edit, so the changelog says who rather than "manual".
 
 ### Setting it up
 
-In Google Cloud Console, in the project you use for internal tools:
+In Google Cloud Console, in the initiative you use for internal tools:
 
 1. **APIs & Services -> OAuth consent screen** -> choose **Internal**. That
    alone restricts sign-in to your Workspace; the domain check below is the
@@ -373,7 +373,7 @@ Set every environment variable as an App Service **Application setting**
 reference, not typed into the portal as plain text.
 
 Deploying to Azure changes nothing about Google sign-in. The Google Cloud
-project exists only to hold the OAuth client registration; no code or data
+initiative exists only to hold the OAuth client registration; no code or data
 runs there.
 
 ## Layout
@@ -406,7 +406,7 @@ they are directly testable and the test run needs no fixtures.
 - **No Jira adapter yet**, though MUPP is where the Unified Platform Program
   work actually lives.
 - **The seed is a stale snapshot, and says so.** Once Linear sync runs, the
-  delivery layer is matched by external id; seeded projects that do not exist
+  delivery layer is matched by external id; seeded initiatives that do not exist
   in Linear stay as manual records rather than being reconciled automatically.
   Nothing in the seed is invented — see "What the seed data actually is" above.
 - **Scoring is single-scorer.** The schema supports per-person scores

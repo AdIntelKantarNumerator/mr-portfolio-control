@@ -44,11 +44,11 @@ const EXPECTED = [
   ['0008', 'column', 'agent_observations', 'recent'],
   ['0008', 'column', 'agent_observations', 'activity_score'],
   ['0008', 'column', 'agent_observations', 'activity_window_hours'],
-  ['0009', 'column', 'projects', 'dev_lead'],
-  ['0009', 'column', 'projects', 'program_lead'],
-  ['0009', 'table', 'workstreams', null],
-  ['0009', 'table', 'workstream_items', null],
-  ['0009', 'table', 'workstream_phases', null],
+  ['0009', 'column', 'initiatives', 'dev_lead'],
+  ['0009', 'column', 'initiatives', 'program_lead'],
+  ['0009', 'table', 'projects', null],
+  ['0009', 'table', 'project_items', null],
+  ['0009', 'table', 'project_phases', null],
 ]
 
 try {

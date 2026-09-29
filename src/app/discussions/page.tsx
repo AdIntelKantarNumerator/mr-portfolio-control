@@ -12,7 +12,7 @@
  */
 import { asc } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { initiatives, projects, workstreams } from '@/db/schema'
+import { objectives, initiatives, projects } from '@/db/schema'
 import { recentThemes } from '@/lib/portfolio'
 import { Kicker } from '@/components/ui'
 import { DiscussionsList, type TopicRow } from './list'
@@ -21,23 +21,23 @@ export const metadata = { title: 'Discussions' }
 export const dynamic = 'force-dynamic'
 
 const HREF: Record<string, string> = {
+  objective: '/objectives',
   initiative: '/initiatives',
   project: '/projects',
-  workstream: '/workstreams',
 }
 
 export default async function DiscussionsPage() {
   const [themes, inits, projs, wss] = await Promise.all([
     recentThemes(60),
+    db.select({ id: objectives.id, name: objectives.name }).from(objectives).orderBy(asc(objectives.name)),
     db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives).orderBy(asc(initiatives.name)),
     db.select({ id: projects.id, name: projects.name }).from(projects).orderBy(asc(projects.name)),
-    db.select({ id: workstreams.id, name: workstreams.name }).from(workstreams).orderBy(asc(workstreams.name)),
   ])
 
   const named = new Map<string, string>()
-  for (const i of inits) named.set(`initiative:${i.id}`, i.name)
-  for (const p of projs) named.set(`project:${p.id}`, p.name)
-  for (const w of wss) named.set(`workstream:${w.id}`, w.name)
+  for (const i of inits) named.set(`objective:${i.id}`, i.name)
+  for (const p of projs) named.set(`initiative:${p.id}`, p.name)
+  for (const w of wss) named.set(`project:${w.id}`, w.name)
 
   const topics: TopicRow[] = themes.map((t) => {
     const key = t.entityId ? `${t.entityType}:${t.entityId}` : ''
@@ -71,7 +71,7 @@ export default async function DiscussionsPage() {
         <div className="tile-head">
           <h2>Active recurring topics</h2>
         </div>
-        <DiscussionsList topics={topics} initiatives={inits} projects={projs} workstreams={wss} />
+        <DiscussionsList topics={topics} objectives={inits} initiatives={projs} projects={wss} />
       </section>
     </div>
   )

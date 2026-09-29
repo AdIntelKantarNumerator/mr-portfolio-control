@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * One card per initiative — or per project, or per workstream.
+ * One card per objective — or per initiative, or per project.
  *
  * The same card at every level, because the question is the same at each: is
  * this on track for its next milestone, and if not, what is in the way. Only
@@ -34,7 +34,7 @@ const STATUS = {
 
 /**
  * Two vocabularies land on these cards: milestones use the deck's legend, and
- * workstreams use the lifecycle's. Both are here because the rail and the mix
+ * projects use the lifecycle's. Both are here because the rail and the mix
  * bar sit on the same card and must not disagree about what green means.
  */
 const MS_COLOR: Record<string, string> = {
@@ -44,7 +44,7 @@ const MS_COLOR: Record<string, string> = {
   at_risk: 'var(--c2)',
   blocked: 'var(--c3)',
   planning: 'var(--line-2)',
-  // workstream and project statuses
+  // project and initiative statuses
   completed: 'var(--c1)',
   // In-progress work, split by whether anything is in its way. Red here is
   // the one place it is earned on this bar: somebody has raised a blocker and
@@ -86,7 +86,7 @@ function Chevron({ open = false }: { open?: boolean }) {
   )
 }
 
-export function InitiativeCard({
+export function ObjectiveCard({
   card,
   onOpen,
 }: {
@@ -105,7 +105,7 @@ export function InitiativeCard({
 
   /** What is actually in one segment of the mix bar. */
   function openMix(g: MixGroup) {
-    const noun = card.level === 'initiative' ? 'project' : card.level === 'project' ? 'workstream' : 'milestone'
+    const noun = card.level === 'objective' ? 'initiative' : card.level === 'initiative' ? 'project' : 'milestone'
     onOpen(
       `${card.name} — ${g.members.length} ${noun}${g.members.length === 1 ? '' : 's'} ${g.label}`,
       <div>
@@ -265,8 +265,8 @@ export function InitiativeCard({
                 <span className="sig">
                   {byline}
                   {edited ? ' (edited)' : ''}
-                  {/* A borrowed assessment says so. Presenting a project's
-                      sentence as though it were written about the initiative
+                  {/* A borrowed assessment says so. Presenting an initiative's
+                      sentence as though it were written about the objective
                       would be the kind of quiet inaccuracy nobody catches. */}
                   {card.verdictRolledUp ? ` · from ${card.verdictRolledUp}` : ''}
                   {card.verdictAt ? (

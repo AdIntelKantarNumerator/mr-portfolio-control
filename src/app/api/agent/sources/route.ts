@@ -8,13 +8,13 @@
  * WHY THIS EXISTS
  *
  * Linear is easy: the sync records the external id, so an update can be
- * attached to a workstream with certainty. Everything else was being attached by
- * looking for the workstream's name in the text — which is a guess presented as a
- * fact, and which silently fails for every workstream whose name nobody writes
+ * attached to a project with certainty. Everything else was being attached by
+ * looking for the project's name in the text — which is a guess presented as a
+ * fact, and which silently fails for every project whose name nobody writes
  * out.
  *
  * Meanwhile the repos to read at all lived in the agent's own configuration,
- * which meant the same question — what belongs to this workstream — was answered
+ * which meant the same question — what belongs to this project — was answered
  * in two places, and the two could disagree with nobody noticing.
  *
  * This is the one answer: a person attached it, their name is on it, and the
@@ -22,7 +22,7 @@
  */
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { conversationSources, projects, workstreams } from '@/db/schema'
+import { conversationSources, initiatives, projects } from '@/db/schema'
 import { isRepoKind, SOURCE_KIND } from '@/lib/domain'
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
 
@@ -34,13 +34,13 @@ export async function GET(req: Request) {
 
   const [rows, inits, projs] = await Promise.all([
     db.select().from(conversationSources).where(eq(conversationSources.active, true)),
+    db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives),
     db.select({ id: projects.id, name: projects.name }).from(projects),
-    db.select({ id: workstreams.id, name: workstreams.name }).from(workstreams),
   ])
 
   const entityName = new Map<string, string>([
-    ...inits.map((i) => [`project:${i.id}`, i.name] as const),
-    ...projs.map((p) => [`workstream:${p.id}`, p.name] as const),
+    ...inits.map((i) => [`initiative:${i.id}`, i.name] as const),
+    ...projs.map((p) => [`project:${p.id}`, p.name] as const),
   ])
 
   return Response.json({
@@ -73,7 +73,7 @@ export async function GET(req: Request) {
  *
  * WHY SHE MAY DO THIS AT ALL
  *
- * Finding that `org/clickhouse-serving` is the Ratings workstream is tedious, and
+ * Finding that `org/clickhouse-serving` is the Ratings project is tedious, and
  * she is well placed to notice it — she reads both. Making a person do that
  * lookup by hand for every repo is how the links never get made, and unmade
  * links are why evidence falls back to guessing at names.
@@ -127,17 +127,17 @@ export async function POST(req: Request) {
       { status: 400 },
     )
   }
-  if (entityType !== 'project' && entityType !== 'workstream') {
-    return Response.json({ error: 'entityType must be project or workstream.' }, { status: 400 })
+  if (entityType !== 'initiative' && entityType !== 'project') {
+    return Response.json({ error: 'entityType must be initiative or project.' }, { status: 400 })
   }
   if (!label) return Response.json({ error: 'label is required.' }, { status: 400 })
 
   // The entity has to exist. Otherwise a mistyped id creates a link to nothing,
   // which is invisible on every screen and silently suppresses name matching.
   const exists =
-    entityType === 'project'
-      ? (await db.select({ id: projects.id }).from(projects).where(eq(projects.id, entityId))).length > 0
-      : (await db.select({ id: workstreams.id }).from(workstreams).where(eq(workstreams.id, entityId))).length > 0
+    entityType === 'initiative'
+      ? (await db.select({ id: initiatives.id }).from(initiatives).where(eq(initiatives.id, entityId))).length > 0
+      : (await db.select({ id: projects.id }).from(projects).where(eq(projects.id, entityId))).length > 0
   if (!exists) return Response.json({ error: `No ${entityType} with id ${entityId}.` }, { status: 404 })
 
   const externalId = body.externalId ? String(body.externalId).trim() : null

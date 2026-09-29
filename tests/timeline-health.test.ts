@@ -83,7 +83,7 @@ test('the window a bar covers', async (t) => {
   await t.test('ended work still counts — a filter must not move a date', () => {
     // The half of the bug that was hardest to see: the timeline built its
     // roll-up from the rows it was about to draw, so switching to "Live only"
-    // took a completed workstream out of its project's window and the bar
+    // took a completed project out of its initiative's window and the bar
     // moved. Callers pass everything; this function has no idea what is being
     // listed, which is the point.
     const w = rollUpWindow({ startDate: null, targetDate: null }, [d('2026-06-17'), d('2026-10-05')])

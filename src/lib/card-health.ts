@@ -34,7 +34,7 @@
  * WHY SILENCE NO LONGER OUTRANKS TROUBLE
  *
  * It used to: a card with no recent activity was "quiet" whatever else was
- * true, so an initiative with four open blockers and a missed date could
+ * true, so an objective with four open blockers and a missed date could
  * report no signal. Silence is now a reason that travels with the state
  * instead of replacing it — and on work with nothing wrong, it is still the
  * headline, because nothing wrong and nothing happening is not the same as
@@ -128,7 +128,7 @@ export function cardHealth(f: HealthFacts): CardHealth {
     })
   }
 
-  // Trouble outranks silence: an initiative with four blockers that nobody has
+  // Trouble outranks silence: an objective with four blockers that nobody has
   // written about in a month is blocked, and reporting "no signal" buries it.
   const health: Health =
     f.blockers > 0 || f.lateDependencies > 0

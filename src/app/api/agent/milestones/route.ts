@@ -11,7 +11,7 @@
  * Everything else an agent writes here is an observation: what a tracker said,
  * what a meeting decided. This is a plan — the thing a team states to a room
  * every other week — and it has lived in a slide deck, which meant the only
- * copy of "what are we trying to do on this workstream" was a file somebody
+ * copy of "what are we trying to do on this project" was a file somebody
  * rebuilt by hand every fortnight.
  *
  * So the write path exists for two jobs, and they are different:
@@ -25,7 +25,7 @@
  *
  * WHAT IT REFUSES
  *
- * A milestone on a workstream that does not exist, a status or phase outside the
+ * A milestone on a project that does not exist, a status or phase outside the
  * deck's own legend, and a calendar band whose months are not months. The
  * legend is the vocabulary the room reads; a value outside it would render as
  * a blank cell on a slide in a meeting.
@@ -33,16 +33,16 @@
 import { asc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
 import {
+  initiatives,
   projects,
-  workstreams,
   milestoneItems,
   milestonePhases,
   milestones,
 } from '@/db/schema'
 import {
-  WORKSTREAM_ITEM_STATE,
-  WORKSTREAM_PHASE,
-  WORKSTREAM_STATUS,
+  PROJECT_ITEM_STATE,
+  PROJECT_PHASE,
+  PROJECT_STATUS,
   isPeriod,
 } from '@/lib/domain'
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
@@ -51,9 +51,9 @@ import { mergeFromSource } from '@/lib/milestones'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const STATUSES = new Set<string>(WORKSTREAM_STATUS)
-const STATES = new Set<string>(WORKSTREAM_ITEM_STATE)
-const PHASES = new Set<string>(WORKSTREAM_PHASE)
+const STATUSES = new Set<string>(PROJECT_STATUS)
+const STATES = new Set<string>(PROJECT_ITEM_STATE)
+const PHASES = new Set<string>(PROJECT_PHASE)
 
 interface IncomingItem {
   state?: string
@@ -67,7 +67,7 @@ interface IncomingPhase {
   toPeriod?: string
 }
 
-interface IncomingWorkstream {
+interface IncomingProject {
   name?: string
   details?: string | null
   status?: string
@@ -87,19 +87,19 @@ interface IncomingWorkstream {
 
 interface Incoming {
   agent?: string
-  workstreamId?: string
+  projectId?: string
   /** Owner is a Person elsewhere; these two are the deck's free-text pairings. */
   devLead?: string | null
   programLead?: string | null
   /**
-   * replace — this workstream's plan is now exactly what is in this payload.
+   * replace — this project's plan is now exactly what is in this payload.
    *           Right for a deck: the deck is the authority and a milestone it
    *           no longer lists has been dropped, not forgotten.
    * merge   — update the ones named here by name, leave the rest alone. Right
    *           for keeping a plan current without claiming to restate it.
    */
   mode?: 'replace' | 'merge'
-  milestones?: IncomingWorkstream[]
+  milestones?: IncomingProject[]
 }
 
 export async function POST(req: Request) {
@@ -113,20 +113,20 @@ export async function POST(req: Request) {
   }
 
   const agent = (body.agent ?? 'yaara').slice(0, 64)
-  const workstreamId = String(body.workstreamId ?? '')
+  const projectId = String(body.projectId ?? '')
   const mode = body.mode === 'merge' ? 'merge' : 'replace'
   const dropped: string[] = []
   // Fields this write deliberately left alone because a person set them.
   const notes: string[] = []
 
-  const [workstream] = await db.select().from(workstreams).where(eq(workstreams.id, workstreamId)).limit(1)
-  if (!workstream) return Response.json({ error: `No workstream with id ${workstreamId}.` }, { status: 400 })
+  const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1)
+  if (!project) return Response.json({ error: `No project with id ${projectId}.` }, { status: 400 })
 
   // The two names that sit beside Owner on the slide. Only overwritten when
   // supplied: a payload about milestones should not blank them.
   if (body.devLead !== undefined || body.programLead !== undefined) {
     await db
-      .update(workstreams)
+      .update(projects)
       .set({
         ...(body.devLead !== undefined ? { devLead: body.devLead?.slice(0, 200) ?? null } : {}),
         ...(body.programLead !== undefined
@@ -134,13 +134,13 @@ export async function POST(req: Request) {
           : {}),
         updatedAt: new Date(),
       })
-      .where(eq(workstreams.id, workstreamId))
+      .where(eq(projects.id, projectId))
   }
 
   const existing = await db
     .select()
     .from(milestones)
-    .where(eq(milestones.entityId, workstreamId))
+    .where(eq(milestones.entityId, projectId))
     .orderBy(asc(milestones.sortOrder))
 
   const byName = new Map(existing.map((w) => [w.name.trim().toLowerCase(), w]))
@@ -157,8 +157,8 @@ export async function POST(req: Request) {
 
     const status = STATUSES.has(String(raw.status)) ? String(raw.status) : 'planning'
     const values = {
-      level: 'workstream' as const,
-      entityId: workstreamId,
+      level: 'project' as const,
+      entityId: projectId,
       name: name.slice(0, 200),
       details: raw.details ? String(raw.details).slice(0, 1000) : null,
       status,
@@ -248,7 +248,7 @@ export async function POST(req: Request) {
     }
   }
 
-  return Response.json({ workstream: workstream.name, written, removed, mode, dropped, notes })
+  return Response.json({ project: project.name, written, removed, mode, dropped, notes })
 }
 
 /**
@@ -263,14 +263,14 @@ export async function GET(req: Request) {
   const needle = (new URL(req.url).searchParams.get('entity') ?? '').trim().toLowerCase()
 
   const [projs, inits, rows, items, phases] = await Promise.all([
-    db.select().from(workstreams),
-    db.select({ id: projects.id, name: projects.name, ownerId: projects.ownerId }).from(projects),
+    db.select().from(projects),
+    db.select({ id: initiatives.id, name: initiatives.name, ownerId: initiatives.ownerId }).from(initiatives),
     db.select().from(milestones).orderBy(asc(milestones.sortOrder)),
     db.select().from(milestoneItems).orderBy(asc(milestoneItems.sortOrder)),
     db.select().from(milestonePhases),
   ])
 
-  const projectName = new Map(inits.map((i) => [i.id, i.name]))
+  const initiativeName = new Map(inits.map((i) => [i.id, i.name]))
   const itemsFor = new Map<string, typeof items>()
   for (const i of items) itemsFor.set(i.milestoneId, [...(itemsFor.get(i.milestoneId) ?? []), i])
   const phasesFor = new Map<string, typeof phases>()
@@ -278,17 +278,17 @@ export async function GET(req: Request) {
 
   const wanted = projs.filter((p) => {
     if (!needle) return true
-    const project = p.projectId ? (projectName.get(p.projectId) ?? '') : ''
-    return p.name.toLowerCase().includes(needle) || project.toLowerCase().includes(needle)
+    const initiative = p.initiativeId ? (initiativeName.get(p.initiativeId) ?? '') : ''
+    return p.name.toLowerCase().includes(needle) || initiative.toLowerCase().includes(needle)
   })
 
   return Response.json({
-    workstreams: wanted.map((p) => ({
+    projects: wanted.map((p) => ({
       id: p.id,
       name: p.name,
       status: p.status,
-      project: p.projectId ? (projectName.get(p.projectId) ?? null) : null,
-      projectId: p.projectId,
+      initiative: p.initiativeId ? (initiativeName.get(p.initiativeId) ?? null) : null,
+      initiativeId: p.initiativeId,
       devLead: p.devLead,
       programLead: p.programLead,
       milestones: rows

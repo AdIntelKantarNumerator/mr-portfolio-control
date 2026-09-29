@@ -8,7 +8,7 @@
  * It was a stack of cards. A card is the right shape for something you read
  * one of; this is something you scan forty of looking for yours, and the
  * question people actually arrive with is "what is outstanding on the GPC
- * initiative" or "what does Priya owe". Neither of those is answerable by
+ * objective" or "what does Priya owe". Neither of those is answerable by
  * reading cards in a fixed order.
  *
  * So: one row per commitment, the three levels of work it belongs to as their
@@ -17,10 +17,11 @@
  *
  * WHY "UNKNOWN" IS SHOWN RATHER THAN LEFT BLANK
  *
- * A commitment nobody tied to a project is a fact about the commitment, and
+ * A commitment nobody tied to an initiative is a fact about the commitment, and
  * one worth being able to filter for. An empty cell reads as a rendering bug;
  * an italic "Unknown" reads as what it is, and it is clickable.
  */
+import { TIER_LABEL } from '@/lib/home-types'
 import { useActionState, useState } from 'react'
 import Link from 'next/link'
 import { RecordTable, type Column } from '@/components/records/table'
@@ -40,9 +41,9 @@ export interface ActionRowView {
   due: string | null
   overdue: boolean
   status: string
+  objective: { id: string; name: string } | null
   initiative: { id: string; name: string } | null
   project: { id: string; name: string } | null
-  workstream: { id: string; name: string } | null
   /** Where this was said, for the hover card. */
   source: Provenance
 }
@@ -55,17 +56,17 @@ export interface Named {
 export function ActionsList({
   rows,
   people,
+  objectives,
   initiatives,
   projects,
-  workstreams,
   closed,
   scope,
 }: {
   rows: ActionRowView[]
   people: Named[]
+  objectives: Named[]
   initiatives: Named[]
   projects: Named[]
-  workstreams: Named[]
   closed: boolean
   /** Set when a home card linked here for one piece of work. */
   scope: { label: string; clear: string; param: string } | null
@@ -74,7 +75,7 @@ export function ActionsList({
 
   const level = (
     row: ActionRowView,
-    key: 'initiative' | 'project' | 'workstream',
+    key: 'objective' | 'initiative' | 'project',
     options: Named[],
   ) => (
     <AssignCell
@@ -86,6 +87,16 @@ export function ActionsList({
   )
 
   const columns: Column<ActionRowView>[] = [
+    {
+      key: 'objective',
+      label: TIER_LABEL.objective,
+      filter: 'select',
+      // On the name, so the rows nobody placed go to the bottom in both
+      // directions rather than sorting under U for "Unknown".
+      sort: { kind: 'text', by: (r) => r.objective?.name },
+      value: (r) => r.objective?.name ?? 'Unknown',
+      cell: (r) => level(r, 'objective', objectives),
+    },
     {
       key: 'initiative',
       label: 'Initiative',
@@ -105,16 +116,6 @@ export function ActionsList({
       sort: { kind: 'text', by: (r) => r.project?.name },
       value: (r) => r.project?.name ?? 'Unknown',
       cell: (r) => level(r, 'project', projects),
-    },
-    {
-      key: 'workstream',
-      label: 'Workstream',
-      filter: 'select',
-      // On the name, so the rows nobody placed go to the bottom in both
-      // directions rather than sorting under U for "Unknown".
-      sort: { kind: 'text', by: (r) => r.workstream?.name },
-      value: (r) => r.workstream?.name ?? 'Unknown',
-      cell: (r) => level(r, 'workstream', workstreams),
     },
     {
       key: 'owner',

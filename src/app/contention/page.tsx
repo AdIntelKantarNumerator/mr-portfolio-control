@@ -20,16 +20,16 @@ export default async function ContentionPage() {
   const loads = personLoads(p)
   const hot = loads.filter((l) => l.hot)
 
-  // Only show teams and projects that actually appear in the matrix —
+  // Only show teams and initiatives that actually appear in the matrix —
   // an all-empty row teaches nothing and makes the real cells harder to find.
   const allocByTeam = new Map<string, Map<string, (typeof p.allocations)[number]>>()
   for (const a of p.allocations) {
     if (!allocByTeam.has(a.teamId)) allocByTeam.set(a.teamId, new Map())
-    allocByTeam.get(a.teamId)!.set(a.projectId, a)
+    allocByTeam.get(a.teamId)!.set(a.initiativeId, a)
   }
   const teams = p.teams.filter((t) => allocByTeam.has(t.id))
-  const projectId = new Set(p.allocations.map((a) => a.projectId))
-  const projects = p.projects.filter((i) => projectId.has(i.id))
+  const initiativeId = new Set(p.allocations.map((a) => a.initiativeId))
+  const initiatives = p.initiatives.filter((i) => initiativeId.has(i.id))
 
   const competing = p.allocations.filter((a) => a.mode === 'competing')
   const frozen = p.allocations.filter((a) => a.mode === 'frozen')
@@ -38,7 +38,7 @@ export default async function ContentionPage() {
     <div className="flex flex-col gap-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat value={hot.length} label="People carrying colliding commitments" tone={hot.length ? 'red' : 'green'} />
-        <Stat value={competing.length} label="Team/project pairs in open competition" tone={competing.length ? 'amber' : undefined} />
+        <Stat value={competing.length} label="Team/initiative pairs in open competition" tone={competing.length ? 'amber' : undefined} />
         <Stat value={frozen.length} label="Frozen allocations" sub="Capacity deliberately withheld" />
         <Stat
           value={p.teams.length - teams.length}
@@ -51,10 +51,10 @@ export default async function ContentionPage() {
       <Card>
         <CardHeading
           title="Named people spread across the portfolio"
-          sub="Reconciled from workstream leads. Red means one person is the dependency for several dated things at once — the bottleneck a capacity total hides."
+          sub="Reconciled from project leads. Red means one person is the dependency for several dated things at once — the bottleneck a capacity total hides."
         />
         {loads.length === 0 ? (
-          <Empty>No workstream leads assigned yet.</Empty>
+          <Empty>No project leads assigned yet.</Empty>
         ) : (
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
             {loads.map((l) => (
@@ -71,25 +71,25 @@ export default async function ContentionPage() {
                 <span
                   className="w-8 shrink-0 text-center text-[17px] font-bold tabular-nums"
                   style={{ color: l.hot ? 'var(--red)' : 'var(--brand)' }}
-                  title={`${l.workstreams.length} open workstreams led`}
+                  title={`${l.projects.length} open projects led`}
                 >
-                  {l.workstreams.length}
+                  {l.projects.length}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-x-2">
                     <span className="text-[12.5px] font-semibold">{l.person.name}</span>
                     <Muted>{l.person.role ?? l.team?.name ?? ''}</Muted>
                     {l.person.bottleneck ? <Chip tone="red">flagged single point</Chip> : null}
-                    {l.initiativeCount > 1 ? (
-                      <Muted>across {l.initiativeCount} projects</Muted>
+                    {l.objectiveCount > 1 ? (
+                      <Muted>across {l.objectiveCount} initiatives</Muted>
                     ) : null}
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-1">
-                    {l.workstreams.map((pr) => (
+                    {l.projects.map((pr) => (
                       <Chip
                         key={pr.id}
                         tone={pr.health.rag === 'red' ? 'red' : pr.health.rag === 'amber' ? 'amber' : 'blue'}
-                        title={`${vocab('projectStatus', pr.status)}${pr.targetDate ? ` · target ${fmtDate(pr.targetDate, { year: true })}` : ''}`}
+                        title={`${vocab('initiativeStatus', pr.status)}${pr.targetDate ? ` · target ${fmtDate(pr.targetDate, { year: true })}` : ''}`}
                       >
                         {pr.name}
                         {pr.targetDate ? ` · ${fmtDate(pr.targetDate)}` : ''}
@@ -112,7 +112,7 @@ export default async function ContentionPage() {
       <Card>
         <CardHeading
           title="Who competes for whom"
-          sub="Teams as rows, projects as columns. Read across a row to see what one team is being asked to do at once."
+          sub="Teams as rows, initiatives as columns. Read across a row to see what one team is being asked to do at once."
         />
         {teams.length === 0 ? (
           <Empty>No allocations recorded yet.</Empty>
@@ -123,7 +123,7 @@ export default async function ContentionPage() {
                 <thead>
                   <tr>
                     <th style={{ minWidth: 190 }}>Team / resource</th>
-                    {projects.map((i) => (
+                    {initiatives.map((i) => (
                       <th key={i.id} className="text-center" style={{ minWidth: 120 }}>
                         {i.name}
                       </th>
@@ -143,7 +143,7 @@ export default async function ContentionPage() {
                             {competingCount ? ` · ${competingCount} competing` : ''}
                           </Muted>
                         </th>
-                        {projects.map((i) => {
+                        {initiatives.map((i) => {
                           const cell = row.get(i.id)
                           if (!cell)
                             return (
@@ -199,7 +199,7 @@ export default async function ContentionPage() {
               than engineer-weeks.
             </>
           ) : (
-            'No single-threaded people detected from the current lead assignments. That is either good news or a sign that workstream leads are not filled in.'
+            'No single-threaded people detected from the current lead assignments. That is either good news or a sign that project leads are not filled in.'
           )}
         </p>
         <p className="m-0 mt-2 text-[12px]">

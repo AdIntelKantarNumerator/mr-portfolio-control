@@ -13,7 +13,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { intakeRequests, workstreams } from '@/db/schema'
+import { intakeRequests, projects } from '@/db/schema'
 import { INTAKE_STATUS, LABELS, intakeInput, type IntakeStatus } from '@/lib/domain'
 import { logChange } from '@/lib/portfolio'
 import { actorName } from '@/lib/auth/current-user'
@@ -47,7 +47,7 @@ export async function moveRequest(formData: FormData) {
   if (!row || row.status === next) return
 
   // 'converted' is owned by approveAndConvert — reaching it by hand would leave
-  // a request marked converted with no workstream behind it.
+  // a request marked converted with no project behind it.
   if (next === 'converted') return
 
   await db.update(intakeRequests).set({ status: next }).where(eq(intakeRequests.id, id))
@@ -142,7 +142,7 @@ export async function createRequest(
     stakeholders: blankToNull(formData.get('stakeholders')),
     themeId: blankToNull(formData.get('themeId')),
     appAreaId: blankToNull(formData.get('appAreaId')),
-    proposedInitiativeId: blankToNull(formData.get('proposedInitiativeId')),
+    proposedObjectiveId: blankToNull(formData.get('proposedObjectiveId')),
     desiredDate: blankToNull(formData.get('desiredDate')),
     hardDate: formData.get('hardDate') === 'on',
     hardDateReason: blankToNull(formData.get('hardDateReason')),
@@ -187,7 +187,7 @@ export async function createRequest(
         stakeholders: data.stakeholders ?? null,
         themeId: data.themeId ?? null,
         appAreaId: data.appAreaId ?? null,
-        proposedInitiativeId: data.proposedInitiativeId ?? null,
+        proposedObjectiveId: data.proposedObjectiveId ?? null,
         desiredDate: data.desiredDate,
         hardDate: data.hardDate,
         hardDateReason: data.hardDateReason ?? null,
@@ -232,7 +232,7 @@ export async function createRequest(
 }
 
 // ---------------------------------------------------------------------------
-// Approve → create workstream
+// Approve → create project
 // ---------------------------------------------------------------------------
 
 export async function approveAndConvert(formData: FormData) {
@@ -242,33 +242,33 @@ export async function approveAndConvert(formData: FormData) {
   const [row] = await db.select().from(intakeRequests).where(eq(intakeRequests.id, id)).limit(1)
   // Converting anything but an approved request would turn intake into a side
   // door around the decision it exists to record.
-  if (!row || row.status !== 'approved' || row.convertedProjectId) return
+  if (!row || row.status !== 'approved' || row.convertedInitiativeId) return
 
   const existing = await db
-    .select({ key: workstreams.key, sortOrder: workstreams.sortOrder })
-    .from(workstreams)
-    .orderBy(desc(workstreams.sortOrder))
+    .select({ key: projects.key, sortOrder: projects.sortOrder })
+    .from(projects)
+    .orderBy(desc(projects.sortOrder))
   const taken = new Set(existing.map((p) => p.key))
   const base = slugify(row.title) || slugify(row.ref)
   // Deterministic rather than "-2", "-3": two concurrent submits for the same
   // request compute the same key, so the unique index turns a double-click into
-  // a no-op instead of a second workstream nobody asked for.
+  // a no-op instead of a second project nobody asked for.
   const key = taken.has(base) ? `${base}-${slugify(row.ref)}` : base
 
   // The id is generated here rather than read back with `.returning()`: the
   // `db` handle is a union of two drivers and the returning overload does not
   // resolve across it, and the request row needs the id in the same breath.
-  const workstreamId = randomUUID()
+  const projectId = randomUUID()
 
   try {
-    await db.insert(workstreams).values({
-      id: workstreamId,
+    await db.insert(projects).values({
+      id: projectId,
       key,
       name: row.title,
       description: row.problem,
       status: 'backlog',
       progress: 0,
-      projectId: row.proposedInitiativeId,
+      initiativeId: row.proposedObjectiveId,
       appAreaId: row.appAreaId,
       targetDate: row.desiredDate,
       sortOrder: (existing[0]?.sortOrder ?? 0) + 1,
@@ -280,16 +280,16 @@ export async function approveAndConvert(formData: FormData) {
 
   await db
     .update(intakeRequests)
-    .set({ status: 'converted', convertedProjectId: workstreamId })
+    .set({ status: 'converted', convertedInitiativeId: projectId })
     .where(eq(intakeRequests.id, id))
 
   await logChange({
     actor: await actorName(),
     kind: 'change',
-    summary: `${row.ref} approved and converted to workstream "${row.title}"`,
+    summary: `${row.ref} approved and converted to project "${row.title}"`,
     detail: [
-      `Workstream key ${key}`,
-      row.proposedInitiativeId ? 'Linked to the proposed project' : 'No project linked yet',
+      `Project key ${key}`,
+      row.proposedObjectiveId ? 'Linked to the proposed initiative' : 'No initiative linked yet',
       row.desiredDate ? `Target date carried over from the desired date` : 'No target date set',
     ].join(' · '),
     entityType: ENTITY,

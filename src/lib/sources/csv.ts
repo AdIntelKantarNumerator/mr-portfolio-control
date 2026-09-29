@@ -8,7 +8,7 @@
 /**
  * Minimal RFC 4180 CSV parser.
  *
- * Splitting on commas breaks the moment a workstream name contains one, which in
+ * Splitting on commas breaks the moment a project name contains one, which in
  * a real tracker is immediately. Quoted fields, escaped quotes and CRLF are
  * handled; anything more exotic belongs in a real parser, but this covers
  * every export Sheets and Excel produce.
@@ -75,7 +75,7 @@ export function csvUrlFor(url: string): string {
   return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
 }
 
-/** Column values people actually type, mapped onto the workstream vocabulary. */
+/** Column values people actually type, mapped onto the project vocabulary. */
 export const STATUS_ALIASES: Record<string, string> = {
   'not started': 'backlog',
   backlog: 'backlog',

@@ -5,7 +5,7 @@
  *
  * The plan — what a team says it will deliver and by when — arrives from
  * Linear and from read program review decks. Neither of those is always
- * right, and neither covers an initiative at all: nothing upstream knows what
+ * right, and neither covers an objective at all: nothing upstream knows what
  * "Ad Intelligence Platform" is committed to, because the grouping only
  * exists here.
  *
@@ -24,11 +24,11 @@
 import { revalidatePath } from 'next/cache'
 import { asc, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { initiatives, milestones, projects, workstreams } from '@/db/schema'
+import { objectives, milestones, initiatives, projects } from '@/db/schema'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
 import { lockedAfterEdit, type MilestoneField } from '@/lib/milestones'
-import { WORKSTREAM_STATUS } from '@/lib/domain'
+import { PROJECT_STATUS } from '@/lib/domain'
 
 export interface MilestoneState {
   ok?: boolean
@@ -37,8 +37,8 @@ export interface MilestoneState {
   stamp?: number
 }
 
-const LEVELS = new Set(['initiative', 'project', 'workstream'])
-const STATUSES = new Set<string>(WORKSTREAM_STATUS)
+const LEVELS = new Set(['objective', 'initiative', 'project'])
+const STATUSES = new Set<string>(PROJECT_STATUS)
 
 function refresh(level: string, entityId: string) {
   revalidatePath('/')
@@ -49,15 +49,15 @@ function refresh(level: string, entityId: string) {
 
 /** The row exists and is at the level it claims. */
 async function entityName(level: string, id: string): Promise<string | null> {
+  if (level === 'objective') {
+    const [r] = await db.select({ name: objectives.name }).from(objectives).where(eq(objectives.id, id)).limit(1)
+    return r?.name ?? null
+  }
   if (level === 'initiative') {
     const [r] = await db.select({ name: initiatives.name }).from(initiatives).where(eq(initiatives.id, id)).limit(1)
     return r?.name ?? null
   }
-  if (level === 'project') {
-    const [r] = await db.select({ name: projects.name }).from(projects).where(eq(projects.id, id)).limit(1)
-    return r?.name ?? null
-  }
-  const [r] = await db.select({ name: workstreams.name }).from(workstreams).where(eq(workstreams.id, id)).limit(1)
+  const [r] = await db.select({ name: projects.name }).from(projects).where(eq(projects.id, id)).limit(1)
   return r?.name ?? null
 }
 

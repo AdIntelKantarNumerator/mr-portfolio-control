@@ -16,22 +16,22 @@
 import { strict as assert } from 'node:assert'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { PROJECT_STATUS, PRIORITY, WORKSTREAM_STATUS_SET } from '../src/lib/domain'
+import { INITIATIVE_STATUS, PRIORITY, PROJECT_STATUS_SET } from '../src/lib/domain'
 
 const AGREED = [
   'appArea',
   'description',
   'devLead',
-  // The grouping tier above projects. Refused for workstreams: they roll up to
-  // a project, and letting one name an initiative would build a second
-  // hierarchy nothing else in the app knows about.
+  // Moving a project between initiatives — the tier directly above it.
   'initiative',
   'name',
+  // The grouping tier above initiatives. Refused for projects: they roll up
+  // to an initiative, and letting one name an objective directly would build
+  // a second hierarchy nothing else in the app knows about.
+  'objective',
   'owner',
   'priority',
   'programLead',
-  // What used to be 'initiative': moving a workstream between projects.
-  'project',
   'sponsor',
   'startDate',
   'status',
@@ -67,9 +67,9 @@ test('a change without a reason cannot be written', async () => {
 })
 
 test('statuses come from the lifecycle lists, not from free text', () => {
-  assert.ok((WORKSTREAM_STATUS_SET as readonly string[]).includes('completed'))
-  assert.ok((WORKSTREAM_STATUS_SET as readonly string[]).includes('canceled'))
-  assert.ok(!(WORKSTREAM_STATUS_SET as readonly string[]).includes('done'))
-  assert.ok((PROJECT_STATUS as readonly string[]).includes('paused'))
+  assert.ok((PROJECT_STATUS_SET as readonly string[]).includes('completed'))
+  assert.ok((PROJECT_STATUS_SET as readonly string[]).includes('canceled'))
+  assert.ok(!(PROJECT_STATUS_SET as readonly string[]).includes('done'))
+  assert.ok((INITIATIVE_STATUS as readonly string[]).includes('paused'))
   assert.ok(!(PRIORITY as readonly string[]).includes('P0'))
 })

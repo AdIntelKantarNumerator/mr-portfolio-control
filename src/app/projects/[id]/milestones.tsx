@@ -11,16 +11,17 @@
  * milestones as five open forms is a page nobody can read; five summaries
  * with the status and date visible is the slide itself.
  */
+import { TIER_LABEL } from '@/lib/home-types'
 import { useActionState, useState } from 'react'
-import { WORKSTREAM_ITEM_STATE, WORKSTREAM_PHASE, WORKSTREAM_STATUS, label } from '@/lib/domain'
+import { PROJECT_ITEM_STATE, PROJECT_PHASE, PROJECT_STATUS, label } from '@/lib/domain'
 import {
   addPhase,
-  addWorkstream,
+  addProject,
   removePhase,
-  removeWorkstream,
+  removeProject,
   setLeads,
-  updateWorkstream,
-  type WorkstreamState,
+  updateProject,
+  type ProjectState,
 } from './milestone-actions'
 
 export interface PhaseView {
@@ -31,7 +32,7 @@ export interface PhaseView {
   toPeriod: string
 }
 
-export interface WorkstreamView {
+export interface ProjectView {
   id: string
   name: string
   details: string | null
@@ -86,21 +87,21 @@ function StatusChip({ status }: { status: string }) {
       className="rounded px-1.5 py-0.5 text-[10.5px] font-bold"
       style={{ background: STATUS_COLOR[status] ?? '#d9d9d9', color: '#1a1a1a' }}
     >
-      {label('workstreamStatus', status)}
+      {label('projectStatus', status)}
     </span>
   )
 }
 
-function bulletsFor(w: WorkstreamView, state: string) {
+function bulletsFor(w: ProjectView, state: string) {
   return w.items
     .filter((i) => i.state === state)
     .map((i) => i.text)
     .join('\n')
 }
 
-function PhaseEditor({ w, workstreamId }: { w: WorkstreamView; workstreamId: string }) {
-  const [state, action, pending] = useActionState<WorkstreamState, FormData>(addPhase, {})
-  const [, removeAction] = useActionState<WorkstreamState, FormData>(removePhase, {})
+function PhaseEditor({ w, projectId }: { w: ProjectView; projectId: string }) {
+  const [state, action, pending] = useActionState<ProjectState, FormData>(addPhase, {})
+  const [, removeAction] = useActionState<ProjectState, FormData>(removePhase, {})
 
   return (
     <div className="mt-3">
@@ -116,12 +117,12 @@ function PhaseEditor({ w, workstreamId }: { w: WorkstreamView; workstreamId: str
                   className="rounded px-1.5 py-0.5"
                   style={{ background: 'var(--raised)', border: '1px solid var(--line)' }}
                 >
-                  {p.label || label('workstreamPhase', p.phase)} · {p.fromPeriod}
+                  {p.label || label('projectPhase', p.phase)} · {p.fromPeriod}
                   {p.toPeriod !== p.fromPeriod ? ` → ${p.toPeriod}` : ''}
                 </span>
                 <form action={removeAction}>
                   <input type="hidden" name="id" value={p.id} />
-                  <input type="hidden" name="workstreamId" value={workstreamId} />
+                  <input type="hidden" name="projectId" value={projectId} />
                   <button
                     type="submit"
                     aria-label={`Remove ${p.phase} band`}
@@ -138,11 +139,11 @@ function PhaseEditor({ w, workstreamId }: { w: WorkstreamView; workstreamId: str
 
       <form action={action} className="flex flex-wrap items-end gap-1.5">
         <input type="hidden" name="milestoneId" value={w.id} />
-        <input type="hidden" name="workstreamId" value={workstreamId} />
+        <input type="hidden" name="projectId" value={projectId} />
         <select name="phase" className="rounded-md border px-2 py-1 text-[11.5px]" defaultValue="development">
-          {WORKSTREAM_PHASE.map((p) => (
+          {PROJECT_PHASE.map((p) => (
             <option key={p} value={p}>
-              {label('workstreamPhase', p)}
+              {label('projectPhase', p)}
             </option>
           ))}
         </select>
@@ -162,10 +163,10 @@ function PhaseEditor({ w, workstreamId }: { w: WorkstreamView; workstreamId: str
   )
 }
 
-function Row({ w, workstreamId }: { w: WorkstreamView; workstreamId: string }) {
+function Row({ w, projectId }: { w: ProjectView; projectId: string }) {
   const [open, setOpen] = useState(false)
-  const [state, action, pending] = useActionState<WorkstreamState, FormData>(updateWorkstream, {})
-  const [, deleteAction] = useActionState<WorkstreamState, FormData>(removeWorkstream, {})
+  const [state, action, pending] = useActionState<ProjectState, FormData>(updateProject, {})
+  const [, deleteAction] = useActionState<ProjectState, FormData>(removeProject, {})
 
   return (
     <li className="rounded-lg border px-3 py-2.5" style={{ borderColor: 'var(--line)' }}>
@@ -202,7 +203,7 @@ function Row({ w, workstreamId }: { w: WorkstreamView; workstreamId: string }) {
 
         On the page as well as the slide, and deliberately: the owner should be
         able to disagree with her here, quietly, rather than first seeing it
-        projected in a room. Editing the row clears it.
+        initiativeed in a room. Editing the row clears it.
       */}
       {w.agentNote ? (
         <div
@@ -230,19 +231,19 @@ function Row({ w, workstreamId }: { w: WorkstreamView; workstreamId: string }) {
         <>
           <form action={action} className="mt-2 flex flex-col gap-2">
             <input type="hidden" name="id" value={w.id} />
-            <input type="hidden" name="workstreamId" value={workstreamId} />
+            <input type="hidden" name="projectId" value={projectId} />
 
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="flex flex-col gap-1">
-                <span className={legend}>Objective</span>
+                <span className={legend}>{TIER_LABEL.objective}</span>
                 <input name="name" defaultValue={w.name} className={field} />
               </label>
               <label className="flex flex-col gap-1">
                 <span className={legend}>Status</span>
                 <select name="status" defaultValue={w.status} className={field}>
-                  {WORKSTREAM_STATUS.map((s) => (
+                  {PROJECT_STATUS.map((s) => (
                     <option key={s} value={s}>
-                      {label('workstreamStatus', s)}
+                      {label('projectStatus', s)}
                     </option>
                   ))}
                 </select>
@@ -271,9 +272,9 @@ function Row({ w, workstreamId }: { w: WorkstreamView; workstreamId: string }) {
             </div>
 
             <div className="grid gap-2 sm:grid-cols-3">
-              {WORKSTREAM_ITEM_STATE.map((s) => (
+              {PROJECT_ITEM_STATE.map((s) => (
                 <label key={s} className="flex flex-col gap-1">
-                  <span className={legend}>{label('workstreamItemState', s)}</span>
+                  <span className={legend}>{label('projectItemState', s)}</span>
                   <textarea
                     name={`items_${s}`}
                     rows={4}
@@ -297,11 +298,11 @@ function Row({ w, workstreamId }: { w: WorkstreamView; workstreamId: string }) {
             </div>
           </form>
 
-          <PhaseEditor w={w} workstreamId={workstreamId} />
+          <PhaseEditor w={w} projectId={projectId} />
 
           <form action={deleteAction} className="mt-3">
             <input type="hidden" name="id" value={w.id} />
-            <input type="hidden" name="workstreamId" value={workstreamId} />
+            <input type="hidden" name="projectId" value={projectId} />
             <Btn type="submit" tone="danger">
               Remove this milestone
             </Btn>
@@ -313,18 +314,18 @@ function Row({ w, workstreamId }: { w: WorkstreamView; workstreamId: string }) {
 }
 
 export function Milestones({
-  workstreamId,
+  projectId,
   milestones,
   devLead,
   programLead,
 }: {
-  workstreamId: string
-  milestones: WorkstreamView[]
+  projectId: string
+  milestones: ProjectView[]
   devLead: string | null
   programLead: string | null
 }) {
-  const [addState, addAction, adding] = useActionState<WorkstreamState, FormData>(addWorkstream, {})
-  const [, leadsAction] = useActionState<WorkstreamState, FormData>(setLeads, {})
+  const [addState, addAction, adding] = useActionState<ProjectState, FormData>(addProject, {})
+  const [, leadsAction] = useActionState<ProjectState, FormData>(setLeads, {})
 
   return (
     <div className="no-print flex flex-col gap-3">
@@ -347,7 +348,7 @@ export function Milestones({
             className="rounded-md border px-2.5 py-1.5 text-[12.5px]"
           />
         </label>
-        <input type="hidden" name="workstreamId" value={workstreamId} />
+        <input type="hidden" name="projectId" value={projectId} />
         <Btn type="submit">Save names</Btn>
       </form>
 
@@ -359,7 +360,7 @@ export function Milestones({
       ) : (
         <ul className="m-0 flex list-none flex-col gap-2 p-0">
           {milestones.map((w) => (
-            <Row key={w.id} w={w} workstreamId={workstreamId} />
+            <Row key={w.id} w={w} projectId={projectId} />
           ))}
         </ul>
       )}
@@ -378,11 +379,11 @@ export function Milestones({
         style={{ borderColor: 'var(--line)' }}
       >
         <span className={legend}>Add a milestone</span>
-        <input type="hidden" name="workstreamId" value={workstreamId} />
+        <input type="hidden" name="projectId" value={projectId} />
 
         <div className="flex flex-wrap gap-2">
           <label className="flex min-w-[200px] flex-1 flex-col gap-1">
-            <span className={legend}>Objective</span>
+            <span className={legend}>{TIER_LABEL.objective}</span>
             <input name="name" placeholder="Sports Dashboard MVP" className={field} required />
           </label>
           <label className="flex min-w-[240px] flex-[2] flex-col gap-1">

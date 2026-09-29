@@ -5,11 +5,11 @@
  *
  * Reads as text until you click it, then becomes a select. Same idea as the
  * click-to-edit on the list pages, and the same reason: the place you notice
- * a commitment is filed under the wrong project is the row you are reading,
+ * a commitment is filed under the wrong initiative is the row you are reading,
  * and a correction that needs another screen does not get made.
  *
  * "Unknown" is a real value, shown in italics rather than as an empty cell. A
- * commitment nobody tied to a project is a fact about the commitment, and an
+ * commitment nobody tied to an initiative is a fact about the commitment, and an
  * empty cell reads as a rendering bug.
  */
 import { useState } from 'react'

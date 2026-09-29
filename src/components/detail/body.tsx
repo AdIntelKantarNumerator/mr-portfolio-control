@@ -16,7 +16,7 @@ import type { DetailData } from '@/lib/detail'
  * checklist, and only when something on it is outstanding.
  *
  * The tiers differ in what rolls up into these, never in which tiles appear
- * or what order they are in. A reader who has learned the project page has
+ * or what order they are in. A reader who has learned the initiative page has
  * learned all three.
  */
 export function DetailBody({
@@ -26,7 +26,7 @@ export function DetailBody({
   entity,
   adding,
 }: {
-  /** "Project" | "Workstream" | "Initiative" — used in two tile titles. */
+  /** "Initiative" | "Project" | "Strategic Objective" — used in two tile titles. */
   tier: string
   data: DetailData
   canEdit: boolean
@@ -45,14 +45,14 @@ export function DetailBody({
   const editable = (kind: 'blocker' | 'dependency') =>
     canEdit && adding ? { kind, ctx: { people: adding.people, endpoints: adding.endpoints } } : undefined
 
-  // The tier as the timeline names it — the header says "Project", the chart
-  // wants 'project'.
-  const tierLevel = tier.toLowerCase() as 'initiative' | 'project' | 'workstream'
+  // The tier as the timeline names it — the header says "Initiative", the chart
+  // wants 'initiative'.
+  const tierLevel = tier.toLowerCase() as 'objective' | 'initiative' | 'project'
 
   return (
     <>
       {/* When there is a tier beneath, the right column carries the updates
-          and then that list. A workstream has no tier beneath, so its updates
+          and then that list. A project has no tier beneath, so its updates
           tile stretches to the height of the health tile beside it rather
           than leaving a column of empty page. */}
       {/* The top row always squares off: whatever is in the right column ends
@@ -89,14 +89,14 @@ export function DetailBody({
           {data.children && (
             <ListTile
               title={data.children.title}
-              icon={data.children.title === 'Projects' ? 'projects' : 'workstreams'}
+              icon={data.children.title === 'Initiatives' ? 'initiatives' : 'projects'}
               items={data.children.items}
               perPage={8}
               empty={`No ${data.children.title.toLowerCase()} yet.`}
               add={
-                canEdit && (entity.entityType === 'initiative' || entity.entityType === 'project') ? (
+                canEdit && (entity.entityType === 'objective' || entity.entityType === 'initiative') ? (
                   <NewChildButton
-                    level={entity.entityType === 'initiative' ? 'project' : 'workstream'}
+                    level={entity.entityType === 'objective' ? 'initiative' : 'project'}
                     parentId={entity.entityId}
                     label={data.children.title}
                   />
@@ -165,7 +165,7 @@ export function DetailBody({
       {data.readiness && (
         <div className="tiles">
           <ReadinessTile
-            workstreamId={data.readiness.workstreamId}
+            projectId={data.readiness.projectId}
             streams={data.readiness.streams}
           />
         </div>

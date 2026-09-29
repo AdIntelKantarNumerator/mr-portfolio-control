@@ -52,10 +52,10 @@ const STATUS_NOTE: Record<IntakeStatus, string> = {
   triage: 'Being read and routed. Duplicates and non-requests die here.',
   scoring: 'In the model, waiting for criteria to be filled in.',
   ranked: 'Scored and placed on the ranked list. Above or below the cut line is decided there.',
-  approved: 'Leadership said yes. Not real until it is a workstream.',
+  approved: 'Leadership said yes. Not real until it is a project.',
   rejected: 'Said no, with a reason on the record.',
   deferred: 'Not now. Revisit at the next planning cycle.',
-  converted: 'Became a workstream. The delivery layer owns it from here.',
+  converted: 'Became a project. The delivery layer owns it from here.',
 }
 
 /** Statuses a request can be pushed to by hand; 'converted' is earned, not set. */
@@ -203,17 +203,17 @@ function RequestCard({
               <button
                 type="submit"
                 className="btn btn-primary !py-1"
-                title="Creates a backlog workstream carrying the title, problem, app area and proposed project, then marks this request converted."
+                title="Creates a backlog project carrying the title, problem, app area and proposed initiative, then marks this request converted."
               >
-                Create workstream
+                Create project
               </button>
             </form>
           ) : null}
 
-          {r.convertedProjectId ? (
+          {r.convertedInitiativeId ? (
             <span className="ml-auto">
-              <Chip tone="green" title="A workstream exists for this request.">
-                workstream created
+              <Chip tone="green" title="A project exists for this request.">
+                project created
               </Chip>
             </span>
           ) : null}

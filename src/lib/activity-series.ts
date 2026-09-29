@@ -14,7 +14,7 @@
  * WHAT IT DOES NOW
  *
  * Counts what actually happened, per week, over the last eight. That is a
- * shape worth looking at — a project that was busy a month ago and silent
+ * shape worth looking at — an initiative that was busy a month ago and silent
  * since reads differently from one that picked up last week, and those two
  * had the same picture before.
  *

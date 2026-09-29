@@ -12,9 +12,9 @@
  *
  * The sync returned 400 on every run for days:
  *
- *   Field "status" of type "ProjectStatus!" must have a selection of subfields
+ *   Field "status" of type "InitiativeStatus!" must have a selection of subfields
  *
- * Linear had changed Project.status from an enum to an object. The old probe
+ * Linear had changed Initiative.status from an enum to an object. The old probe
  * asked only whether a field called "status" still existed — it did — and went
  * on requesting it as a leaf. One invalid field takes the whole query down
  * with it, which is precisely what probing the schema was supposed to prevent:
@@ -184,7 +184,7 @@ export function shrinkPage(pageSize: number, message: string): number | null {
  * no capabilities — the same outcome as a type the schema does not have,
  * which is the behaviour the callers already handle.
  */
-export const PROBE_TYPES = ['Team', 'User', 'Project', 'Workstream'] as const
+export const PROBE_TYPES = ['Team', 'User', 'Initiative', 'Project'] as const
 
 /** One `__type` block per type, aliased so the response can be put back together. */
 export function probeQuery(types: readonly string[] = PROBE_TYPES): string {

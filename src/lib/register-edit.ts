@@ -60,7 +60,7 @@ export function parseDay(raw: string | null | undefined, field: string): Checked
   return ok(at)
 }
 
-/** "project:abc" → { type, id }. The form's one field for a two-part answer. */
+/** "initiative:abc" → { type, id }. The form's one field for a two-part answer. */
 export function parseEndpoint(raw: string | null | undefined): { type: string; id: string } | null {
   const [type, ...rest] = String(raw ?? '').split(':')
   const id = rest.join(':')
@@ -87,7 +87,7 @@ export function blockerPatch(input: {
   category?: string
   ownerId?: string | null
   dueBy?: string | null
-  /** "project:abc", or "" for nothing in particular. */
+  /** "initiative:abc", or "" for nothing in particular. */
   at?: string | null
 }): Checked<BlockerEdit> {
   const title = (input.title ?? '').trim()
@@ -102,7 +102,7 @@ export function blockerPatch(input: {
   let entityId: string | null = null
   if (at) {
     const end = parseEndpoint(at)
-    if (!end || !['initiative', 'project', 'workstream'].includes(end.type)) {
+    if (!end || !['objective', 'initiative', 'project'].includes(end.type)) {
       return no('That is not a piece of work this portfolio has.', 'at')
     }
     level = end.type

@@ -18,11 +18,11 @@ import {
   decisions,
   dependencies,
   entityThemes,
-  projects,
+  initiatives,
   intakeRequests,
   milestones,
   people,
-  workstreams,
+  projects,
   sourceRecords,
   syncRuns,
   teams,
@@ -46,7 +46,7 @@ export type DependencyRow = typeof dependencies.$inferSelect
 export type AllocationRow = typeof allocations.$inferSelect
 export type IntakeRow = typeof intakeRequests.$inferSelect
 
-export interface WorkstreamView extends Omit<typeof workstreams.$inferSelect, never> {
+export interface ProjectView extends Omit<typeof projects.$inferSelect, never> {
   health: ResolvedHealth
   lead: PersonRow | null
   team: TeamRow | null
@@ -58,16 +58,16 @@ export interface WorkstreamView extends Omit<typeof workstreams.$inferSelect, ne
   sources: { system: string; url: string | null }[]
 }
 
-export interface ProjectView extends Omit<typeof projects.$inferSelect, never> {
+export interface InitiativeView extends Omit<typeof initiatives.$inferSelect, never> {
   health: ResolvedHealth
   owner: PersonRow | null
   sponsor: PersonRow | null
   theme: ThemeRow | null
-  workstreams: WorkstreamView[]
+  projects: ProjectView[]
   overridden: string[]
   sourceValues: Record<string, unknown>
   sources: { system: string; url: string | null }[]
-  /** Rolled up from workstreams when the project itself has no dates. */
+  /** Rolled up from projects when the initiative itself has no dates. */
   derivedStart: Date | null
   derivedTarget: Date | null
 }
@@ -77,17 +77,17 @@ export interface Portfolio {
   appAreas: AppAreaRow[]
   teams: TeamRow[]
   people: PersonRow[]
+  initiatives: InitiativeView[]
   projects: ProjectView[]
-  workstreams: WorkstreamView[]
   allocations: AllocationRow[]
   dependencies: DependencyRow[]
   decisions: DecisionRow[]
-  milestones: (MilestoneRow & { workstream: WorkstreamView })[]
+  milestones: (MilestoneRow & { project: ProjectView })[]
   lastSync: (typeof syncRuns.$inferSelect) | null
 }
 
-const PROJECT_DATE_FIELDS = ['startDate', 'targetDate', 'startedAt', 'completedAt'] as const
-const INITIATIVE_DATE_FIELDS = ['startDate', 'targetDate'] as const
+const INITIATIVE_DATE_FIELDS = ['startDate', 'targetDate', 'startedAt', 'completedAt'] as const
+const OBJECTIVE_DATE_FIELDS = ['startDate', 'targetDate'] as const
 
 /** Current assessments for a set of entities, keyed `type:id`. */
 async function loadAssessments(entityType: string, ids: string[]) {
@@ -126,19 +126,19 @@ async function loadSources(entityType: string, ids: string[]) {
   return map
 }
 
-function mergeProject(
-  row: typeof workstreams.$inferSelect,
+function mergeInitiative(
+  row: typeof projects.$inferSelect,
   ctx: {
     overrides: OverrideMap
     assessment?: typeof assessments.$inferSelect
     peopleById: Map<string, PersonRow>
     teamsById: Map<string, TeamRow>
     areasById: Map<string, AppAreaRow>
-    milestonesByProject: Map<string, MilestoneRow[]>
+    milestonesByInitiative: Map<string, MilestoneRow[]>
     sources: { system: string; url: string | null }[]
   },
-): WorkstreamView {
-  const merged = applyOverrides(row, 'workstream', ctx.overrides, PROJECT_DATE_FIELDS)
+): ProjectView {
+  const merged = applyOverrides(row, 'project', ctx.overrides, INITIATIVE_DATE_FIELDS)
   const v = merged.value
   return {
     ...v,
@@ -146,7 +146,7 @@ function mergeProject(
     lead: v.leadId ? (ctx.peopleById.get(v.leadId) ?? null) : null,
     team: v.teamId ? (ctx.teamsById.get(v.teamId) ?? null) : null,
     appArea: v.appAreaId ? (ctx.areasById.get(v.appAreaId) ?? null) : null,
-    milestones: ctx.milestonesByProject.get(v.id) ?? [],
+    milestones: ctx.milestonesByInitiative.get(v.id) ?? [],
     overridden: [...merged.overridden],
     sourceValues: merged.sourceValues,
     sources: ctx.sources,
@@ -157,7 +157,7 @@ function mergeProject(
  * Loads the whole portfolio. Cached per request, so a page that renders five
  * views costs one set of queries rather than five.
  *
- * The portfolio is deliberately small data — hundreds of workstreams, not
+ * The portfolio is deliberately small data — hundreds of projects, not
  * millions of rows — so loading it whole and shaping it in memory is both
  * faster and far easier to reason about than per-view SQL.
  */
@@ -167,8 +167,8 @@ export const getPortfolio = cache(async (): Promise<Portfolio> => {
     areaRows,
     teamRows,
     personRows,
+    objectiveRows,
     initiativeRows,
-    projectRows,
     milestoneRows,
     allocationRows,
     dependencyRows,
@@ -179,8 +179,8 @@ export const getPortfolio = cache(async (): Promise<Portfolio> => {
     db.select().from(appAreas).orderBy(appAreas.sortOrder),
     db.select().from(teams).orderBy(teams.name),
     db.select().from(people).orderBy(people.name),
+    db.select().from(initiatives).orderBy(initiatives.sortOrder, initiatives.name),
     db.select().from(projects).orderBy(projects.sortOrder, projects.name),
-    db.select().from(workstreams).orderBy(workstreams.sortOrder, workstreams.name),
     db.select().from(milestones).orderBy(milestones.targetDate),
     db.select().from(allocations),
     db.select().from(dependencies),
@@ -188,23 +188,23 @@ export const getPortfolio = cache(async (): Promise<Portfolio> => {
     db.select().from(syncRuns).orderBy(desc(syncRuns.startedAt)).limit(1),
   ])
 
-  const workstreamId = projectRows.map((p) => p.id)
-  const projectId = initiativeRows.map((i) => i.id)
+  const projectId = initiativeRows.map((p) => p.id)
+  const initiativeId = objectiveRows.map((i) => i.id)
 
   const [
-    projectOverrides,
     initiativeOverrides,
-    projectAssessments,
+    objectiveOverrides,
     initiativeAssessments,
-    projectSources,
+    objectiveAssessments,
     initiativeSources,
+    objectiveSources,
   ] = await Promise.all([
-    loadOverrides('workstream', workstreamId),
     loadOverrides('project', projectId),
-    loadAssessments('workstream', workstreamId),
+    loadOverrides('initiative', initiativeId),
     loadAssessments('project', projectId),
-    loadSources('workstream', workstreamId),
+    loadAssessments('initiative', initiativeId),
     loadSources('project', projectId),
+    loadSources('initiative', initiativeId),
   ])
 
   const peopleById = new Map(personRows.map((p) => [p.id, p]))
@@ -212,38 +212,38 @@ export const getPortfolio = cache(async (): Promise<Portfolio> => {
   const areasById = new Map(areaRows.map((a) => [a.id, a]))
   const themesById = new Map(themeRows.map((t) => [t.id, t]))
 
-  const milestonesByProject = new Map<string, MilestoneRow[]>()
+  const milestonesByInitiative = new Map<string, MilestoneRow[]>()
   for (const m of milestoneRows) {
-    if (!milestonesByProject.has(m.entityId)) milestonesByProject.set(m.entityId, [])
-    milestonesByProject.get(m.entityId)!.push(m)
+    if (!milestonesByInitiative.has(m.entityId)) milestonesByInitiative.set(m.entityId, [])
+    milestonesByInitiative.get(m.entityId)!.push(m)
   }
 
-  const projectViews = projectRows.map((row) =>
-    mergeProject(row, {
-      overrides: projectOverrides,
-      assessment: projectAssessments.get(row.id),
+  const initiativeViews = initiativeRows.map((row) =>
+    mergeInitiative(row, {
+      overrides: initiativeOverrides,
+      assessment: initiativeAssessments.get(row.id),
       peopleById,
       teamsById,
       areasById,
-      milestonesByProject,
-      sources: projectSources.get(row.id) ?? [],
+      milestonesByInitiative,
+      sources: initiativeSources.get(row.id) ?? [],
     }),
   )
-  const projectsByInitiative = new Map<string, WorkstreamView[]>()
-  for (const p of projectViews) {
-    if (!p.projectId) continue
-    if (!projectsByInitiative.has(p.projectId)) projectsByInitiative.set(p.projectId, [])
-    projectsByInitiative.get(p.projectId)!.push(p)
+  const initiativesByObjective = new Map<string, ProjectView[]>()
+  for (const p of initiativeViews) {
+    if (!p.initiativeId) continue
+    if (!initiativesByObjective.has(p.initiativeId)) initiativesByObjective.set(p.initiativeId, [])
+    initiativesByObjective.get(p.initiativeId)!.push(p)
   }
 
-  const initiativeViews: ProjectView[] = initiativeRows.map((row) => {
-    const merged = applyOverrides(row, 'project', initiativeOverrides, INITIATIVE_DATE_FIELDS)
+  const objectiveViews: InitiativeView[] = objectiveRows.map((row) => {
+    const merged = applyOverrides(row, 'initiative', objectiveOverrides, OBJECTIVE_DATE_FIELDS)
     const v = merged.value
-    const kids = projectsByInitiative.get(v.id) ?? []
+    const kids = initiativesByObjective.get(v.id) ?? []
     /*
      * Everything dated underneath, not just the children's own dates.
      *
-     * A project whose workstreams carry no dates but whose milestones do was
+     * An initiative whose projects carry no dates but whose milestones do was
      * reading as undated — which on a chart is indistinguishable from work
      * nobody has planned. And the roll-up counts ENDED children too: a window
      * is a fact about the work, not about which rows a screen is currently
@@ -252,23 +252,23 @@ export const getPortfolio = cache(async (): Promise<Portfolio> => {
      */
     const beneath: Array<Date | null> = [
       ...kids.flatMap((k) => [k.startDate, k.targetDate]),
-      ...kids.flatMap((k) => (milestonesByProject.get(k.id) ?? []).map((m) => m.targetDate)),
-      ...(milestonesByProject.get(v.id) ?? []).map((m) => m.targetDate),
+      ...kids.flatMap((k) => (milestonesByInitiative.get(k.id) ?? []).map((m) => m.targetDate)),
+      ...(milestonesByInitiative.get(v.id) ?? []).map((m) => m.targetDate),
     ]
     const window = rollUpWindow({ startDate: v.startDate, targetDate: v.targetDate }, beneath)
     return {
       ...v,
       health: resolveHealth({
         sourceHealth: v.sourceHealth,
-        assessment: initiativeAssessments.get(v.id) ?? null,
+        assessment: objectiveAssessments.get(v.id) ?? null,
       }),
       owner: v.ownerId ? (peopleById.get(v.ownerId) ?? null) : null,
       sponsor: v.sponsorId ? (peopleById.get(v.sponsorId) ?? null) : null,
       theme: v.themeId ? (themesById.get(v.themeId) ?? null) : null,
-      workstreams: kids,
+      projects: kids,
       overridden: [...merged.overridden],
       sourceValues: merged.sourceValues,
-      sources: initiativeSources.get(v.id) ?? [],
+      sources: objectiveSources.get(v.id) ?? [],
       // Only the rolled-up halves: `derivedX` means "nobody typed this", and
       // the callers show a "rolled up" badge off exactly that.
       derivedStart: v.startDate ? null : window.start,
@@ -276,21 +276,21 @@ export const getPortfolio = cache(async (): Promise<Portfolio> => {
     }
   })
 
-  const projectById = new Map(projectViews.map((p) => [p.id, p]))
+  const initiativeById = new Map(initiativeViews.map((p) => [p.id, p]))
 
   return {
     themes: themeRows,
     appAreas: areaRows,
     teams: teamRows,
     people: personRows,
+    initiatives: objectiveViews,
     projects: initiativeViews,
-    workstreams: projectViews,
     allocations: allocationRows,
     dependencies: dependencyRows,
     decisions: decisionRows,
     milestones: milestoneRows
-      .map((m) => ({ ...m, workstream: projectById.get(m.entityId)! }))
-      .filter((m) => m.workstream),
+      .map((m) => ({ ...m, project: initiativeById.get(m.entityId)! }))
+      .filter((m) => m.project),
     lastSync: lastSyncRows[0] ?? null,
   }
 })
@@ -302,28 +302,28 @@ export const getPortfolio = cache(async (): Promise<Portfolio> => {
 export interface PersonLoad {
   person: PersonRow
   team: TeamRow | null
-  /** Distinct in-flight workstreams this person leads. */
-  workstreams: WorkstreamView[]
-  /** Distinct projects those workstreams roll up to. */
-  initiativeCount: number
-  /** Workstreams with a target date inside the same 45-day window. */
-  collisions: WorkstreamView[]
+  /** Distinct in-flight projects this person leads. */
+  projects: ProjectView[]
+  /** Distinct initiatives those projects roll up to. */
+  objectiveCount: number
+  /** Projects with a target date inside the same 45-day window. */
+  collisions: ProjectView[]
   hot: boolean
 }
 
 /**
  * Who is the bottleneck.
  *
- * Counting workstreams alone overstates load — six sequential workstreams are fine.
+ * Counting projects alone overstates load — six sequential projects are fine.
  * What hurts is several *dated* commitments landing together, so a person is
- * "hot" when they lead three or more active workstreams whose targets cluster, or
+ * "hot" when they lead three or more active projects whose targets cluster, or
  * when a human has flagged them by hand.
  */
 export function personLoads(p: Portfolio): PersonLoad[] {
-  const active = p.workstreams.filter(
+  const active = p.projects.filter(
     (pr) => pr.leadId && !['completed', 'canceled'].includes(pr.status),
   )
-  const byPerson = new Map<string, WorkstreamView[]>()
+  const byPerson = new Map<string, ProjectView[]>()
   for (const pr of active) {
     if (!byPerson.has(pr.leadId!)) byPerson.set(pr.leadId!, [])
     byPerson.get(pr.leadId!)!.push(pr)
@@ -338,7 +338,7 @@ export function personLoads(p: Portfolio): PersonLoad[] {
     const dated = owned
       .filter((o) => o.targetDate)
       .sort((a, b) => a.targetDate!.getTime() - b.targetDate!.getTime())
-    let collisions: WorkstreamView[] = []
+    let collisions: ProjectView[] = []
     for (let i = 0; i < dated.length; i++) {
       const window = dated.filter(
         (d) =>
@@ -351,8 +351,8 @@ export function personLoads(p: Portfolio): PersonLoad[] {
     loads.push({
       person,
       team: person.teamId ? (teamsById.get(person.teamId) ?? null) : null,
-      workstreams: owned,
-      initiativeCount: new Set(owned.map((o) => o.projectId).filter(Boolean)).size,
+      projects: owned,
+      objectiveCount: new Set(owned.map((o) => o.initiativeId).filter(Boolean)).size,
       collisions: collisions.length > 1 ? collisions : [],
       hot: person.bottleneck || owned.length >= 3 || collisions.length >= 2,
     })
@@ -360,13 +360,13 @@ export function personLoads(p: Portfolio): PersonLoad[] {
 
   return loads.sort((a, b) => {
     if (a.hot !== b.hot) return a.hot ? -1 : 1
-    return b.workstreams.length - a.workstreams.length
+    return b.projects.length - a.projects.length
   })
 }
 
 export interface Gap {
-  kind: 'no_owner' | 'no_assessment' | 'no_dates' | 'no_projects' | 'stale_assessment'
-  entityType: 'project' | 'workstream'
+  kind: 'no_owner' | 'no_assessment' | 'no_dates' | 'no_initiatives' | 'stale_assessment'
+  entityType: 'initiative' | 'project'
   id: string
   name: string
   detail: string
@@ -378,27 +378,27 @@ const STALE_DAYS = 21
  * The "who owes me an update" list.
  *
  * Making absence visible is most of the value of a portfolio tool: an
- * project with no owner and a project that's merely quiet look identical
+ * initiative with no owner and an initiative that's merely quiet look identical
  * on a roadmap, and only one of them is a problem you can act on today.
  */
 export function gaps(p: Portfolio, now = new Date()): Gap[] {
   const out: Gap[] = []
 
-  for (const i of p.projects) {
+  for (const i of p.initiatives) {
     if (['completed', 'canceled'].includes(i.status)) continue
     if (!i.ownerId || i.ownerGap) {
       out.push({
         kind: 'no_owner',
-        entityType: 'project',
+        entityType: 'initiative',
         id: i.id,
         name: i.name,
-        detail: 'No project owner set',
+        detail: 'No initiative owner set',
       })
     }
     if (i.health.origin === 'none') {
       out.push({
         kind: 'no_assessment',
-        entityType: 'project',
+        entityType: 'initiative',
         id: i.id,
         name: i.name,
         detail: 'No health assessment and the source has none either',
@@ -408,39 +408,39 @@ export function gaps(p: Portfolio, now = new Date()): Gap[] {
       if (days > STALE_DAYS) {
         out.push({
           kind: 'stale_assessment',
-          entityType: 'project',
+          entityType: 'initiative',
           id: i.id,
           name: i.name,
           detail: `Assessment is ${days} days old`,
         })
       }
     }
-    if (i.workstreams.length === 0) {
+    if (i.projects.length === 0) {
       out.push({
-        kind: 'no_projects',
-        entityType: 'project',
+        kind: 'no_initiatives',
+        entityType: 'initiative',
         id: i.id,
         name: i.name,
-        detail: 'Strategic project with no delivery workstreams behind it',
+        detail: 'Strategic initiative with no delivery projects behind it',
       })
     }
     if (!i.targetDate && !i.derivedTarget) {
       out.push({
         kind: 'no_dates',
-        entityType: 'project',
+        entityType: 'initiative',
         id: i.id,
         name: i.name,
-        detail: 'No target date on the project or any of its workstreams',
+        detail: 'No target date on the initiative or any of its projects',
       })
     }
   }
 
-  for (const pr of p.workstreams) {
+  for (const pr of p.projects) {
     if (['completed', 'canceled'].includes(pr.status)) continue
     if (pr.health.origin === 'none' && pr.status === 'in_progress') {
       out.push({
         kind: 'no_assessment',
-        entityType: 'workstream',
+        entityType: 'project',
         id: pr.id,
         name: pr.name,
         detail: 'In progress with no health on record',
@@ -456,7 +456,7 @@ export interface RiskItem {
   name: string
   rag: Rag
   why: string
-  entityType: 'project' | 'workstream' | 'dependency' | 'milestone'
+  entityType: 'initiative' | 'project' | 'dependency' | 'milestone'
   targetDate: Date | null
 }
 
@@ -464,14 +464,14 @@ export interface RiskItem {
 export function risks(p: Portfolio, now = new Date()): RiskItem[] {
   const out: RiskItem[] = []
 
-  for (const i of p.projects) {
+  for (const i of p.initiatives) {
     if (i.health.rag === 'red' || i.health.rag === 'amber') {
       out.push({
         id: i.id,
         name: i.name,
         rag: i.health.rag,
         why: i.health.rationale ?? 'Assessed off track',
-        entityType: 'project',
+        entityType: 'initiative',
         targetDate: i.targetDate ?? i.derivedTarget,
       })
     }
@@ -494,7 +494,7 @@ export function risks(p: Portfolio, now = new Date()): RiskItem[] {
     if (m.status === 'pending' && m.targetDate && m.targetDate < now) {
       out.push({
         id: m.id,
-        name: `${m.workstream.name} — ${m.name}`,
+        name: `${m.project.name} — ${m.name}`,
         rag: 'red',
         why: 'Milestone date has passed and it is still pending',
         entityType: 'milestone',
@@ -511,11 +511,11 @@ export function risks(p: Portfolio, now = new Date()): RiskItem[] {
 }
 
 export function labelForEndpoint(p: Portfolio, type: string, id: string): string {
-  if (type === 'workstream') return p.workstreams.find((x) => x.id === id)?.name ?? id
   if (type === 'project') return p.projects.find((x) => x.id === id)?.name ?? id
+  if (type === 'initiative') return p.initiatives.find((x) => x.id === id)?.name ?? id
   if (type === 'milestone') {
     const m = p.milestones.find((x) => x.id === id)
-    return m ? `${m.workstream.name} — ${m.name}` : id
+    return m ? `${m.project.name} — ${m.name}` : id
   }
   return id
 }
@@ -524,7 +524,7 @@ export function labelForEndpoint(p: Portfolio, type: string, id: string): string
 export function upcomingMilestones(p: Portfolio, limit = 12, now = new Date()) {
   return p.milestones
     .filter((m) => m.targetDate && m.status !== 'done')
-    .filter((m) => (m.level === 'initiative') || m.contested || (m.targetDate as Date) >= now)
+    .filter((m) => (m.level === 'objective') || m.contested || (m.targetDate as Date) >= now)
     .sort((a, b) => a.targetDate!.getTime() - b.targetDate!.getTime())
     .slice(0, limit)
 }
@@ -567,8 +567,8 @@ export async function recentThemes(limit = 24) {
  * The themes recorded against one piece of work.
  *
  * Themes were only ever shown on the register, which is the wrong place to
- * look them up: somebody wondering what is being talked about on a workstream is
- * on that workstream's page. Recurring discussion that never becomes a decision
+ * look them up: somebody wondering what is being talked about on a project is
+ * on that project's page. Recurring discussion that never becomes a decision
  * is exactly the signal worth seeing there, and the register is where you go
  * when you already know what you are chasing.
  */
@@ -630,17 +630,17 @@ export async function decisionTrail(): Promise<Map<string, (typeof decisionEvent
 }
 
 /**
- * The program review plan for one workstream.
+ * The program review plan for one project.
  *
  * Three tables, assembled in the order the slide reads them, because every
  * caller wants it that way and none of them should have to know there are
  * three.
  */
-export async function workstreamsFor(workstreamId: string) {
+export async function projectsFor(projectId: string) {
   const rows = await db
     .select()
     .from(milestones)
-    .where(eq(milestones.entityId, workstreamId))
+    .where(eq(milestones.entityId, projectId))
     .orderBy(milestones.sortOrder)
 
   if (rows.length === 0) return []

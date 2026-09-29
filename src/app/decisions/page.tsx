@@ -9,7 +9,7 @@
  */
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { decisionEvents, decisions, initiatives, people, projects, sourceDocuments, workstreams } from '@/db/schema'
+import { decisionEvents, decisions, objectives, people, initiatives, sourceDocuments, projects } from '@/db/schema'
 import { Kicker } from '@/components/ui'
 import { addContext } from '@/lib/add-context'
 import { scopeFilter } from '@/lib/scope-filter'
@@ -37,15 +37,15 @@ export default async function DecisionsPage({
           .orderBy(desc(decisions.resolvedAt))
           .limit(300)
       : db.select().from(decisions).where(eq(decisions.kind, 'decision')),
-    db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives).orderBy(asc(initiatives.name)),
+    db.select({ id: objectives.id, name: objectives.name }).from(objectives).orderBy(asc(objectives.name)),
+    db
+      .select({ id: initiatives.id, name: initiatives.name, objectiveId: initiatives.objectiveId })
+      .from(initiatives)
+      .orderBy(asc(initiatives.name)),
     db
       .select({ id: projects.id, name: projects.name, initiativeId: projects.initiativeId })
       .from(projects)
       .orderBy(asc(projects.name)),
-    db
-      .select({ id: workstreams.id, name: workstreams.name, projectId: workstreams.projectId })
-      .from(workstreams)
-      .orderBy(asc(workstreams.name)),
     db.select({ id: people.id, name: people.name }).from(people).orderBy(asc(people.name)),
     // The same context the detail-page dialogs use, so the two surfaces offer
     // the same options rather than two lists that drift.
@@ -82,16 +82,16 @@ export default async function DecisionsPage({
 
   const nameOf = new Map(folk.map((p) => [p.id, p.name]))
   const named = new Map<string, Named>()
-  for (const i of inits) named.set(`initiative:${i.id}`, i)
-  for (const p of projs) named.set(`project:${p.id}`, p)
-  for (const w of wss) named.set(`workstream:${w.id}`, w)
+  for (const i of inits) named.set(`objective:${i.id}`, i)
+  for (const p of projs) named.set(`initiative:${p.id}`, p)
+  for (const w of wss) named.set(`project:${w.id}`, w)
 
   /*
    * Narrowed to one piece of work, when a card linked here.
    *
    * At or BELOW it, because that is what the card counted: "10 blockers" on
-   * an initiative means ten across everything underneath. A page filtered to
-   * the initiative row alone would answer that link with an empty list, which
+   * an objective means ten across everything underneath. A page filtered to
+   * the objective row alone would answer that link with an empty list, which
    * reads as data loss rather than as a filter. See lib/hierarchy.ts.
    */
   const narrow = scopeFilter(scope, projs, wss, inits)
@@ -142,9 +142,9 @@ export default async function DecisionsPage({
       <RegisterList
         kind="decision"
         rows={items}
-        initiatives={inits}
-        projects={projs}
-        workstreams={wss}
+        objectives={inits}
+        initiatives={projs}
+        projects={wss}
         people={folk}
         closed={closed}
         editing={user.personId ? { people: ctx.people, endpoints: ctx.endpoints } : null}

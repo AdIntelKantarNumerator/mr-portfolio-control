@@ -9,7 +9,7 @@
  * click, because on a page about work in flight this is not the point.
  */
 import { useActionState, useState } from 'react'
-import { PROJECT_STATUS, WORKSTREAM_STATUS_SET, isEnded, label, reopenedStatus } from '@/lib/domain'
+import { INITIATIVE_STATUS, PROJECT_STATUS_SET, isEnded, label, reopenedStatus } from '@/lib/domain'
 import { setLifecycle, type LifecycleState } from './actions'
 
 const field =
@@ -40,7 +40,7 @@ export function LifecycleControl({
   id,
   status,
 }: {
-  kind: 'workstream' | 'project'
+  kind: 'project' | 'initiative'
   id: string
   status: string
 }) {
@@ -48,7 +48,7 @@ export function LifecycleControl({
   const [state, action, pending] = useActionState<LifecycleState, FormData>(setLifecycle, {})
 
   const ended = isEnded(status)
-  const statuses: readonly string[] = kind === 'workstream' ? WORKSTREAM_STATUS_SET : PROJECT_STATUS
+  const statuses: readonly string[] = kind === 'project' ? PROJECT_STATUS_SET : INITIATIVE_STATUS
   const back = reopenedStatus(kind)
 
   if (ended && !open) {

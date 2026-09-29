@@ -1,12 +1,12 @@
 'use server'
 
 /**
- * Closing, withdrawing and reopening a workstream or a project.
+ * Closing, withdrawing and reopening a project or an initiative.
  *
  * The status column has always existed and nothing in the UI could set it —
  * everything arrived from the tracker sync, which works right up until a piece
- * of work only lives here, as everything converted from intake does. A workstream
- * you cannot close is a workstream that stays on the list forever.
+ * of work only lives here, as everything converted from intake does. A project
+ * you cannot close is a project that stays on the list forever.
  *
  * A note is required to end something and to reopen it, for the same reason the
  * register requires one: six months later, "why was this cancelled" is asked by
@@ -21,8 +21,8 @@
 import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { projects, workstreams } from '@/db/schema'
-import { PROJECT_STATUS, WORKSTREAM_STATUS_SET, isEnded, label, reopenedStatus } from '@/lib/domain'
+import { initiatives, projects } from '@/db/schema'
+import { INITIATIVE_STATUS, PROJECT_STATUS_SET, isEnded, label, reopenedStatus } from '@/lib/domain'
 import { logChange } from '@/lib/portfolio'
 import { actorName } from '@/lib/auth/current-user'
 
@@ -34,10 +34,10 @@ export interface LifecycleState {
 const MIN_NOTE = 4
 const MAX_NOTE = 1000
 
-function refresh(kind: 'workstream' | 'project', id: string) {
+function refresh(kind: 'project' | 'initiative', id: string) {
   revalidatePath(`/${kind}s/${id}`)
-  revalidatePath('/workstreams')
   revalidatePath('/projects')
+  revalidatePath('/initiatives')
   revalidatePath('/applications')
   revalidatePath('/')
   revalidatePath('/changes')
@@ -60,12 +60,12 @@ export async function setLifecycle(
   const status = String(formData.get('status') ?? '')
   const note = String(formData.get('note') ?? '').trim()
 
-  if (kind !== 'workstream' && kind !== 'project') return { error: 'Unknown kind of work.' }
+  if (kind !== 'project' && kind !== 'initiative') return { error: 'Unknown kind of work.' }
 
-  const allowed: readonly string[] = kind === 'workstream' ? WORKSTREAM_STATUS_SET : PROJECT_STATUS
+  const allowed: readonly string[] = kind === 'project' ? PROJECT_STATUS_SET : INITIATIVE_STATUS
   if (!allowed.includes(status)) return { error: 'That is not a status this can be set to.' }
 
-  const table = kind === 'workstream' ? workstreams : projects
+  const table = kind === 'project' ? projects : initiatives
   const [row] = await db.select().from(table).where(eq(table.id, id)).limit(1)
   if (!row) return { error: `That ${kind} no longer exists.` }
 
@@ -101,6 +101,6 @@ export async function setLifecycle(
 }
 
 /** What reopening means for this kind, so the button can say it. */
-export async function reopenTarget(kind: 'workstream' | 'project'): Promise<string> {
+export async function reopenTarget(kind: 'project' | 'initiative'): Promise<string> {
   return reopenedStatus(kind)
 }

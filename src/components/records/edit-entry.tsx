@@ -41,7 +41,7 @@ export interface Named {
 
 export interface EditContext {
   people: Named[]
-  /** "type:id" and a label, grouped — initiatives, projects, workstreams, milestones. */
+  /** "type:id" and a label, grouped — objectives, initiatives, projects, milestones. */
   endpoints: Array<{ value: string; label: string; group: string }>
 }
 

@@ -2,7 +2,7 @@
  * "Did you mean…" — what it should and should not offer.
  *
  * The failure worth guarding against is not a missed suggestion. It is a
- * confident wrong one: two workstream names that look alike, one offered as
+ * confident wrong one: two project names that look alike, one offered as
  * though it were obvious, and somebody says yes without reading it properly.
  * So most of these are about what it declines to suggest.
  */
@@ -12,7 +12,7 @@ import { closest, exact, editDistance, similarity } from '../src/lib/match-name'
 
 const named = (...names: string[]) => names.map((name) => ({ name }))
 
-const PROJECTS = named(
+const INITIATIVES = named(
   'Keystone Data Migration',
   'Sports Dashboard',
   'GPC Taxonomy',
@@ -22,39 +22,39 @@ const PROJECTS = named(
 )
 
 test('an exact match ignores case and punctuation', () => {
-  assert.equal(exact('sports dashboard', PROJECTS)?.name, 'Sports Dashboard')
-  assert.equal(exact('GPC  Taxonomy', PROJECTS)?.name, 'GPC Taxonomy')
-  assert.equal(exact('Sports-Dashboard', PROJECTS)?.name, 'Sports Dashboard')
-  assert.equal(exact('Dashboard', PROJECTS), null, 'a partial name is not an exact match')
+  assert.equal(exact('sports dashboard', INITIATIVES)?.name, 'Sports Dashboard')
+  assert.equal(exact('GPC  Taxonomy', INITIATIVES)?.name, 'GPC Taxonomy')
+  assert.equal(exact('Sports-Dashboard', INITIATIVES)?.name, 'Sports Dashboard')
+  assert.equal(exact('Dashboard', INITIATIVES), null, 'a partial name is not an exact match')
 })
 
 test('the name somebody actually says comes back first', () => {
-  assert.equal(closest('Keystone', PROJECTS)[0]?.name, 'Keystone Data Migration')
-  assert.equal(closest('Taxonomy', PROJECTS)[0]?.name, 'GPC Taxonomy')
-  assert.equal(closest('the dashboard', PROJECTS)[0]?.name, 'Sports Dashboard')
+  assert.equal(closest('Keystone', INITIATIVES)[0]?.name, 'Keystone Data Migration')
+  assert.equal(closest('Taxonomy', INITIATIVES)[0]?.name, 'GPC Taxonomy')
+  assert.equal(closest('the dashboard', INITIATIVES)[0]?.name, 'Sports Dashboard')
 })
 
 test('a typo still finds it', () => {
-  assert.equal(closest('GPC Taxonmy', PROJECTS)[0]?.name, 'GPC Taxonomy')
-  assert.equal(closest('Viewship Panel', PROJECTS)[0]?.name, 'Viewership Panel')
+  assert.equal(closest('GPC Taxonmy', INITIATIVES)[0]?.name, 'GPC Taxonomy')
+  assert.equal(closest('Viewship Panel', INITIATIVES)[0]?.name, 'Viewership Panel')
 })
 
 test('words in a different order still match', () => {
-  assert.equal(closest('Dashboard for Sports', PROJECTS)[0]?.name, 'Sports Dashboard')
+  assert.equal(closest('Dashboard for Sports', INITIATIVES)[0]?.name, 'Sports Dashboard')
 })
 
 test('nothing close comes back empty rather than as a bad guess', () => {
   // The caller says "I do not know that one" instead of offering something
   // the person has to read carefully to reject.
-  assert.deepEqual(closest('Payroll Rewrite', PROJECTS), [])
-  assert.deepEqual(closest('zzzz', PROJECTS), [])
-  assert.deepEqual(closest('', PROJECTS), [])
+  assert.deepEqual(closest('Payroll Rewrite', INITIATIVES), [])
+  assert.deepEqual(closest('zzzz', INITIATIVES), [])
+  assert.deepEqual(closest('', INITIATIVES), [])
 })
 
 test('generic words alone are not a match', () => {
-  // Every one of these contains "workstream" or "data" somewhere nearby; that is
+  // Every one of these contains "project" or "data" somewhere nearby; that is
   // not a reason to suggest anything.
-  assert.deepEqual(closest('the workstream', PROJECTS), [])
+  assert.deepEqual(closest('the project', INITIATIVES), [])
   assert.deepEqual(closest('data', named('Keystone Data Migration', 'Data Platform Work')), [])
 })
 
@@ -84,7 +84,7 @@ test('edit distance is the ordinary one', () => {
   assert.equal(editDistance('', 'abc'), 3)
 })
 
-test('a person or team is matched the same way as a workstream', () => {
+test('a person or team is matched the same way as a project', () => {
   const people = named('Priya Raman', 'Dan Okoro', 'Scott Bernberg')
   assert.equal(closest('Priya', people)[0]?.name, 'Priya Raman')
   assert.equal(closest('Scott', people)[0]?.name, 'Scott Bernberg')

@@ -9,11 +9,11 @@
  * authenticated path below is used instead.
  *
  * This is how non-Linear milestones get onto the same timeline: the rows in
- * someone's spreadsheet become workstreams with the same shape as synced ones.
+ * someone's spreadsheet become projects with the same shape as synced ones.
  */
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { projects, workstreams, sourceRecords, syncRuns } from '@/db/schema'
+import { initiatives, projects, sourceRecords, syncRuns } from '@/db/schema'
 import { logChange } from '../portfolio'
 import { slugify } from '../util'
 import { STATUS_ALIASES, csvUrlFor, parseCsv, rowsToObjects } from './csv'
@@ -21,13 +21,13 @@ import { STATUS_ALIASES, csvUrlFor, parseCsv, rowsToObjects } from './csv'
 export { csvUrlFor, parseCsv, rowsToObjects } from './csv'
 
 export interface SheetMapping {
-  /** Column header → field on the workstream. Unmapped columns are ignored. */
+  /** Column header → field on the project. Unmapped columns are ignored. */
   name: string
   status?: string
   startDate?: string
   targetDate?: string
   lead?: string
-  project?: string
+  initiative?: string
   progress?: string
   notes?: string
   /** Column holding a stable per-row id. Falls back to the row's name. */
@@ -67,7 +67,7 @@ function parseDate(v?: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
-/** Load a configured sheet and upsert its rows as workstreams. */
+/** Load a configured sheet and upsert its rows as projects. */
 export async function syncSheet(source: SheetSource) {
   const counters = { created: 0, updated: 0, skipped: 0 }
   const [run] = await db
@@ -95,13 +95,13 @@ export async function syncSheet(source: SheetSource) {
         .where(and(eq(sourceRecords.system, 'sheets'), eq(sourceRecords.externalId, externalId)))
         .limit(1)
 
-      // Projects are matched by name rather than created, so a typo in a
+      // Initiatives are matched by name rather than created, so a typo in a
       // spreadsheet cannot silently fork the portfolio's structure.
-      let projectId: string | null = null
-      if (m.project && rowData[m.project]) {
-        const wanted = rowData[m.project].trim().toLowerCase()
-        const all = await db.select().from(projects)
-        projectId = all.find((i) => i.name.toLowerCase() === wanted)?.id ?? null
+      let initiativeId: string | null = null
+      if (m.initiative && rowData[m.initiative]) {
+        const wanted = rowData[m.initiative].trim().toLowerCase()
+        const all = await db.select().from(initiatives)
+        initiativeId = all.find((i) => i.name.toLowerCase() === wanted)?.id ?? null
       }
 
       const rawProgress = m.progress ? Number(String(rowData[m.progress]).replace('%', '')) : NaN
@@ -112,19 +112,19 @@ export async function syncSheet(source: SheetSource) {
         startDate: parseDate(m.startDate ? rowData[m.startDate] : undefined),
         targetDate: parseDate(m.targetDate ? rowData[m.targetDate] : undefined),
         progress: Number.isFinite(rawProgress) ? Math.min(1, Math.max(0, rawProgress > 1 ? rawProgress / 100 : rawProgress)) : 0,
-        ...(projectId ? { projectId } : {}),
+        ...(initiativeId ? { initiativeId } : {}),
       }
 
       let entityId: string
       if (link) {
-        await db.update(workstreams).set(values).where(eq(workstreams.id, link.entityId))
+        await db.update(projects).set(values).where(eq(projects.id, link.entityId))
         entityId = link.entityId
         counters.updated += 1
       } else {
         const [created] = await db
-          .insert(workstreams)
+          .insert(projects)
           .values({ ...values, key: `sheet-${slugify(rowKey)}`.slice(0, 60) })
-          .returning({ id: workstreams.id })
+          .returning({ id: projects.id })
         entityId = created.id
         counters.created += 1
       }
@@ -134,7 +134,7 @@ export async function syncSheet(source: SheetSource) {
         .values({
           system: 'sheets',
           externalId,
-          entityType: 'workstream',
+          entityType: 'project',
           entityId,
           url: source.url,
           raw: JSON.stringify(rowData),

@@ -219,7 +219,7 @@ body[data-detail='lead'] .full-only {
 
 /* Text-like controls fill their field. Checkboxes and radios must be excluded:
    width:100% stretched every tick box across its whole row, which on the
-   project picker put a 1100px checkbox between the row and its label and made
+   initiative picker put a 1100px checkbox between the row and its label and made
    the names look right-aligned. */
 input:not([type='checkbox']):not([type='radio']),
 select,
@@ -344,7 +344,7 @@ table.dtable thead th {
 }
 
 /* ===========================================================================
-   Home board — initiative / project / workstream cards
+   Home board — objective / initiative / project cards
    ---------------------------------------------------------------------------
    The categorical colours are stepped from the client app's palette and
    validated: the brand navy and plum were too dark for chart use and were
@@ -368,7 +368,7 @@ table.dtable thead th {
   --lift: 0 10px 34px rgb(15 23 42 / .16);
   /* Backlog is lighter than planned; ended work is a deliberate dark grey.
      Red means "a person needs to do something", and nobody needs to do
-     anything about a cancelled project. */
+     anything about a cancelled initiative. */
   --line-3: #e3e7ee;
   --ended: #6b7280;
   --surface-2: #f8f9fb;
@@ -581,9 +581,9 @@ table.dtable thead th {
 .ev div { display: flex; gap: 10px; font-size: 12.5px; background: var(--surface-2); padding: 7px 10px; border-radius: 7px; }
 .ev .s { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; width: 56px; flex: none; padding-top: 2px; }
 
-/* ---- Grouping form (initiatives) -------------------------------------- */
-/* Create an initiative, or move projects into one. Both are the same gesture
-   — tick some projects, say where they go — so they share one control. */
+/* ---- Grouping form (objectives) -------------------------------------- */
+/* Create an objective, or move initiatives into one. Both are the same gesture
+   — tick some initiatives, say where they go — so they share one control. */
 .group-form { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 16px; display: grid; gap: 13px; }
 .gf-modes { display: flex; gap: 6px; }
 .gf-modes button { border: 1px solid var(--line-2); background: var(--surface-2); color: var(--muted); border-radius: 8px; padding: 6px 13px; font-size: 12.5px; font-weight: 700; cursor: pointer; }
@@ -754,7 +754,7 @@ table.dtable thead th {
 /* Floated rather than stacked above the page.
    
    As its own row it pushed the breadcrumb down by its full height, so every
-   screen opened with an inch of nothing above "PORTFOLIO · INITIATIVES".
+   screen opened with an inch of nothing above "PORTFOLIO · OBJECTIVES".
    Floating it right puts it on the same line as the breadcrumb and takes the
    gap back, and the page content flows under it once the title is past.
    
@@ -807,7 +807,7 @@ table.dtable thead th {
    a different site, not this one with better type.
    
    The size is set here too. Every page declared its own before, so "Active
-   initiatives" was 25px and "Action items" was whatever the browser default
+   objectives" was 25px and "Action items" was whatever the browser default
    left it at, and the two screens did not look like one product. */
 .page h1 {
   font-family: var(--font-display);
@@ -894,7 +894,7 @@ table.dtable thead th {
    sizes the dial smaller gets two 112px svgs overflowing it - which is
    exactly what the health tile did the first time it drew one. */
 
-/* ---- Initiative and project list rows ---------------------------------- */
+/* ---- Objective and initiative list rows ---------------------------------- */
 /* The ring on the left, the coloured edge, and the work inside. The same
    shape on both list pages so moving between them costs no re-learning. */
 .ilist { display: grid; gap: 9px; }
@@ -940,7 +940,7 @@ a.ir-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .ed-err { position: absolute; top: calc(100% + 4px); left: 0; width: 260px; font-size: 11.5px; color: var(--crit); background: var(--surface); border: 1px solid var(--crit); border-radius: 8px; padding: 6px 8px; }
 
 /* ---------------------------------------------------------------------------
-   Editable list rows (projects, workstreams)
+   Editable list rows (initiatives, projects)
    --------------------------------------------------------------------------- */
 
 /* Facts that decide something, on the row rather than a click away. The
@@ -1034,7 +1034,7 @@ a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }
 .atext-foot .err { font-style: normal; font-size: 11.5px; color: var(--crit); }
 
 /* ---------------------------------------------------------------------------
-   Detail pages: one layout for initiative, project and workstream
+   Detail pages: one layout for objective, initiative and project
    --------------------------------------------------------------------------- */
 
 .dhead { display: grid; gap: 2px; }
@@ -1103,7 +1103,7 @@ a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }
 /* Readiness */
 .rk-bar { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
 .rk-bar > span { display: block; height: 100%; border-radius: 99px; background: var(--c5); }
-/* The workstream this checklist belongs to, and the way to another. Above the
+/* The project this checklist belongs to, and the way to another. Above the
    bar because it says what the bar is counting. */
 .rk-pick { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 .rk-pick select { flex: 1; min-width: 0; font: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ink); background: var(--surface); border: 1px solid var(--line-2); border-radius: 7px; padding: 5px 8px; }
@@ -1137,7 +1137,7 @@ a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }
    these rows are separate elements, so the space has to be a margin. */
 .tiles { gap: 16px; padding: 0 2px; margin: 0 0 16px; }
 .tiles:last-child { margin-bottom: 2px; }
-/* The right column can hold one tile (a workstream has nothing beneath it) or
+/* The right column can hold one tile (a project has nothing beneath it) or
    two (updates, then the tier below), and either way it ends level with the
    health tile beside it. A column shorter than its neighbour leaves a slab of
    empty page that reads as a missing tile.
@@ -1379,7 +1379,7 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rx-na.on { background: var(--c1); border-color: var(--c1); color: #fff; }
 .rx-err { color: var(--crit); }
 
-/* The timeline. One row per initiative, project or workstream; inside each,
+/* The timeline. One row per objective, initiative or project; inside each,
    a bar per child, and every milestone from underneath rolled up onto it. */
 .tl { border: 1px solid var(--line); border-radius: 13px; background: var(--surface); overflow: hidden; }
 .tl-head { display: flex; border-bottom: 1px solid var(--line); background: var(--surface-2); }

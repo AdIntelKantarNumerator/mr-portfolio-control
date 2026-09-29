@@ -60,8 +60,8 @@ without ever being displayed.
 
 ## Conversation briefs — what is built and what is not
 
-Built: attaching Slack channels, meeting series and documents to initiatives
-and projects; pasting or uploading transcripts; generating briefs with
+Built: attaching Slack channels, meeting series and documents to objectives
+and initiatives; pasting or uploading transcripts; generating briefs with
 Anthropic; bullets categorised as decision / open issue / risk / change, each
 citing the transcripts it came from; per-source opt-in, off by default.
 
@@ -88,7 +88,7 @@ citing the transcripts it came from; per-source opt-in, off by default.
 Built here: `agent_observations` table; `authored_by` / `reviewed_by` /
 `reviewed_at` on assessments; `GET /api/agent/portfolio` and
 `POST /api/agent/observations` (both SYNC_TOKEN); the Yaara card on the
-initiative and project pages, with mark-as-reviewed. Migration `0003`.
+objective and initiative pages, with mark-as-reviewed. Migration `0003`.
 
 - [ ] **Apply migration 0003 to Azure.** Until then the agent endpoints 500 on
       the missing table. Same routine as before: set `$env:DATABASE_URL` in the
@@ -101,8 +101,8 @@ initiative and project pages, with mark-as-reviewed. Migration `0003`.
 - [ ] **Roles matter more again.** Anyone who can sign in can mark an agent
       assessment reviewed. That is a signature with no check on who signed.
 - [ ] **Let `conversation_sources` link code repositories too.** The table
-      already maps Slack channels, meeting series and documents to initiatives
-      and projects. Adding `github_repo` (and later `azure_repo`,
+      already maps Slack channels, meeting series and documents to objectives
+      and initiatives. Adding `github_repo` (and later `azure_repo`,
       `bitbucket_repo`) to the vocabulary is a `src/lib/domain.ts` change and a
       form option, not a migration — and it replaces both the guessing-by-name
       that attaches repo evidence today and the second list of repos kept in
@@ -131,11 +131,11 @@ initiative and project pages, with mark-as-reviewed. Migration `0003`.
 ## Process, not code
 
 - [ ] **Who owns the weekly assessment pass?** Still unanswered from the user
-      guide. Whether it sits with program management or each project lead
+      guide. Whether it sits with program management or each initiative lead
       changes what the tool needs to make easy. Until someone owns it, the
       health data goes stale and the tool degrades into a Linear mirror.
 - [ ] **Watch for `partial` sync runs.** A `partial` status means specific
-      projects failed to map and the warnings name them — that is the sync
+      initiatives failed to map and the warnings name them — that is the sync
       reporting something about the workspace, not a fault to ignore.
       `GET /api/sync/linear` with the sync token.
 

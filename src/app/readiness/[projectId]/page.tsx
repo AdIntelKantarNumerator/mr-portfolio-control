@@ -1,5 +1,5 @@
 /**
- * One workstream's lifecycle checklist.
+ * One project's lifecycle checklist.
  *
  * The matrix screen says a gate is 3/4; this is where the fourth thing gets
  * named, linked and closed. Each row carries the item's own description so the
@@ -46,31 +46,31 @@ const STATUS_TONE: Record<ReadinessStatus, Tone> = {
   na: 'blue',
 }
 
-export default async function ProjectReadinessPage({
+export default async function InitiativeReadinessPage({
   params,
 }: {
-  params: Promise<{ workstreamId: string }>
+  params: Promise<{ projectId: string }>
 }) {
-  const { workstreamId } = await params
+  const { projectId } = await params
   const [p, model] = await Promise.all([getPortfolio(), getReadiness()])
 
-  const workstream = p.workstreams.find((pr) => pr.id === workstreamId)
-  if (!workstream) notFound()
+  const project = p.projects.find((pr) => pr.id === projectId)
+  if (!project) notFound()
 
-  const overall = scoreItems(model, workstream.id, model.items)
+  const overall = scoreItems(model, project.id, model.items)
 
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <Kicker>Lifecycle readiness</Kicker>
-          <h2 className="m-0 mt-0.5 text-[18px] font-bold tracking-[-0.01em]">{workstream.name}</h2>
+          <h2 className="m-0 mt-0.5 text-[18px] font-bold tracking-[-0.01em]">{project.name}</h2>
           <p className="m-0 mt-1 flex flex-wrap items-center gap-2 text-[12.5px]">
-            <Pill tone="slate">{label('projectStatus', workstream.status)}</Pill>
-            {workstream.lead ? <Chip tone="blue">lead · {workstream.lead.name}</Chip> : <GapFlag>no lead</GapFlag>}
-            {workstream.team ? <Chip tone="slate">{workstream.team.name}</Chip> : null}
-            {workstream.targetDate ? (
-              <Chip tone="accent">target · {fmtDate(workstream.targetDate, { year: true })}</Chip>
+            <Pill tone="slate">{label('initiativeStatus', project.status)}</Pill>
+            {project.lead ? <Chip tone="blue">lead · {project.lead.name}</Chip> : <GapFlag>no lead</GapFlag>}
+            {project.team ? <Chip tone="slate">{project.team.name}</Chip> : null}
+            {project.targetDate ? (
+              <Chip tone="accent">target · {fmtDate(project.targetDate, { year: true })}</Chip>
             ) : null}
           </p>
         </div>
@@ -109,7 +109,7 @@ export default async function ProjectReadinessPage({
       {model.gates.length === 0 ? <Empty>No lifecycle gates are defined yet.</Empty> : null}
 
       {model.gates.map((gate) => {
-        const score = scoreItems(model, workstream.id, gate.items)
+        const score = scoreItems(model, project.id, gate.items)
         return (
           <Card key={gate.id}>
             <CardHeading
@@ -127,8 +127,8 @@ export default async function ProjectReadinessPage({
 
             <div className="grid gap-2.5">
               {gate.items.map((item) => {
-                const status = statusFor(model, workstream.id, item.id)
-                const row = progressFor(model, workstream.id, item.id)
+                const status = statusFor(model, project.id, item.id)
+                const row = progressFor(model, project.id, item.id)
                 return (
                   <div
                     key={item.id}
@@ -205,7 +205,7 @@ export default async function ProjectReadinessPage({
                       className="full-only no-print mt-2.5 grid gap-2 border-t pt-2.5 sm:grid-cols-[auto_1fr_auto]"
                       style={{ borderColor: 'var(--line)' }}
                     >
-                      <input type="hidden" name="workstreamId" value={workstream.id} />
+                      <input type="hidden" name="projectId" value={project.id} />
                       <input type="hidden" name="itemId" value={item.id} />
                       <select
                         name="status"
@@ -223,7 +223,7 @@ export default async function ProjectReadinessPage({
                         type="url"
                         name="link"
                         defaultValue={row?.link ?? ''}
-                        placeholder="Where this workstream's copy actually lives"
+                        placeholder="Where this project's copy actually lives"
                         aria-label={`Link for ${item.label}`}
                         className="!py-1 text-[11.5px]"
                       />

@@ -18,7 +18,7 @@
 import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { entityThemes, initiatives, projects, workstreams } from '@/db/schema'
+import { entityThemes, objectives, initiatives, projects } from '@/db/schema'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
 
@@ -29,9 +29,9 @@ export interface TopicState {
   stamp?: number
 }
 
-const LEVELS = { initiative: initiatives, project: projects, workstream: workstreams } as const
+const LEVELS = { objective: objectives, initiative: initiatives, project: projects } as const
 type Level = keyof typeof LEVELS
-const isLevel = (v: string): v is Level => v === 'initiative' || v === 'project' || v === 'workstream'
+const isLevel = (v: string): v is Level => v === 'objective' || v === 'initiative' || v === 'project'
 
 export async function editTopic(input: {
   id: string

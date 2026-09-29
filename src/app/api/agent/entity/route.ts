@@ -1,5 +1,5 @@
 /**
- * Changing a workstream or a project.
+ * Changing a project or an initiative.
  *
  *   POST /api/agent/entity
  *
@@ -12,14 +12,14 @@
  * see it came from her and weigh it accordingly, and nothing she wrote replaced
  * anything a person put there.
  *
- * This endpoint edits the records themselves. A renamed workstream is renamed for
- * everyone, a moved workstream changes the rollups and the deck, and a closed one
- * disappears from the default lists. There is no "her version" of a workstream
+ * This endpoint edits the records themselves. A renamed project is renamed for
+ * everyone, a moved project changes the rollups and the deck, and a closed one
+ * disappears from the default lists. There is no "her version" of a project
  * name. So the rules here are stricter than anywhere else in the API:
  *
- * NOTHING IS CREATED. She may change an existing workstream or project and
+ * NOTHING IS CREATED. She may change an existing project or initiative and
  * nothing else. Every reference — an owner, a team, an app area, a parent
- * project — must already exist, matched by name, or the change is refused
+ * initiative — must already exist, matched by name, or the change is refused
  * with the list of what does exist. An agent that could create a Person to
  * satisfy an owner field would eventually create "Unknown" and assign work to
  * it.
@@ -38,18 +38,18 @@
  * WHY THE ROW AND NOT AN OVERRIDE
  *
  * field_overrides exists so a stated value can beat a synced one. Nothing syncs
- * these fields today — the Linear sync does not write workstream rows — so an
- * override would add a second place where a workstream's name lives, and the UI
+ * these fields today — the Linear sync does not write project rows — so an
+ * override would add a second place where a project's name lives, and the UI
  * edit and the agent edit would disagree about which one is true. A person
- * editing on the workstream page writes the row; she writes the row.
+ * editing on the project page writes the row; she writes the row.
  */
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { appAreas, initiatives, projects, people, workstreams, teams } from '@/db/schema'
+import { appAreas, objectives, initiatives, people, projects, teams } from '@/db/schema'
 import {
-  PROJECT_STATUS,
+  INITIATIVE_STATUS,
   PRIORITY,
-  WORKSTREAM_STATUS_SET,
+  PROJECT_STATUS_SET,
 } from '@/lib/domain'
 import { closest, exact } from '@/lib/match-name'
 import { logChange } from '@/lib/portfolio'
@@ -111,8 +111,8 @@ export async function POST(req: Request) {
     )
   }
 
-  const kind = body.entityType === 'project' ? 'project' : 'workstream'
-  const table = kind === 'project' ? projects : workstreams
+  const kind = body.entityType === 'initiative' ? 'initiative' : 'project'
+  const table = kind === 'initiative' ? initiatives : projects
 
   const rows = await db.select().from(table)
   const asked = String(body.entityName ?? '')
@@ -121,11 +121,11 @@ export async function POST(req: Request) {
   if (!row) {
     // A shortlist, not the whole list. People say the name they remember, and
     // the answer to "move Keystone" should be "did you mean Keystone Data
-    // Migration?" rather than forty workstream names alphabetically, only one of
+    // Migration?" rather than forty project names alphabetically, only one of
     // which is relevant.
     //
     // Suggestions, never a substitution: picking the top match automatically
-    // is how one team's plan ends up on another team's workstream.
+    // is how one team's plan ends up on another team's project.
     const near = closest(asked, rows)
     return Response.json(
       {
@@ -180,7 +180,7 @@ export async function POST(req: Request) {
           refused.push('name cannot be blank')
           break
         }
-        // Two workstreams with the same name breaks her own matching, silently,
+        // Two projects with the same name breaks her own matching, silently,
         // and a program review with two identical slide titles is unreadable.
         const clash = exact(name, rows.filter((r) => r.id !== row.id))
         if (clash) {
@@ -200,7 +200,7 @@ export async function POST(req: Request) {
       }
 
       case 'status': {
-        const allowed: readonly string[] = kind === 'project' ? PROJECT_STATUS : WORKSTREAM_STATUS_SET
+        const allowed: readonly string[] = kind === 'initiative' ? INITIATIVE_STATUS : PROJECT_STATUS_SET
         const status = String(value ?? '')
         if (!allowed.includes(status)) {
           refused.push(`status "${status}" is not one of: ${allowed.join(', ')}`)
@@ -212,8 +212,8 @@ export async function POST(req: Request) {
       }
 
       case 'priority': {
-        if (kind === 'project') {
-          refused.push('a project has no priority')
+        if (kind === 'initiative') {
+          refused.push('an initiative has no priority')
           break
         }
         const priority = value === null ? null : String(value)
@@ -244,8 +244,8 @@ export async function POST(req: Request) {
 
       case 'devLead':
       case 'programLead': {
-        if (kind === 'project') {
-          refused.push(`a project has no ${field}`)
+        if (kind === 'initiative') {
+          refused.push(`an initiative has no ${field}`)
           break
         }
         // Free text on purpose: the deck says "Scott & Sadiya", which is not a
@@ -258,15 +258,15 @@ export async function POST(req: Request) {
 
       case 'owner':
       case 'sponsor': {
-        if (field === 'sponsor' && kind === 'workstream') {
-          refused.push('a workstream has no sponsor')
+        if (field === 'sponsor' && kind === 'project') {
+          refused.push('a project has no sponsor')
           break
         }
         const found = resolve('person', value, peopleRows)
         if (!found.ok) break
         const column = field === 'owner' ? 'ownerId' : 'sponsorId'
-        if (kind === 'workstream' && field === 'owner') {
-          // Workstreams call it the lead.
+        if (kind === 'project' && field === 'owner') {
+          // Projects call it the lead.
           patch.leadId = found.id
           applied.push({
             field: 'owner',
@@ -281,8 +281,8 @@ export async function POST(req: Request) {
       }
 
       case 'team': {
-        if (kind === 'project') {
-          refused.push('a project has no team')
+        if (kind === 'initiative') {
+          refused.push('an initiative has no team')
           break
         }
         const found = resolve('team', value, teamRows)
@@ -293,8 +293,8 @@ export async function POST(req: Request) {
       }
 
       case 'appArea': {
-        if (kind === 'project') {
-          refused.push('a project has no application area')
+        if (kind === 'initiative') {
+          refused.push('an initiative has no application area')
           break
         }
         const found = resolve('application area', value, areaRows)
@@ -308,52 +308,9 @@ export async function POST(req: Request) {
         break
       }
 
-      case 'project': {
-        if (kind === 'project') {
-          refused.push('a project does not sit under another project')
-          break
-        }
-        if (value === null || value === '') {
-          patch.projectId = null
-          applied.push({
-            field: 'project',
-            from: show((row as { projectId?: string }).projectId),
-            to: null,
-          })
-          break
-        }
-        const all = await db.select().from(projects)
-        const asked = String(value)
-        const found = exact(asked, all)
-        if (!found) {
-          const near = closest(asked, all)
-          refused.push(
-            near.length
-              ? `no project called exactly "${asked}" — did you mean ${near.map((n) => n.name).join(', or ')}?`
-              : `no project called "${asked}", and nothing close.`,
-          )
-          break
-        }
-        patch.projectId = found.id
-        applied.push({
-          field: 'project',
-          from: show((row as { projectId?: string }).projectId),
-          to: found.name,
-        })
-        break
-      }
-
-      /**
-       * Which initiative a project rolls up to.
-       *
-       * The tier above projects, and the only relationship in this app with no
-       * source outside it. An agent moving one is moving somebody's judgement,
-       * so it is refused for workstreams (they roll up to projects, not
-       * initiatives) and it names near misses rather than guessing.
-       */
       case 'initiative': {
-        if (kind !== 'project') {
-          refused.push('only a project rolls up to an initiative — a workstream rolls up to a project')
+        if (kind === 'initiative') {
+          refused.push('an initiative does not sit under another initiative')
           break
         }
         if (value === null || value === '') {
@@ -373,7 +330,7 @@ export async function POST(req: Request) {
           refused.push(
             near.length
               ? `no initiative called exactly "${asked}" — did you mean ${near.map((n) => n.name).join(', or ')}?`
-              : `no initiative called "${asked}", and nothing close. Initiatives are created on the initiatives page, not by me.`,
+              : `no initiative called "${asked}", and nothing close.`,
           )
           break
         }
@@ -381,6 +338,49 @@ export async function POST(req: Request) {
         applied.push({
           field: 'initiative',
           from: show((row as { initiativeId?: string }).initiativeId),
+          to: found.name,
+        })
+        break
+      }
+
+      /**
+       * Which objective an initiative rolls up to.
+       *
+       * The tier above initiatives, and the only relationship in this app with no
+       * source outside it. An agent moving one is moving somebody's judgement,
+       * so it is refused for projects (they roll up to initiatives, not
+       * objectives) and it names near misses rather than guessing.
+       */
+      case 'objective': {
+        if (kind !== 'initiative') {
+          refused.push('only an initiative rolls up to an objective — a project rolls up to an initiative')
+          break
+        }
+        if (value === null || value === '') {
+          patch.objectiveId = null
+          applied.push({
+            field: 'objective',
+            from: show((row as { objectiveId?: string }).objectiveId),
+            to: null,
+          })
+          break
+        }
+        const all = await db.select().from(objectives)
+        const asked = String(value)
+        const found = exact(asked, all)
+        if (!found) {
+          const near = closest(asked, all)
+          refused.push(
+            near.length
+              ? `no objective called exactly "${asked}" — did you mean ${near.map((n) => n.name).join(', or ')}?`
+              : `no objective called "${asked}", and nothing close. Objectives are created on the objectives page, not by me.`,
+          )
+          break
+        }
+        patch.objectiveId = found.id
+        applied.push({
+          field: 'objective',
+          from: show((row as { objectiveId?: string }).objectiveId),
           to: found.name,
         })
         break
@@ -401,7 +401,7 @@ export async function POST(req: Request) {
     .where(eq(table.id, row.id))
 
   // One entry per field. Somebody scanning What Changed wants "the owner
-  // moved", not "four things changed on this workstream".
+  // moved", not "four things changed on this project".
   for (const change of applied) {
     await logChange({
       actor: agent,

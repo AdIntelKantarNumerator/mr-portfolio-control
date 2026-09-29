@@ -18,7 +18,7 @@
 import { and, eq, isNull } from 'drizzle-orm'
 import { recordCorrection } from '../src/app/correction-actions'
 import { db } from '../src/db/client'
-import { initiatives, projects, routingCorrections } from '../src/db/schema'
+import { objectives, initiatives, routingCorrections } from '../src/db/schema'
 
 function check(label: string, ok: boolean, extra = '') {
   console.log(`${ok ? ' ok ' : 'FAIL'}  ${label}${extra ? ` — ${extra}` : ''}`)
@@ -33,21 +33,21 @@ async function pending(wrongEntityId: string) {
 }
 
 async function main() {
-  const all = await db.select({ id: projects.id, name: projects.name }).from(projects).limit(3)
-  const [init] = await db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives).limit(1)
+  const all = await db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives).limit(3)
+  const [init] = await db.select({ id: objectives.id, name: objectives.name }).from(objectives).limit(1)
   const [proj, other] = all
   if (!proj || !other) {
-    console.log('Needs at least two projects. Seed the scratch database first.')
+    console.log('Needs at least two initiatives. Seed the scratch database first.')
     process.exitCode = 1
     return
   }
-  // An initiative when the scratch database has one — that is the case Scott
-  // reported — and otherwise another project, so the "it belongs over there"
+  // An objective when the scratch database has one — that is the case Scott
+  // reported — and otherwise another initiative, so the "it belongs over there"
   // path is exercised either way rather than skipped on a bare seed.
-  const dest = init ? `initiative:${init.id}` : `project:${other.id}`
+  const dest = init ? `objective:${init.id}` : `initiative:${other.id}`
 
   const base = {
-    wrongEntityType: 'project' as const,
+    wrongEntityType: 'initiative' as const,
     wrongEntityId: proj.id,
     source: 'slack',
     location: '#gpc-taxonomy',
@@ -65,7 +65,7 @@ async function main() {
 
   check(
     'a destination that does not exist is refused',
-    Boolean((await recordCorrection({ ...base, belongsTo: 'project:no-such-project' })).error),
+    Boolean((await recordCorrection({ ...base, belongsTo: 'initiative:no-such-initiative' })).error),
   )
 
   check(
@@ -75,7 +75,7 @@ async function main() {
 
   check(
     'moving it to where it already is is refused',
-    Boolean((await recordCorrection({ ...base, belongsTo: `project:${proj.id}` })).error),
+    Boolean((await recordCorrection({ ...base, belongsTo: `initiative:${proj.id}` })).error),
   )
 
   check('none of those were written', (await pending(proj.id)).length === 0, `${(await pending(proj.id)).length} rows`)

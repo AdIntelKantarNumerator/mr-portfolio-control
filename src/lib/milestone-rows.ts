@@ -1,13 +1,13 @@
 /**
  * The milestones on one entity, and everything committed beneath it.
  *
- * WHY A PROJECT SHOWS ITS WORKSTREAMS' MILESTONES
+ * WHY A INITIATIVE SHOWS ITS PROJECTS' MILESTONES
  *
- * Almost nothing is committed at project level. The dates that matter are on
- * the workstreams, so a project page that showed only its own milestones
- * showed an empty plan for a project with eleven dated commitments under it —
- * and the person who wanted "what is this project on the hook for" had to
- * open each workstream and hold the answer in their head.
+ * Almost nothing is committed at initiative level. The dates that matter are on
+ * the projects, so an initiative page that showed only its own milestones
+ * showed an empty plan for an initiative with eleven dated commitments under it —
+ * and the person who wanted "what is this initiative on the hook for" had to
+ * open each project and hold the answer in their head.
  *
  * So each level shows its own plus everything below it, and every borrowed
  * row says where it came from and links there. The row is still owned by the
@@ -21,10 +21,10 @@
  */
 import { asc, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { milestones, projects, workstreams } from '@/db/schema'
+import { milestones, initiatives, projects } from '@/db/schema'
 import type { MilestoneRow } from '@/components/milestone-editor'
 
-export type Level = 'initiative' | 'project' | 'workstream'
+export type Level = 'objective' | 'initiative' | 'project'
 
 /** Every entity at or beneath `level`/`id`, with the names for the From column. */
 async function descendants(
@@ -33,34 +33,34 @@ async function descendants(
 ): Promise<Array<{ level: Level; id: string; name: string }>> {
   const self = { level, id, name: '' }
 
-  if (level === 'workstream') return [self]
+  if (level === 'project') return [self]
 
-  if (level === 'project') {
+  if (level === 'initiative') {
     const kids = await db
-      .select({ id: workstreams.id, name: workstreams.name })
-      .from(workstreams)
-      .where(inArray(workstreams.projectId, [id]))
-    return [self, ...kids.map((k) => ({ level: 'workstream' as const, id: k.id, name: k.name }))]
+      .select({ id: projects.id, name: projects.name })
+      .from(projects)
+      .where(inArray(projects.initiativeId, [id]))
+    return [self, ...kids.map((k) => ({ level: 'project' as const, id: k.id, name: k.name }))]
   }
 
-  // An initiative reaches two tiers down, because the project page it sits
+  // An objective reaches two tiers down, because the initiative page it sits
   // above is itself showing two. Anything else would mean the roll-up said
   // something different at each level.
   const kids = await db
-    .select({ id: projects.id, name: projects.name })
-    .from(projects)
-    .where(inArray(projects.initiativeId, [id]))
+    .select({ id: initiatives.id, name: initiatives.name })
+    .from(initiatives)
+    .where(inArray(initiatives.objectiveId, [id]))
   if (kids.length === 0) return [self]
 
   const grandkids = await db
-    .select({ id: workstreams.id, name: workstreams.name, projectId: workstreams.projectId })
-    .from(workstreams)
-    .where(inArray(workstreams.projectId, kids.map((k) => k.id)))
+    .select({ id: projects.id, name: projects.name, initiativeId: projects.initiativeId })
+    .from(projects)
+    .where(inArray(projects.initiativeId, kids.map((k) => k.id)))
 
   return [
     self,
-    ...kids.map((k) => ({ level: 'project' as const, id: k.id, name: k.name })),
-    ...grandkids.map((g) => ({ level: 'workstream' as const, id: g.id, name: g.name })),
+    ...kids.map((k) => ({ level: 'initiative' as const, id: k.id, name: k.name })),
+    ...grandkids.map((g) => ({ level: 'project' as const, id: g.id, name: g.name })),
   ]
 }
 
@@ -77,7 +77,7 @@ export async function milestoneRows(level: Level, entityId: string): Promise<Mil
   return rows.map((m) => {
     const from = byId.get(m.entityId)
     // The page's own milestones carry no source: labelling them "from this
-    // project" on the project's own page is noise in every row.
+    // initiative" on the initiative's own page is noise in every row.
     const borrowed = Boolean(from && m.entityId !== entityId)
     return {
       id: m.id,

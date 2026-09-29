@@ -2,7 +2,7 @@
  * Narrowing a long list of things to pick from.
  *
  * The dependency dialogs offer every piece of work in the portfolio as the
- * other end of the link — initiatives, projects, workstreams and milestones,
+ * other end of the link — objectives, initiatives, projects and milestones,
  * which on a real portfolio is several hundred options in one dropdown. A
  * native select answers that with a scrollbar and single-letter type-ahead,
  * so finding "Insight Studio — Client Launch (MVP)" means either knowing it
@@ -17,8 +17,8 @@
  * and it does. Requiring the words in order, or anchoring them to the start,
  * turns a search into a guessing game about how the thing was named.
  *
- * Matching the group as well means "workstream gpc" narrows to the GPC
- * workstreams, which is how people describe what they are after when the list
+ * Matching the group as well means "project gpc" narrows to the GPC
+ * projects, which is how people describe what they are after when the list
  * is grouped in front of them.
  */
 

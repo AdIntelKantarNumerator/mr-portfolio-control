@@ -8,7 +8,7 @@
  * The dependency dialogs offer every piece of work in the portfolio as the
  * other end of a link. On a real portfolio that is several hundred options,
  * and a native select answers a list that long with a scrollbar and
- * single-letter type-ahead. Finding one workstream means scrolling, or
+ * single-letter type-ahead. Finding one project means scrolling, or
  * pressing its first letter until you arrive.
  *
  * WHY NOT A `<datalist>`
@@ -16,8 +16,8 @@
  * It is one attribute and it would be tempting. But a datalist's value IS its
  * label, and what the form has to submit here is an id — so the two cannot be
  * different, which is the whole requirement. It also drops the grouping, which
- * is what tells a reader whether "Creative Central" is a project or a
- * workstream when both exist.
+ * is what tells a reader whether "Creative Central" is an initiative or a
+ * project when both exist.
  *
  * SO: A COMBOBOX, AND A HIDDEN INPUT
  *

@@ -20,7 +20,7 @@ test('an edited blocker carries every field the form offered', () => {
     category: 'risk',
     ownerId: 'p1',
     dueBy: ' next leads call ',
-    at: 'project:abc',
+    at: 'initiative:abc',
   })
   assert.ok(r.ok)
   assert.deepEqual(r.value, {
@@ -30,7 +30,7 @@ test('an edited blocker carries every field the form offered', () => {
     category: 'risk',
     ownerId: 'p1',
     dueBy: 'next leads call',
-    level: 'project',
+    level: 'initiative',
     entityId: 'abc',
   })
 })
@@ -61,35 +61,35 @@ test('an unknown status or category falls back rather than failing', () => {
 // --- dependencies ----------------------------------------------------------
 
 test('both ends are required, and named separately', () => {
-  assert.equal(fault(dependencyPatch({ from: '', to: 'project:b' }))?.field, 'from')
-  assert.equal(fault(dependencyPatch({ from: 'project:a', to: '' }))?.field, 'to')
+  assert.equal(fault(dependencyPatch({ from: '', to: 'initiative:b' }))?.field, 'from')
+  assert.equal(fault(dependencyPatch({ from: 'initiative:a', to: '' }))?.field, 'to')
 })
 
 test('nothing may depend on itself', () => {
-  const r = dependencyPatch({ from: 'project:a', to: 'project:a' })
+  const r = dependencyPatch({ from: 'initiative:a', to: 'initiative:a' })
   assert.equal(fault(r)?.message, 'Something cannot depend on itself.')
 })
 
 test('the same id at two different levels is two different things', () => {
-  const r = dependencyPatch({ from: 'project:a', to: 'workstream:a' })
+  const r = dependencyPatch({ from: 'initiative:a', to: 'project:a' })
   assert.ok(r.ok)
 })
 
 test('a required date that is not a date is refused, not dropped', () => {
   // Writing null here would lose the only thing the reader typed, and the row
   // would come back saying "No date" as though they had left it blank.
-  const r = dependencyPatch({ from: 'project:a', to: 'project:b', dueDate: 'next tuesday' })
+  const r = dependencyPatch({ from: 'initiative:a', to: 'initiative:b', dueDate: 'next tuesday' })
   assert.equal(fault(r)?.field, 'dueDate')
 })
 
 test('an empty required date means no date, which is a real answer', () => {
-  const r = dependencyPatch({ from: 'project:a', to: 'project:b', dueDate: '' })
+  const r = dependencyPatch({ from: 'initiative:a', to: 'initiative:b', dueDate: '' })
   assert.ok(r.ok)
   assert.equal(r.value.dueDate, null)
 })
 
 test('a required date is read as UTC midnight, not the server timezone', () => {
-  const r = dependencyPatch({ from: 'project:a', to: 'project:b', dueDate: '2026-10-07' })
+  const r = dependencyPatch({ from: 'initiative:a', to: 'initiative:b', dueDate: '2026-10-07' })
   assert.ok(r.ok)
   assert.equal(r.value.dueDate?.toISOString(), '2026-10-07T00:00:00.000Z')
 })
@@ -97,7 +97,7 @@ test('a required date is read as UTC midnight, not the server timezone', () => {
 // --- the bits both use -----------------------------------------------------
 
 test('an endpoint id containing a colon survives the split', () => {
-  assert.deepEqual(parseEndpoint('project:a:b'), { type: 'project', id: 'a:b' })
+  assert.deepEqual(parseEndpoint('initiative:a:b'), { type: 'initiative', id: 'a:b' })
 })
 
 test('parseDay names the field it was given', () => {

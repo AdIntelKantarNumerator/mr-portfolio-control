@@ -1,20 +1,15 @@
 'use client'
 
 /**
- * Projects, one row each, with their workstreams underneath.
+ * Every project, in the same row shape as initiatives and objectives.
  *
- * Same shape as the initiatives list on purpose: ring on the left saying how
- * far along against how far along it should be, a coloured edge repeating it
- * for anyone scanning, and the facts that decide anything — who owns it, when
- * it lands, what is underneath — on the row itself rather than a click away.
+ * This is the flat view — the one you come to when you know the name of the
+ * thing and not where it lives, which is the state a project converted
+ * from intake is in on the day it is created. So the initiative it rolls up to
+ * is shown on the row rather than being the way you navigate to it.
  *
- * WHY EVERY VALUE HERE IS EDITABLE
- *
- * The owner, the status, the lead, the dates and the health are the fields
- * that go stale, and they go stale because correcting one meant finding the
- * screen that owned it. They are all `<Editable>` now, all writing through
- * the one server action, so the place you notice a wrong value is the place
- * you fix it.
+ * The fields are editable here for the same reason they are on the Initiatives
+ * page: this is where somebody notices that the lead left in March.
  */
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
@@ -26,37 +21,34 @@ import { Editable } from '@/components/editable'
 import { HealthEditable } from '@/components/health-editable'
 import { calendarDate } from '@/lib/calendar-date'
 
-export interface WorkstreamRow {
+export interface WsListRow {
   id: string
   name: string
   status: string
   priority: string | null
   progress: number
   lead: string | null
+  team: string | null
   startDate: string | null
   targetDate: string | null
+  initiative: { id: string; name: string } | null
   health: { rag: string; rationale: string | null; evidence: string | null; origin: string }
-}
-
-export interface ProjectRow {
-  id: string
-  name: string
-  status: string
-  owner: string | null
-  startDate: string | null
-  targetDate: string | null
-  /** True when the dates came from the workstreams rather than from anybody. */
-  datesRolledUp: boolean
-  /** Pace against the next milestone, from the home board. */
-  health: 'good' | 'warn' | 'crit' | 'quiet' | null
-  /** The project's own assessed health, used for the edge when there is no pace. */
-  rag: string | null
+  pace: 'good' | 'warn' | 'crit' | 'quiet' | null
   /** Why the row reads the way it does. See lib/card-health.ts. */
   reasons: { text: string; tone: 'crit' | 'warn' | 'muted' }[]
-  workstreams: WorkstreamRow[]
 }
 
 const ENDED = new Set(['completed', 'canceled', 'cancelled', 'withdrawn'])
+
+/** Live work first, then the not-yet-started, then everything finished. */
+const STATUS_RANK: Record<string, number> = {
+  in_progress: 0,
+  paused: 1,
+  planned: 2,
+  backlog: 3,
+  completed: 4,
+  canceled: 5,
+}
 
 /**
  * The edge colour for a row nothing has been said about.
@@ -68,22 +60,15 @@ const ENDED = new Set(['completed', 'canceled', 'cancelled', 'withdrawn'])
  * abandoned.
  */
 const STATUS_TONE: Record<string, string> = {
-  active: 'var(--line-2)',
+  in_progress: 'var(--line-2)',
   planned: 'var(--line-2)',
+  backlog: 'var(--line-2)',
   paused: 'var(--c2)',
   completed: 'var(--c1)',
   canceled: 'var(--ended)',
 }
 
 const PROJECT_STATUS = [
-  { value: 'planned', label: 'Planned' },
-  { value: 'active', label: 'Active' },
-  { value: 'paused', label: 'Paused' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'canceled', label: 'Canceled' },
-]
-
-const WORKSTREAM_STATUS = [
   { value: 'backlog', label: 'Backlog' },
   { value: 'planned', label: 'Planned' },
   { value: 'in_progress', label: 'In progress' },
@@ -100,37 +85,50 @@ const PRIORITY = [
   { value: 'no_priority', label: 'None' },
 ]
 
-const STATUS_WORD = new Map([...PROJECT_STATUS, ...WORKSTREAM_STATUS].map((s) => [s.value, s.label]))
+const STATUS_WORD = new Map(PROJECT_STATUS.map((s) => [s.value, s.label]))
+const PRIORITY_WORD = new Map(PRIORITY.map((s) => [s.value, s.label]))
 
 export function ProjectList({
   rows,
   people,
   sort,
 }: {
-  rows: ProjectRow[]
-  people: { id: string; name: string }[]
+  rows: WsListRow[]
   /** The sort the page applied; 'custom' is the one you can drag under. */
   sort: string
+  people: { id: string; name: string }[]
 }) {
   const [find, setFind] = useState('')
   const [showEnded, setShowEnded] = useState(false)
+  const [loose, setLoose] = useState(false)
 
   const shown = useMemo(() => {
     const q = find.trim().toLowerCase()
-    return rows.filter((r) => {
-      if (!showEnded && ENDED.has(r.status)) return false
-      if (!q) return true
-      // A workstream's name counts as part of its project's, because people
-      // look for the work they know the name of, not the container it
-      // happens to sit in.
-      return (
-        r.name.toLowerCase().includes(q) ||
-        (r.owner ?? '').toLowerCase().includes(q) ||
-        r.workstreams.some((w) => w.name.toLowerCase().includes(q))
-      )
-    })
-  }, [rows, find, showEnded])
+    return rows
+      .filter((r) => {
+        if (!showEnded && ENDED.has(r.status)) return false
+        if (loose && r.initiative) return false
+        if (!q) return true
+        return (
+          r.name.toLowerCase().includes(q) ||
+          (r.lead ?? '').toLowerCase().includes(q) ||
+          (r.initiative?.name ?? '').toLowerCase().includes(q)
+        )
+      })
+      // Status order is the DEFAULT, not an override: the page now has a Sort
+      // By picker, and a list that re-sorted underneath it would make the
+      // control look broken. `rows` already arrives in the order the picker
+      // asked for, so anything other than the default is left alone.
+      .sort((a, b) => {
+        if (sort !== 'active') return 0
+        const ra = STATUS_RANK[a.status] ?? 99
+        const rb = STATUS_RANK[b.status] ?? 99
+        if (ra !== rb) return ra - rb
+        return a.name.localeCompare(b.name)
+      })
+  }, [rows, find, showEnded, loose, sort])
 
+  const orphans = rows.filter((r) => !r.initiative && !ENDED.has(r.status)).length
   const hidden = rows.length - shown.length
 
   return (
@@ -144,7 +142,7 @@ export function ProjectList({
               type="search"
               value={find}
               onChange={(e) => setFind(e.target.value)}
-              placeholder="Project, owner or a workstream in it"
+              placeholder="Project, lead or initiative"
               aria-label="Find a project"
             />
           </span>
@@ -163,6 +161,16 @@ export function ProjectList({
             </select>
           </span>
         </label>
+        {orphans > 0 && (
+          <button type="button" className={`fpill as-btn${loose ? ' active' : ''}`} onClick={() => setLoose(!loose)}>
+            <span>
+              <span className="lab">Not under an initiative</span>
+              <span className="val">
+                {orphans} {loose ? '· showing only these' : '· show'}
+              </span>
+            </span>
+          </button>
+        )}
         <SortPicker sort={sort} />
       </div>
 
@@ -171,8 +179,8 @@ export function ProjectList({
           <h2>{find ? 'Nothing matches' : 'No projects yet'}</h2>
           <p>
             {find
-              ? `No project, owner or workstream matches "${find}".`
-              : 'Projects arrive from the sync, or are created on the Initiatives page.'}
+              ? `No project, lead or initiative matches "${find}".`
+              : 'Projects arrive from the sync, or are converted from an intake request.'}
           </p>
         </div>
       ) : (
@@ -184,13 +192,13 @@ export function ProjectList({
             render={(id) => {
             const r = shown.find((x) => x.id === id)!
             const edge =
-              edgeColor(r.health, r.rag) ??
+              edgeColor(r.pace, r.health.rag) ??
               STATUS_TONE[r.status] ??
               'var(--line-2)'
             return (
               <div key={r.id} className="irow" style={{ borderLeftColor: edge }}>
                 <div className="ir-ring">
-                  <HealthDot health={r.health} reasons={r.reasons} />
+                  <HealthDot health={r.pace} reasons={r.reasons} />
                 </div>
 
                 <div className="ir-body">
@@ -208,22 +216,68 @@ export function ProjectList({
                       value={STATUS_WORD.get(r.status) ?? r.status}
                       className="ir-status-ed"
                     />
-                    <span className="ir-meta">
-                      {r.workstreams.length} workstream{r.workstreams.length === 1 ? '' : 's'}
-                    </span>
+                    <HealthEditable
+                      level="project"
+                      id={r.id}
+                      rag={r.health.rag}
+                      rationale={r.health.rationale}
+                      evidence={r.health.evidence}
+                      origin={r.health.origin}
+                    />
+                    {r.initiative ? (
+                      <Link href={`/initiatives/${r.initiative.id}`} className="ir-meta">
+                        {r.initiative.name}
+                      </Link>
+                    ) : (
+                      <span
+                        className="ir-loose"
+                        title="Not under any initiative. Newly converted intake requests start this way."
+                      >
+                        no initiative
+                      </span>
+                    )}
                   </div>
 
                   <div className="ir-facts">
                     <span>
-                      <i>Owner</i>
+                      <i>Lead</i>
                       <Editable
                         level="project"
                         id={r.id}
-                        field="owner"
+                        field="lead"
                         kind="person"
                         people={people}
-                        value={r.owner}
-                        prompt="no owner"
+                        value={r.lead}
+                        prompt="no lead"
+                      />
+                    </span>
+                    <span>
+                      <i>Priority</i>
+                      <Editable
+                        level="project"
+                        id={r.id}
+                        field="priority"
+                        kind="choice"
+                        options={PRIORITY}
+                        raw={r.priority ?? 'medium'}
+                        value={r.priority ? (PRIORITY_WORD.get(r.priority) ?? r.priority) : null}
+                        prompt="unset"
+                      />
+                    </span>
+                    <span>
+                      <i>Progress</i>
+                      <Editable
+                        level="project"
+                        id={r.id}
+                        field="progress"
+                        kind="number"
+                        raw={String(progressPercent(r.progress))}
+                        value={`${progressPercent(r.progress)}%`}
+                        after={
+                          <span className="wsbar" aria-hidden="true">
+                            <span style={{ width: `${progressPercent(r.progress)}%` }} />
+                          </span>
+                        }
                       />
                     </span>
                     <span>
@@ -247,19 +301,15 @@ export function ProjectList({
                         value={calendarDate(r.targetDate, { year: false })}
                         prompt="no target"
                       />
-                      {r.datesRolledUp && <b title="Nobody typed these; they are the span of the workstreams.">rolled up</b>}
                     </span>
+                    {r.team && (
+                      <span>
+                        <i>Team</i>
+                        {r.team}
+                      </span>
+                    )}
                   </div>
 
-
-                  {r.workstreams.length === 0 ? (
-                    <p className="ir-desc">
-                      Nothing in delivery yet — no workstreams roll up to this. That is a statement
-                      about the plan, not a missing row.
-                    </p>
-                  ) : (
-                    <WorkstreamTable rows={r.workstreams} people={people} />
-                  )}
                 </div>
               </div>
             )
@@ -268,150 +318,11 @@ export function ProjectList({
         </div>
       )}
 
-      {hidden > 0 && !showEnded && (
+      {hidden > 0 && !showEnded && !loose && (
         <p className="ir-hidden">
           {hidden} closed or canceled {hidden === 1 ? 'project is' : 'projects are'} hidden.
         </p>
       )}
     </>
-  )
-}
-
-/**
- * The delivery work under one project.
- *
- * WHY THE COLUMNS ARE DECLARED AND THE LAYOUT IS FIXED
- *
- * The old table let the browser size its columns from the content, and the
- * health badge sat inside the name cell. A badge reading "Needs input" is
- * three times the width of one reading "On track", so the first column's
- * width — and with it every heading to its right — moved depending on which
- * rows happened to be unassessed. Health has a column of its own now, and
- * `table-layout: fixed` with a declared `<colgroup>` means the headings are
- * positioned by the colgroup and not by whatever is in the cells.
- */
-function WorkstreamTable({
-  rows,
-  people,
-}: {
-  rows: WorkstreamRow[]
-  people: { id: string; name: string }[]
-}) {
-  return (
-    <div className="scroll-x">
-      <table className="dtable cols">
-        <colgroup>
-          <col style={{ width: 118 }} />
-          <col />
-          <col style={{ width: 116 }} />
-          <col style={{ width: 84 }} />
-          <col style={{ width: 128 }} />
-          <col style={{ width: 132 }} />
-          <col style={{ width: 168 }} />
-        </colgroup>
-        <thead>
-          <tr>
-            <th>Health</th>
-            <th>Workstream</th>
-            <th>Status</th>
-            <th>Priority</th>
-            <th>Progress</th>
-            <th>Lead</th>
-            <th>Dates</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((w) => (
-            <tr key={w.id}>
-              <td>
-                <HealthEditable
-                  level="workstream"
-                  id={w.id}
-                  rag={w.health.rag}
-                  rationale={w.health.rationale}
-                  evidence={w.health.evidence}
-                  origin={w.health.origin}
-                />
-              </td>
-              <td>
-                <Link href={`/workstreams/${w.id}`} className="ws-name">
-                  {w.name}
-                </Link>
-              </td>
-              <td>
-                <Editable
-                  level="workstream"
-                  id={w.id}
-                  field="status"
-                  kind="choice"
-                  options={WORKSTREAM_STATUS}
-                  raw={w.status}
-                  value={STATUS_WORD.get(w.status) ?? w.status}
-                />
-              </td>
-              <td>
-                <Editable
-                  level="workstream"
-                  id={w.id}
-                  field="priority"
-                  kind="choice"
-                  options={PRIORITY}
-                  raw={w.priority ?? 'medium'}
-                  value={w.priority ? (PRIORITY.find((p) => p.value === w.priority)?.label ?? w.priority) : null}
-                  prompt="unset"
-                />
-              </td>
-              <td>
-                <Editable
-                  level="workstream"
-                  id={w.id}
-                  field="progress"
-                  kind="number"
-                  raw={String(progressPercent(w.progress))}
-                  value={`${progressPercent(w.progress)}%`}
-                  after={
-                    <span className="wsbar" aria-hidden="true">
-                      <span style={{ width: `${progressPercent(w.progress)}%` }} />
-                    </span>
-                  }
-                />
-              </td>
-              <td>
-                <Editable
-                  level="workstream"
-                  id={w.id}
-                  field="lead"
-                  kind="person"
-                  people={people}
-                  value={w.lead}
-                  prompt="no lead"
-                />
-              </td>
-              <td className="tabular-nums">
-                <Editable
-                  level="workstream"
-                  id={w.id}
-                  field="startDate"
-                  kind="date"
-                  raw={w.startDate}
-                  value={calendarDate(w.startDate, { year: false })}
-                  prompt="—"
-                />
-                <em className="arrow">→</em>
-                <Editable
-                  level="workstream"
-                  id={w.id}
-                  field="targetDate"
-                  kind="date"
-                  raw={w.targetDate}
-                  value={calendarDate(w.targetDate, { year: false })}
-                  prompt="—"
-                />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
   )
 }

@@ -14,9 +14,9 @@ const TODAY = new Date('2026-09-28T12:00:00Z')
 
 const dep = (over: Partial<DependencyLike> = {}): DependencyLike => ({
   id: 'd1',
-  fromType: 'workstream',
+  fromType: 'project',
   fromId: 'w1',
-  toType: 'project',
+  toType: 'initiative',
   toId: 'p1',
   status: 'open',
   dueDate: '2026-10-15',

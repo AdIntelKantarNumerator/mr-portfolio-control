@@ -13,7 +13,7 @@
  * nobody created.
  *
  * The hierarchy rotation made that risk acute — a dozen tables carried a
- * `project_id` that had to become `workstream_id`, and missing one leaves a
+ * `initiative_id` that had to become `project_id`, and missing one leaves a
  * table that reads fine and queries a column that is not there.
  *
  * So this asks both sides and prints the difference. It does not guess which

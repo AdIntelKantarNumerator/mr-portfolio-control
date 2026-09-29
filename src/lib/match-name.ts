@@ -4,13 +4,13 @@
  * An agent asked to "move Keystone under GPC" gets given the words somebody
  * said out loud, not the string in the database. Requiring an exact match
  * meant she refused perfectly clear instructions over a missing "the", and
- * printing the first twelve projects alphabetically was no help at all — the
+ * printing the first twelve initiatives alphabetically was no help at all — the
  * one they meant was rarely among them.
  *
  * This ranks candidates so she can ask one short question instead. It never
  * decides: it produces an ordered shortlist, and something else asks a person.
- * Guessing between two similar project names is exactly the mistake that ends
- * with one team's plan written onto another team's project.
+ * Guessing between two similar initiative names is exactly the mistake that ends
+ * with one team's plan written onto another team's initiative.
  *
  * Deliberately not fuzzy in the clever sense. Three signals, in order of how
  * much they mean:
@@ -26,7 +26,7 @@
 /** Words too common to tell two pieces of work apart. */
 const GENERIC = new Set([
   'the', 'a', 'an', 'and', 'or', 'of', 'for', 'to', 'in', 'on', 'at', 'by',
-  'project', 'initiative', 'programme', 'program', 'phase', 'workstream',
+  'initiative', 'objective', 'programme', 'program', 'phase', 'project',
   'new', 'old', 'v1', 'v2', 'v3', 'data', 'platform', 'system', 'service',
 ])
 

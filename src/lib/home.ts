@@ -8,10 +8,10 @@
  *
  * ROLLING UP
  *
- * An initiative's numbers are the sum of its projects' workstreams, not of
- * anything stored on the initiative. Nothing is denormalised, because a cached
+ * An objective's numbers are the sum of its initiatives' projects, not of
+ * anything stored on the objective. Nothing is denormalised, because a cached
  * count is a second answer to a question the tables already answer, and it goes
- * stale the first time somebody moves a project.
+ * stale the first time somebody moves an initiative.
  */
 import { cache } from 'react'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
@@ -21,14 +21,14 @@ import {
   actionItems,
   agentObservations,
   decisions,
-  initiatives,
+  objectives,
   milestones,
   people,
+  initiatives,
   projects,
-  workstreams,
   dependencies,
 } from '@/db/schema'
-import { ENDED_PROJECT_STATUS } from './domain'
+import { ENDED_INITIATIVE_STATUS } from './domain'
 import { lateDependencies } from './dependency-risk'
 import { activitySeries } from './activity-series'
 import { getCardOrder } from './card-order'
@@ -102,7 +102,7 @@ export interface HomeCard {
   level: Level
   name: string
   owner: string | null
-  /** "4 projects · 11 workstreams" — whatever is beneath this level. */
+  /** "4 initiatives · 11 projects" — whatever is beneath this level. */
   beneath: string
   health: 'good' | 'warn' | 'crit' | 'quiet'
   /** Yaara's one sentence, or a person's if somebody has edited it. */
@@ -114,10 +114,10 @@ export interface HomeCard {
   /**
    * Set when this card's assessment is borrowed from the tier beneath.
    *
-   * Names what it was rolled up from, so the card can say "from 3 projects"
+   * Names what it was rolled up from, so the card can say "from 3 initiatives"
    * rather than presenting somebody else's sentence as if it were about this
-   * initiative. An honest secondhand answer beats "No assessment yet" when
-   * every project inside has one, and beats a silent merge either way.
+   * objective. An honest secondhand answer beats "No assessment yet" when
+   * every initiative inside has one, and beats a silent merge either way.
    */
   verdictRolledUp: string | null
   detail: string[]
@@ -137,10 +137,10 @@ export interface HomeCard {
   /**
    * What sits directly beneath, grouped by status, in a fixed order.
    *
-   * The tier below and no further: an initiative's mix is its projects, a
-   * project's is its workstreams. Counting two tiers down made "23 in
-   * progress" on an initiative card a workstream count, which is not the
-   * number anybody reading an initiative has in mind.
+   * The tier below and no further: an objective's mix is its initiatives, a
+   * initiative's is its projects. Counting two tiers down made "23 in
+   * progress" on an objective card a project count, which is not the
+   * number anybody reading an objective has in mind.
    *
    * The members travel with the count so a segment can say what is in it. A
    * bar you cannot interrogate is a bar you have to take on trust.
@@ -154,8 +154,8 @@ export interface HomeCard {
 const DAY = 86_400_000
 
 /**
- * Same text twice is the commonest artefact of rolling up: two projects in
- * one initiative frequently produce the identical bullet from the identical
+ * Same text twice is the commonest artefact of rolling up: two initiatives in
+ * one objective frequently produce the identical bullet from the identical
  * pull request.
  */
 function dedupe(values: string[]): string[] {
@@ -163,7 +163,7 @@ function dedupe(values: string[]): string[] {
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
-const ENDED = new Set<string>(ENDED_PROJECT_STATUS)
+const ENDED = new Set<string>(ENDED_INITIATIVE_STATUS)
 
 function parse<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback
@@ -213,9 +213,9 @@ export const getHomeCards = cache(async (
   const startOfToday = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate())
 
   const [inits, projs, wss, ms, obs, decs, acts, links, peeps, deps] = await Promise.all([
+    db.select().from(objectives),
     db.select().from(initiatives),
     db.select().from(projects),
-    db.select().from(workstreams),
     db.select().from(milestones),
     db.select().from(agentObservations).where(isNull(agentObservations.supersededAt)).orderBy(desc(agentObservations.generatedAt)),
     db.select().from(decisions),
@@ -247,38 +247,38 @@ export const getHomeCards = cache(async (
    * waiting end would light up a team who cannot do anything about it.
    */
   const plans = new Map<string, { targetDate: Date | null; done: boolean }>()
-  for (const p of projs) plans.set(`project:${p.id}`, { targetDate: p.targetDate, done: ENDED.has(p.status) })
-  for (const w of wss) plans.set(`workstream:${w.id}`, { targetDate: w.targetDate, done: ENDED.has(w.status) })
-  for (const i of inits) plans.set(`initiative:${i.id}`, { targetDate: i.targetDate, done: i.status === 'completed' || i.status === 'canceled' })
+  for (const p of projs) plans.set(`initiative:${p.id}`, { targetDate: p.targetDate, done: ENDED.has(p.status) })
+  for (const w of wss) plans.set(`project:${w.id}`, { targetDate: w.targetDate, done: ENDED.has(w.status) })
+  for (const i of inits) plans.set(`objective:${i.id}`, { targetDate: i.targetDate, done: i.status === 'completed' || i.status === 'canceled' })
   for (const m of ms) plans.set(`milestone:${m.id}`, { targetDate: m.targetDate, done: m.status === 'complete' })
 
   const late = lateDependencies(deps, (type, id) => plans.get(`${type}:${id}`) ?? null)
   for (const id of late.keys()) blockedIds.add(id)
 
-  // Which workstreams sit under which project, and which projects under which
-  // initiative — the only two joins the whole page needs.
-  const wsByProject = new Map<string, typeof wss>()
+  // Which projects sit under which initiative, and which initiatives under which
+  // objective — the only two joins the whole page needs.
+  const wsByInitiative = new Map<string, typeof wss>()
   for (const w of wss) {
-    if (!w.projectId) continue
-    wsByProject.set(w.projectId, [...(wsByProject.get(w.projectId) ?? []), w])
+    if (!w.initiativeId) continue
+    wsByInitiative.set(w.initiativeId, [...(wsByInitiative.get(w.initiativeId) ?? []), w])
   }
-  const projByInitiative = new Map<string, typeof projs>()
+  const projByObjective = new Map<string, typeof projs>()
   for (const p of projs) {
-    if (!p.initiativeId) continue
-    projByInitiative.set(p.initiativeId, [...(projByInitiative.get(p.initiativeId) ?? []), p])
+    if (!p.objectiveId) continue
+    projByObjective.set(p.objectiveId, [...(projByObjective.get(p.objectiveId) ?? []), p])
   }
 
   /**
-   * Is this project standing still — itself, or anything inside it?
+   * Is this initiative standing still — itself, or anything inside it?
    *
-   * A blocker is filed where the work is stuck, which is a workstream. Asking
-   * only whether the project row carries one says "on track" about a project
-   * whose every workstream is jammed.
+   * A blocker is filed where the work is stuck, which is a project. Asking
+   * only whether the initiative row carries one says "on track" about an initiative
+   * whose every project is jammed.
    */
-  const blockedProject = (projectId: string): boolean =>
+  const blockedInitiative = (initiativeId: string): boolean =>
     blockedAtOrBelow(
-      projectId,
-      (wsByProject.get(projectId) ?? []).map((w) => w.id),
+      initiativeId,
+      (wsByInitiative.get(initiativeId) ?? []).map((w) => w.id),
       blockedIds,
     )
 
@@ -289,13 +289,13 @@ export const getHomeCards = cache(async (
   }
 
   /** Every id at or beneath one entity — what its rollups count over. */
-  function scope(lv: Level, id: string): { projects: string[]; workstreams: string[] } {
-    if (lv === 'workstream') return { projects: [], workstreams: [id] }
-    if (lv === 'project') return { projects: [id], workstreams: (wsByProject.get(id) ?? []).map((w) => w.id) }
-    const kids = projByInitiative.get(id) ?? []
+  function scope(lv: Level, id: string): { initiatives: string[]; projects: string[] } {
+    if (lv === 'project') return { initiatives: [], projects: [id] }
+    if (lv === 'initiative') return { initiatives: [id], projects: (wsByInitiative.get(id) ?? []).map((w) => w.id) }
+    const kids = projByObjective.get(id) ?? []
     return {
-      projects: kids.map((p) => p.id),
-      workstreams: kids.flatMap((p) => (wsByProject.get(p.id) ?? []).map((w) => w.id)),
+      initiatives: kids.map((p) => p.id),
+      projects: kids.flatMap((p) => (wsByInitiative.get(p.id) ?? []).map((w) => w.id)),
     }
   }
 
@@ -308,9 +308,9 @@ export const getHomeCards = cache(async (
     /** The hand-arranged position, for sort=custom. */
     rank: number
   }> =
-    level === 'initiative'
+    level === 'objective'
       ? inits.map((i) => ({ id: i.id, name: i.name, ownerId: i.ownerId, startDate: i.startDate, status: i.status, rank: i.sortOrder }))
-      : level === 'project'
+      : level === 'initiative'
         ? projs.map((p) => ({ id: p.id, name: p.name, ownerId: p.ownerId, startDate: p.startDate, status: p.status, rank: p.sortOrder }))
         : wss.map((w) => ({ id: w.id, name: w.name, ownerId: w.leadId, startDate: w.startDate, status: w.status, rank: w.sortOrder }))
 
@@ -318,12 +318,12 @@ export const getHomeCards = cache(async (
     .filter((r) => !ENDED.has(r.status))
     .map((r) => {
       const sc = scope(level, r.id)
-      const allIds = new Set<string>([r.id, ...sc.projects, ...sc.workstreams])
+      const allIds = new Set<string>([r.id, ...sc.initiatives, ...sc.projects])
 
       const mine = ms.filter((m) => allIds.has(m.entityId))
       const own = ms.filter((m) => m.level === level && m.entityId === r.id)
       // Its own milestones if it has any; otherwise the ones underneath, so an
-      // initiative with nothing authored still shows the work's real dates.
+      // objective with nothing authored still shows the work's real dates.
       // By date, not by the order somebody arranged them in on the editor —
       // the rail is a run of time, and the first open mark on it is the card's
       // "next milestone". See lib/milestone-order.ts.
@@ -369,15 +369,15 @@ export const getHomeCards = cache(async (
 
       // Nothing assessed at this level, but something assessed beneath it.
       //
-      // An initiative is a grouping; Yaara may not have been asked about it
-      // directly, while every project inside has a current reading. Showing
+      // An objective is a grouping; Yaara may not have been asked about it
+      // directly, while every initiative inside has a current reading. Showing
       // "No assessment yet" there is technically true and useless - the
       // information exists, one tier down. So the card borrows it, newest
       // first, and says where it came from.
       const kids = ob
         ? []
-        : [...sc.projects, ...sc.workstreams]
-            .map((id) => obsFor.get(`project:${id}`) ?? obsFor.get(`workstream:${id}`) ?? null)
+        : [...sc.initiatives, ...sc.projects]
+            .map((id) => obsFor.get(`initiative:${id}`) ?? obsFor.get(`project:${id}`) ?? null)
             .filter((o): o is NonNullable<typeof o> => Boolean(o))
             .sort((a, b) => b.generatedAt.getTime() - a.generatedAt.getTime())
 
@@ -408,8 +408,8 @@ export const getHomeCards = cache(async (
       const myActionIds = new Set(links.filter((l) => allIds.has(l.entityId)).map((l) => l.actionItemId))
       const myActions = acts.filter((a) => myActionIds.has(a.id))
 
-      // Rolled-up activity is the sum of the children's: an initiative whose
-      // five projects each had a busy week is a busy initiative, and taking
+      // Rolled-up activity is the sum of the children's: an objective whose
+      // five initiatives each had a busy week is a busy objective, and taking
       // only the newest child's score would call it quiet.
       const activityScore = rolledUp
         ? kids.reduce((n, k) => n + (k.activityScore ?? 0), 0)
@@ -418,7 +418,7 @@ export const getHomeCards = cache(async (
       /*
        * Where a signal's link points.
        *
-       * Every count on a card rolls up — "11 blockers" on an initiative is
+       * Every count on a card rolls up — "11 blockers" on an objective is
        * eleven across everything beneath it — so the link has to carry which
        * card it came from, and the page it lands on has to filter by the same
        * set. `/decisions?ref=…` did neither: blockers and decisions now have
@@ -477,28 +477,28 @@ export const getHomeCards = cache(async (
         })
       }
 
-      // The tier directly beneath, by status. A workstream has no tier below
+      // The tier directly beneath, by status. A project has no tier below
       // it that carries a lifecycle status, so it shows its milestones.
       const below: MixMember[] =
-        level === 'initiative'
-          ? (projByInitiative.get(r.id) ?? []).map((p) => ({
+        level === 'objective'
+          ? (projByObjective.get(r.id) ?? []).map((p) => ({
               id: p.id,
               name: p.name,
               status: p.status,
-              href: `/projects/${p.id}`,
+              href: `/initiatives/${p.id}`,
             }))
-          : level === 'project'
-            ? (wsByProject.get(r.id) ?? []).map((w) => ({
+          : level === 'initiative'
+            ? (wsByInitiative.get(r.id) ?? []).map((w) => ({
                 id: w.id,
                 name: w.name,
                 status: w.status,
-                href: `/workstreams/${w.id}`,
+                href: `/projects/${w.id}`,
               }))
             : own.map((m) => ({
                 id: m.id,
                 name: m.name,
                 status: m.status,
-                href: `/workstreams/${r.id}`,
+                href: `/projects/${r.id}`,
               }))
 
       // In-progress work splits on whether anything is standing in its way.
@@ -506,15 +506,15 @@ export const getHomeCards = cache(async (
       // for the whole board rather than per card.
       //
       // "In its way" means anywhere at or beneath it, which is the fix for a
-      // bar that read 6 projects on track under an initiative flagged Blocked
-      // with fourteen open blockers. Blockers are filed against the workstream
-      // where the work is stuck, almost never against the project above it, so
-      // asking only whether the project row itself carried one made a project
+      // bar that read 6 initiatives on track under an objective flagged Blocked
+      // with fourteen open blockers. Blockers are filed against the project
+      // where the work is stuck, almost never against the initiative above it, so
+      // asking only whether the initiative row itself carried one made an initiative
       // look fine while everything inside it was jammed — and it made the two
       // halves of the same card disagree in public.
       const byStatus = new Map<string, MixMember[]>()
       for (const b of below as Array<MixMember & { status: string }>) {
-        const stuck = level === 'initiative' ? blockedProject(b.id) : blockedIds.has(b.id)
+        const stuck = level === 'objective' ? blockedInitiative(b.id) : blockedIds.has(b.id)
         const key = isInProgress(b.status)
           ? stuck
             ? IN_PROGRESS_BLOCKED
@@ -560,10 +560,10 @@ export const getHomeCards = cache(async (
       })
 
       const beneath =
-        level === 'initiative'
-          ? `${plural(sc.projects.length, 'project')} · ${plural(sc.workstreams.length, 'workstream')}`
-          : level === 'project'
-            ? `${plural(sc.workstreams.length, 'workstream')} · ${plural(mine.length, 'milestone')}`
+        level === 'objective'
+          ? `${plural(sc.initiatives.length, 'initiative')} · ${plural(sc.projects.length, 'project')}`
+          : level === 'initiative'
+            ? `${plural(sc.projects.length, 'project')} · ${plural(mine.length, 'milestone')}`
             : plural(own.length, 'milestone')
 
       return {
@@ -582,7 +582,7 @@ export const getHomeCards = cache(async (
         verdictAt: source?.verdictAt ?? source?.generatedAt ?? null,
         verdictEditedBy: ob?.verdictBy ?? null,
         verdictRolledUp: rolledUp
-          ? `${kids.length} ${level === 'initiative' ? 'project' : 'workstream'}${kids.length === 1 ? '' : 's'}`
+          ? `${kids.length} ${level === 'objective' ? 'initiative' : 'project'}${kids.length === 1 ? '' : 's'}`
           : null,
         detail: dedupe(items.map((i) => i.text)).slice(0, 6),
         evidence: dedupe(ev.map((e) => `${e.source}\u0000${e.title}\u0000${e.url ?? ''}`))
@@ -601,7 +601,7 @@ export const getHomeCards = cache(async (
         activity: activitySeries(recent, new Date(now)),
         activityDelta: activityScore > 0 ? `${Math.round(activityScore)}` : '0',
         href:
-          level === 'initiative' ? `/initiatives/${r.id}` : level === 'project' ? `/projects/${r.id}` : `/workstreams/${r.id}`,
+          level === 'objective' ? `/objectives/${r.id}` : level === 'initiative' ? `/initiatives/${r.id}` : `/projects/${r.id}`,
       }
     })
 
@@ -627,7 +627,7 @@ export const getHomeCards = cache(async (
   // last dragged it:
   //
   //   - a card they have never placed goes to the END, not to position zero.
-  //     A new project appearing silently at the top of somebody's hand-made
+  //     A new initiative appearing silently at the top of somebody's hand-made
   //     order would look like the app had rearranged their board.
   //   - a card in their saved list that no longer exists is simply absent;
   //     the ones after it keep their relative order.
@@ -651,17 +651,17 @@ export const getHomeCards = cache(async (
   })
 })
 
-/** Projects with no initiative above them — named, not hidden. */
+/** Initiatives with no objective above them — named, not hidden. */
 export const getUngrouped = cache(async () => {
   const rows = await db
-    .select({ id: projects.id, name: projects.name, status: projects.status })
-    .from(projects)
-    .where(or(isNull(projects.initiativeId), eq(projects.initiativeId, '')))
+    .select({ id: initiatives.id, name: initiatives.name, status: initiatives.status })
+    .from(initiatives)
+    .where(or(isNull(initiatives.objectiveId), eq(initiatives.objectiveId, '')))
 
-  const counts = await db.select({ id: workstreams.id, projectId: workstreams.projectId }).from(workstreams)
+  const counts = await db.select({ id: projects.id, initiativeId: projects.initiativeId }).from(projects)
   return rows
     .filter((r) => !ENDED.has(r.status))
-    .map((r) => ({ ...r, workstreams: counts.filter((c) => c.projectId === r.id).length }))
+    .map((r) => ({ ...r, projects: counts.filter((c) => c.initiativeId === r.id).length }))
 })
 
 /** Where a number on the home page came from — for the provenance panel. */
@@ -689,15 +689,15 @@ export const getProvenance = cache(async (level: Level, id: string) => {
 })
 
 export async function idsInScope(level: Level, id: string): Promise<string[]> {
-  if (level === 'workstream') return [id]
-  if (level === 'project') {
-    const ws = await db.select({ id: workstreams.id }).from(workstreams).where(eq(workstreams.projectId, id))
+  if (level === 'project') return [id]
+  if (level === 'initiative') {
+    const ws = await db.select({ id: projects.id }).from(projects).where(eq(projects.initiativeId, id))
     return [id, ...ws.map((w) => w.id)]
   }
-  const pj = await db.select({ id: projects.id }).from(projects).where(eq(projects.initiativeId, id))
+  const pj = await db.select({ id: initiatives.id }).from(initiatives).where(eq(initiatives.objectiveId, id))
   const ids = pj.map((p) => p.id)
   const ws = ids.length
-    ? await db.select({ id: workstreams.id }).from(workstreams).where(inArray(workstreams.projectId, ids))
+    ? await db.select({ id: projects.id }).from(projects).where(inArray(projects.initiativeId, ids))
     : []
   return [id, ...ids, ...ws.map((w) => w.id)]
 }

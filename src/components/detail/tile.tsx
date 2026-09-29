@@ -29,10 +29,10 @@ import {
   IconDependency,
   IconHealth,
   IconMilestone,
-  IconProjectsTile,
+  IconInitiativesTile,
   IconReadiness,
   IconUpdates,
-  IconWorkstreamsTile,
+  IconProjectsTile,
 } from './icons'
 
 /**
@@ -51,10 +51,10 @@ const ICONS = {
   dependency: IconDependency,
   health: IconHealth,
   milestone: IconMilestone,
-  projects: IconProjectsTile,
+  initiatives: IconInitiativesTile,
   readiness: IconReadiness,
   updates: IconUpdates,
-  workstreams: IconWorkstreamsTile,
+  projects: IconProjectsTile,
 } as const
 
 export type IconName = keyof typeof ICONS

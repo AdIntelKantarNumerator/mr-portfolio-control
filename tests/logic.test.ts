@@ -3,7 +3,7 @@
  *
  * Deliberately no UI tests and no database: these cover the rules that decide
  * what a number on screen *means* — whether an edit survives a sync, whether
- * an unassessed workstream reads as green, whether a signature check can be
+ * an unassessed project reads as green, whether a signature check can be
  * bypassed. Those are the failures nobody notices until a decision has already
  * been made on bad information.
  *
@@ -17,7 +17,7 @@ import { resolveHealth, computeScore, TSHIRT_WEEKS } from '../src/lib/domain'
 import { applyOverrides, overrideSurvivesSourceChange, type OverrideMap } from '../src/lib/merge'
 import { parseCsv, rowsToObjects, csvUrlFor } from '../src/lib/sources/csv'
 import { verifySlackSignature, parseSlackIntake } from '../src/lib/sources/slack-protocol'
-import { mapProjectStatus, mapInitiativeStatus } from '../src/lib/sources/linear-map'
+import { mapInitiativeStatus, mapObjectiveStatus } from '../src/lib/sources/linear-map'
 import { nextRef, slugify } from '../src/lib/util'
 
 // ---------------------------------------------------------------------------
@@ -72,12 +72,12 @@ describe('override merge', () => {
   const makeMap = (field: string, value: unknown, reason = 'board-locked'): OverrideMap =>
     new Map([
       [
-        'workstream:p1',
+        'project:p1',
         new Map([
           [
             field,
             {
-              entityType: 'workstream',
+              entityType: 'project',
               entityId: 'p1',
               field,
               value: JSON.stringify(value),
@@ -92,34 +92,34 @@ describe('override merge', () => {
 
   test('a manual value replaces the synced one and is reported as overridden', () => {
     const row = { id: 'p1', name: 'GPC', status: 'backlog' }
-    const merged = applyOverrides(row, 'workstream', makeMap('status', 'in_progress'))
+    const merged = applyOverrides(row, 'project', makeMap('status', 'in_progress'))
     assert.equal(merged.value.status, 'in_progress')
     assert.ok(merged.overridden.has('status'))
   })
 
   test('the original source value is preserved so both can be shown', () => {
     const row = { id: 'p1', name: 'GPC', status: 'backlog' }
-    const merged = applyOverrides(row, 'workstream', makeMap('status', 'in_progress'))
+    const merged = applyOverrides(row, 'project', makeMap('status', 'in_progress'))
     assert.equal(merged.sourceValues.status, 'backlog')
     assert.equal(merged.reasons.status, 'board-locked')
   })
 
   test('date fields come back as real Dates, not JSON strings', () => {
     const row = { id: 'p1', targetDate: new Date('2026-10-05') }
-    const merged = applyOverrides(row, 'workstream', makeMap('targetDate', '2026-11-20'), ['targetDate'])
+    const merged = applyOverrides(row, 'project', makeMap('targetDate', '2026-11-20'), ['targetDate'])
     assert.ok(merged.value.targetDate instanceof Date)
     assert.equal(merged.value.targetDate.toISOString().slice(0, 10), '2026-11-20')
   })
 
   test('an override for a field the row does not have is ignored', () => {
     const row = { id: 'p1', name: 'GPC' }
-    const merged = applyOverrides(row, 'workstream', makeMap('nonexistent', 'x'))
+    const merged = applyOverrides(row, 'project', makeMap('nonexistent', 'x'))
     assert.equal(merged.overridden.size, 0)
   })
 
   test('rows with no overrides pass through untouched', () => {
     const row = { id: 'p2', name: 'Other' }
-    const merged = applyOverrides(row, 'workstream', makeMap('status', 'x'))
+    const merged = applyOverrides(row, 'project', makeMap('status', 'x'))
     assert.equal(merged.value, row)
     assert.equal(merged.overridden.size, 0)
   })
@@ -190,8 +190,8 @@ describe('CSV ingestion', () => {
   })
 
   test('headers map onto objects', () => {
-    const objs = rowsToObjects(parseCsv('Workstream,Target\nGPC,2026-10-05'))
-    assert.deepEqual(objs, [{ Workstream: 'GPC', Target: '2026-10-05' }])
+    const objs = rowsToObjects(parseCsv('Project,Target\nGPC,2026-10-05'))
+    assert.deepEqual(objs, [{ Project: 'GPC', Target: '2026-10-05' }])
   })
 
   test('a sheet URL becomes a CSV export URL, keeping the gid', () => {
@@ -280,19 +280,19 @@ describe('Slack intake parsing', () => {
 
 describe('Linear value mapping', () => {
   test('both the legacy state string and the newer status type map to our vocabulary', () => {
-    assert.equal(mapProjectStatus('started', null), 'in_progress')
-    assert.equal(mapProjectStatus(null, 'started'), 'in_progress')
-    assert.equal(mapProjectStatus('completed', null), 'completed')
-    assert.equal(mapProjectStatus('cancelled', null), 'canceled')
+    assert.equal(mapInitiativeStatus('started', null), 'in_progress')
+    assert.equal(mapInitiativeStatus(null, 'started'), 'in_progress')
+    assert.equal(mapInitiativeStatus('completed', null), 'completed')
+    assert.equal(mapInitiativeStatus('cancelled', null), 'canceled')
   })
 
   test('the status object wins over the legacy string when both are present', () => {
-    assert.equal(mapProjectStatus('backlog', 'completed'), 'completed')
+    assert.equal(mapInitiativeStatus('backlog', 'completed'), 'completed')
   })
 
   test('an unknown state falls back to backlog rather than throwing', () => {
-    assert.equal(mapProjectStatus('something-new', null), 'backlog')
-    assert.equal(mapInitiativeStatus(undefined), 'planned')
+    assert.equal(mapInitiativeStatus('something-new', null), 'backlog')
+    assert.equal(mapObjectiveStatus(undefined), 'planned')
   })
 })
 

@@ -15,7 +15,7 @@
 import { revalidatePath } from 'next/cache'
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { actionItemLinks, actionItems, initiatives, people, projects, workstreams } from '@/db/schema'
+import { actionItemLinks, actionItems, objectives, people, initiatives, projects } from '@/db/schema'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
 
@@ -147,10 +147,10 @@ export async function claimAction(_prev: ActionState, formData: FormData): Promi
  *
  * WHY THIS IS THREE SEPARATE ASSIGNMENTS AND NOT ONE
  *
- * The list shows initiative, project and workstream as three columns, and a
+ * The list shows objective, initiative and project as three columns, and a
  * commitment can legitimately be known at one level and not the others: "the
- * GPC initiative" is all anybody said in the meeting, and pretending to know
- * which workstream would be inventing a fact. So each level is set on its own
+ * GPC objective" is all anybody said in the meeting, and pretending to know
+ * which project would be inventing a fact. So each level is set on its own
  * and "Unknown" is a real, reportable state rather than a gap to be filled in
  * by guessing.
  *
@@ -163,12 +163,12 @@ export async function assignAction(
   level: string,
   entityId: string,
 ): Promise<ActionState> {
-  if (!['initiative', 'project', 'workstream'].includes(level)) return { error: 'Unknown level.' }
+  if (!['objective', 'initiative', 'project'].includes(level)) return { error: 'Unknown level.' }
 
   const [row] = await db.select().from(actionItems).where(eq(actionItems.id, id)).limit(1)
   if (!row) return { error: 'That action item no longer exists.' }
 
-  const table = level === 'initiative' ? initiatives : level === 'project' ? projects : workstreams
+  const table = level === 'objective' ? objectives : level === 'initiative' ? initiatives : projects
   let name = 'Unknown'
   if (entityId) {
     const [found] = await db.select({ name: table.name }).from(table).where(eq(table.id, entityId)).limit(1)

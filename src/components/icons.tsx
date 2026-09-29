@@ -54,8 +54,8 @@ export const IconActivity = (p: IconProps) => (
   </Glyph>
 )
 
-/** Initiatives — projects stacked into one thing. */
-export const IconInitiatives = (p: IconProps) => (
+/** Objectives — initiatives stacked into one thing. */
+export const IconObjectives = (p: IconProps) => (
   <Glyph {...p}>
     <path d="M8 1.8 14.2 5 8 8.2 1.8 5z" />
     <path d="M1.8 8.4 8 11.6l6.2-3.2" />
@@ -63,15 +63,15 @@ export const IconInitiatives = (p: IconProps) => (
   </Glyph>
 )
 
-/** Projects — a folder. */
-export const IconProjects = (p: IconProps) => (
+/** Initiatives — a folder. */
+export const IconInitiatives = (p: IconProps) => (
   <Glyph {...p}>
     <path d="M1.8 12.4V3.6a.6.6 0 0 1 .6-.6h3.2l1.6 1.8h6.4a.6.6 0 0 1 .6.6v7a.6.6 0 0 1-.6.6H2.4a.6.6 0 0 1-.6-.6z" />
   </Glyph>
 )
 
-/** Workstreams — parallel lanes of work branching off. */
-export const IconWorkstreams = (p: IconProps) => (
+/** Projects — parallel lanes of work branching off. */
+export const IconProjects = (p: IconProps) => (
   <Glyph {...p}>
     <path d="M3.4 2.6v10.8" />
     <path d="M3.4 5.6h5a2 2 0 0 1 2 2v.8" />

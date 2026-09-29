@@ -113,8 +113,8 @@ export const appAreas = pgTable('app_areas', {
 // Work
 // ---------------------------------------------------------------------------
 
-export const projects = pgTable(
-  'projects',
+export const initiatives = pgTable(
+  'initiatives',
   {
     id: id(),
     key: text('key').notNull().unique(),
@@ -135,12 +135,12 @@ export const projects = pgTable(
     sortOrder: integer('sort_order').notNull().default(0),
 
     /**
-     * The initiative this project rolls up to, if any.
+     * The objective this initiative rolls up to, if any.
      *
-     * Nullable and expected to be null sometimes: a project with no initiative
+     * Nullable and expected to be null sometimes: an initiative with no objective
      * is a reportable state the home page names, not a gap to be filled.
      */
-    initiativeId: text('initiative_id').references(() => initiatives.id, { onDelete: 'set null' }),
+    objectiveId: text('objective_id').references(() => objectives.id, { onDelete: 'set null' }),
 
     /** Nobody owns this yet — drives the "needs owner" gap flag. */
     ownerGap: boolean('owner_gap').notNull().default(false),
@@ -149,11 +149,11 @@ export const projects = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('projects_theme_idx').on(t.themeId), index('projects_owner_idx').on(t.ownerId)],
+  (t) => [index('initiatives_theme_idx').on(t.themeId), index('initiatives_owner_idx').on(t.ownerId)],
 )
 
-export const workstreams = pgTable(
-  'workstreams',
+export const projects = pgTable(
+  'projects',
   {
     id: id(),
     key: text('key').notNull().unique(),
@@ -174,7 +174,7 @@ export const workstreams = pgTable(
     /** onTrack | atRisk | offTrack — usually null in practice. */
     sourceHealth: text('source_health'),
 
-    projectId: text('project_id').references(() => projects.id, { onDelete: 'set null' }),
+    initiativeId: text('initiative_id').references(() => initiatives.id, { onDelete: 'set null' }),
     appAreaId: text('app_area_id').references(() => appAreas.id, { onDelete: 'set null' }),
     leadId: text('lead_id').references(() => people.id, { onDelete: 'set null' }),
     teamId: text('team_id').references(() => teams.id, { onDelete: 'set null' }),
@@ -196,10 +196,10 @@ export const workstreams = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
-    index('workstreams_initiative_idx').on(t.projectId),
-    index('workstreams_app_area_idx').on(t.appAreaId),
-    index('workstreams_lead_idx').on(t.leadId),
-    index('workstreams_team_idx').on(t.teamId),
+    index('projects_objective_idx').on(t.initiativeId),
+    index('projects_app_area_idx').on(t.appAreaId),
+    index('projects_lead_idx').on(t.leadId),
+    index('projects_team_idx').on(t.teamId),
   ],
 )
 
@@ -217,7 +217,7 @@ export const dependencies = pgTable(
   'dependencies',
   {
     id: id(),
-    /** initiative | project | milestone | external */
+    /** objective | initiative | milestone | external */
     fromType: text('from_type').notNull(),
     fromId: text('from_id').notNull(),
     toType: text('to_type').notNull(),
@@ -259,7 +259,7 @@ export const assessments = pgTable(
   'assessments',
   {
     id: id(),
-    /** initiative | project | milestone | app_area | theme */
+    /** objective | initiative | milestone | app_area | theme */
     entityType: text('entity_type').notNull(),
     entityId: text('entity_id').notNull(),
 
@@ -460,7 +460,7 @@ export const decisions = pgTable(
 // next, and when each version lands.
 //
 // It lives here because it was living in a slide deck, which meant the only
-// copy of "what are we actually trying to do on this project" was a file
+// copy of "what are we actually trying to do on this initiative" was a file
 // somebody rebuilt by hand every fortnight. Moving it here does not remove the
 // deck; it makes the deck a rendering of something that can also be read,
 // queried, and kept current between meetings.
@@ -469,23 +469,23 @@ export const decisions = pgTable(
 /**
  * One row of a program review table: an objective and where it has got to.
  *
- * A project has a handful. "Logo Rec Tech", "Sports Dashboard MVP", "Data
- * Updates" are milestones of the Sports project — each with its own status
- * and its own date, which is exactly why a project's single RAG cannot say
+ * An initiative has a handful. "Logo Rec Tech", "Sports Dashboard MVP", "Data
+ * Updates" are milestones of the Sports initiative — each with its own status
+ * and its own date, which is exactly why an initiative's single RAG cannot say
  * what the deck says.
  */
 /**
- * An initiative — a grouping of projects, and the level leadership reads.
+ * An objective — a grouping of initiatives, and the level leadership reads.
  *
  * Deliberately few: five to ten active is the working rule, because the home
  * page shows one card each and twenty cards is a list rather than a summary.
  * Nothing enforces the number; the page makes exceeding it feel wrong.
  *
- * A project belongs to one initiative or none. "None" is a real and reportable
+ * An initiative belongs to one objective or none. "None" is a real and reportable
  * state, not a gap — some work genuinely does not sit under a programme, and
  * the home page names those rather than hiding them.
  */
-export const initiatives = pgTable('initiatives', {
+export const objectives = pgTable('objectives', {
   id: id(),
   key: text('key').notNull().unique(),
   name: text('name').notNull(),
@@ -540,7 +540,7 @@ export const actionItems = pgTable(
  * What an action item is about — at every level it is about.
  *
  * Its own table rather than a column, because one commitment routinely matters
- * to a workstream, the project above it and the initiative above that, and
+ * to a project, the initiative above it and the objective above that, and
  * forcing a single choice makes it disappear from two of the three places
  * somebody would look. No rows at all is meaningful: an action nobody could
  * place is something to show a person, not something to drop.
@@ -552,7 +552,7 @@ export const actionItemLinks = pgTable(
     actionItemId: text('action_item_id')
       .notNull()
       .references(() => actionItems.id, { onDelete: 'cascade' }),
-    /** initiative | project | workstream */
+    /** objective | initiative | project */
     level: text('level').notNull(),
     entityId: text('entity_id').notNull(),
     createdAt: createdAt(),
@@ -568,15 +568,15 @@ export const milestones = pgTable(
   {
     id: id(),
     /**
-     * initiative | project | workstream.
+     * objective | initiative | project.
      *
      * One table for all three levels, because a milestone is the same thing
      * at each — a named, dated deliverable somebody is accountable for. Three
      * tables would mean three copies of the status vocabulary, the items and
      * the calendar bands, drifting apart within a month.
      */
-    level: text('level').notNull().default('workstream'),
-    /** The initiative, project or workstream this hangs off. */
+    level: text('level').notNull().default('project'),
+    /** The objective, initiative or project this hangs off. */
     entityId: text('entity_id').notNull(),
     /** The Objective column: "Logo Rec Tech", "Hybrid Capture w/ Automation". */
     name: text('name').notNull(),
@@ -667,7 +667,7 @@ export const milestoneItems = pgTable(
 )
 
 /**
- * A band on the release calendar: this workstream is in this phase, from this
+ * A band on the release calendar: this project is in this phase, from this
  * month to that one.
  *
  * Months as 'YYYY-MM' strings rather than dates, because a band is a statement
@@ -697,7 +697,7 @@ export const milestonePhases = pgTable(
 
 /**
  * No relation to a parent here, deliberately: a milestone points at an
- * initiative, a project or a workstream through (level, entityId), and Drizzle
+ * objective, an initiative or a project through (level, entityId), and Drizzle
  * cannot express a foreign key that changes table by row. Callers join on the
  * level themselves — see milestonesFor() in lib/portfolio.
  */
@@ -707,14 +707,14 @@ export const milestonesRelations = relations(milestones, ({ many }) => ({
 }))
 
 export const milestoneItemsRelations = relations(milestoneItems, ({ one }) => ({
-  workstream: one(milestones, {
+  project: one(milestones, {
     fields: [milestoneItems.milestoneId],
     references: [milestones.id],
   }),
 }))
 
 export const milestonePhasesRelations = relations(milestonePhases, ({ one }) => ({
-  workstream: one(milestones, {
+  project: one(milestones, {
     fields: [milestonePhases.milestoneId],
     references: [milestones.id],
   }),
@@ -868,9 +868,9 @@ export const allocations = pgTable(
     teamId: text('team_id')
       .notNull()
       .references(() => teams.id, { onDelete: 'cascade' }),
-    projectId: text('project_id')
+    initiativeId: text('initiative_id')
       .notNull()
-      .references(() => projects.id, { onDelete: 'cascade' }),
+      .references(() => initiatives.id, { onDelete: 'cascade' }),
     /** primary | borrowed | competing | frozen | undefined */
     mode: text('mode').notNull().default('primary'),
     note: text('note'),
@@ -879,7 +879,7 @@ export const allocations = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('allocations_unique').on(t.teamId, t.projectId)],
+  (t) => [uniqueIndex('allocations_unique').on(t.teamId, t.initiativeId)],
 )
 
 // ---------------------------------------------------------------------------
@@ -903,7 +903,7 @@ export const intakeRequests = pgTable(
     themeId: text('theme_id').references(() => themes.id, { onDelete: 'set null' }),
     appAreaId: text('app_area_id').references(() => appAreas.id, { onDelete: 'set null' }),
     /** Where the requester thinks it belongs; the program team can re-route. */
-    proposedInitiativeId: text('proposed_initiative_id').references(() => projects.id, {
+    proposedObjectiveId: text('proposed_objective_id').references(() => initiatives.id, {
       onDelete: 'set null',
     }),
 
@@ -918,7 +918,7 @@ export const intakeRequests = pgTable(
     /** new | triage | scoring | ranked | approved | rejected | deferred | converted */
     status: text('status').notNull().default('new'),
     decisionNote: text('decision_note'),
-    convertedProjectId: text('converted_project_id').references(() => workstreams.id, {
+    convertedInitiativeId: text('converted_initiative_id').references(() => projects.id, {
       onDelete: 'set null',
     }),
 
@@ -995,7 +995,7 @@ export const scores = pgTable(
 
 /**
  * One row per (external system, external id) mapped onto a local record.
- * Keeping provenance out of the entity tables means a single project can be
+ * Keeping provenance out of the entity tables means a single initiative can be
  * backed by a Linear project AND a row in a Google Sheet without either source
  * needing a special column.
  */
@@ -1030,7 +1030,7 @@ export const syncRuns = pgTable(
     status: text('status').notNull().default('running'),
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
-    /** JSON-encoded counters: {"workstreams":{"created":2,"updated":11}} */
+    /** JSON-encoded counters: {"projects":{"created":2,"updated":11}} */
     stats: text('stats'),
     error: text('error'),
     /** High-water mark handed to the next incremental sync. */
@@ -1067,7 +1067,7 @@ export const changelogEntries = pgTable(
 // ---------------------------------------------------------------------------
 
 /**
- * A phase of the documented project lifecycle (pre-approval, core
+ * A phase of the documented initiative lifecycle (pre-approval, core
  * documentation, team alignment, ongoing). Kept as data rather than a
  * hard-coded list so the program team can change its own process without a
  * deploy — which is the difference between a process the tool enforces and a
@@ -1110,28 +1110,28 @@ export const projectReadiness = pgTable(
   'project_readiness',
   {
     id: id(),
-    workstreamId: text('workstream_id')
+    projectId: text('project_id')
       .notNull()
-      .references(() => workstreams.id, { onDelete: 'cascade' }),
+      .references(() => projects.id, { onDelete: 'cascade' }),
     itemId: text('item_id')
       .notNull()
       .references(() => readinessItems.id, { onDelete: 'cascade' }),
     /** not_started | in_progress | done | na */
     status: text('status').notNull().default('not_started'),
-    /** Where the completed artifact actually lives for THIS project. */
+    /** Where the completed artifact actually lives for THIS initiative. */
     link: text('link'),
     note: text('note'),
     updatedById: text('updated_by_id').references(() => people.id, { onDelete: 'set null' }),
     updatedAt: updatedAt(),
   },
   (t) => [
-    uniqueIndex('project_readiness_unique').on(t.workstreamId, t.itemId),
-    index('project_readiness_workstream_idx').on(t.workstreamId),
+    uniqueIndex('project_readiness_unique').on(t.projectId, t.itemId),
+    index('project_readiness_project_idx').on(t.projectId),
   ],
 )
 
 /**
- * The discovery question bank from the generic data project flow.
+ * The discovery question bank from the generic data initiative flow.
  *
  * These are prompts, not fields: the value is in making a team answer "how far
  * back are we going for history?" before committing to a date, rather than
@@ -1142,11 +1142,11 @@ export const discoveryTopics = pgTable(
   {
     id: id(),
     /** ingestion | spend_methodology | classification | user_experience | launch | gtm */
-    workstream: text('workstream').notNull(),
+    project: text('project').notNull(),
     question: text('question').notNull(),
     sortOrder: integer('sort_order').notNull().default(0),
   },
-  (t) => [index('discovery_topics_workstream_idx').on(t.workstream)],
+  (t) => [index('discovery_topics_project_idx').on(t.project)],
 )
 
 /** The standard template library, so links live in one place. */
@@ -1171,7 +1171,7 @@ export const readinessItemsRelations = relations(readinessItems, ({ one, many })
 }))
 
 export const projectReadinessRelations = relations(projectReadiness, ({ one }) => ({
-  workstream: one(workstreams, { fields: [projectReadiness.workstreamId], references: [workstreams.id] }),
+  project: one(projects, { fields: [projectReadiness.projectId], references: [projects.id] }),
   item: one(readinessItems, { fields: [projectReadiness.itemId], references: [readinessItems.id] }),
 }))
 
@@ -1188,58 +1188,58 @@ export const settings = pgTable('settings', {
 
 export const teamsRelations = relations(teams, ({ many }) => ({
   members: many(people),
-  workstreams: many(workstreams),
+  projects: many(projects),
   allocations: many(allocations),
 }))
 
 export const peopleRelations = relations(people, ({ one, many }) => ({
   team: one(teams, { fields: [people.teamId], references: [teams.id] }),
-  ledProjects: many(workstreams),
+  ledInitiatives: many(projects),
 }))
 
 export const themesRelations = relations(themes, ({ many }) => ({
-  projects: many(projects),
+  initiatives: many(initiatives),
 }))
 
 export const appAreasRelations = relations(appAreas, ({ many }) => ({
-  workstreams: many(workstreams),
+  projects: many(projects),
 }))
 
-export const projectsRelations = relations(projects, ({ one, many }) => ({
-  owner: one(people, { fields: [projects.ownerId], references: [people.id], relationName: 'owner' }),
+export const initiativesRelations = relations(initiatives, ({ one, many }) => ({
+  owner: one(people, { fields: [initiatives.ownerId], references: [people.id], relationName: 'owner' }),
   sponsor: one(people, {
-    fields: [projects.sponsorId],
+    fields: [initiatives.sponsorId],
     references: [people.id],
     relationName: 'sponsor',
   }),
-  theme: one(themes, { fields: [projects.themeId], references: [themes.id] }),
-  workstreams: many(workstreams),
+  theme: one(themes, { fields: [initiatives.themeId], references: [themes.id] }),
+  projects: many(projects),
   allocations: many(allocations),
 }))
 
-export const workstreamsRelations = relations(workstreams, ({ one, many }) => ({
-  initiative: one(projects, { fields: [workstreams.projectId], references: [projects.id] }),
-  appArea: one(appAreas, { fields: [workstreams.appAreaId], references: [appAreas.id] }),
-  lead: one(people, { fields: [workstreams.leadId], references: [people.id] }),
-  team: one(teams, { fields: [workstreams.teamId], references: [teams.id] }),
+export const projectsRelations = relations(projects, ({ one, many }) => ({
+  objective: one(initiatives, { fields: [projects.initiativeId], references: [initiatives.id] }),
+  appArea: one(appAreas, { fields: [projects.appAreaId], references: [appAreas.id] }),
+  lead: one(people, { fields: [projects.leadId], references: [people.id] }),
+  team: one(teams, { fields: [projects.teamId], references: [teams.id] }),
   milestones: many(milestones),
 }))
 
 export const allocationsRelations = relations(allocations, ({ one }) => ({
   team: one(teams, { fields: [allocations.teamId], references: [teams.id] }),
-  initiative: one(projects, { fields: [allocations.projectId], references: [projects.id] }),
+  objective: one(initiatives, { fields: [allocations.initiativeId], references: [initiatives.id] }),
 }))
 
 export const intakeRequestsRelations = relations(intakeRequests, ({ one, many }) => ({
   theme: one(themes, { fields: [intakeRequests.themeId], references: [themes.id] }),
   appArea: one(appAreas, { fields: [intakeRequests.appAreaId], references: [appAreas.id] }),
-  proposedInitiative: one(projects, {
-    fields: [intakeRequests.proposedInitiativeId],
-    references: [projects.id],
+  proposedObjective: one(initiatives, {
+    fields: [intakeRequests.proposedObjectiveId],
+    references: [initiatives.id],
   }),
-  convertedProject: one(workstreams, {
-    fields: [intakeRequests.convertedProjectId],
-    references: [workstreams.id],
+  convertedInitiative: one(projects, {
+    fields: [intakeRequests.convertedInitiativeId],
+    references: [projects.id],
   }),
   scores: many(scores),
 }))
@@ -1300,8 +1300,8 @@ export const dependenciesRelations = relations(dependencies, ({ one }) => ({
 // ---------------------------------------------------------------------------
 
 /**
- * A conversation source someone has deliberately attached to an initiative or
- * project: a Slack channel, a recurring meeting, or a one-off document.
+ * A conversation source someone has deliberately attached to an objective or
+ * initiative: a Slack channel, a recurring meeting, or a one-off document.
  *
  * Nothing is ingested until a person creates one of these AND turns
  * `ingestEnabled` on. Off by default is the whole point: a transcript can carry
@@ -1508,7 +1508,7 @@ export const agentObservations = pgTable(
  * are the movement — which is usually the more interesting story, because three
  * small slips read very differently from one big one.
  *
- * Cheap to keep: a project whose date never moves has exactly one row forever.
+ * Cheap to keep: an initiative whose date never moves has exactly one row forever.
  */
 export const dateObservations = pgTable(
   'date_observations',
@@ -1528,17 +1528,17 @@ export const dateObservations = pgTable(
 )
 
 /**
- * Yaara proposing which projects belong together.
+ * Yaara proposing which initiatives belong together.
  *
  * The grouping tier is the only one with no source outside this app, so
  * somebody has to decide it. She can read what the work actually is — shared
  * people, shared repos, the same names appearing in the same meetings — and
  * say "these five look like one thing". That is a proposal, and it stays a
- * proposal: accepting it creates the initiative and moves the projects,
+ * proposal: accepting it creates the objective and moves the initiatives,
  * dismissing it records that the answer was no, and a dismissed suggestion is
  * not offered again.
  *
- * `projectIds` is a comma-separated list. Reading it whole is the only access
+ * `initiativeIds` is a comma-separated list. Reading it whole is the only access
  * pattern, and this schema has no jsonb anywhere for portability reasons that
  * apply here too.
  */
@@ -1546,11 +1546,11 @@ export const groupingSuggestions = pgTable(
   'grouping_suggestions',
   {
     id: id(),
-    /** What she would call the initiative. A person can rename it on accept. */
+    /** What she would call the objective. A person can rename it on accept. */
     name: text('name').notNull(),
     rationale: text('rationale'),
-    /** Comma-separated project ids. */
-    projectIds: text('project_ids').notNull(),
+    /** Comma-separated initiative ids. */
+    initiativeIds: text('initiative_ids').notNull(),
     agent: text('agent').notNull().default('yaara'),
     model: text('model'),
     /** What she read to think so, as a JSON array of {source,title,url}. */
@@ -1560,7 +1560,7 @@ export const groupingSuggestions = pgTable(
     decidedBy: text('decided_by'),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     /** Set on accept, so the suggestion points at what it became. */
-    initiativeId: text('initiative_id'),
+    objectiveId: text('objective_id'),
     createdAt: createdAt(),
   },
   (t) => [index('grouping_suggestions_status_idx').on(t.status, t.createdAt)],
@@ -1583,7 +1583,7 @@ export const cardOrders = pgTable(
   {
     /** `people.id`, or 'local' when auth is switched off for development. */
     personId: text('person_id').notNull(),
-    /** initiative | project | workstream. Each board is arranged separately. */
+    /** objective | initiative | project. Each board is arranged separately. */
     level: text('level').notNull(),
     /** Comma-separated entity ids, first to last. */
     orderedIds: text('ordered_ids').notNull(),

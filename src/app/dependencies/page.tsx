@@ -11,9 +11,10 @@
  * lib/dependency-risk.ts for exactly what "will miss" means and why it is the
  * delivering end that goes red.
  */
+import { TIER_PLURAL } from '@/lib/home-types'
 import { asc } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { dependencies, initiatives, milestones, people, projects, workstreams } from '@/db/schema'
+import { dependencies, objectives, milestones, people, initiatives, projects } from '@/db/schema'
 import { Kicker } from '@/components/ui'
 import { lateness } from '@/lib/dependency-risk'
 import { getCurrentUser } from '@/lib/auth/current-user'
@@ -23,9 +24,9 @@ export const metadata = { title: 'Dependencies' }
 export const dynamic = 'force-dynamic'
 
 const HREF: Record<string, string> = {
+  objective: '/objectives',
   initiative: '/initiatives',
   project: '/projects',
-  workstream: '/workstreams',
 }
 
 const ENDED = new Set(['completed', 'canceled'])
@@ -33,9 +34,9 @@ const ENDED = new Set(['completed', 'canceled'])
 export default async function DependenciesPage() {
   const [deps, inits, projs, wss, ms, folk, user] = await Promise.all([
     db.select().from(dependencies),
+    db.select().from(objectives).orderBy(asc(objectives.name)),
     db.select().from(initiatives).orderBy(asc(initiatives.name)),
     db.select().from(projects).orderBy(asc(projects.name)),
-    db.select().from(workstreams).orderBy(asc(workstreams.name)),
     db.select().from(milestones),
     db.select({ id: people.id, name: people.name }).from(people).orderBy(asc(people.name)),
     getCurrentUser(),
@@ -50,23 +51,23 @@ export default async function DependenciesPage() {
     { label: string; href: string | null; targetDate: Date | null; done: boolean }
   >()
   for (const i of inits)
-    known.set(`initiative:${i.id}`, {
+    known.set(`objective:${i.id}`, {
       label: i.name,
-      href: `/initiatives/${i.id}`,
+      href: `/objectives/${i.id}`,
       targetDate: i.targetDate,
       done: ENDED.has(i.status),
     })
   for (const p of projs)
-    known.set(`project:${p.id}`, {
+    known.set(`initiative:${p.id}`, {
       label: p.name,
-      href: `/projects/${p.id}`,
+      href: `/initiatives/${p.id}`,
       targetDate: p.targetDate,
       done: ENDED.has(p.status),
     })
   for (const w of wss)
-    known.set(`workstream:${w.id}`, {
+    known.set(`project:${w.id}`, {
       label: w.name,
-      href: `/workstreams/${w.id}`,
+      href: `/projects/${w.id}`,
       targetDate: w.targetDate,
       done: ENDED.has(w.status),
     })
@@ -74,7 +75,7 @@ export default async function DependenciesPage() {
     known.set(`milestone:${m.id}`, {
       label: m.name,
       // A milestone has no page of its own, so it links to whatever it hangs
-      // off — which is not always a workstream: the same table carries
+      // off — which is not always a project: the same table carries
       // milestones at all three levels.
       href: m.entityId && HREF[m.level] ? `${HREF[m.level]}/${m.entityId}` : null,
       targetDate: m.targetDate,
@@ -108,9 +109,9 @@ export default async function DependenciesPage() {
   rows.sort((a, b) => rank(a) - rank(b) || (a.required ?? '9999').localeCompare(b.required ?? '9999'))
 
   const endpoints: EndpointOption[] = [
-    ...inits.map((i) => ({ value: `initiative:${i.id}`, label: i.name, group: 'Initiatives' })),
-    ...projs.map((p) => ({ value: `project:${p.id}`, label: p.name, group: 'Projects' })),
-    ...wss.filter((w) => !ENDED.has(w.status)).map((w) => ({ value: `workstream:${w.id}`, label: w.name, group: 'Workstreams' })),
+    ...inits.map((i) => ({ value: `objective:${i.id}`, label: i.name, group: TIER_PLURAL.objective })),
+    ...projs.map((p) => ({ value: `initiative:${p.id}`, label: p.name, group: 'Initiatives' })),
+    ...wss.filter((w) => !ENDED.has(w.status)).map((w) => ({ value: `project:${w.id}`, label: w.name, group: 'Projects' })),
     ...ms
       .filter((m) => m.status !== 'complete')
       .map((m) => ({

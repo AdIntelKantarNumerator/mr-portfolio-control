@@ -1,5 +1,5 @@
 /**
- * `workstreams.progress`, read the same way by everybody.
+ * `projects.progress`, read the same way by everybody.
  *
  * WHAT WAS WRONG
  *
@@ -12,8 +12,8 @@
  *     100.
  *
  * And the readers disagreed in the same way. The timeline multiplied by 100
- * and was right for synced rows; the Workstreams page, the Projects page and
- * the workstream tile on a project detail page rounded the raw value and
+ * and was right for synced rows; the Projects page, the Initiatives page and
+ * the project tile on an initiative detail page rounded the raw value and
  * printed **0%** for every synced row, with a progress bar 0.62% wide. Which
  * is why nobody noticed the app already had a real completion figure: it read
  * as zero everywhere you would have gone looking for it.

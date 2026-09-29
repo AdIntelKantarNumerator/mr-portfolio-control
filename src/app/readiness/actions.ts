@@ -10,7 +10,7 @@
 import { and, eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { db } from '@/db/client'
-import { projectReadiness, workstreams, readinessItems } from '@/db/schema'
+import { projectReadiness, projects, readinessItems } from '@/db/schema'
 import { logChange } from '@/lib/portfolio'
 import { actorName } from '@/lib/auth/current-user'
 import { isReadinessStatus, readinessStatusLabel } from '@/lib/readiness'
@@ -23,34 +23,34 @@ function blankToNull(v: FormDataEntryValue | null): string | null {
 }
 
 export async function updateReadiness(formData: FormData) {
-  const workstreamId = String(formData.get('workstreamId') ?? '')
+  const projectId = String(formData.get('projectId') ?? '')
   const itemId = String(formData.get('itemId') ?? '')
   const status = String(formData.get('status') ?? '')
-  if (!workstreamId || !itemId || !isReadinessStatus(status)) return
+  if (!projectId || !itemId || !isReadinessStatus(status)) return
 
   const link = blankToNull(formData.get('link'))
   const note = blankToNull(formData.get('note'))
 
-  const [[workstream], [item]] = await Promise.all([
-    db.select({ name: workstreams.name }).from(workstreams).where(eq(workstreams.id, workstreamId)).limit(1),
+  const [[project], [item]] = await Promise.all([
+    db.select({ name: projects.name }).from(projects).where(eq(projects.id, projectId)).limit(1),
     db
       .select({ label: readinessItems.label })
       .from(readinessItems)
       .where(eq(readinessItems.id, itemId))
       .limit(1),
   ])
-  if (!workstream || !item) return
+  if (!project || !item) return
 
   const [existing] = await db
     .select()
     .from(projectReadiness)
     .where(
-      and(eq(projectReadiness.workstreamId, workstreamId), eq(projectReadiness.itemId, itemId)),
+      and(eq(projectReadiness.projectId, projectId), eq(projectReadiness.itemId, itemId)),
     )
     .limit(1)
 
-  // A workstream that has never been touched has no row at all, so the first edit
-  // inserts rather than updates. Matching on (workstreamId, itemId) keeps the
+  // A project that has never been touched has no row at all, so the first edit
+  // inserts rather than updates. Matching on (projectId, itemId) keeps the
   // unique index the only thing deciding which of two concurrent edits wins.
   if (existing) {
     const unchanged =
@@ -61,7 +61,7 @@ export async function updateReadiness(formData: FormData) {
       .set({ status, link, note })
       .where(eq(projectReadiness.id, existing.id))
   } else {
-    await db.insert(projectReadiness).values({ workstreamId, itemId, status, link, note })
+    await db.insert(projectReadiness).values({ projectId, itemId, status, link, note })
   }
 
   const before = existing?.status ?? 'not_started'
@@ -70,15 +70,15 @@ export async function updateReadiness(formData: FormData) {
     kind: 'change',
     summary:
       before === status
-        ? `${workstream.name} — "${item.label}" details updated`
-        : `${workstream.name} — "${item.label}" ${readinessStatusLabel(before)} → ${readinessStatusLabel(status)}`,
+        ? `${project.name} — "${item.label}" details updated`
+        : `${project.name} — "${item.label}" ${readinessStatusLabel(before)} → ${readinessStatusLabel(status)}`,
     detail: [link ? `Link: ${link}` : null, note].filter(Boolean).join(' · ') || null,
-    entityType: 'workstream',
-    entityId: workstreamId,
+    entityType: 'project',
+    entityId: projectId,
   })
 
   revalidatePath('/readiness')
-  revalidatePath(`/readiness/${workstreamId}`)
+  revalidatePath(`/readiness/${projectId}`)
   revalidatePath('/changes')
 }
 
@@ -105,20 +105,20 @@ export async function toggleReadinessItem(
   _prev: ReadinessToggleState,
   formData: FormData,
 ): Promise<ReadinessToggleState> {
-  const workstreamId = String(formData.get('workstreamId') ?? '')
+  const projectId = String(formData.get('projectId') ?? '')
   const itemId = String(formData.get('itemId') ?? '')
   const status = String(formData.get('status') ?? '')
-  if (!workstreamId || !itemId) return { error: 'Nothing to change.' }
+  if (!projectId || !itemId) return { error: 'Nothing to change.' }
   if (!isReadinessStatus(status)) return { error: `"${status}" is not a readiness state.` }
 
   const [existing] = await db
     .select({ link: projectReadiness.link, note: projectReadiness.note })
     .from(projectReadiness)
-    .where(and(eq(projectReadiness.workstreamId, workstreamId), eq(projectReadiness.itemId, itemId)))
+    .where(and(eq(projectReadiness.projectId, projectId), eq(projectReadiness.itemId, itemId)))
     .limit(1)
 
   const fd = new FormData()
-  fd.set('workstreamId', workstreamId)
+  fd.set('projectId', projectId)
   fd.set('itemId', itemId)
   fd.set('status', status)
   // Carried through rather than cleared: the whole-row action treats an absent
@@ -133,21 +133,21 @@ export async function toggleReadinessItem(
    * The detail pages render this checklist too, so they have to be refreshed —
    * but by path, not by layout.
    *
-   * These were `revalidatePath('/workstreams', 'layout')` and the same for
-   * projects, which invalidates every page under those segments. Ticking one
-   * box threw away the rendered output of every workstream and every project
+   * These were `revalidatePath('/projects', 'layout')` and the same for
+   * initiatives, which invalidates every page under those segments. Ticking one
+   * box threw away the rendered output of every project and every initiative
    * in the portfolio, and the reader waited for their own page to be built
    * again from nothing. One extra query to find the parent is a great deal
    * cheaper than that.
    */
   const [row] = await db
-    .select({ projectId: workstreams.projectId })
-    .from(workstreams)
-    .where(eq(workstreams.id, workstreamId))
+    .select({ initiativeId: projects.initiativeId })
+    .from(projects)
+    .where(eq(projects.id, projectId))
     .limit(1)
 
-  revalidatePath(`/workstreams/${workstreamId}`)
-  if (row?.projectId) revalidatePath(`/projects/${row.projectId}`)
+  revalidatePath(`/projects/${projectId}`)
+  if (row?.initiativeId) revalidatePath(`/initiatives/${row.initiativeId}`)
 
   return { stamp: Date.now() }
 }

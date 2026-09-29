@@ -7,7 +7,7 @@
  * with no dates" list, a legend and two paragraphs of caption. Between them
  * they took the top half of the screen to say things the chart underneath
  * already said, and the chart itself only ever drew one shape — a lane per
- * project, a bar per workstream.
+ * initiative, a bar per project.
  *
  * WHAT IS THERE INSTEAD
  *

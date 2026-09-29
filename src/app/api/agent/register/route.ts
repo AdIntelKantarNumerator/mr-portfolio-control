@@ -40,9 +40,9 @@ import {
   decisionEvents,
   decisions,
   entityThemes,
-  projects,
+  initiatives,
   people,
-  workstreams,
+  projects,
   sourceDocuments,
 } from '@/db/schema'
 import {
@@ -63,7 +63,7 @@ const EVENT_KINDS = new Set<string>(DECISION_EVENT_KIND)
 const STATUSES = new Set<string>(DECISION_STATUS)
 const CATEGORIES = new Set<string>(DECISION_CATEGORY)
 const ORIGINS = new Set<string>(DOCUMENT_ORIGIN)
-const ENTITY_TYPES = new Set(['project', 'workstream'])
+const ENTITY_TYPES = new Set(['initiative', 'project'])
 
 /** Resolving an entry sets its status to this; it is not the caller's choice. */
 const RESOLVED_STATUS = 'decided'
@@ -184,12 +184,12 @@ export async function POST(req: Request) {
   // does not exist. The agent checks this too; this is the backstop, and the
   // day a second agent points at this endpoint it is the only one.
   const [inits, projs] = await Promise.all([
+    db.select({ id: initiatives.id }).from(initiatives),
     db.select({ id: projects.id }).from(projects),
-    db.select({ id: workstreams.id }).from(workstreams),
   ])
   const realEntities = new Set<string>([
-    ...inits.map((i) => `project:${i.id}`),
-    ...projs.map((x) => `workstream:${x.id}`),
+    ...inits.map((i) => `initiative:${i.id}`),
+    ...projs.map((x) => `project:${x.id}`),
   ])
 
   // Every existing ref, so a new one cannot collide with a row this request is
@@ -213,7 +213,7 @@ export async function POST(req: Request) {
       continue
     }
     if (!ENTITY_TYPES.has(entityType) || !entityId) {
-      dropped.push(`"${title.slice(0, 60)}" — no project or workstream it belongs to`)
+      dropped.push(`"${title.slice(0, 60)}" — no initiative or project it belongs to`)
       continue
     }
     if (!realEntities.has(`${entityType}:${entityId}`)) {
@@ -441,14 +441,14 @@ export async function GET(req: Request) {
   const [rows, folk, inits, projs] = await Promise.all([
     db.select().from(decisions).orderBy(desc(decisions.raisedAt), decisions.ref),
     db.select({ id: people.id, name: people.name }).from(people),
+    db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives),
     db.select({ id: projects.id, name: projects.name }).from(projects),
-    db.select({ id: workstreams.id, name: workstreams.name }).from(workstreams),
   ])
 
   const personName = new Map(folk.map((p) => [p.id, p.name]))
   const entityName = new Map<string, string>([
-    ...inits.map((i) => [`project:${i.id}`, i.name] as const),
-    ...projs.map((p) => [`workstream:${p.id}`, p.name] as const),
+    ...inits.map((i) => [`initiative:${i.id}`, i.name] as const),
+    ...projs.map((p) => [`project:${p.id}`, p.name] as const),
   ])
 
   const matches = rows.filter((d) => {

@@ -120,8 +120,8 @@ export const IconReadiness: SectionIcon = ({ size = 20 }) => (
   </svg>
 )
 
-/** A stack of cards: the projects grouped under an initiative. */
-export const IconProjectsTile: SectionIcon = ({ size = 20 }) => (
+/** A stack of cards: the initiatives grouped under an objective. */
+export const IconInitiativesTile: SectionIcon = ({ size = 20 }) => (
   <svg {...box(size)}>
     <rect x="3" y="7.4" width="18" height="13.2" rx="2.6" fill="var(--c1)" opacity=".18" />
     <rect x="3" y="7.4" width="18" height="13.2" rx="2.6" stroke="var(--c1)" strokeWidth="1.8" />
@@ -129,8 +129,8 @@ export const IconProjectsTile: SectionIcon = ({ size = 20 }) => (
   </svg>
 )
 
-/** Lanes running left to right: the workstreams delivering a project. */
-export const IconWorkstreamsTile: SectionIcon = ({ size = 20 }) => (
+/** Lanes running left to right: the projects delivering an initiative. */
+export const IconProjectsTile: SectionIcon = ({ size = 20 }) => (
   <svg {...box(size)}>
     <rect x="2.6" y="4.4" width="12" height="4.2" rx="2.1" fill="var(--c5)" />
     <rect x="6.4" y="9.9" width="14" height="4.2" rx="2.1" fill="var(--c1)" opacity=".55" />

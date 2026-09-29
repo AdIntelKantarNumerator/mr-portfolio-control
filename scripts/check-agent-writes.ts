@@ -19,10 +19,10 @@ import {
   actionItemLinks,
   actionItems,
   groupingSuggestions,
-  initiatives,
+  objectives,
   people,
+  initiatives,
   projects,
-  workstreams,
 } from '../src/db/schema'
 import { eq, inArray, like } from 'drizzle-orm'
 
@@ -52,24 +52,24 @@ async function main() {
   await db.delete(actionItemLinks)
   await db.delete(actionItems)
   await db.delete(groupingSuggestions)
-  await db.delete(workstreams).where(inArray(workstreams.id, ['cw1']))
-  await db.delete(projects).where(inArray(projects.id, ['cp1', 'cp2', 'cp3']))
-  await db.delete(initiatives).where(like(initiatives.key, 'chk-%'))
+  await db.delete(projects).where(inArray(projects.id, ['cw1']))
+  await db.delete(initiatives).where(inArray(initiatives.id, ['cp1', 'cp2', 'cp3']))
+  await db.delete(objectives).where(like(objectives.key, 'chk-%'))
   await db.delete(people).where(inArray(people.id, ['cper1']))
 
   await db.insert(people).values({ id: 'cper1', name: 'Priya Raman' } as never)
-  await db.insert(initiatives).values({ id: 'ci1', key: 'chk-platform', name: 'Ad Intelligence Platform' } as never)
-  await db.insert(projects).values([
+  await db.insert(objectives).values({ id: 'ci1', key: 'chk-platform', name: 'Ad Intelligence Platform' } as never)
+  await db.insert(initiatives).values([
     { id: 'cp1', key: 'CP-1', name: 'Creative Capture', status: 'active', sortOrder: 1 },
     { id: 'cp2', key: 'CP-2', name: 'Logo Rec Tech', status: 'active', sortOrder: 2 },
-    { id: 'cp3', key: 'CP-3', name: 'Nielsen Migration', status: 'active', sortOrder: 3, initiativeId: 'ci1' },
+    { id: 'cp3', key: 'CP-3', name: 'Nielsen Migration', status: 'active', sortOrder: 3, objectiveId: 'ci1' },
   ] as never)
-  await db.insert(workstreams).values({
+  await db.insert(projects).values({
     id: 'cw1',
     key: 'CW-1',
     name: 'Frame extraction',
     status: 'active',
-    projectId: 'cp1',
+    initiativeId: 'cp1',
     sortOrder: 1,
   } as never)
 
@@ -84,9 +84,9 @@ async function main() {
             owner: 'Priya Raman',
             dueDate: '2026-10-03',
             links: [
-              { level: 'workstream', entityId: 'cw1' },
-              { level: 'project', entityId: 'cp1' },
-              { level: 'initiative', entityName: 'Ad Intelligence Platform' },
+              { level: 'project', entityId: 'cw1' },
+              { level: 'initiative', entityId: 'cp1' },
+              { level: 'objective', entityName: 'Ad Intelligence Platform' },
             ],
           },
         ],
@@ -103,7 +103,7 @@ async function main() {
 
   const links = await db.select().from(actionItemLinks).where(eq(actionItemLinks.actionItemId, written.id))
   check('it hangs off all three levels', links.length === 3, links.map((l) => l.level).sort().join(','))
-  check('an initiative can be named rather than given by id', links.some((l) => l.level === 'initiative'))
+  check('an objective can be named rather than given by id', links.some((l) => l.level === 'objective'))
 
   // --- the same commitment, read again from a second set of notes ---
   r = await json(
@@ -114,7 +114,7 @@ async function main() {
           {
             // Different punctuation, same commitment.
             text: 'Priya to confirm the backfill window with VideoAmp',
-            links: [{ level: 'workstream', entityId: 'cw1' }],
+            links: [{ level: 'project', entityId: 'cw1' }],
           },
         ],
       }),
@@ -130,10 +130,10 @@ async function main() {
       req('/api/agent/actions', 'POST', {
         source: SOURCE,
         items: [
-          { text: 'Somebody to do a thing.', links: [{ level: 'workstream', entityId: 'nope' }] },
+          { text: 'Somebody to do a thing.', links: [{ level: 'project', entityId: 'nope' }] },
           { text: 'Another thing.', links: [{ level: 'galaxy', entityId: 'cw1' }] },
-          { text: 'x'.repeat(400), links: [{ level: 'workstream', entityId: 'cw1' }] },
-          { text: '', links: [{ level: 'workstream', entityId: 'cw1' }] },
+          { text: 'x'.repeat(400), links: [{ level: 'project', entityId: 'cw1' }] },
+          { text: '', links: [{ level: 'project', entityId: 'cw1' }] },
         ],
       }),
     ),
@@ -150,7 +150,7 @@ async function main() {
     await actionsPost(
       req('/api/agent/actions', 'POST', {
         source: SOURCE,
-        items: [{ text: 'Check whether the retry path covers the nightly job.', links: [{ level: 'project', entityId: 'cp1' }] }],
+        items: [{ text: 'Check whether the retry path covers the nightly job.', links: [{ level: 'initiative', entityId: 'cp1' }] }],
       }),
     ),
   )
@@ -181,23 +181,23 @@ async function main() {
           {
             name: 'Creative Intelligence',
             rationale: 'Shared owner and the same repository.',
-            projectIds: ['cp1', 'cp2'],
+            initiativeIds: ['cp1', 'cp2'],
           },
-          { name: 'Too small', rationale: 'x', projectIds: ['cp1'] },
-          { name: 'Not real', rationale: 'x', projectNames: ['Nothing Called This', 'Creative Capture'] },
+          { name: 'Too small', rationale: 'x', initiativeIds: ['cp1'] },
+          { name: 'Not real', rationale: 'x', initiativeNames: ['Nothing Called This', 'Creative Capture'] },
         ],
       }),
     ),
   )
-  check('a grouping of two real projects is proposed', (r.proposed as string[]).length === 1, String(r.dropped))
-  check('a grouping of one is refused', /at least two real projects/.test((r.dropped as string[]).join(' ')))
-  check('a project that does not exist is named back', /no project called/.test((r.dropped as string[]).join(' ')))
+  check('a grouping of two real initiatives is proposed', (r.proposed as string[]).length === 1, String(r.dropped))
+  check('a grouping of one is refused', /at least two real initiatives/.test((r.dropped as string[]).join(' ')))
+  check('an initiative that does not exist is named back', /no initiative called/.test((r.dropped as string[]).join(' ')))
 
   // --- the same set again ---
   r = await json(
     await groupPost(
       req('/api/agent/grouping', 'POST', {
-        groups: [{ name: 'Creative Intelligence, again', rationale: 'Same thing.', projectIds: ['cp2', 'cp1'] }],
+        groups: [{ name: 'Creative Intelligence, again', rationale: 'Same thing.', initiativeIds: ['cp2', 'cp1'] }],
       }),
     ),
   )
@@ -217,7 +217,7 @@ async function main() {
   r = await json(
     await groupPost(
       req('/api/agent/grouping', 'POST', {
-        groups: [{ name: 'Creative Intelligence', rationale: 'Trying again.', projectIds: ['cp1', 'cp2'] }],
+        groups: [{ name: 'Creative Intelligence', rationale: 'Trying again.', initiativeIds: ['cp1', 'cp2'] }],
       }),
     ),
   )
@@ -227,13 +227,13 @@ async function main() {
     String(r.dropped),
   )
 
-  // --- nothing here moved a project ---
-  const stillLoose = await db.select().from(projects).where(eq(projects.id, 'cp1'))
-  check('proposing changed no project', stillLoose[0].initiativeId === null)
+  // --- nothing here moved an initiative ---
+  const stillLoose = await db.select().from(initiatives).where(eq(initiatives.id, 'cp1'))
+  check('proposing changed no initiative', stillLoose[0].objectiveId === null)
 
   const state = await json(await groupGet(req('/api/agent/grouping', 'GET')))
   check(
-    'the loose projects come back so she can see the gap',
+    'the loose initiatives come back so she can see the gap',
     (state.ungrouped as Array<{ id: string }>).some((p) => p.id === 'cp1'),
   )
 

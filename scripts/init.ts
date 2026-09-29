@@ -85,16 +85,16 @@ async function main() {
     console.log('To change one, pass it explicitly, or edit it at /settings in the app.')
   }
 
-  const count = await db.execute(sql`SELECT count(*)::int AS n FROM workstreams`)
+  const count = await db.execute(sql`SELECT count(*)::int AS n FROM projects`)
   const rows = (count as unknown as { rows?: { n: number }[] }).rows ?? []
-  const workstreams = rows[0]?.n ?? 0
+  const projects = rows[0]?.n ?? 0
   console.log(
-    workstreams === 0
+    projects === 0
       ? '\nThe portfolio is empty, which is the intended starting state.\n' +
           'Fill it by connecting Linear (npm run sync:linear) and by entering the things\n' +
           'no tracker holds — assessments, decisions, dependencies, intake.\n' +
           'To explore the screens with example content first: npm run seed:demo'
-      : `\n${workstreams} workstream(s) present.`,
+      : `\n${projects} project(s) present.`,
   )
 
   await warnIfServerRunning(embedded)

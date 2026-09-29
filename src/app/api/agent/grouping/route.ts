@@ -10,21 +10,21 @@
  *
  * Every other agent write in this app records something that happened. This
  * one records an opinion about how the portfolio should be arranged, which is
- * somebody's job and not hers. So there is no path from here to a project
- * actually moving: accepting a suggestion is a click on the initiatives page,
- * made by a named person, and that is what creates the initiative.
+ * somebody's job and not hers. So there is no path from here to an initiative
+ * actually moving: accepting a suggestion is a click on the objectives page,
+ * made by a named person, and that is what creates the objective.
  *
  * WHAT IT REFUSES
  *
- * A grouping of fewer than two projects (that is not a grouping), one naming a
- * project that does not exist, one that repeats a pending suggestion, and one
+ * A grouping of fewer than two initiatives (that is not a grouping), one naming a
+ * initiative that does not exist, one that repeats a pending suggestion, and one
  * that repeats a grouping a person already dismissed — being told no once is
  * enough, and re-proposing it every night is how an agent teaches people to
  * ignore it.
  */
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { groupingSuggestions, initiatives, projects } from '@/db/schema'
+import { groupingSuggestions, objectives, initiatives } from '@/db/schema'
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
 import { closest, exact } from '@/lib/match-name'
 
@@ -34,8 +34,8 @@ export const dynamic = 'force-dynamic'
 interface IncomingGroup {
   name?: string
   rationale?: string
-  projectIds?: string[]
-  projectNames?: string[]
+  initiativeIds?: string[]
+  initiativeNames?: string[]
   evidence?: Array<{ source: string; title: string; url?: string | null }>
 }
 
@@ -55,8 +55,8 @@ export async function GET(req: Request) {
 
   const [rows, projs, groups] = await Promise.all([
     db.select().from(groupingSuggestions).orderBy(desc(groupingSuggestions.createdAt)),
-    db.select({ id: projects.id, name: projects.name, initiativeId: projects.initiativeId }).from(projects),
-    db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives),
+    db.select({ id: initiatives.id, name: initiatives.name, objectiveId: initiatives.objectiveId }).from(initiatives),
+    db.select({ id: objectives.id, name: objectives.name }).from(objectives),
   ])
 
   const nameOf = new Map(projs.map((p) => [p.id, p.name]))
@@ -69,14 +69,14 @@ export async function GET(req: Request) {
       rationale: r.rationale,
       status: r.status,
       decidedBy: r.decidedBy,
-      becameInitiative: r.initiativeId ? (initName.get(r.initiativeId) ?? null) : null,
-      projects: r.projectIds
+      becameObjective: r.objectiveId ? (initName.get(r.objectiveId) ?? null) : null,
+      initiatives: r.initiativeIds
         .split(',')
         .filter(Boolean)
         .map((id) => ({ id, name: nameOf.get(id) ?? null })),
     })),
     // So she can see what is still loose without a second call.
-    ungrouped: projs.filter((p) => !p.initiativeId).map((p) => ({ id: p.id, name: p.name })),
+    ungrouped: projs.filter((p) => !p.objectiveId).map((p) => ({ id: p.id, name: p.name })),
   })
 }
 
@@ -96,17 +96,17 @@ export async function POST(req: Request) {
   if (incoming.length === 0) return Response.json({ proposed: [], dropped: [] })
 
   const [projs, existing] = await Promise.all([
-    db.select({ id: projects.id, name: projects.name }).from(projects),
+    db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives),
     db.select().from(groupingSuggestions),
   ])
 
   const realIds = new Set(projs.map((p) => p.id))
   // Pending and dismissed both block a repeat. Accepted does not: the same
-  // projects can legitimately be regrouped later, after somebody split them up.
+  // initiatives can legitimately be regrouped later, after somebody split them up.
   const blocked = new Map(
     existing
       .filter((e) => e.status === 'pending' || e.status === 'dismissed')
-      .map((e) => [key(e.projectIds.split(',').filter(Boolean)), e.status]),
+      .map((e) => [key(e.initiativeIds.split(',').filter(Boolean)), e.status]),
   )
 
   const proposed: string[] = []
@@ -120,8 +120,8 @@ export async function POST(req: Request) {
     }
 
     const ids: string[] = []
-    for (const id of g.projectIds ?? []) if (realIds.has(String(id))) ids.push(String(id))
-    for (const asked of g.projectNames ?? []) {
+    for (const id of g.initiativeIds ?? []) if (realIds.has(String(id))) ids.push(String(id))
+    for (const asked of g.initiativeNames ?? []) {
       const found = exact(String(asked), projs)
       if (found) {
         if (!ids.includes(found.id)) ids.push(found.id)
@@ -129,14 +129,14 @@ export async function POST(req: Request) {
         const near = closest(String(asked), projs)
         dropped.push(
           near.length
-            ? `"${name}" — no project called "${asked}"; did you mean ${near.map((n) => n.name).join(', or ')}?`
-            : `"${name}" — no project called "${asked}"`,
+            ? `"${name}" — no initiative called "${asked}"; did you mean ${near.map((n) => n.name).join(', or ')}?`
+            : `"${name}" — no initiative called "${asked}"`,
         )
       }
     }
 
     if (ids.length < 2) {
-      dropped.push(`"${name}" — a grouping needs at least two real projects; got ${ids.length}`)
+      dropped.push(`"${name}" — a grouping needs at least two real initiatives; got ${ids.length}`)
       continue
     }
 
@@ -155,7 +155,7 @@ export async function POST(req: Request) {
       .values({
         name: name.slice(0, 200),
         rationale: g.rationale ? String(g.rationale).slice(0, 1000) : null,
-        projectIds: ids.join(','),
+        initiativeIds: ids.join(','),
         agent,
         model,
         evidence: g.evidence ? JSON.stringify(g.evidence).slice(0, 4000) : null,

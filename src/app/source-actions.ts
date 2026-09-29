@@ -7,7 +7,7 @@
  * source Yaara had read, which is a question about her plumbing rather than
  * about the portfolio, and the same facts are on the detail page of whatever
  * they concern. The actions outlived the page because the sources panel on a
- * project still uses them.
+ * initiative still uses them.
  */
 import { revalidatePath } from 'next/cache'
 import { and, eq } from 'drizzle-orm'
@@ -26,7 +26,7 @@ export interface ActionState {
 }
 
 function refresh() {
-  revalidatePath('/initiatives')
+  revalidatePath('/objectives')
   revalidatePath('/changes')
 }
 
@@ -38,8 +38,8 @@ function parseEntity(raw: string): { type: string; id: string } | null {
 }
 
 /**
- * Attaches a Slack channel, meeting series or document to an initiative or
- * project. Ingestion is off unless the person ticked the box — see the note on
+ * Attaches a Slack channel, meeting series or document to an objective or
+ * initiative. Ingestion is off unless the person ticked the box — see the note on
  * the table for why that default is not negotiable.
  */
 export async function addSource(

@@ -29,7 +29,7 @@ import type { HomeCard } from '@/lib/home'
 import type { Level } from '@/lib/home-types'
 import { setCardOrder } from '@/app/order-actions'
 import { moveCard, dropsBelow } from '@/lib/reorder'
-import { InitiativeCard } from './initiative-card'
+import { ObjectiveCard } from './objective-card'
 
 export function SortableCards({
   cards,
@@ -139,7 +139,7 @@ export function SortableCards({
               title={`Drag ${c.name} to reorder`}
             />
           )}
-          <InitiativeCard card={c} onOpen={onOpen} />
+          <ObjectiveCard card={c} onOpen={onOpen} />
         </div>
       ))}
     </>

@@ -14,7 +14,7 @@
  */
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { actionItemLinks, actionItems, initiatives, people, projects, workstreams } from '@/db/schema'
+import { actionItemLinks, actionItems, objectives, people, initiatives, projects } from '@/db/schema'
 import { isTier, placeOf, TIERS, type Tier } from '@/lib/hierarchy'
 import { scopeFilter } from '@/lib/scope-filter'
 import { provenanceOfAction } from '@/lib/provenance'
@@ -42,35 +42,35 @@ export default async function ActionsPage({
       : db.select().from(actionItems).where(eq(actionItems.status, 'open')),
     db.select().from(actionItemLinks),
     db.select({ id: people.id, name: people.name }).from(people).orderBy(asc(people.name)),
-    db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives).orderBy(asc(initiatives.name)),
+    db.select({ id: objectives.id, name: objectives.name }).from(objectives).orderBy(asc(objectives.name)),
+    db
+      .select({ id: initiatives.id, name: initiatives.name, objectiveId: initiatives.objectiveId })
+      .from(initiatives)
+      .orderBy(asc(initiatives.name)),
     db
       .select({ id: projects.id, name: projects.name, initiativeId: projects.initiativeId })
       .from(projects)
       .orderBy(asc(projects.name)),
-    db
-      .select({ id: workstreams.id, name: workstreams.name, projectId: workstreams.projectId })
-      .from(workstreams)
-      .orderBy(asc(workstreams.name)),
   ])
 
   const nameOf = new Map(folk.map((p) => [p.id, p.name]))
   const named = new Map<string, { id: string; name: string }>()
-  for (const g of groups) named.set(`initiative:${g.id}`, g)
-  for (const p of projs) named.set(`project:${p.id}`, p)
-  for (const w of streams) named.set(`workstream:${w.id}`, w)
+  for (const g of groups) named.set(`objective:${g.id}`, g)
+  for (const p of projs) named.set(`initiative:${p.id}`, p)
+  for (const w of streams) named.set(`project:${w.id}`, w)
 
   /*
    * Where each item sits, filled in UPWARDS from the tier it was filed at.
    *
    * The page used to read only the link's own tier, so an action filed against
-   * a workstream showed that workstream and "Unknown" for both the project and
-   * the initiative above it. A tier above is never unknown - it is a fact about
+   * a project showed that project and "Unknown" for both the initiative and
+   * the objective above it. A tier above is never unknown - it is a fact about
    * where the work sits. A tier below stays unknown, because nothing says which
    * one it would be. See lib/hierarchy.ts.
    */
   const parents = {
-    projectOf: new Map(streams.map((w) => [w.id, w.projectId])),
-    initiativeOf: new Map(projs.map((p) => [p.id, p.initiativeId])),
+    initiativeOf: new Map(streams.map((w) => [w.id, w.initiativeId])),
+    objectiveOf: new Map(projs.map((p) => [p.id, p.objectiveId])),
   }
 
   /*
@@ -100,7 +100,7 @@ export default async function ActionsPage({
    */
   const narrow = scopeFilter(scope, projs, streams, groups)
   // Against the item's whole ancestry, not just the tier it was filed at: an
-  // action on a workstream belongs to the initiative above it, which is what
+  // action on a project belongs to the objective above it, which is what
   // the card that linked here counted.
   const inScope = (id: string) =>
     Object.values(linkFor.get(id) ?? {}).some((e) => narrow.covers(e.id))
@@ -120,9 +120,9 @@ export default async function ActionsPage({
         due,
         overdue: Boolean(due && due < today && a.status === 'open'),
         status: a.status,
+        objective: at.objective ?? null,
         initiative: at.initiative ?? null,
         project: at.project ?? null,
-        workstream: at.workstream ?? null,
         // Where Yaara read this out of. Built on the server so the browser is
         // sent one small shape rather than five raw columns to reassemble.
         source: provenanceOfAction(a),
@@ -148,9 +148,9 @@ export default async function ActionsPage({
       <ActionsList
         rows={items}
         people={folk}
-        initiatives={groups}
-        projects={projs}
-        workstreams={streams}
+        objectives={groups}
+        initiatives={projs}
+        projects={streams}
         closed={closed}
         scope={narrow.label && scope ? { label: narrow.label, clear: '/actions', param: scope } : null}
       />

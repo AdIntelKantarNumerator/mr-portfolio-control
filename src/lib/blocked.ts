@@ -4,12 +4,12 @@
  * WHY THIS IS NOT JUST `blocked.has(id)`
  *
  * A blocker is filed where the work is stuck, and work is stuck in a
- * workstream. Almost nobody files one against the project above it, and
- * nobody at all files one against an initiative. So asking whether the
- * project row itself carries a blocker answers "no" for a project whose every
- * workstream is jammed — which is how the home board came to show an
- * initiative flagged Blocked, with fourteen open blockers listed beside it,
- * over a bar reading six projects on track. Both halves were reading the same
+ * project. Almost nobody files one against the initiative above it, and
+ * nobody at all files one against an objective. So asking whether the
+ * initiative row itself carries a blocker answers "no" for an initiative whose every
+ * project is jammed — which is how the home board came to show an
+ * objective flagged Blocked, with fourteen open blockers listed beside it,
+ * over a bar reading six initiatives on track. Both halves were reading the same
  * table and only one of them was looking underneath.
  *
  * The rule is: a thing is blocked if it carries an open blocker, or if

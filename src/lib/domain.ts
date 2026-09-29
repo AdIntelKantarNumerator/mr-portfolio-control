@@ -17,10 +17,10 @@ export type Rag = (typeof RAG)[number]
 export const CONFIDENCE = ['low', 'medium', 'high'] as const
 export type Confidence = (typeof CONFIDENCE)[number]
 
-export const PROJECT_STATUS = ['planned', 'active', 'paused', 'completed', 'canceled'] as const
-export type ProjectStatus = (typeof PROJECT_STATUS)[number]
+export const INITIATIVE_STATUS = ['planned', 'active', 'paused', 'completed', 'canceled'] as const
+export type InitiativeStatus = (typeof INITIATIVE_STATUS)[number]
 
-export const WORKSTREAM_STATUS_SET = [
+export const PROJECT_STATUS_SET = [
   'backlog',
   'planned',
   'in_progress',
@@ -28,7 +28,7 @@ export const WORKSTREAM_STATUS_SET = [
   'completed',
   'canceled',
 ] as const
-export type WorkstreamEntityStatus = (typeof WORKSTREAM_STATUS_SET)[number]
+export type ProjectEntityStatus = (typeof PROJECT_STATUS_SET)[number]
 
 /**
  * The states that mean the work is over.
@@ -39,20 +39,20 @@ export type WorkstreamEntityStatus = (typeof WORKSTREAM_STATUS_SET)[number]
  * difference between "canceled" and "withdrawn" forever.
  *
  * Defined once because four screens and an agent all have to agree on it. The
- * day these two lists disagree, a workstream is hidden from the page and still
+ * day these two lists disagree, a project is hidden from the page and still
  * matched by Yaara, or the reverse — and either way somebody's work vanishes
  * from a list that claims to be complete.
  */
-export const ENDED_PROJECT_STATUS = ['completed', 'canceled'] as const
 export const ENDED_INITIATIVE_STATUS = ['completed', 'canceled'] as const
+export const ENDED_OBJECTIVE_STATUS = ['completed', 'canceled'] as const
 
 export function isEnded(status: string | null | undefined): boolean {
   return status === 'completed' || status === 'canceled'
 }
 
 /** What reopening puts it back to: the earliest state that means "live". */
-export function reopenedStatus(kind: 'workstream' | 'project'): string {
-  return kind === 'workstream' ? 'planned' : 'active'
+export function reopenedStatus(kind: 'project' | 'initiative'): string {
+  return kind === 'project' ? 'planned' : 'active'
 }
 
 /**
@@ -60,25 +60,25 @@ export function reopenedStatus(kind: 'workstream' | 'project'): string {
  *
  * These are the team's words on a slide people read every fortnight, so they
  * are not renamed here to match the portfolio's other vocabularies. A
- * milestone is "On Track"; a workstream is "In progress". They are different
+ * milestone is "On Track"; a project is "In progress". They are different
  * statements about different things, and collapsing them would lose the one
  * the deck exists to make.
  */
-export const WORKSTREAM_STATUS = [
+export const PROJECT_STATUS = [
   'planning',
   'on_track',
   'at_risk',
   'blocked',
   'complete',
 ] as const
-export type WorkstreamStatus = (typeof WORKSTREAM_STATUS)[number]
+export type ProjectStatus = (typeof PROJECT_STATUS)[number]
 
 /** Where a bullet sits under a Status Update. */
-export const WORKSTREAM_ITEM_STATE = ['completed', 'in_progress', 'to_do'] as const
-export type WorkstreamItemState = (typeof WORKSTREAM_ITEM_STATE)[number]
+export const PROJECT_ITEM_STATE = ['completed', 'in_progress', 'to_do'] as const
+export type ProjectItemState = (typeof PROJECT_ITEM_STATE)[number]
 
 /** The phases row: Discovery → Development → Testing (QA) → UAT → Alpha/Beta → GA. */
-export const WORKSTREAM_PHASE = [
+export const PROJECT_PHASE = [
   'discovery',
   'development',
   'testing',
@@ -88,7 +88,7 @@ export const WORKSTREAM_PHASE = [
   'release',
   'tbd',
 ] as const
-export type MilestonePhase = (typeof WORKSTREAM_PHASE)[number]
+export type MilestonePhase = (typeof PROJECT_PHASE)[number]
 
 /** 'YYYY-MM', which is what a release calendar band is a statement about. */
 export function isPeriod(value: string): boolean {
@@ -155,13 +155,13 @@ export type Tshirt = (typeof TSHIRT)[number]
 export const TSHIRT_WEEKS: Record<Tshirt, number> = { xs: 1, s: 3, m: 8, l: 20, xl: 45 }
 
 export const ENTITY_TYPE = [
-  // 'initiative' joined when dependencies became something a person files by
-  // hand. "The GPC initiative is waiting on the vendor feed" is a real
+  // 'objective' joined when dependencies became something a person files by
+  // hand. "The GPC objective is waiting on the vendor feed" is a real
   // sentence people say, and before this the only way to record it was to
-  // pick one project underneath and hope somebody read it as the whole thing.
+  // pick one initiative underneath and hope somebody read it as the whole thing.
+  'objective',
   'initiative',
   'project',
-  'workstream',
   'milestone',
   'app_area',
   'theme',
@@ -188,7 +188,7 @@ export const LABELS = {
     meeting_series: 'Meeting series',
     document: 'Document',
     // Code hosts. Same table on purpose: "which things out there are this
-    // workstream" is one question, and answering it in two places is how the two
+    // project" is one question, and answering it in two places is how the two
     // answers drift. Adding a host here is a vocabulary change, not a
     // migration — the column is text.
     github_repo: 'GitHub repository',
@@ -202,19 +202,19 @@ export const LABELS = {
     resolved: 'Resolved',
     reopened: 'Reopened',
   },
-  workstreamStatus: {
+  projectStatus: {
     planning: 'Planning',
     on_track: 'On Track',
     at_risk: 'At Risk',
     blocked: 'Blocked',
     complete: 'Complete',
   },
-  workstreamItemState: {
+  projectItemState: {
     completed: 'Completed',
     in_progress: 'In Progress',
     to_do: 'To Do',
   },
-  workstreamPhase: {
+  projectPhase: {
     discovery: 'Discovery',
     development: 'Development',
     testing: 'Testing (QA)',
@@ -225,7 +225,7 @@ export const LABELS = {
     tbd: 'TBD',
   },
   rag: { green: 'On track', amber: 'At risk', red: 'In trouble', unknown: 'Needs input' },
-  projectStatus: {
+  initiativeStatus: {
     backlog: 'Backlog',
     planned: 'Planned',
     in_progress: 'In progress',
@@ -233,7 +233,7 @@ export const LABELS = {
     completed: 'Completed',
     canceled: 'Canceled',
   },
-  initiativeStatus: {
+  objectiveStatus: {
     planned: 'Planned',
     active: 'Active',
     paused: 'Paused',
@@ -474,7 +474,7 @@ export const intakeInput = z.object({
   stakeholders: z.string().optional().nullable(),
   themeId: z.string().optional().nullable(),
   appAreaId: z.string().optional().nullable(),
-  proposedInitiativeId: z.string().optional().nullable(),
+  proposedObjectiveId: z.string().optional().nullable(),
   desiredDate: optionalDate,
   hardDate: z.boolean().default(false),
   hardDateReason: z.string().optional().nullable(),
@@ -506,7 +506,7 @@ export const decisionInput = z.object({
 
 export const allocationInput = z.object({
   teamId: z.string().min(1),
-  projectId: z.string().min(1),
+  initiativeId: z.string().min(1),
   mode: z.enum(ALLOCATION_MODE),
   note: z.string().optional().nullable(),
   share: z.number().min(0).max(1).optional().nullable(),

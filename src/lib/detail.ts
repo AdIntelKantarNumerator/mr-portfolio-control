@@ -3,9 +3,9 @@
  *
  * WHY THIS EXISTS
  *
- * The three detail pages were written one at a time and diverged: the project
- * page had fourteen sections, the workstream page fifteen in a different
- * order, and the initiative page five. The same fact — an open blocker — was
+ * The three detail pages were written one at a time and diverged: the initiative
+ * page had fourteen sections, the project page fifteen in a different
+ * order, and the objective page five. The same fact — an open blocker — was
  * a table row on one, a card on another and absent from the third. Somebody
  * moving between tiers had to re-learn the page each time.
  *
@@ -15,10 +15,10 @@
  *
  * WHAT ROLLS UP
  *
- * An initiative owns almost no records directly — the grouping exists only in
+ * An objective owns almost no records directly — the grouping exists only in
  * this app, and every blocker, decision and dependency is filed against the
- * work underneath. An initiative page that showed only its own rows would be
- * blank on an initiative in serious trouble. So each tier shows its own plus
+ * work underneath. An objective page that showed only its own rows would be
+ * blank on an objective in serious trouble. So each tier shows its own plus
  * everything beneath it, which is the same rule the milestone panel uses.
  */
 import { cache } from 'react'
@@ -34,7 +34,7 @@ import { progressPercent } from './progress'
 import type { Evidence, UpdateBullet } from '@/components/detail/health-tile'
 import type { ReadinessGateView } from '@/components/detail/readiness-tile'
 
-export type Level = 'initiative' | 'project' | 'workstream'
+export type Level = 'objective' | 'initiative' | 'project'
 
 /** Assessed health as a bullet colour, so a child list reads like the rest. */
 const RAG_TONE: Record<string, string> = {
@@ -44,7 +44,7 @@ const RAG_TONE: Record<string, string> = {
   unknown: 'var(--line-2)',
 }
 
-/** States that mean a workstream is no longer live, for the "N live" count. */
+/** States that mean a project is no longer live, for the "N live" count. */
 const ENDED_WS = new Set(['completed', 'canceled', 'cancelled', 'withdrawn'])
 
 const DEC_TONE: Record<string, string> = {
@@ -90,43 +90,43 @@ export interface DetailData {
    */
   timeline: TimelineModel | null
   /**
-   * Null only when this page covers no workstream that has a checklist at all.
-   * `workstreamId` is where to start; `streams` is everything it could show.
+   * Null only when this page covers no project that has a checklist at all.
+   * `projectId` is where to start; `streams` is everything it could show.
    */
   readiness: {
-    workstreamId: string
+    projectId: string
     streams: Array<{ id: string; name: string; gates: ReadinessGateView[]; done: number; total: number }>
   } | null
   /**
    * The tier directly beneath, linked.
    *
-   * An initiative lists its projects and a project lists its workstreams. A
-   * workstream has nothing below it that carries a name and a page, so this
+   * An objective lists its initiatives and an initiative lists its projects. A
+   * project has nothing below it that carries a name and a page, so this
    * is null there and the layout gives the space back to the updates.
    */
   children: { title: string; items: TileItem[] } | null
 }
 
-/** Every entity id at or beneath this one, and the workstreams among them. */
+/** Every entity id at or beneath this one, and the projects among them. */
 function scopeOf(
   level: Level,
   id: string,
   p: Awaited<ReturnType<typeof getPortfolio>>,
-): { ids: Set<string>; workstreams: Array<{ id: string; name: string }> } {
-  if (level === 'workstream') {
-    const w = p.projects.flatMap((x) => x.workstreams).find((x) => x.id === id)
-    return { ids: new Set([id]), workstreams: w ? [{ id: w.id, name: w.name }] : [] }
-  }
-
+): { ids: Set<string>; projects: Array<{ id: string; name: string }> } {
   if (level === 'project') {
-    const proj = p.projects.find((x) => x.id === id)
-    const ws = proj?.workstreams.map((w) => ({ id: w.id, name: w.name })) ?? []
-    return { ids: new Set([id, ...ws.map((w) => w.id)]), workstreams: ws }
+    const w = p.initiatives.flatMap((x) => x.projects).find((x) => x.id === id)
+    return { ids: new Set([id]), projects: w ? [{ id: w.id, name: w.name }] : [] }
   }
 
-  const projs = p.projects.filter((x) => x.initiativeId === id)
-  const ws = projs.flatMap((x) => x.workstreams.map((w) => ({ id: w.id, name: w.name })))
-  return { ids: new Set([id, ...projs.map((x) => x.id), ...ws.map((w) => w.id)]), workstreams: ws }
+  if (level === 'initiative') {
+    const proj = p.initiatives.find((x) => x.id === id)
+    const ws = proj?.projects.map((w) => ({ id: w.id, name: w.name })) ?? []
+    return { ids: new Set([id, ...ws.map((w) => w.id)]), projects: ws }
+  }
+
+  const projs = p.initiatives.filter((x) => x.objectiveId === id)
+  const ws = projs.flatMap((x) => x.projects.map((w) => ({ id: w.id, name: w.name })))
+  return { ids: new Set([id, ...projs.map((x) => x.id), ...ws.map((w) => w.id)]), projects: ws }
 }
 
 /**
@@ -134,19 +134,19 @@ function scopeOf(
  *
  * WHAT WAS WRONG
  *
- * A checklist belongs to a workstream — the tick has to be against a specific
- * piece of work — but a project or initiative page covers several. This used to
- * resolve that by showing "the first workstream that still has something
+ * A checklist belongs to a project — the tick has to be against a specific
+ * piece of work — but an initiative or objective page covers several. This used to
+ * resolve that by showing "the first project that still has something
  * outstanding", and returning null when there was none.
  *
  * Both halves of that misbehave at exactly the moment somebody finishes a
- * checklist, which is the worst possible moment. Tick the last box on a project
- * page and the tile silently swapped to a DIFFERENT workstream, whose boxes are
+ * checklist, which is the worst possible moment. Tick the last box on an initiative
+ * page and the tile silently swapped to a DIFFERENT project, whose boxes are
  * all empty: you ticked fourteen things and watched all fourteen go blank. On a
- * workstream page it did not swap, it disappeared. Both read as "it unchecked
+ * project page it did not swap, it disappeared. Both read as "it unchecked
  * everything", and both were reported as that.
  *
- * So: every workstream this page covers is returned, each with its own
+ * So: every project this page covers is returned, each with its own
  * checklist and its own count, and the tile lets the reader choose between them
  * and holds that choice. The default is still the first one with something
  * outstanding, because that is the useful place to land — but it is now a
@@ -165,7 +165,7 @@ function readinessFor(
         label: g.name,
         items: g.items.map((it) => {
           const s = statusFor(model, wid, it.id)
-          const row = model.byProject.get(wid)?.get(it.id)
+          const row = model.byInitiative.get(wid)?.get(it.id)
           return {
             id: it.id,
             label: it.label,
@@ -197,7 +197,7 @@ function readinessFor(
   // the first, so that a completed checklist is still shown as completed
   // rather than vanishing.
   const start = views.find((v) => v.done < v.total) ?? views[0]!
-  return { workstreamId: start.id, streams: views }
+  return { projectId: start.id, streams: views }
 }
 
 export const getDetail = cache(async (level: Level, id: string): Promise<DetailData> => {
@@ -226,7 +226,7 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
     timelineModel({ level, only: id, includeEnded: true }),
   ])
 
-  const { ids, workstreams: scopeStreams } = scopeOf(level, id, p)
+  const { ids, projects: scopeStreams } = scopeOf(level, id, p)
   const personName = new Map(folk.map((x) => [x.id, x.name]))
 
   // --- what Yaara said -----------------------------------------------------
@@ -374,8 +374,8 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
   // --- dependencies --------------------------------------------------------
   const deps = p.dependencies.filter((d) => ids.has(d.fromId) || ids.has(d.toId))
   const nameOf = (type: string, entityId: string): string => {
-    if (type === 'workstream') return p.workstreams.find((w) => w.id === entityId)?.name ?? 'something'
-    if (type === 'project') return p.projects.find((x) => x.id === entityId)?.name ?? 'something'
+    if (type === 'project') return p.projects.find((w) => w.id === entityId)?.name ?? 'something'
+    if (type === 'initiative') return p.initiatives.find((x) => x.id === entityId)?.name ?? 'something'
     return 'something'
   }
 
@@ -415,27 +415,27 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
     readiness: readinessFor(model, scopeStreams),
     timeline,
     children:
-      level === 'initiative'
+      level === 'objective'
         ? {
-            title: 'Projects',
-            items: p.projects
-              .filter((x) => x.initiativeId === id)
+            title: 'Initiatives',
+            items: p.initiatives
+              .filter((x) => x.objectiveId === id)
               .map((x) => ({
                 id: x.id,
                 text: x.name,
-                meta: `${x.workstreams.filter((w) => !ENDED_WS.has(w.status)).length} live`,
+                meta: `${x.projects.filter((w) => !ENDED_WS.has(w.status)).length} live`,
                 tone: RAG_TONE[x.health.rag] ?? 'var(--line-2)',
                 toneLabel: x.status,
                 detail: [x.owner?.name ? `Owner ${x.owner.name}` : 'No owner', x.health.rationale]
                   .filter(Boolean)
                   .join('\n'),
-                href: `/projects/${x.id}`,
+                href: `/initiatives/${x.id}`,
               })),
           }
-        : level === 'project'
+        : level === 'initiative'
           ? {
-              title: 'Workstreams',
-              items: (p.projects.find((x) => x.id === id)?.workstreams ?? []).map((w) => ({
+              title: 'Projects',
+              items: (p.initiatives.find((x) => x.id === id)?.projects ?? []).map((w) => ({
                 id: w.id,
                 text: w.name,
                 meta: w.progress ? `${progressPercent(w.progress)}%` : null,
@@ -444,10 +444,10 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
                 detail: [w.lead?.name ? `Lead ${w.lead.name}` : 'No lead', w.health.rationale]
                   .filter(Boolean)
                   .join('\n'),
-                href: `/workstreams/${w.id}`,
+                href: `/projects/${w.id}`,
               })),
             }
-          // A workstream has nothing below it with a page of its own.
+          // A project has nothing below it with a page of its own.
           : null,
   }
 })

@@ -53,7 +53,7 @@ export function nextRef(kind: string, existing: readonly string[]): string {
 /**
  * A "type:id" target from a form, or null.
  *
- * One select has to offer projects and workstreams together — "which piece of
+ * One select has to offer initiatives and projects together — "which piece of
  * work does this belong to" is one question, and two dropdowns would make the
  * person answer a question about database tables first.
  */
@@ -64,6 +64,6 @@ export function parseEntityTarget(raw: string): { type: string; id: string } | n
   const type = text.slice(0, at)
   const id = text.slice(at + 1)
   if (!id) return null
-  if (type !== 'project' && type !== 'workstream') return null
+  if (type !== 'initiative' && type !== 'project') return null
   return { type, id }
 }

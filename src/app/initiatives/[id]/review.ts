@@ -15,6 +15,6 @@ export async function reviewAssessment(assessmentId: string) {
     throw new Error('No person record for the signed-in account, so this review cannot be attributed.')
   }
   await markAssessmentReviewed(assessmentId, personId)
+  revalidatePath('/initiatives')
   revalidatePath('/projects')
-  revalidatePath('/workstreams')
 }

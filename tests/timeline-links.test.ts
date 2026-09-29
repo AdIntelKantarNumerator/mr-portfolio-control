@@ -39,8 +39,8 @@ const dep = (from: string, to: string, fromRow: string, toRow: string): DepInput
 
 const horizon = { start: day('2026-05-01'), end: day('2027-01-31'), now: day('2026-09-28') }
 
-test('the reported case: two projects inside one initiative are joined', () => {
-  // Looked at from the initiative level, both ends of this dependency are
+test('the reported case: two initiatives inside one objective are joined', () => {
+  // Looked at from the objective level, both ends of this dependency are
   // bars of the SAME row. Resolving only as far as the row made it a line
   // from something to itself, and it was dropped — so nothing was drawn,
   // while both bars sat there plainly on screen.

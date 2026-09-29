@@ -59,9 +59,9 @@ export function settled(server: string, pending: PendingEdit | undefined): boole
  * The key an edit is held under.
  *
  * Both parts, because the Readiness page shows the same checklist item for
- * many workstreams at once and `itemId` alone would tick one row's box by
+ * many projects at once and `itemId` alone would tick one row's box by
  * ticking another's.
  */
-export function editKey(workstreamId: string, itemId: string): string {
-  return `${workstreamId}:${itemId}`
+export function editKey(projectId: string, itemId: string): string {
+  return `${projectId}:${itemId}`
 }

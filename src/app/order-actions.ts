@@ -35,15 +35,15 @@
 import { revalidatePath } from 'next/cache'
 import { inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { cardOrders, initiatives, projects, workstreams } from '@/db/schema'
+import { cardOrders, objectives, initiatives, projects } from '@/db/schema'
 import { viewerKey } from '@/lib/card-order'
 
-const TABLES = { initiative: initiatives, project: projects, workstream: workstreams } as const
+const TABLES = { objective: objectives, initiative: initiatives, project: projects } as const
 
 type Level = keyof typeof TABLES
 
 function isLevel(v: string): v is Level {
-  return v === 'initiative' || v === 'project' || v === 'workstream'
+  return v === 'objective' || v === 'initiative' || v === 'project'
 }
 
 export interface OrderState {
@@ -80,7 +80,7 @@ export async function setCardOrder(level: string, orderedIds: string[]): Promise
   // The board already moved in the browser; this is for the reader's next
   // visit, and for the other tab they have open on the same page.
   //
-  // The try/catch is the same one initiatives/actions.ts carries, for the same
+  // The try/catch is the same one objectives/actions.ts carries, for the same
   // reason: revalidatePath needs a request context and throws this one
   // invariant without it, and the caller with no request is
   // scripts/check-card-order.ts, which is testing what reaches the database.

@@ -3,9 +3,9 @@
  *
  * The sync failed every run for days with
  *
- *   Field "status" of type "ProjectStatus!" must have a selection of subfields
+ *   Field "status" of type "InitiativeStatus!" must have a selection of subfields
  *
- * Linear had turned Project.status from an enum into an object. The schema
+ * Linear had turned Initiative.status from an enum into an object. The schema
  * probe checked that a field called "status" still existed, which it did, and
  * went on asking for it as a leaf — and one invalid field takes the entire
  * query down, which is exactly what probing the schema was meant to prevent.
@@ -16,38 +16,38 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mapInitiativeStatus } from '../src/lib/sources/linear-map'
+import { mapObjectiveStatus } from '../src/lib/sources/linear-map'
 
-test('the initiative status maps from either shape Linear has used', async (t) => {
+test('the objective status maps from either shape Linear has used', async (t) => {
   await t.test('the old enum string', () => {
-    assert.equal(mapInitiativeStatus('active'), 'active')
-    assert.equal(mapInitiativeStatus('completed'), 'completed')
-    assert.equal(mapInitiativeStatus('canceled'), 'canceled')
-    assert.equal(mapInitiativeStatus('paused'), 'paused')
+    assert.equal(mapObjectiveStatus('active'), 'active')
+    assert.equal(mapObjectiveStatus('completed'), 'completed')
+    assert.equal(mapObjectiveStatus('canceled'), 'canceled')
+    assert.equal(mapObjectiveStatus('paused'), 'paused')
   })
 
   await t.test('the object Linear sends now', () => {
-    assert.equal(mapInitiativeStatus({ name: 'In Progress', type: 'started' }), 'active')
-    assert.equal(mapInitiativeStatus({ name: 'Backlog', type: 'backlog' }), 'planned')
-    assert.equal(mapInitiativeStatus({ name: 'Done', type: 'completed' }), 'completed')
-    assert.equal(mapInitiativeStatus({ name: 'Cancelled', type: 'canceled' }), 'canceled')
+    assert.equal(mapObjectiveStatus({ name: 'In Progress', type: 'started' }), 'active')
+    assert.equal(mapObjectiveStatus({ name: 'Backlog', type: 'backlog' }), 'planned')
+    assert.equal(mapObjectiveStatus({ name: 'Done', type: 'completed' }), 'completed')
+    assert.equal(mapObjectiveStatus({ name: 'Cancelled', type: 'canceled' }), 'canceled')
   })
 
   await t.test('type beats name, because names are workspace-editable', () => {
     // Somebody renaming their "Done" column to "Shipped" must not silently
-    // turn every completed initiative back into a planned one.
-    assert.equal(mapInitiativeStatus({ name: 'Shipped', type: 'completed' }), 'completed')
+    // turn every completed objective back into a planned one.
+    assert.equal(mapObjectiveStatus({ name: 'Shipped', type: 'completed' }), 'completed')
   })
 
   await t.test('falls back to the name when there is no type', () => {
-    assert.equal(mapInitiativeStatus({ name: 'paused' }), 'paused')
+    assert.equal(mapObjectiveStatus({ name: 'paused' }), 'paused')
   })
 
   await t.test('anything unrecognised is planned, not a crash', () => {
-    assert.equal(mapInitiativeStatus(undefined), 'planned')
-    assert.equal(mapInitiativeStatus(null), 'planned')
-    assert.equal(mapInitiativeStatus({}), 'planned')
-    assert.equal(mapInitiativeStatus('something new they added'), 'planned')
+    assert.equal(mapObjectiveStatus(undefined), 'planned')
+    assert.equal(mapObjectiveStatus(null), 'planned')
+    assert.equal(mapObjectiveStatus({}), 'planned')
+    assert.equal(mapObjectiveStatus('something new they added'), 'planned')
   })
 })
 
@@ -65,7 +65,7 @@ function schema(fields: Record<string, Array<[string, string]>>) {
     __schema: {
       queryType: { name: 'Query' },
       types: [
-        { name: 'Query', kind: 'OBJECT', fields: [{ name: 'projects', type: { kind: 'OBJECT', name: 'C' } }] },
+        { name: 'Query', kind: 'OBJECT', fields: [{ name: 'initiatives', type: { kind: 'OBJECT', name: 'C' } }] },
         ...Object.entries(fields).map(([name, fs]) => ({
           name,
           kind: 'OBJECT',
@@ -73,7 +73,7 @@ function schema(fields: Record<string, Array<[string, string]>>) {
             // Wrapped the way a non-null field really arrives, so the
             // unwrapping is exercised rather than assumed.
             kind === 'OBJECT'
-              ? { name: f, type: { kind: 'NON_NULL', name: null, ofType: { kind: 'OBJECT', name: 'ProjectStatus' } } }
+              ? { name: f, type: { kind: 'NON_NULL', name: null, ofType: { kind: 'OBJECT', name: 'InitiativeStatus' } } }
               : { name: f, type: { kind: kind, name: 'String' } },
           ),
         })),
@@ -88,7 +88,7 @@ function capsFor(fields: Record<string, Array<[string, string]>>): LinearCapabil
 
 test('the selection set', async (t) => {
   const caps = capsFor({
-    Project: [
+    Initiative: [
       ['id', 'SCALAR'],
       ['name', 'SCALAR'],
       ['status', 'OBJECT'],
@@ -97,28 +97,28 @@ test('the selection set', async (t) => {
   })
 
   await t.test('knows an object from a scalar, through NON_NULL', () => {
-    assert.equal(caps.isLeaf('Project', 'name'), true)
-    assert.equal(caps.isLeaf('Project', 'status'), false)
+    assert.equal(caps.isLeaf('Initiative', 'name'), true)
+    assert.equal(caps.isLeaf('Initiative', 'status'), false)
   })
 
   await t.test('an object field is asked for with its subfields, never bare', () => {
-    const got = pick(caps, 'Project', ['id', 'name', 'status', 'url'], { status: 'status { name type }' })
+    const got = pick(caps, 'Initiative', ['id', 'name', 'status', 'url'], { status: 'status { name type }' })
     assert.deepEqual(got, ['id', 'name', 'status { name type }', 'url'])
   })
 
   await t.test('an object nobody said how to select is dropped, not sent bare', () => {
     // This is the whole fix: the query loses one field instead of returning
     // 400 and losing every field.
-    const got = pick(caps, 'Project', ['id', 'status'])
+    const got = pick(caps, 'Initiative', ['id', 'status'])
     assert.deepEqual(got, ['id'])
   })
 
   await t.test('a field this schema does not have is dropped as before', () => {
-    assert.deepEqual(pick(caps, 'Project', ['id', 'notAThing']), ['id'])
+    assert.deepEqual(pick(caps, 'Initiative', ['id', 'notAThing']), ['id'])
   })
 
   await t.test('a candidate that already carries a selection is passed through', () => {
-    assert.deepEqual(pick(caps, 'Project', ['status { type }']), ['status { type }'])
+    assert.deepEqual(pick(caps, 'Initiative', ['status { type }']), ['status { type }'])
   })
 })
 
@@ -142,7 +142,7 @@ test('shrinking a page Linear refused', async (t) => {
   })
 
   await t.test('the next page is small enough, with room to spare', () => {
-    // 50 x (10000/65536) x 0.8 = 6. Six workstreams a page against a score
+    // 50 x (10000/65536) x 0.8 = 6. Six projects a page against a score
     // that was six and a half times the ceiling.
     const next = shrinkPage(50, REAL)
     assert.equal(next, 6)
@@ -194,7 +194,7 @@ test('every type the sync asks about is in the probe', () => {
   // The two lists drifting apart is silent: a type left out of the probe has
   // no capabilities, so every optional field on it is quietly dropped and the
   // sync carries on writing nulls.
-  for (const t of ['Team', 'User', 'Project', 'Workstream']) {
+  for (const t of ['Team', 'User', 'Initiative', 'Project']) {
     assert.ok(PROBE_TYPES.includes(t as (typeof PROBE_TYPES)[number]), `${t} is missing from PROBE_TYPES`)
   }
 })
@@ -202,13 +202,13 @@ test('every type the sync asks about is in the probe', () => {
 test('the probe response reads exactly as a full introspection did', () => {
   const caps = capabilitiesFrom(
     probeToIntrospection({
-      __schema: { queryType: { name: 'Query', fields: [{ name: 'teams' }, { name: 'projects' }] } },
+      __schema: { queryType: { name: 'Query', fields: [{ name: 'teams' }, { name: 'initiatives' }] } },
       t0: { name: 'Team', kind: 'OBJECT', fields: [{ name: 'id', type: { kind: 'SCALAR', name: 'String' } }] },
       t1: null,
       t2: {
-        name: 'Project',
+        name: 'Initiative',
         kind: 'OBJECT',
-        fields: [{ name: 'status', type: { kind: 'OBJECT', name: 'ProjectStatus' } }],
+        fields: [{ name: 'status', type: { kind: 'OBJECT', name: 'InitiativeStatus' } }],
       },
       t3: null,
     } as never),
@@ -218,7 +218,7 @@ test('the probe response reads exactly as a full introspection did', () => {
   assert.equal(caps.has('Team', 'id'), true)
   assert.equal(caps.isLeaf('Team', 'id'), true)
   // An object still needs a selection; that rule is what the probe exists for.
-  assert.equal(caps.isLeaf('Project', 'status'), false)
+  assert.equal(caps.isLeaf('Initiative', 'status'), false)
 })
 
 test('a type the schema does not have simply has no capabilities', () => {
@@ -231,8 +231,8 @@ test('a type the schema does not have simply has no capabilities', () => {
       t3: null,
     } as never),
   )
-  assert.equal(caps.has('Workstream', 'anything'), false)
-  assert.equal(caps.isLeaf('Workstream', 'anything'), false)
+  assert.equal(caps.has('Project', 'anything'), false)
+  assert.equal(caps.isLeaf('Project', 'anything'), false)
 })
 
 test('a single-type probe aliases to t0, which the fallback reads', () => {
@@ -240,8 +240,8 @@ test('a single-type probe aliases to t0, which the fallback reads', () => {
   // alias ever stopped being t0 the fallback would silently produce a schema
   // with no capabilities at all — every optional field dropped, sync still
   // "succeeding".
-  const q = probeQuery(['Project'])
-  assert.match(q, /t0: __type\(name: "Project"\)/)
+  const q = probeQuery(['Initiative'])
+  assert.match(q, /t0: __type\(name: "Initiative"\)/)
   assert.equal((q.match(/__type\(name:/g) ?? []).length, 1)
 })
 

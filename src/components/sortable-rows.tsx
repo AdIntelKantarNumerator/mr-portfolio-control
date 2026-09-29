@@ -10,8 +10,8 @@
  *
  * WHY IT WRAPS ROWS RATHER THAN RENDERING THEM
  *
- * The three lists draw quite different rows — a project row carries a ring
- * and a mix bar, a workstream row is a table cell — and none of that is this
+ * The three lists draw quite different rows — an initiative row carries a ring
+ * and a mix bar, a project row is a table cell — and none of that is this
  * component's business. It takes what a page already renders and adds the
  * grip and the drop target around it.
  */
@@ -27,7 +27,7 @@ export function SortableRows({
 }: {
   /** The ids, in the order the server sent them. */
   ids: string[]
-  level: 'initiative' | 'project' | 'workstream'
+  level: 'objective' | 'initiative' | 'project'
   /** True only under the Custom sort. */
   draggable: boolean
   /** One row, by id. */

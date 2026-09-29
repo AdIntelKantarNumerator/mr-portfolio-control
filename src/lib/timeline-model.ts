@@ -3,12 +3,12 @@
  *
  * WHY THIS REPLACED THE OLD MODEL
  *
- * The old one knew one shape: a lane per project, a bar per workstream. That
+ * The old one knew one shape: a lane per initiative, a bar per project. That
  * made the page answer exactly one question, and the question people arrive
- * with is usually a tier up — "how do the initiatives sit against the year".
+ * with is usually a tier up — "how do the objectives sit against the year".
  * Everything here is expressed in terms of a ROW and the SPANS inside it, so
- * the same arithmetic draws initiatives-with-projects, projects-with-
- * workstreams, and workstreams on their own.
+ * the same arithmetic draws objectives-with-initiatives, initiatives-with-
+ * projects, and projects on their own.
  *
  * Positions are percentages of the horizon, so the same model renders at any
  * width without re-computing.
@@ -63,7 +63,7 @@ export interface Span {
   /**
    * Which sub-lane inside the row this bar sits on.
    *
-   * Two workstreams running over the same fortnight used to draw on top of
+   * Two projects running over the same fortnight used to draw on top of
    * each other, so a row of six overlapping bars showed one name and five
    * slivers. Bars are packed into the first lane they fit in, which is the
    * standard way and keeps the common case — work that does not overlap — to
@@ -109,8 +109,8 @@ export interface Link {
    * Which sub-lane inside each row the line leaves from and arrives at.
    *
    * A row can be several bars deep, and two ends of one dependency are
-   * regularly two bars of the SAME row — two projects inside one initiative,
-   * looked at from the initiative level. Without the lane the line would be
+   * regularly two bars of the SAME row — two initiatives inside one objective,
+   * looked at from the objective level. Without the lane the line would be
    * drawn from the middle of a row to the middle of the same row, which is a
    * dot.
    */
@@ -176,7 +176,7 @@ const TROUBLE = new Set(['blocked', 'at_risk', 'missed', 'paused'])
  *
  * The order is the whole rule, and each step earns its place:
  *
- *   1. Finished beats everything. A workstream that was red the week before
+ *   1. Finished beats everything. A project that was red the week before
  *      it landed is not a problem, and drawing it red is how a chart of a
  *      delivered quarter still looks like a disaster.
  *   2. Then overdue, which is not a matter of opinion: the date has passed
@@ -390,10 +390,10 @@ function buildLinks(deps: DepInput[], rows: TimelineRow[]): Link[] {
     if (!from || !to) continue
 
     // The specific bar, when the row draws one for that end. A dependency
-    // between two projects of one initiative is two bars of one row, and
+    // between two initiatives of one objective is two bars of one row, and
     // resolving only as far as the row made it a line from something to
     // itself — which the old code then dropped, so the line simply never
-    // appeared. It is the commonest shape there is: work inside one initiative
+    // appeared. It is the commonest shape there is: work inside one objective
     // waiting on other work inside it.
     const a = d.fromId ? from.bars.find((b) => b.id === d.fromId) : undefined
     const z = d.toId ? to.bars.find((b) => b.id === d.toId) : undefined

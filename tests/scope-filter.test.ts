@@ -16,68 +16,68 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { scopeFilter } from '../src/lib/scope-filter'
 
-const initiatives = [{ id: 'i1', name: 'Insights Studio GPC' }]
-const projects = [
-  { id: 'p1', name: 'ClickHouse', initiativeId: 'i1' },
-  { id: 'p2', name: 'Ingest', initiativeId: 'i1' },
-  { id: 'p9', name: 'Somewhere else', initiativeId: 'i9' },
+const objectives = [{ id: 'i1', name: 'Insights Studio GPC' }]
+const initiatives = [
+  { id: 'p1', name: 'ClickHouse', objectiveId: 'i1' },
+  { id: 'p2', name: 'Ingest', objectiveId: 'i1' },
+  { id: 'p9', name: 'Somewhere else', objectiveId: 'i9' },
 ]
-const workstreams = [
-  { id: 'w1', name: 'Schema', projectId: 'p1' },
-  { id: 'w9', name: 'Unrelated', projectId: 'p9' },
+const projects = [
+  { id: 'w1', name: 'Schema', initiativeId: 'p1' },
+  { id: 'w9', name: 'Unrelated', initiativeId: 'p9' },
 ]
 
-test('the reported case: an initiative shows what its children carry', () => {
-  // "11 blockers" on an initiative is eleven across everything beneath it.
-  // Filtering to the initiative row alone answers that link with an empty
+test('the reported case: an objective shows what its children carry', () => {
+  // "11 blockers" on an objective is eleven across everything beneath it.
+  // Filtering to the objective row alone answers that link with an empty
   // list, which reads as data loss rather than as a filter.
-  const f = scopeFilter('initiative:i1', projects, workstreams, initiatives)
-  assert.ok(f.covers('i1'), 'a blocker filed on the initiative itself')
+  const f = scopeFilter('objective:i1', initiatives, projects, objectives)
+  assert.ok(f.covers('i1'), 'a blocker filed on the objective itself')
   assert.ok(f.covers('p1'))
   assert.ok(f.covers('w1'))
   assert.equal(f.covers('p9'), false)
   assert.equal(f.covers('w9'), false)
 })
 
-test('a project scope stops at its own workstreams', () => {
-  const f = scopeFilter('project:p1', projects, workstreams, initiatives)
+test('an initiative scope stops at its own projects', () => {
+  const f = scopeFilter('initiative:p1', initiatives, projects, objectives)
   assert.ok(f.covers('p1'))
   assert.ok(f.covers('w1'))
-  assert.equal(f.covers('i1'), false, 'the initiative above is not part of the project')
+  assert.equal(f.covers('i1'), false, 'the objective above is not part of the initiative')
   assert.equal(f.covers('p2'), false)
 })
 
-test('a workstream scope is only itself', () => {
-  const f = scopeFilter('workstream:w1', projects, workstreams, initiatives)
+test('a project scope is only itself', () => {
+  const f = scopeFilter('project:w1', initiatives, projects, objectives)
   assert.ok(f.covers('w1'))
   assert.equal(f.covers('p1'), false)
 })
 
 test('no scope means no filtering, and no chip', () => {
   for (const raw of [null, undefined, '', 'nonsense']) {
-    const f = scopeFilter(raw, projects, workstreams, initiatives)
+    const f = scopeFilter(raw, initiatives, projects, objectives)
     assert.ok(f.covers('anything at all'))
     assert.equal(f.label, null, `${raw} should not draw a chip`)
   }
 })
 
 test('the chip is named after the thing clicked', () => {
-  assert.equal(scopeFilter('initiative:i1', projects, workstreams, initiatives).label, 'Insights Studio GPC')
-  assert.equal(scopeFilter('project:p1', projects, workstreams, initiatives).label, 'ClickHouse')
-  assert.equal(scopeFilter('workstream:w1', projects, workstreams, initiatives).label, 'Schema')
+  assert.equal(scopeFilter('objective:i1', initiatives, projects, objectives).label, 'Insights Studio GPC')
+  assert.equal(scopeFilter('initiative:p1', initiatives, projects, objectives).label, 'ClickHouse')
+  assert.equal(scopeFilter('project:w1', initiatives, projects, objectives).label, 'Schema')
 })
 
 test('a scope whose record is gone filters to nothing and says so', () => {
   // Rather than silently showing everything, which would look like the filter
   // had been ignored.
-  const f = scopeFilter('project:deleted', projects, workstreams, initiatives)
+  const f = scopeFilter('initiative:deleted', initiatives, projects, objectives)
   assert.equal(f.covers('p1'), false)
   assert.equal(f.covers('deleted'), true, 'its own records, if any survive, still belong to it')
   assert.ok(f.label, 'a missing record still draws a chip')
 })
 
 test('nothing filed against anything is never covered by a scope', () => {
-  const f = scopeFilter('initiative:i1', projects, workstreams, initiatives)
+  const f = scopeFilter('objective:i1', initiatives, projects, objectives)
   assert.equal(f.covers(null), false)
   assert.equal(f.covers(undefined), false)
   assert.equal(f.covers(''), false)

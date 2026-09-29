@@ -17,6 +17,7 @@
  * blocker Yaara read out of a meeting is that it is filed against the wrong
  * piece of work, and the place somebody notices that is this row.
  */
+import { TIER_PLURAL } from '@/lib/home-types'
 import { useActionState, useState } from 'react'
 import { RecordTable, type Column } from '@/components/records/table'
 import { SourceHover } from '@/components/records/source-hover'
@@ -124,14 +125,14 @@ function labelFor(status: string): string {
 }
 
 /** The hierarchy, for the Level column. */
-const TIER_RANK = ['initiative', 'project', 'workstream']
+const TIER_RANK = ['objective', 'initiative', 'project']
 
 export function RegisterList({
   kind,
   rows,
+  objectives,
   initiatives,
   projects,
-  workstreams,
   people,
   closed,
   editing,
@@ -139,9 +140,9 @@ export function RegisterList({
 }: {
   kind: RegisterKind
   rows: BlockerRow[]
+  objectives: Named[]
   initiatives: Named[]
   projects: Named[]
-  workstreams: Named[]
   people: Named[]
   closed: boolean
   /** What the edit dialog needs, or null for a reader who cannot write. */
@@ -153,7 +154,7 @@ export function RegisterList({
   const w = WORDS[kind]
 
   const optionsFor = (level: string | null) =>
-    level === 'initiative' ? initiatives : level === 'project' ? projects : workstreams
+    level === 'objective' ? objectives : level === 'initiative' ? initiatives : projects
 
   const columns: Column<BlockerRow>[] = [
     { key: 'ref', label: 'Ref', sort: 'text', value: (r) => r.ref, className: 'rt-due' },
@@ -167,8 +168,8 @@ export function RegisterList({
         <AssignCell
           value={r.entity?.id ?? ''}
           name={r.entity?.name ?? null}
-          options={optionsFor(r.level ?? 'workstream')}
-          onPick={(entityId) => fileBlockerAt(r.id, r.level ?? 'workstream', entityId)}
+          options={optionsFor(r.level ?? 'project')}
+          onPick={(entityId) => fileBlockerAt(r.id, r.level ?? 'project', entityId)}
         />
       ),
     },
@@ -267,9 +268,9 @@ export function RegisterList({
       {adding && (
         <AddDialog
           kind={kind}
+          objectives={objectives}
           initiatives={initiatives}
           projects={projects}
-          workstreams={workstreams}
           people={people}
           onClose={() => setAdding(false)}
         />
@@ -313,16 +314,16 @@ function StatusCell({ row }: { row: BlockerRow }) {
 
 function AddDialog({
   kind,
+  objectives,
   initiatives,
   projects,
-  workstreams,
   people,
   onClose,
 }: {
   kind: RegisterKind
+  objectives: Named[]
   initiatives: Named[]
   projects: Named[]
-  workstreams: Named[]
   people: Named[]
   onClose: () => void
 }) {
@@ -357,6 +358,13 @@ function AddDialog({
           </label>
           <select id="b-at" name="at" defaultValue="">
             <option value="">— nothing in particular —</option>
+            <optgroup label={TIER_PLURAL.objective}>
+              {objectives.map((o) => (
+                <option key={o.id} value={`objective:${o.id}`}>
+                  {o.name}
+                </option>
+              ))}
+            </optgroup>
             <optgroup label="Initiatives">
               {initiatives.map((o) => (
                 <option key={o.id} value={`initiative:${o.id}`}>
@@ -367,13 +375,6 @@ function AddDialog({
             <optgroup label="Projects">
               {projects.map((o) => (
                 <option key={o.id} value={`project:${o.id}`}>
-                  {o.name}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Workstreams">
-              {workstreams.map((o) => (
-                <option key={o.id} value={`workstream:${o.id}`}>
                   {o.name}
                 </option>
               ))}

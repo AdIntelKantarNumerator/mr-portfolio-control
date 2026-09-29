@@ -10,38 +10,38 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { FIELDS, isLevel, isSameValue, parseDate, parsePercent, specFor } from '../src/lib/field-rules'
-import { PRIORITY, PROJECT_STATUS, WORKSTREAM_STATUS_SET } from '../src/lib/domain'
+import { PRIORITY, INITIATIVE_STATUS, PROJECT_STATUS_SET } from '../src/lib/domain'
 
 test('the editable surface', async (t) => {
   await t.test('all three tiers, and nothing else', () => {
-    // The initiative tier joined when the detail pages were unified: the
+    // The objective tier joined when the detail pages were unified: the
     // status pill is the control on all three, so all three have to accept a
     // status write. A milestone is not a tier and never gets one.
+    assert.ok(isLevel('objective'))
     assert.ok(isLevel('initiative'))
     assert.ok(isLevel('project'))
-    assert.ok(isLevel('workstream'))
     assert.ok(!isLevel('milestone'))
     assert.ok(!isLevel('theme'))
   })
 
   await t.test('an unknown field is not editable by accident', () => {
-    assert.equal(specFor('project', 'name'), undefined)
-    assert.equal(specFor('workstream', 'ownerId'), undefined)
-    assert.equal(specFor('project', 'progress'), undefined)
+    assert.equal(specFor('initiative', 'name'), undefined)
+    assert.equal(specFor('project', 'ownerId'), undefined)
+    assert.equal(specFor('initiative', 'progress'), undefined)
   })
 
   await t.test('every vocabulary comes from domain.ts, not a second list', () => {
     // A copy here would drift, and the failure is a status the UI offers and
     // the server refuses.
-    assert.deepEqual([...FIELDS.initiative.status!.allowed!].sort(), [...PROJECT_STATUS].sort())
-    assert.deepEqual([...FIELDS.project.status!.allowed!].sort(), [...PROJECT_STATUS].sort())
-    assert.deepEqual([...FIELDS.workstream.status!.allowed!].sort(), [...WORKSTREAM_STATUS_SET].sort())
-    assert.deepEqual([...FIELDS.workstream.priority!.allowed!].sort(), [...PRIORITY].sort())
+    assert.deepEqual([...FIELDS.objective.status!.allowed!].sort(), [...INITIATIVE_STATUS].sort())
+    assert.deepEqual([...FIELDS.initiative.status!.allowed!].sort(), [...INITIATIVE_STATUS].sort())
+    assert.deepEqual([...FIELDS.project.status!.allowed!].sort(), [...PROJECT_STATUS_SET].sort())
+    assert.deepEqual([...FIELDS.project.priority!.allowed!].sort(), [...PRIORITY].sort())
   })
 
   await t.test('nothing editable here re-parents or renames anything', () => {
     const columns = Object.values(FIELDS).flatMap((f) => Object.values(f).map((s) => s.column))
-    for (const forbidden of ['name', 'key', 'projectId', 'initiativeId', 'id']) {
+    for (const forbidden of ['name', 'key', 'initiativeId', 'objectiveId', 'id']) {
       assert.ok(!columns.includes(forbidden), `${forbidden} must not be editable from a list row`)
     }
   })

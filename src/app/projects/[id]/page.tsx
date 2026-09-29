@@ -1,16 +1,7 @@
 /**
- * One project.
- *
- * Thin on purpose: the shape of a detail page lives in components/detail and
- * the data behind it in lib/detail, so this file says what a project is and
- * nothing about how a tile is drawn. The workstream and initiative pages are
- * the same file with two words changed, which is the point - the three tiers
- * used to be three different screens.
+ * One project. Same page as an initiative, one tier down.
  */
 import { notFound } from 'next/navigation'
-import { eq } from 'drizzle-orm'
-import { db } from '@/db/client'
-import { initiatives } from '@/db/schema'
 import { DetailHead } from '@/components/detail-head'
 import { DetailBody } from '@/components/detail/body'
 import { MilestoneEditor } from '@/components/milestone-editor'
@@ -24,28 +15,39 @@ import { HealthEditable } from '@/components/health-editable'
 import { Editable } from '@/components/editable'
 import { SourceBadge } from '@/components/ui'
 import { calendarRange } from '@/lib/calendar-date'
+import { rollUpWindow } from '@/lib/rollup-window'
 
 export const dynamic = 'force-dynamic'
 
 const STATUS = [
+  { value: 'backlog', label: 'Backlog' },
   { value: 'planned', label: 'Planned' },
-  { value: 'active', label: 'Active' },
+  { value: 'in_progress', label: 'In progress' },
   { value: 'paused', label: 'Paused' },
   { value: 'completed', label: 'Completed' },
   { value: 'canceled', label: 'Canceled' },
 ]
 
+const PRIORITY = [
+  { value: 'urgent', label: 'Urgent' },
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+  { value: 'no_priority', label: 'None' },
+]
+
 const TONE: Record<string, string> = {
+  backlog: 'var(--line-2)',
   planned: 'var(--line-2)',
-  active: 'var(--c5)',
+  in_progress: 'var(--c5)',
   paused: 'var(--c2)',
   completed: 'var(--c1)',
   canceled: 'var(--ended)',
 }
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null)
-// What a <input type="date"> takes, and what an empty one means: no typed
-// date, so that end of the window comes from the work beneath.
+// What a <input type="date"> takes; empty means nobody typed one, so that end
+// of the window comes from the work beneath.
 const ymd = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : '')
 
 export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -58,18 +60,25 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     addContext(),
   ])
 
-  const i = p.projects.find((x) => x.id === id)
-  if (!i) notFound()
+  const w = p.projects.find((x) => x.id === id)
+  if (!w) notFound()
 
-  const [parent] = i.initiativeId
-    ? await db
-        .select({ id: initiatives.id, name: initiatives.name })
-        .from(initiatives)
-        .where(eq(initiatives.id, i.initiativeId))
-        .limit(1)
-    : []
-
+  const parent = w.initiativeId ? (p.initiatives.find((x) => x.id === w.initiativeId) ?? null) : null
   const people = p.people.map((x) => ({ id: x.id, name: x.name }))
+
+  /*
+   * A project's window rolls up too — from its own milestones.
+   *
+   * It was the one tier that did not. The timeline has always drawn a
+   * project bar across its milestones, so a project with dated
+   * milestones and no typed dates appeared on the chart and read as undated on
+   * its own page: the same disagreement the tiers above had, one tier down.
+   * Same function, so it stays fixed. See lib/rollup-window.ts.
+   */
+  const win = rollUpWindow(
+    { startDate: w.startDate, targetDate: w.targetDate },
+    plan.map((m) => (m.targetDate ? new Date(m.targetDate) : null)),
+  )
 
   return (
     <div className="stack">
@@ -79,60 +88,77 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             <EditRecordButton
               level="project"
               id={id}
-              name={i.name}
-              description={i.description ?? ''}
-              parentId={i.initiativeId ?? null}
+              name={w.name}
+              description={w.description ?? ''}
+              parentId={w.initiativeId ?? null}
               parents={adding.initiatives}
               window={{
-                startDate: ymd(i.startDate),
-                targetDate: ymd(i.targetDate),
-                rolledStart: ymd(i.derivedStart),
-                rolledTarget: ymd(i.derivedTarget),
+                startDate: ymd(w.startDate),
+                targetDate: ymd(w.targetDate),
+                rolledStart: w.startDate ? '' : ymd(win.start),
+                rolledTarget: w.targetDate ? '' : ymd(win.end),
               }}
             />
           ) : null
         }
         tier={{ label: 'Project', href: '/projects' }}
-        name={i.name}
+        name={w.name}
         parent={parent ? { label: 'in', name: parent.name, href: `/initiatives/${parent.id}` } : null}
-        orphan="Not in an initiative"
+        orphan="Not under an initiative"
         status={{
           level: 'project',
-          id: i.id,
-          value: i.status,
-          label: STATUS.find((s) => s.value === i.status)?.label ?? i.status,
-          tone: TONE[i.status] ?? 'var(--line-2)',
+          id: w.id,
+          value: w.status,
+          label: STATUS.find((s) => s.value === w.status)?.label ?? w.status,
+          tone: TONE[w.status] ?? 'var(--line-2)',
           options: STATUS,
         }}
-        pills={i.sources.map((s) => (
-          <SourceBadge key={`${s.system}-${s.url ?? ''}`} system={s.system} url={s.url} />
-        ))}
+        pills={
+          <>
+            <Editable
+              level="project"
+              id={w.id}
+              field="priority"
+              kind="choice"
+              options={PRIORITY}
+              raw={w.priority ?? 'medium'}
+              value={w.priority ? (PRIORITY.find((x) => x.value === w.priority)?.label ?? w.priority) : null}
+              prompt="no priority"
+              className="dpriority"
+            />
+            {w.sources.map((s) => (
+              <SourceBadge key={`${s.system}-${s.url ?? ''}`} system={s.system} url={s.url} />
+            ))}
+          </>
+        }
       >
         <div className="ir-facts dfacts">
           <span>
             <HealthEditable
               level="project"
-              id={i.id}
-              rag={i.health.rag}
-              rationale={i.health.rationale}
-              evidence={i.health.evidence}
-              origin={i.health.origin}
+              id={w.id}
+              rag={w.health.rag}
+              rationale={w.health.rationale}
+              evidence={w.health.evidence}
+              origin={w.health.origin}
             />
           </span>
           <span>
-            <i>Owner</i>
-            <Editable level="project" id={i.id} field="owner" kind="person" people={people} value={i.owner?.name ?? null} prompt="no owner" />
+            <i>Lead</i>
+            <Editable level="project" id={w.id} field="lead" kind="person" people={people} value={w.lead?.name ?? null} prompt="no lead" />
           </span>
-          {i.sponsor ? (
+          {w.team ? (
             <span>
-              <i>Sponsor</i>
-              {i.sponsor.name}
+              <i>Team</i>
+              {w.team.name}
             </span>
           ) : null}
           <span>
             <i>Window</i>
-            {calendarRange(iso(i.startDate ?? i.derivedStart), iso(i.targetDate ?? i.derivedTarget))}
-            {!i.targetDate && i.derivedTarget ? <b title="Rolled up from the workstreams; nobody typed it.">rolled up</b> : null}
+            {calendarRange(iso(win.start), iso(win.end))}
+            {win.rolledUp ? (
+              <b title="Rolled up from the milestones beneath; nobody typed it.">rolled up</b>
+            ) : null}
           </span>
         </div>
       </DetailHead>

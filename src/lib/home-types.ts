@@ -9,11 +9,36 @@
  * The rule this encodes: a type shared across the server/client line lives in
  * a module that imports nothing.
  */
-export type Level = 'initiative' | 'project' | 'workstream'
-export const LEVELS: Level[] = ['initiative', 'project', 'workstream']
+export type Level = 'objective' | 'initiative' | 'project'
+
+/*
+ * What each tier is CALLED on screen, as opposed to what it is called in code.
+ *
+ * The two were the same word everywhere until the tiers were renamed to line
+ * up with Linear's: a Linear Project is a Project here and a Linear Initiative
+ * is an Initiative, which leaves the tier above them with no Linear
+ * counterpart and a name of its own. `objective` is short enough to live in an
+ * identifier; "Strategic Objective" is what it is called out loud.
+ *
+ * Written down once because the rename had to touch three thousand
+ * occurrences across a hundred and eighty files, and a fair number of them
+ * were display strings that could have been this constant.
+ */
+export const TIER_LABEL: Record<Level, string> = {
+  objective: 'Strategic Objective',
+  initiative: 'Initiative',
+  project: 'Project',
+}
+
+export const TIER_PLURAL: Record<Level, string> = {
+  objective: 'Strategic Objectives',
+  initiative: 'Initiatives',
+  project: 'Projects',
+}
+export const LEVELS: Level[] = ['objective', 'initiative', 'project']
 
 export function isLevel(v: string | undefined): v is Level {
-  return v === 'initiative' || v === 'project' || v === 'workstream'
+  return v === 'objective' || v === 'initiative' || v === 'project'
 }
 
 /**
@@ -27,7 +52,7 @@ export function isLevel(v: string | undefined): v is Level {
 /**
  * 'custom' is an order somebody dragged into place, kept in each table's
  * `sortOrder` column. It is deliberately a property of the portfolio rather
- * than of the reader: the order initiatives are discussed in is an editorial
+ * than of the reader: the order objectives are discussed in is an editorial
  * decision a team makes together, the same way theme order already is, and a
  * per-browser copy would mean the board looked different in the meeting than
  * it did to the person who arranged it.
@@ -69,7 +94,7 @@ export interface MixGroup {
  * In-progress work, split by whether anything is standing in its way.
  *
  * "In progress" was the biggest segment on most cards and said the least: a
- * workstream shipping cleanly and one that has been stuck behind a blocker
+ * project shipping cleanly and one that has been stuck behind a blocker
  * for three weeks are both in progress, and the bar coloured them the same
  * green. The split is on open blockers, which is the same evidence `healthOf`
  * uses, so the bar and the card's health cannot disagree.
@@ -109,7 +134,7 @@ export function mixRank(status: string): number {
  * A status as a person says it. "in_progress" is a column value, not a word.
  *
  * Deliberately not lib/domain.ts's `label()`: that one takes a named group,
- * and the mix bar mixes two vocabularies on one card - a project's lifecycle
+ * and the mix bar mixes two vocabularies on one card - an initiative's lifecycle
  * status and a milestone's - which is exactly the case a group-keyed lookup
  * cannot serve.
  */

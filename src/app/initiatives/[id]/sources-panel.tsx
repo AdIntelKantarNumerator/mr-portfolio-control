@@ -18,21 +18,21 @@ const labelCls = 'text-[11px] font-semibold uppercase tracking-[0.05em] text-[va
 
 /**
  * Attach, switch on and remove the channels and meeting series feeding one
- * project, without leaving the project.
+ * initiative, without leaving the initiative.
  *
  * The full Conversations screen still exists and does more. This exists because
  * "which channel is this coming from, and should it be?" is a question people
- * ask while looking at the project, and making them navigate away to answer
+ * ask while looking at the initiative, and making them navigate away to answer
  * it is how the links stop getting maintained.
  */
-export function InitiativeSources({
+export function ObjectiveSources({
   entityValue,
-  initiativeName,
+  objectiveName,
   sources,
   transcriptCount,
 }: {
   entityValue: string
-  initiativeName: string
+  objectiveName: string
   sources: SourceRow[]
   transcriptCount: number
 }) {
@@ -83,7 +83,7 @@ export function InitiativeSources({
       {open === 'transcript' ? (
         <TranscriptForm
           entityValue={entityValue}
-          initiativeName={initiativeName}
+          objectiveName={objectiveName}
           sources={sources}
           onDone={() => setOpen('none')}
         />
@@ -239,12 +239,12 @@ function SourceForm({ entityValue, onDone }: { entityValue: string; onDone: () =
 
 function TranscriptForm({
   entityValue,
-  initiativeName,
+  objectiveName,
   sources,
   onDone,
 }: {
   entityValue: string
-  initiativeName: string
+  objectiveName: string
   sources: SourceRow[]
   onDone: () => void
 }) {
@@ -266,7 +266,7 @@ function TranscriptForm({
           id="it-title"
           name="title"
           className={field}
-          defaultValue={`${initiativeName} — `}
+          defaultValue={`${objectiveName} — `}
           required
         />
       </div>

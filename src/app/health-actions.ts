@@ -25,7 +25,7 @@
 import { revalidatePath } from 'next/cache'
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { assessments, initiatives, projects, workstreams } from '@/db/schema'
+import { assessments, objectives, initiatives, projects } from '@/db/schema'
 import { RAG } from '@/lib/domain'
 import { actorName, actorPersonId } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
@@ -42,19 +42,19 @@ export interface HealthState {
  * The tables behind each level, and the paths a change to one invalidates.
  *
  * Named here rather than inferred, because the post-rotation mapping is not
- * guessable: the `projects` table holds what the UI calls projects and the
- * `workstreams` table holds workstreams, while `initiatives` sits above both.
+ * guessable: the `initiatives` table holds what the UI calls initiatives and the
+ * `projects` table holds projects, while `objectives` sits above both.
  */
 const LEVELS = {
+  objective: { table: objectives, path: '/objectives' },
   initiative: { table: initiatives, path: '/initiatives' },
   project: { table: projects, path: '/projects' },
-  workstream: { table: workstreams, path: '/workstreams' },
 } as const
 
 type Level = keyof typeof LEVELS
 
 function isLevel(v: string): v is Level {
-  return v === 'initiative' || v === 'project' || v === 'workstream'
+  return v === 'objective' || v === 'initiative' || v === 'project'
 }
 
 const RAG_WORD: Record<string, string> = {

@@ -10,7 +10,7 @@ const LANE_LABEL_WIDTH = 210
 const MIN_COL_WIDTH = 66
 
 /**
- * Project-by-project timeline.
+ * Initiative-by-initiative timeline.
  *
  * Uses one CSS grid for the header and a positioned track per lane, rather
  * than a chart library: the bars carry interactive content (links, tooltips,
@@ -64,7 +64,7 @@ export function Timeline({ model }: { model: TimelineModel }) {
             className="sticky left-0 z-20 border-b px-2.5 py-1.5 text-[11px] font-semibold"
             style={{ background: 'var(--canvas)', borderColor: 'var(--line)', color: 'var(--muted)' }}
           >
-            Project
+            Initiative
           </div>
           {model.columns.map((c) => (
             <div
@@ -84,7 +84,7 @@ export function Timeline({ model }: { model: TimelineModel }) {
         {/* Lanes */}
         {model.lanes.map((lane) => (
           <div
-            key={lane.project.id}
+            key={lane.initiative.id}
             className="grid"
             style={{ gridTemplateColumns: gridTemplate }}
           >
@@ -93,31 +93,31 @@ export function Timeline({ model }: { model: TimelineModel }) {
               style={{ background: 'var(--surface)', borderColor: 'var(--line)' }}
             >
               <Link
-                // The project's own page, not an anchor into the list: the
+                // The initiative's own page, not an anchor into the list: the
                 // list is filtered in the browser now, so an anchor lands on
                 // a row that may not be rendered.
-                href={`/projects/${lane.project.id}`}
+                href={`/initiatives/${lane.initiative.id}`}
                 className="truncate text-[11.5px] font-semibold hover:underline"
-                title={lane.project.name}
+                title={lane.initiative.name}
               >
-                {lane.project.name}
+                {lane.initiative.name}
               </Link>
               <div className="flex items-center gap-1">
                 <span
-                  className={`rag-dot bg-rag-${lane.project.health.rag}`}
-                  title={vocab('rag', lane.project.health.rag)}
+                  className={`rag-dot bg-rag-${lane.initiative.health.rag}`}
+                  title={vocab('rag', lane.initiative.health.rag)}
                 />
                 <span className="text-[10px]" style={{ color: 'var(--muted)' }}>
-                  {lane.project.theme?.name ?? 'No theme'}
+                  {lane.initiative.theme?.name ?? 'No theme'}
                 </span>
               </div>
-              {lane.undatedProjects.length > 0 ? (
+              {lane.undatedInitiatives.length > 0 ? (
                 <span
                   className="text-[10px]"
                   style={{ color: 'var(--violet)' }}
-                  title={lane.undatedProjects.map((p) => p.name).join('\n')}
+                  title={lane.undatedInitiatives.map((p) => p.name).join('\n')}
                 >
-                  {lane.undatedProjects.length} undated
+                  {lane.undatedInitiatives.length} undated
                 </span>
               ) : null}
             </div>
@@ -160,8 +160,8 @@ export function Timeline({ model }: { model: TimelineModel }) {
 
               {lane.bars.map((bar) => (
                 <Link
-                  key={bar.workstream.id}
-                  href={`/readiness/${bar.workstream.id}`}
+                  key={bar.project.id}
+                  href={`/readiness/${bar.project.id}`}
                   className="absolute z-[2] flex items-center overflow-hidden rounded-md px-2 text-[10px] font-semibold text-white transition-transform hover:scale-y-110"
                   style={{
                     left: `${bar.leftPct}%`,
@@ -173,19 +173,19 @@ export function Timeline({ model }: { model: TimelineModel }) {
                     borderBottomLeftRadius: bar.clippedStart ? 0 : undefined,
                     borderTopRightRadius: bar.clippedEnd ? 0 : undefined,
                     borderBottomRightRadius: bar.clippedEnd ? 0 : undefined,
-                    opacity: ['completed', 'canceled'].includes(bar.workstream.status) ? 0.45 : 1,
+                    opacity: ['completed', 'canceled'].includes(bar.project.status) ? 0.45 : 1,
                   }}
                   title={[
-                    bar.workstream.name,
-                    `${vocab('projectStatus', bar.workstream.status)} · ${progressPercent(bar.workstream.progress)}%`,
-                    fmtRange(bar.workstream.startDate, bar.workstream.targetDate),
-                    bar.workstream.lead ? `Lead: ${bar.workstream.lead.name}` : 'No lead',
-                    bar.workstream.health.rationale ?? '',
+                    bar.project.name,
+                    `${vocab('initiativeStatus', bar.project.status)} · ${progressPercent(bar.project.progress)}%`,
+                    fmtRange(bar.project.startDate, bar.project.targetDate),
+                    bar.project.lead ? `Lead: ${bar.project.lead.name}` : 'No lead',
+                    bar.project.health.rationale ?? '',
                   ]
                     .filter(Boolean)
                     .join('\n')}
                 >
-                  <span className="truncate">{bar.workstream.name}</span>
+                  <span className="truncate">{bar.project.name}</span>
                 </Link>
               ))}
 
@@ -195,7 +195,7 @@ export function Timeline({ model }: { model: TimelineModel }) {
                   className="absolute z-[3] -translate-x-1/2 text-center"
                   style={{ left: `${m.leftPct}%`, top: 36 }}
                   title={[
-                    `${m.projectName} — ${m.milestone.name}`,
+                    `${m.initiativeName} — ${m.milestone.name}`,
                     fmtDate(m.milestone.targetDate, { year: true }),
                     m.milestone.contested ? 'Contested or externally committed date.' : '',
                     m.milestone.details ?? '',
@@ -287,7 +287,7 @@ export function KeyDateStrip({ model }: { model: TimelineModel }) {
             </div>
             <div className="mt-0.5 text-[11.5px] font-semibold">{k.milestone.name}</div>
             <div className="text-[11px]" style={{ color: 'var(--muted)' }}>
-              {k.projectName}
+              {k.initiativeName}
             </div>
             {k.milestone.details ? (
               <p className="m-0 mt-1 text-[11px]" style={{ color: 'var(--muted)' }}>

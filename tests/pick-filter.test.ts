@@ -11,11 +11,11 @@ import assert from 'node:assert/strict'
 import { filterOptions, groupsOf, moveHighlight } from '../src/lib/pick-filter'
 
 const options = [
-  { value: 'w1', label: 'Insight Studio — Client Launch (MVP)', group: 'Workstreams' },
-  { value: 'w2', label: 'Global Product Catalog (GPC)', group: 'Workstreams' },
-  { value: 'p1', label: 'Creative Intel', group: 'Projects' },
-  { value: 'p2', label: 'Globalization', group: 'Projects' },
-  { value: 'i1', label: 'Insights Studio GPC', group: 'Initiatives' },
+  { value: 'w1', label: 'Insight Studio — Client Launch (MVP)', group: 'Projects' },
+  { value: 'w2', label: 'Global Product Catalog (GPC)', group: 'Projects' },
+  { value: 'p1', label: 'Creative Intel', group: 'Initiatives' },
+  { value: 'p2', label: 'Globalization', group: 'Initiatives' },
+  { value: 'i1', label: 'Insights Studio GPC', group: 'Objectives' },
   { value: 'm1', label: 'GPC + Creative Central GA', group: 'Milestones' },
 ]
 const names = (rows: Array<{ value: string }>) => rows.map((r) => r.value)
@@ -34,9 +34,9 @@ test('case is not something anybody should have to get right', () => {
 })
 
 test('the group counts as part of the option', () => {
-  // "workstream gpc" is how people describe what they want when the list in
+  // "project gpc" is how people describe what they want when the list in
   // front of them is grouped.
-  assert.deepEqual(names(filterOptions(options, 'workstream gpc')), ['w2'])
+  assert.deepEqual(names(filterOptions(options, 'project gpc')), ['w2'])
 })
 
 test('an empty box means nothing has been said yet, not that nothing matches', () => {
@@ -55,11 +55,11 @@ test('no match is an empty list, not everything', () => {
 })
 
 test('the groups come back in the order they first appear', () => {
-  assert.deepEqual(groupsOf(options), ['Workstreams', 'Projects', 'Initiatives', 'Milestones'])
+  assert.deepEqual(groupsOf(options), ['Projects', 'Initiatives', 'Objectives', 'Milestones'])
 })
 
 test('the groups of a narrowed list are only the ones still in it', () => {
-  assert.deepEqual(groupsOf(filterOptions(options, 'creative')), ['Projects', 'Milestones'])
+  assert.deepEqual(groupsOf(filterOptions(options, 'creative')), ['Initiatives', 'Milestones'])
 })
 
 // --- the keyboard ------------------------------------------------------------

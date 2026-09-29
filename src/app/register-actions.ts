@@ -19,7 +19,7 @@
 import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { actionItemLinks, actionItems, decisions, dependencies, initiatives, projects, workstreams } from '@/db/schema'
+import { actionItemLinks, actionItems, decisions, dependencies, objectives, initiatives, projects } from '@/db/schema'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
 import { blockerPatch, dependencyPatch, describeChange } from '@/lib/register-edit'
@@ -31,9 +31,9 @@ export interface RegisterState {
   stamp?: number
 }
 
-const LEVELS = { initiative: initiatives, project: projects, workstream: workstreams } as const
+const LEVELS = { objective: objectives, initiative: initiatives, project: projects } as const
 type Level = keyof typeof LEVELS
-const isLevel = (v: string): v is Level => v === 'initiative' || v === 'project' || v === 'workstream'
+const isLevel = (v: string): v is Level => v === 'objective' || v === 'initiative' || v === 'project'
 
 function refresh(level: string, id: string) {
   try {
@@ -47,7 +47,7 @@ function refresh(level: string, id: string) {
     revalidatePath('/changes')
   } catch (err) {
     // Needs a request context; the check scripts have none. Same guard, and
-    // the same reasoning, as initiatives/actions.ts.
+    // the same reasoning, as objectives/actions.ts.
     if (!(err instanceof Error) || !/static generation store/i.test(err.message)) throw err
   }
 }
@@ -283,11 +283,11 @@ export interface LoadedEntry {
   category?: string
   ownerId: string | null
   dueBy?: string | null
-  /** "project:abc", or '' — where a blocker is filed. */
+  /** "initiative:abc", or '' — where a blocker is filed. */
   at?: string
   /** What that work is called, for when the live list leaves it out. */
   atLabel?: string
-  /** Dependencies: "project:abc" at each end. */
+  /** Dependencies: "initiative:abc" at each end. */
   from?: string
   to?: string
   /**
@@ -464,9 +464,9 @@ export async function editRegisterEntry(input: {
    *
    * `fromLabel`/`toLabel` name an `external` end — a vendor feed, another
    * org's deliverable — because there is no record to read a name from. Move
-   * that end onto a real workstream and the old label is not just redundant,
+   * that end onto a real project and the old label is not just redundant,
    * it is wrong: the page prefers the stored label when it has one, so the row
-   * would go on calling a workstream "BiS data feed".
+   * would go on calling a project "BiS data feed".
    */
   const moved = (a: string, b: string, c: string, d: string) => a !== c || b !== d
   await db

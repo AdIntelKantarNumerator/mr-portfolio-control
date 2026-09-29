@@ -5,13 +5,14 @@
  *
  * WHY AT THE TOP RATHER THAN IN A FORM AT THE FOOT
  *
- * The initiative page carried a rename form below everything else, and the
- * project and workstream pages carried nothing at all: renaming one, or
+ * The objective page carried a rename form below everything else, and the
+ * initiative and project pages carried nothing at all: renaming one, or
  * moving it under a different parent, meant going to Linear or to the
  * grouping screen. Editing is the exception on a page whose job is to be
  * read, so it is a button next to the title rather than a form taking up the
  * bottom third of every visit.
  */
+import { TIER_LABEL } from '@/lib/home-types'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createChild, editRecord, type RecordState } from '@/app/record-actions'
@@ -47,11 +48,11 @@ export function EditRecordButton({
   parents,
   window,
 }: {
-  level: 'initiative' | 'project' | 'workstream'
+  level: 'objective' | 'initiative' | 'project'
   id: string
   name: string
   description: string
-  /** Null for an initiative, which rolls up to nothing. */
+  /** Null for an objective, which rolls up to nothing. */
   parentId: string | null
   parents: Named[]
   window: WindowEdit
@@ -78,7 +79,7 @@ export function EditRecordButton({
   )
 }
 
-const PARENT_LABEL = { project: 'Initiative', workstream: 'Project' } as const
+const PARENT_LABEL = { initiative: TIER_LABEL.objective, project: TIER_LABEL.initiative } as const
 
 function EditDialog({
   level,
@@ -90,7 +91,7 @@ function EditDialog({
   window: win,
   onClose,
 }: {
-  level: 'initiative' | 'project' | 'workstream'
+  level: 'objective' | 'initiative' | 'project'
   id: string
   name: string
   description: string
@@ -112,9 +113,9 @@ function EditDialog({
       description: String(form.get('description') ?? ''),
       startDate: String(form.get('startDate') ?? ''),
       targetDate: String(form.get('targetDate') ?? ''),
-      // Left out entirely for an initiative, so the action does not treat an
+      // Left out entirely for an objective, so the action does not treat an
       // absent field as "detach from everything".
-      ...(level === 'initiative' ? {} : { parentId: String(form.get('parentId') ?? '') }),
+      ...(level === 'objective' ? {} : { parentId: String(form.get('parentId') ?? '') }),
     }).catch((): RecordState => ({ error: 'That could not be saved.' }))
     setBusy(false)
     setState(res)
@@ -140,7 +141,7 @@ function EditDialog({
           </label>
           <input id="er-name" name="name" defaultValue={name} required minLength={3} maxLength={200} />
 
-          {level !== 'initiative' && (
+          {level !== 'objective' && (
             <>
               <label className="mr-label" htmlFor="er-parent">
                 {PARENT_LABEL[level]}
@@ -204,7 +205,7 @@ function EditDialog({
               {busy ? 'Saving…' : 'Save'}
             </button>
             {state.error ? <span className="mr-said mr-bad">{state.error}</span> : null}
-            {level !== 'initiative' ? (
+            {level !== 'objective' ? (
               <span className="mr-hint">
                 Moving this changes every roll-up above it — the board, the timeline and the readiness matrix
                 all follow.
@@ -230,7 +231,7 @@ export function NewChildButton({
   parentId,
   label,
 }: {
-  level: 'project' | 'workstream'
+  level: 'initiative' | 'project'
   parentId: string
   label: string
 }) {

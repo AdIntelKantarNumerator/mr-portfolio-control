@@ -64,26 +64,26 @@ export function buildGraph(p: Portfolio, opts: { includeResolved?: boolean } = {
     let date: Date | null = null
     let href: string | undefined
 
-    if (type === 'workstream') {
-      const pr = p.workstreams.find((x) => x.id === id)
+    if (type === 'project') {
+      const pr = p.projects.find((x) => x.id === id)
       if (pr) {
         label = pr.name
         rag = pr.health.rag
         date = pr.targetDate
         href = `/readiness/${pr.id}`
       }
-    } else if (type === 'project') {
-      const it = p.projects.find((x) => x.id === id)
+    } else if (type === 'initiative') {
+      const it = p.initiatives.find((x) => x.id === id)
       if (it) {
         label = it.name
         rag = it.health.rag
         date = it.targetDate ?? it.derivedTarget
-        href = `/projects#${it.key}`
+        href = `/initiatives#${it.key}`
       }
     } else if (type === 'milestone') {
       const m = p.milestones.find((x) => x.id === id)
       if (m) {
-        label = `${m.workstream.name} — ${m.name}`
+        label = `${m.project.name} — ${m.name}`
         rag = m.contested ? 'red' : 'unknown'
         date = m.targetDate
       }
@@ -230,16 +230,16 @@ export function buildGraph(p: Portfolio, opts: { includeResolved?: boolean } = {
 }
 
 /**
- * Which teams depend on which other teams, derived from workstream dependencies.
+ * Which teams depend on which other teams, derived from project dependencies.
  * Cross-team edges are where dependencies actually go wrong; same-team ones
  * are usually just sequencing, so they are reported separately.
  */
 export function teamDependencyMatrix(p: Portfolio) {
   const cells = new Map<string, { count: number; atRisk: number }>()
   for (const d of p.dependencies) {
-    if (d.fromType !== 'workstream' || d.toType !== 'workstream') continue
-    const from = p.workstreams.find((x) => x.id === d.fromId)
-    const to = p.workstreams.find((x) => x.id === d.toId)
+    if (d.fromType !== 'project' || d.toType !== 'project') continue
+    const from = p.projects.find((x) => x.id === d.fromId)
+    const to = p.projects.find((x) => x.id === d.toId)
     if (!from?.teamId || !to?.teamId) continue
     const k = `${from.teamId}|${to.teamId}`
     const cur = cells.get(k) ?? { count: 0, atRisk: 0 }

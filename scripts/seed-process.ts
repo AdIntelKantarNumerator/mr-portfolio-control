@@ -1,9 +1,9 @@
 /**
- * Process reference data — the workstream lifecycle, its templates, the discovery
+ * Process reference data — the project lifecycle, its templates, the discovery
  * question bank, and a starting scoring model.
  *
  * This is SEPARATE from any portfolio content on purpose. It describes how the
- * organisation runs workstreams, not which workstreams exist, so it belongs in an
+ * organisation runs projects, not which projects exist, so it belongs in an
  * otherwise empty system: install the tool, load your process, then let Linear
  * and your own data entry fill in the work.
  *
@@ -38,10 +38,10 @@ async function main() {
   const gateRows = [
     { key: 'pre-approval', name: 'Pre-Approval (Business Case & Decomposition)',
       phase: 'pre_approval', sortOrder: 1,
-      description: "Define the workstream's value and get initial prioritization approval." },
+      description: "Define the project's value and get initial prioritization approval." },
     { key: 'core-documentation', name: 'Core Documentation & Tracking',
       phase: 'discovery', sortOrder: 2,
-      description: 'After approval, the team defines the workstream in detail.' },
+      description: 'After approval, the team defines the project in detail.' },
     { key: 'team-alignment', name: 'Team Alignment & Communication',
       phase: 'alignment', sortOrder: 3,
       description: 'Secure cross-functional alignment and make the work visible.' },
@@ -67,24 +67,24 @@ async function main() {
       templateUrl: 'https://docs.google.com/document/d/1QHem3pDopaN-r9NvQIsFbBouviGH6Txt9pECRZ6iWHQ/edit?tab=t.a7w0rldxunpa#heading=h.dt9c4ue8fhyj' },
     { gate: 'pre-approval', key: 'quarterly-prioritization',
       label: 'Prioritization approved at Quarterly Planning', ownerRole: 'Program',
-      description: "Align on and approve the workstream's priority during the Quarterly Planning Sessions.",
+      description: "Align on and approve the project's priority during the Quarterly Planning Sessions.",
       templateUrl: 'https://docs.google.com/document/d/1AuIwResENfhlp1GL8dYu3tLax5BhKWUoZ7-5ffDEcBM/edit?tab=t.9enchglmy815#heading=h.6r4b45t8xpzj' },
 
     { gate: 'core-documentation', key: 'product-dev-charter',
       label: 'Product Dev Charter', ownerRole: 'Product',
-      description: 'Defines workstream goals, iterations and the Architectural Flow. Initiated by Product but completed cross-functionally for alignment.',
+      description: 'Defines project goals, iterations and the Architectural Flow. Initiated by Product but completed cross-functionally for alignment.',
       templateUrl: 'https://docs.google.com/document/d/1NZ2Eu5887AKe1FKHlEFsCIGcYilrMg1HuegfZIIB7cs/edit?tab=t.0#heading=h.5x0d5h95i329' },
-    { gate: 'core-documentation', key: 'workstream-folder',
-      label: 'Centralized workstream folder', ownerRole: 'Program',
-      description: 'One folder holding every document related to the workstream.',
+    { gate: 'core-documentation', key: 'project-folder',
+      label: 'Centralized project folder', ownerRole: 'Program',
+      description: 'One folder holding every document related to the project.',
       templateUrl: 'https://drive.google.com/drive/folders/1NujCCdPIYbDS0Jk7WfUkb6cTg3lzdHHO' },
-    { gate: 'core-documentation', key: 'jira-project',
-      label: 'Jira Project created', ownerRole: 'Program',
-      description: 'An Project in MediaRadar - Unified Platform Program (MUPP) tracking all associated work.',
-      templateUrl: 'https://mediaradar.atlassian.net/jira/software/c/workstreams/MUPP/boards/83' },
-    { gate: 'core-documentation', key: 'workstream-plan',
-      label: 'Workstream plan / tracker started', ownerRole: 'Program',
-      description: 'Drives the workstream and holds the team accountable to delivery.',
+    { gate: 'core-documentation', key: 'jira-initiative',
+      label: 'Jira Initiative created', ownerRole: 'Program',
+      description: 'An Initiative in MediaRadar - Unified Platform Program (MUPP) tracking all associated work.',
+      templateUrl: 'https://mediaradar.atlassian.net/jira/software/c/projects/MUPP/boards/83' },
+    { gate: 'core-documentation', key: 'project-plan',
+      label: 'Project plan / tracker started', ownerRole: 'Program',
+      description: 'Drives the project and holds the team accountable to delivery.',
       templateUrl: 'https://docs.google.com/spreadsheets/d/1EpnrSGwmQlEPEy7Eg4s9nad2qmDBGDH_kJ-Jk8ozOcw/edit?gid=570899029#gid=570899029' },
 
     { gate: 'team-alignment', key: 'kickoff-meeting',
@@ -92,7 +92,7 @@ async function main() {
       description: 'Review the charter, highlight goals, identify required delivery teams, confirm alignment.' },
     { gate: 'team-alignment', key: 'raci',
       label: 'Roles & responsibilities documented (RACI)', ownerRole: 'Program',
-      description: 'Identify and document key owners, doers and stakeholders. Update the base template to the level of detail your workstream actually needs.',
+      description: 'Identify and document key owners, doers and stakeholders. Update the base template to the level of detail your project actually needs.',
       templateUrl: 'https://docs.google.com/spreadsheets/d/16MkKO-Buhi1TqhMrN2E4uxetYr_Fap_WNOf4gJ-iep4/edit?gid=800826233#gid=800826233' },
     { gate: 'team-alignment', key: 'meeting-cadence',
       label: 'Meeting cadence established', ownerRole: 'Program',
@@ -127,24 +127,24 @@ async function main() {
   // ---- template library --------------------------------------------------
   await db.insert(s.templates).values(
     [
-      { key: 'workstream-tracker', name: 'Workstream Tracker', kind: 'sheet',
+      { key: 'project-tracker', name: 'Project Tracker', kind: 'sheet',
         url: 'https://docs.google.com/spreadsheets/d/1EpnrSGwmQlEPEy7Eg4s9nad2qmDBGDH_kJ-Jk8ozOcw/edit?gid=570899029#gid=570899029',
-        description: 'Gantt-style workstream plan with key milestones and dates.' },
+        description: 'Gantt-style project plan with key milestones and dates.' },
       { key: 'raci', name: 'RACI', kind: 'sheet',
         url: 'https://docs.google.com/spreadsheets/d/16MkKO-Buhi1TqhMrN2E4uxetYr_Fap_WNOf4gJ-iep4/edit?gid=800826233#gid=800826233',
         description: 'Clarity on roles and responsibilities at kick-off.' },
       { key: 'retrospectives', name: 'Retrospectives', kind: 'sheet',
         url: 'https://docs.google.com/spreadsheets/d/1_y5TD4t_xaj0hoIdIpls-UktMmAT6quSuqFUAtH1Rto/edit?gid=730810162#gid=730810162',
         description: 'Inspect and adapt — look back and change how the team works.' },
-      { key: 'workstream-charter', name: 'Workstream Charter', kind: 'doc',
+      { key: 'project-charter', name: 'Project Charter', kind: 'doc',
         url: 'https://docs.google.com/document/d/1NZ2Eu5887AKe1FKHlEFsCIGcYilrMg1HuegfZIIB7cs/edit?tab=t.0#heading=h.5x0d5h95i329',
-        description: 'Filled out at the start of a workstream to align the cross-functional team.' },
+        description: 'Filled out at the start of a project to align the cross-functional team.' },
       { key: 'product-brief', name: 'Product Brief', kind: 'doc',
         url: 'https://docs.google.com/document/d/1QHem3pDopaN-r9NvQIsFbBouviGH6Txt9pECRZ6iWHQ/edit?tab=t.a7w0rldxunpa#heading=h.dt9c4ue8fhyj',
         description: 'Business case and value proposition. A living document.' },
       { key: 'quarterly-planning', name: 'Quarterly Planning Framework', kind: 'doc',
         url: 'https://docs.google.com/document/d/1AuIwResENfhlp1GL8dYu3tLax5BhKWUoZ7-5ffDEcBM/edit?tab=t.9enchglmy815#heading=h.6r4b45t8xpzj',
-        description: 'How workstream priority is agreed each quarter.' },
+        description: 'How project priority is agreed each quarter.' },
     ].map((t, ix) => ({ ...t, id: id(), sortOrder: ix })),
   )
 
@@ -201,8 +201,8 @@ async function main() {
     ],
   }
   await db.insert(s.discoveryTopics).values(
-    Object.entries(discovery).flatMap(([workstream, questions]) =>
-      questions.map((question, ix) => ({ id: id(), workstream, question, sortOrder: ix })),
+    Object.entries(discovery).flatMap(([project, questions]) =>
+      questions.map((question, ix) => ({ id: id(), project, question, sortOrder: ix })),
     ),
   )
 

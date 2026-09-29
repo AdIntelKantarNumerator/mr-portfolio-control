@@ -15,7 +15,7 @@ const facts = (over: Partial<HealthFacts> = {}): HealthFacts => ({
 
 test('the reported case: a milestone added today cannot move the health at all', () => {
   // The ring read 80% on a milestone nobody had started, because 80% of the
-  // calendar between the initiative's start and that date had gone. Nothing
+  // calendar between the objective's start and that date had gone. Nothing
   // here reads a date against today, so adding a milestone changes nothing
   // until something is actually blocked, overdue, or in trouble.
   const before = cardHealth(facts())
@@ -63,7 +63,7 @@ test('children in trouble are counted against how many there are', () => {
 })
 
 test('trouble outranks silence rather than being hidden by it', () => {
-  // This was the old behaviour: quiet was checked first, so an initiative
+  // This was the old behaviour: quiet was checked first, so an objective
   // with four open blockers that nobody had written about in a month
   // reported "No signal" and sat there grey.
   const h = cardHealth(facts({ blockers: 4, oldestBlockerDays: 30, daysSinceActivity: 40 }))

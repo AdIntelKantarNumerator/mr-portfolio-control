@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { asc } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { projects } from '@/db/schema'
+import { initiatives } from '@/db/schema'
 import { Kicker, Muted } from '@/components/ui'
 import { RequestForm } from './request-form'
 
@@ -12,11 +12,11 @@ export const metadata = { title: 'New request · Portfolio Control Room' }
 export const dynamic = 'force-dynamic'
 
 export default async function NewRequestPage() {
-  const [initiativeRows] = await Promise.all([
+  const [objectiveRows] = await Promise.all([
     db
-      .select({ id: projects.id, name: projects.name })
-      .from(projects)
-      .orderBy(asc(projects.sortOrder), asc(projects.name)),
+      .select({ id: initiatives.id, name: initiatives.name })
+      .from(initiatives)
+      .orderBy(asc(initiatives.sortOrder), asc(initiatives.name)),
   ])
 
   return (
@@ -35,7 +35,7 @@ export default async function NewRequestPage() {
         </Link>
       </div>
 
-      <RequestForm projects={initiativeRows} />
+      <RequestForm initiatives={objectiveRows} />
     </div>
   )
 }

@@ -22,6 +22,7 @@
  * Kept separate from shell.tsx so the structure can be read without reading
  * the layout, and changed without touching it.
  */
+import { TIER_PLURAL } from '@/lib/home-types'
 import type { ComponentType, SVGProps } from 'react'
 import {
   IconActions,
@@ -30,15 +31,15 @@ import {
   IconDecisions,
   IconDependencies,
   IconHome,
-  IconInitiatives,
+  IconObjectives,
   IconIntake,
   IconPrioritization,
-  IconProjects,
+  IconInitiatives,
   IconReadiness,
   IconRegister,
   IconTemplates,
   IconTimeline,
-  IconWorkstreams,
+  IconProjects,
 } from './icons'
 
 export interface NavItem {
@@ -66,9 +67,9 @@ export const NAV: NavSection[] = [
     id: 'work',
     label: 'The work',
     items: [
-      { href: '/initiatives', label: 'Initiatives', icon: IconInitiatives, hint: 'Groups of projects' },
+      { href: '/objectives', label: TIER_PLURAL.objective, icon: IconObjectives, hint: 'Groups of initiatives' },
+      { href: '/initiatives', label: 'Initiatives', icon: IconInitiatives },
       { href: '/projects', label: 'Projects', icon: IconProjects },
-      { href: '/workstreams', label: 'Workstreams', icon: IconWorkstreams },
       { href: '/roadmap', label: 'Timeline', icon: IconTimeline, hint: 'Everything against the calendar' },
     ],
   },
@@ -105,7 +106,7 @@ export const NAV: NavSection[] = [
       // answers a real question — who is committed to two things at once —
       // but nobody was opening it, and a reference section is the first place
       // an unused link becomes clutter.
-      { href: '/templates', label: 'Project Documents', icon: IconTemplates },
+      { href: '/templates', label: 'Initiative Documents', icon: IconTemplates },
     ],
   },
   {

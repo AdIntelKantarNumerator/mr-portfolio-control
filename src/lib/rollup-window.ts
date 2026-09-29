@@ -3,17 +3,17 @@
  *
  * WHY THIS IS ONE FUNCTION IN ONE FILE
  *
- * It was two. The detail page rolled a project's window up from its
- * workstreams' dates; the timeline rolled it up from its workstreams' dates
- * AND their milestones. So a project could read "Jun 17 → Oct 5" on one screen
+ * It was two. The detail page rolled an initiative's window up from its
+ * projects' dates; the timeline rolled it up from its projects' dates
+ * AND their milestones. So an initiative could read "Jun 17 → Oct 5" on one screen
  * and be drawn to Oct 12 on the other, and both were behaving exactly as
  * written. Two implementations of one idea drift the moment either is touched,
  * and the only fix that stays fixed is that there is one of them.
  *
  * WHAT COUNTS AS "BENEATH"
  *
- * Every date of every child, and every milestone at or below. A project with
- * no workstream dates but four dated milestones has a window — it was showing
+ * Every date of every child, and every milestone at or below. An initiative with
+ * no project dates but four dated milestones has a window — it was showing
  * as undated, which on a chart is indistinguishable from work nobody has
  * planned.
  *
@@ -21,7 +21,7 @@
  *
  * This is the other half of the same bug. The timeline built its roll-up from
  * the rows it was about to DRAW, so switching the chart to "Live only" took
- * completed workstreams out of their project's window — and the project's bar
+ * completed projects out of their initiative's window — and the initiative's bar
  * moved, or vanished, because of a filter that was only ever meant to change
  * what was listed. A window is a fact about the work; which rows you are
  * looking at is a question about the screen. Callers pass everything.

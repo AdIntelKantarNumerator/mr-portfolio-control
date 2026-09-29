@@ -127,6 +127,13 @@
       "when": 1790713823125,
       "tag": "0017_theme_edits",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790800223125,
+      "tag": "0018_rename_tiers",
+      "breakpoints": true
     }
   ]
 }

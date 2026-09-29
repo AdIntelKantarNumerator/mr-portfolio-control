@@ -1,12 +1,12 @@
 'use server'
 
 /**
- * Changing one field on one project or workstream, from wherever it is shown.
+ * Changing one field on one initiative or project, from wherever it is shown.
  *
  * WHY THIS EXISTS RATHER THAN A FORM PER PAGE
  *
  * The owner, the status, the lead and the dates appear on the list pages, the
- * detail pages and inside the workstream table. Wiring each of those to its
+ * detail pages and inside the project table. Wiring each of those to its
  * own action would mean five implementations of "is this a valid status" and
  * five changelog lines that say it slightly differently — and the first one
  * somebody forgot to write would be a field you could see but not fix.
@@ -16,7 +16,7 @@
  *
  * WHAT IT WILL NOT DO
  *
- * It does not create people, teams or projects. An owner has to be somebody
+ * It does not create people, teams or initiatives. An owner has to be somebody
  * the portfolio already knows, because the alternative is a table of
  * near-duplicate names nobody can reconcile later. Where a name is wanted and
  * absent, the caller gets the closest matches back and asks.
@@ -24,7 +24,7 @@
 import { revalidatePath } from 'next/cache'
 import { asc, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { initiatives, people, projects, workstreams } from '@/db/schema'
+import { objectives, people, initiatives, projects } from '@/db/schema'
 import { isLevel, isSameValue, parseDate, parsePercent, specFor } from '@/lib/field-rules'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
@@ -61,7 +61,7 @@ export async function setField(_prev: FieldState, formData: FormData): Promise<F
   const spec = specFor(level, field)
   if (!spec) return { error: `A ${level} has no editable "${field}".` }
 
-  const table = level === 'initiative' ? initiatives : level === 'project' ? projects : workstreams
+  const table = level === 'objective' ? objectives : level === 'initiative' ? initiatives : projects
   const [row] = await db.select().from(table).where(eq(table.id, id)).limit(1)
   if (!row) return { error: `That ${level} no longer exists — reload the page.` }
 
@@ -137,8 +137,8 @@ export async function setField(_prev: FieldState, formData: FormData): Promise<F
   revalidatePath('/changes')
   revalidatePath(`/${level}s`)
   revalidatePath(`/${level}s/${id}`)
-  if (level === 'workstream' && (row as { projectId?: string }).projectId) {
-    revalidatePath(`/projects/${(row as { projectId?: string }).projectId}`)
+  if (level === 'project' && (row as { initiativeId?: string }).initiativeId) {
+    revalidatePath(`/initiatives/${(row as { initiativeId?: string }).initiativeId}`)
   }
 
   return { ok: true, stamp: Date.now(), message: `${fromText} → ${toText}` }

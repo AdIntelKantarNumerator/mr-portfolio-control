@@ -28,7 +28,7 @@
  */
 import { POST as observe } from '../src/app/api/agent/observations/route'
 import { db } from '../src/db/client'
-import { agentObservations, initiatives, projects } from '../src/db/schema'
+import { agentObservations, objectives, initiatives } from '../src/db/schema'
 import { and, desc, eq, isNull, like } from 'drizzle-orm'
 
 const TOKEN = process.env.SYNC_TOKEN ?? 'test-token'
@@ -71,23 +71,23 @@ async function liveCount(entityId: string) {
 }
 
 async function main() {
-  // --- a scratch initiative and project of our own ------------------------
-  await db.delete(projects).where(like(projects.key, `${MARK}%`))
+  // --- a scratch objective and initiative of our own ------------------------
   await db.delete(initiatives).where(like(initiatives.key, `${MARK}%`))
+  await db.delete(objectives).where(like(objectives.key, `${MARK}%`))
 
   const [init] = await db
-    .insert(initiatives)
-    .values({ key: `${MARK}-init`, name: `${MARK} initiative`, status: 'active' })
+    .insert(objectives)
+    .values({ key: `${MARK}-init`, name: `${MARK} objective`, status: 'active' })
     .returning()
   const [proj] = await db
-    .insert(projects)
-    .values({ key: `${MARK}-proj`, name: `${MARK} project`, status: 'active', initiativeId: init.id })
+    .insert(initiatives)
+    .values({ key: `${MARK}-proj`, name: `${MARK} initiative`, status: 'active', objectiveId: init.id })
     .returning()
 
   // --- she has written one, a person corrects it --------------------------
   console.log('\nan edit to an assessment she already wrote')
   await observe(
-    req({ entityType: 'initiative', entityId: init.id, agent: 'yaara', summary: 'HERS: first reading.', model: 'test' }),
+    req({ entityType: 'objective', entityId: init.id, agent: 'yaara', summary: 'HERS: first reading.', model: 'test' }),
   )
   const hers = await shown(init.id)
   // The edit, exactly as app/verdict-actions.ts makes it on an existing row.
@@ -98,7 +98,7 @@ async function main() {
   check('the correction is what the card shows', (await shown(init.id))?.verdict === 'THEIRS: corrected by hand.')
 
   await observe(
-    req({ entityType: 'initiative', entityId: init.id, agent: 'yaara', summary: 'HERS: second reading.', model: 'test' }),
+    req({ entityType: 'objective', entityId: init.id, agent: 'yaara', summary: 'HERS: second reading.', model: 'test' }),
   )
   const after = await shown(init.id)
   check('her new reading replaces it', after?.verdict === 'HERS: second reading.', `got: ${after?.verdict}`)
@@ -110,7 +110,7 @@ async function main() {
   // Exactly what verdict-actions.ts inserts when there is no row to edit:
   // an observation whose author is the person.
   await db.insert(agentObservations).values({
-    entityType: 'project',
+    entityType: 'initiative',
     entityId: proj.id,
     agent: 'A Person',
     items: '[]',
@@ -123,7 +123,7 @@ async function main() {
   check('it is what the card shows', (await shown(proj.id))?.verdict === 'THEIRS: nobody had assessed this.')
 
   await observe(
-    req({ entityType: 'project', entityId: proj.id, agent: 'yaara', summary: 'HERS: caught up.', model: 'test' }),
+    req({ entityType: 'initiative', entityId: proj.id, agent: 'yaara', summary: 'HERS: caught up.', model: 'test' }),
   )
   check('her reading replaces it too', (await shown(proj.id))?.verdict === 'HERS: caught up.')
   check('and the hand-written row is retired, not left live beside hers', (await liveCount(proj.id)) === 1)
@@ -131,7 +131,7 @@ async function main() {
   // --- the case that made it permanent ------------------------------------
   console.log('\nher reading is backdated to the document she read')
   await db.insert(agentObservations).values({
-    entityType: 'project',
+    entityType: 'initiative',
     entityId: proj.id,
     agent: 'A Person',
     items: '[]',
@@ -143,7 +143,7 @@ async function main() {
   })
   await observe(
     req({
-      entityType: 'project',
+      entityType: 'initiative',
       entityId: proj.id,
       agent: 'yaara',
       summary: 'HERS: from Friday review deck.',
