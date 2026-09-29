@@ -12,13 +12,23 @@ import { db } from '@/db/client'
 import { groupingSuggestions, initiatives, projects, workstreams, people } from '@/db/schema'
 import { Kicker } from '@/components/ui'
 import { isEnded } from '@/lib/domain'
+import { cookies } from 'next/headers'
+import { HOME_PREFS_COOKIE, resolveHomePrefs } from '@/lib/home-prefs'
 import { getHomeCards } from '@/lib/home'
 import { InitiativeList, type InitiativeRow } from './list'
 import { Suggestions, type Suggestion } from './suggestions'
 
 export const dynamic = 'force-dynamic'
 
-export default async function InitiativesPage() {
+export default async function InitiativesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string }>
+}) {
+  // The same four sorts as the home board, read the same way, so the order a
+  // reader arranged in one place is the order they get in the other.
+  const [{ sort: asked }, jar] = await Promise.all([searchParams, cookies()])
+  const prefs = resolveHomePrefs({ sort: asked }, jar.get(HOME_PREFS_COOKIE)?.value)
   // The home board's own computation, reused rather than repeated: the ring
   // and the left border on this page have to mean what they mean there, and
   // two implementations of "how far behind is this" would drift.
@@ -32,7 +42,7 @@ export default async function InitiativesPage() {
       .from(groupingSuggestions)
       .where(eq(groupingSuggestions.status, 'pending'))
       .orderBy(desc(groupingSuggestions.createdAt)),
-    getHomeCards('initiative'),
+    getHomeCards('initiative', prefs.sort),
   ])
 
   const ownerName = new Map(owners.map((p) => [p.id, p.name]))
@@ -84,7 +94,14 @@ export default async function InitiativesPage() {
   }))
 
   const cardById = new Map(cards.map((c) => [c.id, c]))
-  const rows: InitiativeRow[] = inits.map((i) => {
+  // In the order the sort produced. The source list is alphabetical, so
+  // without this the picker would change nothing — which is the shape of bug
+  // that makes a reader stop trusting a control.
+  const rank = new Map(cards.map((c, ix) => [c.id, ix]))
+  const byRank = <T extends { id: string; name: string }>(a: T, b: T) =>
+    (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9) || a.name.localeCompare(b.name)
+
+  const rows: InitiativeRow[] = [...inits].sort(byRank).map((i) => {
     const mine = byInitiative.get(i.id) ?? []
     const card = cardById.get(i.id)
     return {
@@ -116,6 +133,7 @@ export default async function InitiativesPage() {
       <Suggestions suggestions={suggestions} />
 
       <InitiativeList
+        sort={prefs.sort}
         rows={rows}
         loose={loose.map((p) => ({ id: p.id, name: p.name, workstreams: streamsByProject.get(p.id) ?? 0 }))}
         options={options}

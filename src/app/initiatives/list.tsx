@@ -10,6 +10,7 @@
  */
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import { SortableRows, SortPicker } from '@/components/sortable-rows'
 import { NextMilestoneRing, edgeColor, shortMilestone } from '@/components/ring'
 import { Grouping } from './grouping'
 
@@ -49,8 +50,11 @@ export function InitiativeList({
   rows,
   loose,
   options,
+  sort,
 }: {
   rows: InitiativeRow[]
+  /** The sort the page applied; 'custom' is the one you can drag under. */
+  sort: string
   loose: { id: string; name: string; workstreams: number }[]
   options: { id: string; name: string; initiativeId: string | null; workstreams: number }[]
 }) {
@@ -118,6 +122,7 @@ export function InitiativeList({
         >
           {editing ? 'Close' : 'Edit Initiatives'}
         </button>
+        <SortPicker sort={sort} />
       </div>
 
       {editing && <Grouping initiatives={rows.map((r) => ({ id: r.id, name: r.name }))} projects={options} />}
@@ -133,7 +138,12 @@ export function InitiativeList({
         </div>
       ) : (
         <div className="ilist">
-          {shown.map((r) => {
+          <SortableRows
+            ids={shown.map((r) => r.id)}
+            level="initiative"
+            draggable={sort === 'custom'}
+            render={(id) => {
+            const r = shown.find((x) => x.id === id)!
             const edge =
               edgeColor(r.health, (r.next?.expected ?? 0) - (r.next?.pct ?? 0)) ??
               EDGE_TONE[r.status] ??
@@ -193,7 +203,8 @@ export function InitiativeList({
                 </div>
               </div>
             )
-          })}
+            }}
+          />
         </div>
       )}
 

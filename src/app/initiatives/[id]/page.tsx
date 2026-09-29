@@ -18,7 +18,7 @@ import { milestoneRows } from '@/lib/milestone-rows'
 import { getDetail } from '@/lib/detail'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { addContext } from '@/lib/add-context'
-import { EditInitiative } from './edit'
+import { EditRecordButton } from '@/components/detail/edit-record'
 
 export const dynamic = 'force-dynamic'
 
@@ -70,6 +70,18 @@ export default async function InitiativeDetailPage({ params }: { params: Promise
   return (
     <div className="stack">
       <DetailHead
+        edit={
+          user.personId ? (
+            <EditRecordButton
+              level="initiative"
+              id={id}
+              name={row.name}
+              description={row.description ?? ''}
+              parentId={null}
+              parents={[]}
+            />
+          ) : null
+        }
         tier={{ label: 'Initiative', href: '/initiatives' }}
         name={row.name}
         status={{
@@ -102,10 +114,6 @@ export default async function InitiativeDetailPage({ params }: { params: Promise
         canEdit={Boolean(user.personId)}
         entity={{ entityType: 'initiative', entityId: id }}
         adding={{ level: 'initiative', entityId: id, ...adding }}
-      />
-
-      <EditInitiative
-        initiative={{ id: row.id, name: row.name, description: row.description ?? '', status: row.status }}
       />
     </div>
   )

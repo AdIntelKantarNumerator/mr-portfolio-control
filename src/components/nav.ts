@@ -31,7 +31,6 @@ import {
   IconHome,
   IconInitiatives,
   IconIntake,
-  IconPeople,
   IconPrioritization,
   IconProjects,
   IconReadiness,
@@ -100,8 +99,11 @@ export const NAV: NavSection[] = [
     id: 'reference',
     label: 'Reference',
     items: [
-      { href: '/contention', label: 'People', icon: IconPeople, hint: 'Who is being pulled in two directions' },
-      { href: '/templates', label: 'Templates', icon: IconTemplates },
+      // People (contention) is out for now. The page is still there and still
+      // answers a real question — who is committed to two things at once —
+      // but nobody was opening it, and a reference section is the first place
+      // an unused link becomes clutter.
+      { href: '/templates', label: 'Project Documents', icon: IconTemplates },
     ],
   },
   {
