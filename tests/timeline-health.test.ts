@@ -75,13 +75,23 @@ test('the colour of a milestone', async (t) => {
 // The window a bar covers
 // ---------------------------------------------------------------------------
 
-import { effectiveWindow } from '../src/lib/timeline-model'
+import { rollUpWindow } from '../src/lib/rollup-window'
 
 const d = (s: string) => new Date(`${s}T00:00:00Z`)
 
 test('the window a bar covers', async (t) => {
+  await t.test('ended work still counts — a filter must not move a date', () => {
+    // The half of the bug that was hardest to see: the timeline built its
+    // roll-up from the rows it was about to draw, so switching to "Live only"
+    // took a completed workstream out of its project's window and the bar
+    // moved. Callers pass everything; this function has no idea what is being
+    // listed, which is the point.
+    const w = rollUpWindow({ startDate: null, targetDate: null }, [d('2026-06-17'), d('2026-10-05')])
+    assert.deepEqual([w.start, w.end], [d('2026-06-17'), d('2026-10-05')])
+  })
+
   await t.test('its own dates win when it has them', () => {
-    const w = effectiveWindow({ startDate: d('2026-01-01'), targetDate: d('2026-06-01') }, [d('2025-01-01'), d('2027-01-01')])
+    const w = rollUpWindow({ startDate: d('2026-01-01'), targetDate: d('2026-06-01') }, [d('2025-01-01'), d('2027-01-01')])
     assert.deepEqual([w.start, w.end], [d('2026-01-01'), d('2026-06-01')])
     assert.equal(w.rolledUp, false)
   })
@@ -89,7 +99,7 @@ test('the window a bar covers', async (t) => {
   await t.test('with no dates of its own it spans what is beneath', () => {
     // The reported bug: milestones moved, the detail page said June 17 to
     // Nov 2, the chart drew nothing.
-    const w = effectiveWindow({ startDate: null, targetDate: null }, [d('2026-06-17'), d('2026-09-01'), d('2026-11-02')])
+    const w = rollUpWindow({ startDate: null, targetDate: null }, [d('2026-06-17'), d('2026-09-01'), d('2026-11-02')])
     assert.deepEqual([w.start, w.end], [d('2026-06-17'), d('2026-11-02')])
     assert.equal(w.rolledUp, true)
   })
@@ -97,18 +107,18 @@ test('the window a bar covers', async (t) => {
   await t.test('each end falls back on its own', () => {
     // A typed start and no target should extend to the last milestone, not
     // lose the start somebody typed.
-    const w = effectiveWindow({ startDate: d('2026-01-01'), targetDate: null }, [d('2026-05-01'), d('2026-11-02')])
+    const w = rollUpWindow({ startDate: d('2026-01-01'), targetDate: null }, [d('2026-05-01'), d('2026-11-02')])
     assert.deepEqual([w.start, w.end], [d('2026-01-01'), d('2026-11-02')])
     assert.equal(w.rolledUp, true)
   })
 
   await t.test('nothing anywhere is honestly nothing', () => {
-    const w = effectiveWindow({ startDate: null, targetDate: null }, [])
+    const w = rollUpWindow({ startDate: null, targetDate: null }, [])
     assert.deepEqual([w.start, w.end, w.rolledUp], [null, null, false])
   })
 
   await t.test('nulls beneath are ignored rather than counted as an epoch', () => {
-    const w = effectiveWindow({ startDate: null, targetDate: null }, [null, undefined, d('2026-06-17')])
+    const w = rollUpWindow({ startDate: null, targetDate: null }, [null, undefined, d('2026-06-17')])
     assert.deepEqual([w.start, w.end], [d('2026-06-17'), d('2026-06-17')])
   })
 })
