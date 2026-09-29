@@ -142,7 +142,24 @@ export async function POST(req: Request) {
   const generatedAt = body.generatedAt ? new Date(body.generatedAt) : new Date()
   const model = String(body.model ?? 'unknown').slice(0, 200)
 
-  // Only the newest observation per entity is shown; older ones stay as history.
+  /*
+   * Only the newest observation per entity is shown; older ones stay as
+   * history. PER ENTITY, not per entity and author.
+   *
+   * This used to retire only rows written by the same agent, which quietly
+   * broke the one-live-row-per-entity invariant the reader assumes. The way
+   * in is ordinary: somebody writes the first assessment on a card Yaara has
+   * not reached yet, and that edit is stored as an observation authored by
+   * them (see app/verdict-actions.ts). Her next post did not touch it, so two
+   * rows were live and the card took whichever had the newer `generatedAt`.
+   *
+   * Usually hers is newer and it looks fine. But `generatedAt` is the
+   * caller's to set — she stamps an observation with the date of the document
+   * she read — so a Friday deck read on Monday lands behind a hand-written
+   * sentence from Saturday, and that sentence then wins for good. A person's
+   * correction is meant to stand until there is fresh evidence, not to
+   * outrank every future reading of it.
+   */
   await db
     .update(agentObservations)
     .set({ supersededAt: new Date() })
@@ -150,7 +167,7 @@ export async function POST(req: Request) {
       and(
         eq(agentObservations.entityType, entityType),
         eq(agentObservations.entityId, entityId),
-        eq(agentObservations.agent, agent),
+        isNull(agentObservations.supersededAt),
       ),
     )
 
