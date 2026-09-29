@@ -17,6 +17,7 @@ import { db } from '@/db/client'
 import { actionItemLinks, actionItems, initiatives, people, projects, workstreams } from '@/db/schema'
 import { isTier, placeOf, TIERS, type Tier } from '@/lib/hierarchy'
 import { scopeFilter } from '@/lib/scope-filter'
+import { provenanceOfAction } from '@/lib/provenance'
 import { Kicker } from '@/components/ui'
 import { ActionsList, type ActionRowView } from './list'
 
@@ -122,6 +123,9 @@ export default async function ActionsPage({
         initiative: at.initiative ?? null,
         project: at.project ?? null,
         workstream: at.workstream ?? null,
+        // Where Yaara read this out of. Built on the server so the browser is
+        // sent one small shape rather than five raw columns to reassemble.
+        source: provenanceOfAction(a),
       }
     })
 

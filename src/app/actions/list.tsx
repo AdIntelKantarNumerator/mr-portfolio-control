@@ -24,6 +24,8 @@
 import { useActionState, useState } from 'react'
 import Link from 'next/link'
 import { RecordTable, type Column } from '@/components/records/table'
+import { SourceHover } from '@/components/records/source-hover'
+import type { Provenance } from '@/lib/provenance'
 import { AssignCell } from '@/components/records/assign'
 import { assignAction, claimAction, setActionStatus, type ActionState } from './actions'
 
@@ -41,6 +43,8 @@ export interface ActionRowView {
   initiative: { id: string; name: string } | null
   project: { id: string; name: string } | null
   workstream: { id: string; name: string } | null
+  /** Where this was said, for the hover card. */
+  source: Provenance
 }
 
 export interface Named {
@@ -150,10 +154,10 @@ export function ActionsList({
       sort: { kind: 'text', by: (r) => r.ref },
       value: (r) => `${r.ref ?? ''} ${r.text}`,
       cell: (r) => (
-        <>
+        <SourceHover source={r.source}>
           {r.ref ? <span className="rt-ref">{r.ref}</span> : null}
           {r.text}
-        </>
+        </SourceHover>
       ),
     },
     {
