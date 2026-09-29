@@ -365,6 +365,7 @@ table.dtable thead th {
   --c4: #a83a93;
   --c5: #00a651;
   --line-2: #d2d7e0;
+  --lift: 0 10px 34px rgb(15 23 42 / .16);
   /* Backlog is lighter than planned; ended work is a deliberate dark grey.
      Red means "a person needs to do something", and nobody needs to do
      anything about a cancelled project. */
@@ -381,6 +382,9 @@ table.dtable thead th {
     --c1: #5b87e8; --c2: #f5871f; --c3: #ef5a52; --c4: #c661b2; --c5: #17bb63;
     --line-2: #333947; --surface-2: #1b1f28; --line-3: #262b36; --ended: #8b93a3;
     --good-bg: #102a15; --warn-bg: #2d2410; --crit-bg: #2b1517;
+    /* A shadow tuned for light backgrounds disappears on a dark one, and the
+       card has to read as floating above the table either way. */
+    --lift: 0 12px 38px rgb(0 0 0 / .55);
   }
 }
 :root[data-theme='dark'] {
@@ -388,6 +392,7 @@ table.dtable thead th {
   --c1: #5b87e8; --c2: #f5871f; --c3: #ef5a52; --c4: #c661b2; --c5: #17bb63;
   --line-2: #333947; --surface-2: #1b1f28; --line-3: #262b36; --ended: #8b93a3;
   --good-bg: #102a15; --warn-bg: #2d2410; --crit-bg: #2b1517;
+  --lift: 0 12px 38px rgb(0 0 0 / .55);
 }
 
 .home .crumb {
@@ -1266,6 +1271,36 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .mr-grid > span { display: block; }
 .rt-status { font: inherit; font-size: 12.5px; padding: 3px 6px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--surface); color: var(--ink); }
 .rt-sub { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+/* The source card, and the cell that opens it.
+
+   The host is a block so the whole prose cell is the hover target rather than
+   the few words of the title, and it carries no visual treatment of its own:
+   forty rows each wearing a dotted underline turns a list into a rash. The
+   only hint is on hover, which is when it matters. */
+.src-host { display: block; outline-offset: 3px; }
+.src-host:hover { cursor: help; }
+.rt td:has(.src-host:hover) { background: var(--raised); }
+
+/* Positioned from JS onto the top layer, so `.rt-wrap`'s overflow cannot clip
+   it. `position: fixed` because the top layer is laid out against the
+   viewport, which is also what the sums in source-hover.tsx assume. */
+.src-card { position: fixed; margin: 0; inset: auto; max-width: min(360px, calc(100vw - 24px)); border: 1px solid var(--line-2); border-radius: 11px; background: var(--surface); color: var(--ink); box-shadow: var(--lift); padding: 12px 14px; font-size: 12.5px; line-height: 1.5; }
+.src-card:not(:popover-open) { display: none; }
+.src-card p { margin: 0; }
+.src-head { font-weight: 700; font-size: 13px; }
+.src-kind { display: inline-block; margin-right: 7px; padding: 1px 6px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--line); font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); vertical-align: 1px; }
+.src-meta { color: var(--muted); margin-top: 2px; }
+.src-link { margin-top: 7px; }
+.src-link a { color: var(--brand-2); font-weight: 650; text-decoration: none; }
+.src-link a:hover { text-decoration: underline; }
+.src-more { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); }
+.src-count { font-weight: 700; margin-bottom: 5px; }
+.src-mention { color: var(--muted); margin-top: 5px; }
+.src-mention b { color: var(--ink); font-weight: 650; margin-right: 5px; }
+.src-quote { display: block; font-style: italic; margin-top: 1px; padding-left: 9px; border-left: 2px solid var(--line-2); }
+.src-closed { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--green); font-weight: 650; }
+.src-none { color: var(--muted); }
 .rt-actions { display: inline-flex; gap: 8px; align-items: center; }
 
 /* The narrowing chip: which piece of work this list has been filtered to,
