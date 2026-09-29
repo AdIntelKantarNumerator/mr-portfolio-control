@@ -57,7 +57,7 @@ test('the initiative status maps from either shape Linear has used', async (t) =
 
 // From the schema module, not from linear.ts: that one opens a database
 // connection on import, and these rules have nothing to do with a database.
-import { capabilitiesFrom, pick, type LinearCapabilities } from '../src/lib/sources/graphql-schema'
+import { PROBE_TYPES, capabilitiesFrom, pick, probeQuery, probeToIntrospection, type LinearCapabilities } from '../src/lib/sources/graphql-schema'
 
 /** A schema the way Linear's introspection returns one. */
 function schema(fields: Record<string, Array<[string, string]>>) {
@@ -176,4 +176,77 @@ test('the ceiling is never mistaken for the score', () => {
   // ratio of 1 — a shrink to the same size, which is a retry loop.
   assert.equal(complexityRatio('Complexity: abc. Maximum allowed complexity: 10000.'), null)
   assert.equal(complexityRatio('Maximum allowed complexity: 10000.'), null)
+})
+
+// --- the probe -------------------------------------------------------------
+
+test('the probe asks for four types, not the whole schema', () => {
+  // The full introspection is the most expensive query a sync sends and the
+  // first one it sends, so when Linear refuses it on complexity the run dies
+  // before writing anything — and the page-shrink cannot help, because a
+  // schema probe has no page size to shrink.
+  const q = probeQuery()
+  assert.equal((q.match(/__type\(name:/g) ?? []).length, 4)
+  assert.ok(!/types\s*\{/.test(q), 'it must not ask for every type in the schema')
+})
+
+test('every type the sync asks about is in the probe', () => {
+  // The two lists drifting apart is silent: a type left out of the probe has
+  // no capabilities, so every optional field on it is quietly dropped and the
+  // sync carries on writing nulls.
+  for (const t of ['Team', 'User', 'Project', 'Workstream']) {
+    assert.ok(PROBE_TYPES.includes(t as (typeof PROBE_TYPES)[number]), `${t} is missing from PROBE_TYPES`)
+  }
+})
+
+test('the probe response reads exactly as a full introspection did', () => {
+  const caps = capabilitiesFrom(
+    probeToIntrospection({
+      __schema: { queryType: { name: 'Query', fields: [{ name: 'teams' }, { name: 'projects' }] } },
+      t0: { name: 'Team', kind: 'OBJECT', fields: [{ name: 'id', type: { kind: 'SCALAR', name: 'String' } }] },
+      t1: null,
+      t2: {
+        name: 'Project',
+        kind: 'OBJECT',
+        fields: [{ name: 'status', type: { kind: 'OBJECT', name: 'ProjectStatus' } }],
+      },
+      t3: null,
+    } as never),
+  )
+  assert.equal(caps.hasQuery('teams'), true)
+  assert.equal(caps.hasQuery('issues'), false)
+  assert.equal(caps.has('Team', 'id'), true)
+  assert.equal(caps.isLeaf('Team', 'id'), true)
+  // An object still needs a selection; that rule is what the probe exists for.
+  assert.equal(caps.isLeaf('Project', 'status'), false)
+})
+
+test('a type the schema does not have simply has no capabilities', () => {
+  const caps = capabilitiesFrom(
+    probeToIntrospection({
+      __schema: { queryType: { name: 'Query', fields: [] } },
+      t0: null,
+      t1: null,
+      t2: null,
+      t3: null,
+    } as never),
+  )
+  assert.equal(caps.has('Workstream', 'anything'), false)
+  assert.equal(caps.isLeaf('Workstream', 'anything'), false)
+})
+
+test('a single-type probe aliases to t0, which the fallback reads', () => {
+  // The per-type fallback merges `one.t0` into the combined shape. If the
+  // alias ever stopped being t0 the fallback would silently produce a schema
+  // with no capabilities at all — every optional field dropped, sync still
+  // "succeeding".
+  const q = probeQuery(['Project'])
+  assert.match(q, /t0: __type\(name: "Project"\)/)
+  assert.equal((q.match(/__type\(name:/g) ?? []).length, 1)
+})
+
+test('the probe still asks for the type of each field, not just its name', () => {
+  // This is the rule the whole module exists for: a field name alone is not
+  // enough, because an object asked for bare is a 400.
+  assert.match(probeQuery(['Team']), /type \{ kind name ofType/)
 })

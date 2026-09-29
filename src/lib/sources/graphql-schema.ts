@@ -166,3 +166,78 @@ export function shrinkPage(pageSize: number, message: string): number | null {
   const next = Math.max(1, Math.floor(pageSize * ratio * 0.8))
   return next < pageSize ? next : null
 }
+
+/**
+ * The types the sync asks capability questions about.
+ *
+ * WHY THE PROBE IS NARROW
+ *
+ * It used to introspect the whole schema — every type, every field, each
+ * field's type unwrapped three levels deep. Linear's schema has hundreds of
+ * types, and that query is the single most expensive thing a sync does. It is
+ * also the FIRST thing a sync does, so when Linear refuses it on complexity
+ * the run dies before writing anything, and the adaptive page-shrink cannot
+ * help because a schema probe has no page size to shrink.
+ *
+ * Four types are all that is ever asked about, so four types are all it asks
+ * for. A name this list gets wrong comes back null and that type simply has
+ * no capabilities — the same outcome as a type the schema does not have,
+ * which is the behaviour the callers already handle.
+ */
+export const PROBE_TYPES = ['Team', 'User', 'Project', 'Workstream'] as const
+
+/** One `__type` block per type, aliased so the response can be put back together. */
+export function probeQuery(types: readonly string[] = PROBE_TYPES): string {
+  const blocks = types
+    .map(
+      (t, i) => `    t${i}: __type(name: "${t}") {
+      name
+      kind
+      fields(includeDeprecated: false) {
+        name
+        type { kind name ofType { kind name ofType { kind name ofType { kind name } } } }
+      }
+    }`,
+    )
+    .join('\n')
+
+  return `query Caps {
+    __schema { queryType { name fields(includeDeprecated: false) { name } } }
+${blocks}
+  }`
+}
+
+export interface ProbeResult {
+  __schema: { queryType: { name: string; fields: Array<{ name: string }> | null } }
+  [alias: string]: unknown
+}
+
+/**
+ * Put the narrow probe back into the shape `capabilitiesFrom` reads.
+ *
+ * Kept as a translation rather than a second reader so there is still one
+ * function deciding what a capability is — the rule that field names alone
+ * were not enough is written down once, and tested once.
+ */
+export function probeToIntrospection(
+  data: ProbeResult,
+  types: readonly string[] = PROBE_TYPES,
+): IntrospectionResult {
+  const rootName = data.__schema?.queryType?.name ?? 'Query'
+  const out: IntrospectionResult['__schema']['types'] = [
+    {
+      name: rootName,
+      kind: 'OBJECT',
+      fields: (data.__schema?.queryType?.fields ?? []).map((f) => ({ name: f.name })),
+    },
+  ]
+
+  for (let i = 0; i < types.length; i++) {
+    const t = data[`t${i}`] as IntrospectionResult['__schema']['types'][number] | null | undefined
+    // A type the schema does not have comes back null. Left out entirely, so
+    // `has` answers false for it rather than throwing.
+    if (t?.name) out.push({ name: t.name, kind: t.kind ?? 'OBJECT', fields: t.fields ?? null })
+  }
+
+  return { __schema: { queryType: { name: rootName }, types: out } }
+}

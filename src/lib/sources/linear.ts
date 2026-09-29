@@ -29,7 +29,10 @@ import {
   capabilitiesFrom,
   pick,
   shrinkPage,
-  type IntrospectionResult,
+  probeQuery,
+  probeToIntrospection,
+  PROBE_TYPES,
+  type ProbeResult,
   type LinearCapabilities,
 } from './graphql-schema'
 import { logChange } from '../portfolio'
@@ -51,7 +54,19 @@ interface GraphQLResponse<T> {
   errors?: { message: string; extensions?: Record<string, unknown> }[]
 }
 
-async function gql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+async function gql<T>(
+  query: string,
+  variables: Record<string, unknown> = {},
+  /**
+   * What this query is for, in the words the Activity page uses.
+   *
+   * A sync sends five different queries and reported a refusal from any of
+   * them identically - "Linear returned 400: ... Query too complex". Which one
+   * was refused is the whole question when that happens, and the message did
+   * not say, so it had to be inferred from which counters were still empty.
+   */
+  op = 'query',
+): Promise<T> {
   // Trimmed, and not only for tidiness. A key that arrives with a trailing
   // newline — which is what happens when one is pasted through a shell, a
   // prompt or a cloud config UI — makes an invalid HTTP header value, and the
@@ -95,13 +110,13 @@ async function gql<T>(query: string, variables: Record<string, unknown> = {}): P
 
   if (res.status === 429) {
     const retry = res.headers.get('retry-after')
-    throw new LinearError(`Linear rate limit hit; retry after ${retry ?? 'unknown'}s`)
+    throw new LinearError(`Linear rate limit hit on ${op}; retry after ${retry ?? 'unknown'}s`)
   }
-  if (!res.ok) throw new LinearError(`Linear returned ${res.status}: ${await res.text()}`)
+  if (!res.ok) throw new LinearError(`Linear returned ${res.status} on ${op}: ${await res.text()}`)
 
   const body = (await res.json()) as GraphQLResponse<T>
-  if (body.errors?.length) throw new LinearError(body.errors.map((e) => e.message).join('; '))
-  if (!body.data) throw new LinearError('Linear returned no data')
+  if (body.errors?.length) throw new LinearError(`${op}: ${body.errors.map((e) => e.message).join('; ')}`)
+  if (!body.data) throw new LinearError(`Linear returned no data for ${op}`)
   return body.data
 }
 
@@ -115,24 +130,45 @@ async function gql<T>(query: string, variables: Record<string, unknown> = {}): P
  * NON_NULL and LIST to the named type underneath, so an object is never asked
  * for bare.
  */
-const INTROSPECTION = `
-  query Caps {
-    __schema {
-      queryType { name }
-      types {
-        name
-        kind
-        fields(includeDeprecated: false) {
-          name
-          type { kind name ofType { kind name ofType { kind name ofType { kind name } } } }
-        }
-      }
-    }
-  }
-`
-
+/*
+ * The probe asks about four types, not the whole schema.
+ *
+ * The full introspection - every type in the schema, every field, each
+ * field's type unwrapped three levels - is the most expensive query a sync
+ * sends, and it is the FIRST one it sends. When Linear refuses it on
+ * complexity the run dies before writing anything, and the adaptive shrink
+ * below cannot help: a schema probe has no page size to shrink.
+ *
+ * See lib/sources/graphql-schema.ts for the query and the four types.
+ */
 export async function introspect(): Promise<LinearCapabilities> {
-  return capabilitiesFrom(await gql<IntrospectionResult>(INTROSPECTION))
+  try {
+    const data = await gql<ProbeResult>(probeQuery(), {}, 'the schema probe')
+    return capabilitiesFrom(probeToIntrospection(data))
+  } catch (err) {
+    // Refused on complexity even so? Ask for one type at a time.
+    //
+    // A single `__type` is about as small as a GraphQL query gets, so this
+    // gets through where a combined probe might not. Four round trips instead
+    // of one is nothing beside a sync that does not run at all - and this is
+    // the first thing a sync does, so failing here costs the whole run.
+    //
+    // TOO_COMPLEX is declared further down, beside the page shrinking it was
+    // written for; both readers of it run long after this module is loaded.
+    if (!TOO_COMPLEX.test(err instanceof Error ? err.message : String(err))) throw err
+
+    const root = await gql<{ __schema: ProbeResult['__schema'] }>(
+      'query Caps { __schema { queryType { name fields(includeDeprecated: false) { name } } } }',
+      {},
+      'the schema probe (root)',
+    )
+    const merged = { __schema: root.__schema } as ProbeResult
+    for (const [i, type] of PROBE_TYPES.entries()) {
+      const one = await gql<ProbeResult>(probeQuery([type]), {}, `the schema probe (${type})`)
+      merged[`t${i}`] = one.t0
+    }
+    return capabilitiesFrom(probeToIntrospection(merged))
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -261,11 +297,11 @@ async function* paged<T>(
     // for a ceiling that moves while a sync is running.
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
-        data = await gql<Record<string, Connection>>(query, {
-          first: pageSize,
-          after,
-          ...(useFilter ? { filter } : {}),
-        })
+        data = await gql<Record<string, Connection>>(
+          query,
+          { first: pageSize, after, ...(useFilter ? { filter } : {}) },
+          `${queryName} (page of ${pageSize})`,
+        )
         break
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
