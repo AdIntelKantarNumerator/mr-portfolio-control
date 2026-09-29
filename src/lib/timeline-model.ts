@@ -98,13 +98,24 @@ export interface TimelineRow {
   undated: number
 }
 
-/** A dependency, as a line from where one row ends to where another begins. */
+/** A dependency, as a line from where one bar ends to where another begins. */
 export interface Link {
   id: string
   fromRow: string
   fromPct: number
   toRow: string
   toPct: number
+  /**
+   * Which sub-lane inside each row the line leaves from and arrives at.
+   *
+   * A row can be several bars deep, and two ends of one dependency are
+   * regularly two bars of the SAME row — two projects inside one initiative,
+   * looked at from the initiative level. Without the lane the line would be
+   * drawn from the middle of a row to the middle of the same row, which is a
+   * dot.
+   */
+  fromLane: number
+  toLane: number
   /** The delivering end is not going to make the required date. */
   late: boolean
   label: string
@@ -345,6 +356,16 @@ export interface DepInput {
   /** The row each end belongs to AT THE LEVEL BEING SHOWN, not its own level. */
   fromRow: string | null
   toRow: string | null
+  /**
+   * The thing each end actually points at.
+   *
+   * The row is where it is drawn; this is what it IS. They differ whenever the
+   * chart is showing a tier above the dependency's own — which is most of the
+   * time — and the difference is what lets a line find the right bar instead
+   * of the whole row.
+   */
+  fromId?: string
+  toId?: string
   fromAt: Date | null
   toAt: Date | null
   late: boolean
@@ -359,19 +380,49 @@ export interface DepInput {
  * something they cannot see without telling them what.
  */
 function buildLinks(deps: DepInput[], rows: TimelineRow[]): Link[] {
-  const known = new Set(rows.map((r) => r.id))
+  const byId = new Map(rows.map((r) => [r.id, r]))
   const out: Link[] = []
+
   for (const d of deps) {
-    if (!d.fromRow || !d.toRow || !known.has(d.fromRow) || !known.has(d.toRow)) continue
-    if (d.fromRow === d.toRow) continue
-    const from = rows.find((r) => r.id === d.fromRow)!
-    const to = rows.find((r) => r.id === d.toRow)!
+    if (!d.fromRow || !d.toRow) continue
+    const from = byId.get(d.fromRow)
+    const to = byId.get(d.toRow)
+    if (!from || !to) continue
+
+    // The specific bar, when the row draws one for that end. A dependency
+    // between two projects of one initiative is two bars of one row, and
+    // resolving only as far as the row made it a line from something to
+    // itself — which the old code then dropped, so the line simply never
+    // appeared. It is the commonest shape there is: work inside one initiative
+    // waiting on other work inside it.
+    const a = d.fromId ? from.bars.find((b) => b.id === d.fromId) : undefined
+    const z = d.toId ? to.bars.find((b) => b.id === d.toId) : undefined
+
+    // Still nothing to join if both ends land on the same bar.
+    if (a && z && a.id === z.id) continue
+    if (!a && !z && d.fromRow === d.toRow) continue
+
     // The right-hand end of what is delivering, and the left-hand end of what
     // is waiting: that is the shape of the sentence the line is drawing.
-    const fromPct = from.bars.length ? Math.max(...from.bars.map((b) => b.leftPct + b.widthPct)) : null
-    const toPct = to.bars.length ? Math.min(...to.bars.map((b) => b.leftPct)) : null
+    const fromPct = a
+      ? a.leftPct + a.widthPct
+      : from.bars.length
+        ? Math.max(...from.bars.map((b) => b.leftPct + b.widthPct))
+        : null
+    const toPct = z ? z.leftPct : to.bars.length ? Math.min(...to.bars.map((b) => b.leftPct)) : null
     if (fromPct === null || toPct === null) continue
-    out.push({ id: d.id, fromRow: d.fromRow, fromPct, toRow: d.toRow, toPct, late: d.late, label: d.label })
+
+    out.push({
+      id: d.id,
+      fromRow: d.fromRow,
+      fromPct,
+      fromLane: a?.lane ?? 0,
+      toRow: d.toRow,
+      toPct,
+      toLane: z?.lane ?? 0,
+      late: d.late,
+      label: d.label,
+    })
   }
   return out
 }

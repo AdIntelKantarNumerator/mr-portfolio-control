@@ -35,6 +35,8 @@ import { setCardOrder } from '@/app/order-actions'
  */
 const LANE_H = 30
 const ROW_PAD = 14
+/** The vertical middle of a bar within its lane. See Bar()'s `top`. */
+const BAR_MID = 15
 
 /** The height of one row, and the top of each, so the links can find them. */
 function layout(rows: TimelineRow[]) {
@@ -176,7 +178,7 @@ export function TimelineView({
               <span className="tl-today" style={{ left: `${model.todayPct}%` }} title="Today" />
             )}
 
-            {showLinks && <Links links={model.links} tops={tops} heights={heights} height={total} />}
+            {showLinks && <Links links={model.links} tops={tops} height={total} />}
 
             {rows.map((r) => (
               <div key={r.id} className="tl-row" style={{ top: tops.get(r.id), height: heights.get(r.id) }}>
@@ -240,23 +242,25 @@ function BarView({ bar }: { bar: TimelineModel['rows'][number]['bars'][number] }
 function Links({
   links,
   tops,
-  heights,
   height,
 }: {
   links: DepLink[]
   tops: Map<string, number>
-  heights: Map<string, number>
   height: number
 }) {
   if (links.length === 0) return null
-  const y = (id: string) => (tops.get(id) ?? 0) + (heights.get(id) ?? 0) / 2
+  // The middle of a bar's own lane, not the middle of the row: a row can be
+  // several bars deep and both ends of a dependency are often in one row.
+  // Matches the bar's own `top` in Bar() — lane * LANE_H + 5 — plus half a
+  // bar's height.
+  const y = (id: string, lane: number) => (tops.get(id) ?? 0) + lane * LANE_H + BAR_MID
 
   return (
     <svg className="tl-links" viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" aria-hidden="true">
       {links.map((l) => {
         if (!tops.has(l.fromRow) || !tops.has(l.toRow)) return null
-        const y1 = y(l.fromRow)
-        const y2 = y(l.toRow)
+        const y1 = y(l.fromRow, l.fromLane)
+        const y2 = y(l.toRow, l.toLane)
         // Out of the delivering bar, down or up to the waiting row, then in.
         const mid = (l.fromPct + l.toPct) / 2
         return (

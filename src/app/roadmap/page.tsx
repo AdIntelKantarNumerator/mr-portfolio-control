@@ -234,14 +234,33 @@ export default async function RoadmapPage({
   for (const i of inits) planOf.set(`initiative:${i.id}`, { targetDate: i.targetDate, done: ENDED.has(i.status) })
   for (const m of ms) planOf.set(`milestone:${m.id}`, { targetDate: m.targetDate, done: m.status === 'complete' })
 
+  /*
+   * What to call each end when the line is hovered.
+   *
+   * `fromLabel`/`toLabel` are only set for `external` ends — a vendor feed,
+   * another org's deliverable — because those have no record to read a name
+   * from. Every other end fell through to the raw id, so hovering a line
+   * between two projects showed a pair of UUIDs.
+   */
+  const nameOf = new Map<string, string>()
+  for (const i of inits) nameOf.set(i.id, i.name)
+  for (const pr of projs) nameOf.set(pr.id, pr.name)
+  for (const w of wss) nameOf.set(w.id, w.name)
+  for (const m of ms) nameOf.set(m.id, m.name)
+  const endName = (id: string, stored: string | null) => stored ?? nameOf.get(id) ?? id
+
   const depInputs: DepInput[] = deps.map((d) => ({
     id: d.id,
     fromRow: rowOf.get(d.fromId) ?? null,
     toRow: rowOf.get(d.toId) ?? null,
+    // What each end actually is, so the line can find its own bar rather than
+    // settling for the row it is drawn in.
+    fromId: d.fromId,
+    toId: d.toId,
     fromAt: null,
     toAt: null,
     late: Boolean(lateness(d, planOf.get(`${d.fromType}:${d.fromId}`) ?? null, now)),
-    label: `${d.fromLabel ?? d.fromId} → ${d.toLabel ?? d.toId}`,
+    label: `${endName(d.fromId, d.fromLabel)} → ${endName(d.toId, d.toLabel)}`,
   }))
 
   const model = buildTimeline(ordered, { ...horizon, now, deps: depInputs })
