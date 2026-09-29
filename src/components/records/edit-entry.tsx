@@ -24,6 +24,7 @@
  */
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { PickOne } from './pick-one'
 import {
   deleteRegisterEntry,
   editRegisterEntry,
@@ -165,8 +166,13 @@ function EditDialog({
   // Only the work — a blocker is filed against a piece of work, never against
   // a milestone, though both come from the one endpoint list.
   const work = ctx.endpoints.filter((o) => !o.value.startsWith('milestone:'))
-  const groupsOf = (list: typeof ctx.endpoints) => [...new Set(list.map((e) => e.group))]
 
+  /*
+   * Typed rather than scrolled. Both ends of a dependency can be any piece of
+   * work in the portfolio, which is a list nobody should have to scroll —
+   * see components/records/pick-one.tsx. `blank` is kept in the signature
+   * because a field that may be left empty is not required.
+   */
   const picker = (
     field: string,
     list: typeof ctx.endpoints,
@@ -175,26 +181,15 @@ function EditDialog({
     /** What this end is called, when the live list does not carry it. */
     current?: string,
   ) => (
-    <select id={`ee-${field}`} name={field} defaultValue={value} required={blank === null}>
-      {blank !== null ? <option value="">{blank}</option> : null}
-      {/* A record can point at work that has since ended, and that is not a
-          reason to silently move it: the current value is offered even when
-          the live list no longer carries it. */}
-      {value && !list.some((o) => o.value === value) ? (
-        <option value={value}>{current ?? 'What it points at now'}</option>
-      ) : null}
-      {groupsOf(list).map((g) => (
-        <optgroup key={g} label={g}>
-          {list
-            .filter((o) => o.group === g)
-            .map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-        </optgroup>
-      ))}
-    </select>
+    <PickOne
+      id={`ee-${field}`}
+      name={field}
+      options={list}
+      value={value}
+      required={blank === null}
+      currentLabel={current}
+      placeholder={blank ?? 'Type to search…'}
+    />
   )
 
   return (

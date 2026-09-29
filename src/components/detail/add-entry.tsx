@@ -14,6 +14,7 @@
  * The button is small and sits in the tile's header, because adding is the
  * exception: the list is what the tile is for.
  */
+import { PickOne } from '@/components/records/pick-one'
 import { useState } from 'react'
 import { addActionItem, addDependency, addRegisterEntry, type RegisterState } from '@/app/register-actions'
 
@@ -93,7 +94,6 @@ function Dialog({ kind, ctx, onClose }: { kind: EntryKind; ctx: AddContext; onCl
     if (res.ok) onClose()
   }
 
-  const groups = [...new Set(ctx.endpoints.map((e) => e.group))]
 
   return (
     <div className="modal-scrim" role="presentation" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -149,20 +149,10 @@ function Dialog({ kind, ctx, onClose }: { kind: EntryKind; ctx: AddContext; onCl
               <label className="mr-label" htmlFor="ae-other">
                 The other end
               </label>
-              <select id="ae-other" name="other" required defaultValue="">
-                <option value="">Select…</option>
-                {groups.map((g) => (
-                  <optgroup key={g} label={g}>
-                    {ctx.endpoints
-                      .filter((o) => o.group === g)
-                      .map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                  </optgroup>
-                ))}
-              </select>
+              {/* Every piece of work in the portfolio is a candidate here,
+                  which on a real one is several hundred. Typed rather than
+                  scrolled — see components/records/pick-one.tsx. */}
+              <PickOne id="ae-other" name="other" options={ctx.endpoints} required />
 
               <div className="mr-grid">
                 <span>
