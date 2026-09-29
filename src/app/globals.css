@@ -454,18 +454,37 @@ table.dtable thead th {
 .panel { padding: 14px 16px; min-width: 0; }
 .panel + .panel { border-left: 1px solid var(--line); }
 .ptitle { font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; margin: 0 0 10px; }
+
+/* The health state and the facts behind it, where the completion ring was.
+   A word and a list rather than a dial: the state is the headline and the
+   reasons are the thing worth reading, so neither is shrunk to fit a circle. */
+.hstate { display: grid; gap: 8px; }
+.hstate-word { display: flex; align-items: center; gap: 7px; font-size: 17px; font-weight: 750; letter-spacing: -.01em; line-height: 1.1; }
+.hstate-word > i { width: 9px; height: 9px; border-radius: 99px; flex: none; }
+.hstate-why { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.hstate-why > li { font-size: 11.5px; line-height: 1.35; }
+
+/* The same thing in a list row, where there is room for the first reason. */
+.hdot { display: grid; justify-items: center; gap: 3px; text-align: center; }
+.hdot-word { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 750; white-space: nowrap; }
+.hdot-word > i { width: 7px; height: 7px; border-radius: 99px; flex: none; }
+.hdot-why { font-size: 10px; line-height: 1.25; max-width: 96px; }
+
+/* The count beside an update list, in place of its ring: the number, and
+   what the list is made of. */
+.hcount { display: flex; align-items: baseline; flex: none; min-width: 28px; justify-content: flex-end; }
+.hcount > b { font-size: 20px; font-weight: 800; letter-spacing: -.02em; line-height: 1; }
+/* What the list is made of, on the heading line rather than in the gutter:
+   "1 blocker · 2 progress" is a phrase and wraps to four lines in a column
+   sized for a ring. */
+.hmix { margin-left: 8px; font-size: 10.5px; font-weight: 600; color: var(--muted); letter-spacing: 0; text-transform: none; }
+
+/* The RAG dial on a detail page's health tile, in place of its ring. */
+.hrag { display: flex; align-items: center; gap: 8px; flex: none; }
+.hrag > i { width: 12px; height: 12px; border-radius: 99px; }
+.hrag > b { font-size: 14px; font-weight: 750; white-space: nowrap; }
 .empty { font-size: 13px; color: var(--muted); margin: 0; font-style: italic; }
 
-.ringwrap { display: flex; flex-direction: column; align-items: center; gap: 8px; border: 0; background: transparent; cursor: pointer; width: 100%; padding: 4px; border-radius: 9px; position: relative; }
-.ringwrap:hover { background: var(--surface-2); }
-.dial { position: relative; width: 112px; height: 112px; display: block; }
-.dial .tick { position: absolute; inset: 0; }
-.rmid { position: absolute; top: 4px; left: 0; right: 0; height: 112px; display: grid; place-content: center; justify-items: center; text-align: center; padding: 0 24px; pointer-events: none; }
-.rmid .pct { font-size: 26px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
-.rmid .of { font-size: 9.5px; color: var(--muted); font-weight: 650; margin-top: 3px; line-height: 1.2; }
-.rcap { font-size: 12px; font-weight: 700; color: var(--ink-2, var(--muted)); display: flex; align-items: center; gap: 3px; }
-.ringwrap:hover .rcap { color: var(--brand); }
-.rsub { font-size: 11.5px; color: var(--muted); text-align: center; line-height: 1.35; }
 
 .vwrap { display: flex; align-items: flex-start; gap: 4px; margin: -4px 0 12px -10px; }
 .verdict { flex: 1; text-align: left; border: 0; background: transparent; cursor: pointer; padding: 8px 10px; border-radius: 9px; font-family: var(--font-display); font-size: 21px; line-height: 1.3; font-weight: 400; letter-spacing: 0; color: var(--ink); }
@@ -482,7 +501,6 @@ table.dtable thead th {
 .rail { position: relative; width: 100%; margin: 4px 0 0; cursor: pointer; padding: 10px 34px 2px; border-radius: 8px; border: 0; background: transparent; display: block; }
 .rail:hover { background: var(--surface-2); }
 .railline { position: relative; display: block; height: 6px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--line); }
-.railfill { position: absolute; inset: 0 auto 0 0; border-radius: 99px; }
 .railnow { position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--ink); opacity: .55; }
 /* Each milestone label gets its share of the rail and no more. Without a cap,
    "Migration spend across all 5 data sets" ran straight through its
@@ -852,15 +870,10 @@ table.dtable thead th {
    percentage sits inside the dial rather than under it, and the dial is
    sized by the caller rather than by its own 112px default - the big ring on
    the home card and the 56px one in a list row are the same component. */
-.ringmini { position: relative; display: inline-grid; place-items: center; flex: none; }
-.ringmini > .dial { grid-area: 1 / 1; width: 100%; height: 100%; }
-.ringmini > .pct { grid-area: 1 / 1; }
 /* Scoped to the dial itself, not to one of its callers. The svgs carry
    width="112" height="112" attributes, so without this every consumer that
    sizes the dial smaller gets two 112px svgs overflowing it - which is
    exactly what the health tile did the first time it drew one. */
-.dial svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-.ringmini .pct { position: relative; font-size: 12.5px; font-weight: 800; letter-spacing: -.02em; }
 
 /* ---- Initiative and project list rows ---------------------------------- */
 /* The ring on the left, the coloured edge, and the work inside. The same
@@ -870,14 +883,12 @@ table.dtable thead th {
 .ir-ring { display: grid; justify-items: center; gap: 4px; }
 .ir-noring { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 99px; border: 2px dashed var(--line-2); color: var(--muted); font-size: 15px; }
 .ir-bang { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 99px; border: 2.5px solid var(--crit); color: var(--crit); font-size: 26px; font-weight: 800; line-height: 1; }
-.ir-due { font-size: 10.5px; color: var(--muted); font-weight: 700; text-align: center; }
 .ir-body { min-width: 0; display: grid; gap: 5px; }
 .ir-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 9px; }
 .ir-name { font-size: 15.5px; font-weight: 750; letter-spacing: -.012em; color: var(--ink); text-decoration: none; }
 a.ir-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .ir-status { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .ir-meta { font-size: 12.5px; color: var(--muted); }
-.ir-next { margin: 0; font-size: 12.5px; color: var(--muted); }
 .ir-desc { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; max-width: 90ch; }
 .ir-hidden { margin: 0; font-size: 12px; color: var(--muted); }
 .orphan-row .ir-name { color: var(--crit); }
@@ -970,13 +981,6 @@ a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }
 .btn-primary.on { background: var(--surface); color: var(--brand); }
 /* Pushes an item to the far end of the .filters row. */
 .push-right { margin-left: auto; }
-/* The abbreviated milestone under the ring. The full name is on the row and
-   in the title attribute, so this can afford to be short and wrong-ish. */
-/* Clamped to two lines: a three-line caption makes the ring column taller
-   than the ring, and every row in the list inherits that height. The full
-   name is on the row and in the title attribute. */
-.ir-short { font-size: 10.5px; font-weight: 750; color: var(--ink); text-align: center; line-height: 1.2; max-width: 84px;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* "in <parent>" under a detail page's title. The label is quiet and the name
    is the link, because the name is what people are aiming at. */
@@ -1056,9 +1060,6 @@ a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }
 /* Health tile: three rows, each a ring and a body. */
 .tile-health .hrow { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 14px; align-items: start; padding: 12px 0; border-top: 1px solid var(--line); }
 .tile-health .hrow:first-of-type { border-top: 0; padding-top: 2px; }
-.hring { position: relative; display: inline-grid; place-items: center; width: 56px; height: 56px; flex: none; }
-.hring > .dial { grid-area: 1 / 1; width: 100%; height: 100%; }
-.hring > b { grid-area: 1 / 1; position: relative; font-size: 13px; font-weight: 800; letter-spacing: -.02em; }
 .hbody { min-width: 0; }
 .hbody h3 { margin: 0 0 7px; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 .hlead { margin: 0; font-size: 15px; line-height: 1.5; color: var(--ink); }

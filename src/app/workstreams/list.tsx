@@ -14,7 +14,9 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { SortableRows, SortPicker } from '@/components/sortable-rows'
-import { NextMilestoneRing, edgeColor, shortMilestone } from '@/components/ring'
+import { progressPercent } from '@/lib/progress'
+import { HealthDot } from '@/components/health-state'
+import { edgeColor } from '@/lib/card-health'
 import { Editable } from '@/components/editable'
 import { HealthEditable } from '@/components/health-editable'
 import { calendarDate } from '@/lib/calendar-date'
@@ -32,7 +34,8 @@ export interface WsListRow {
   project: { id: string; name: string } | null
   health: { rag: string; rationale: string | null; evidence: string | null; origin: string }
   pace: 'good' | 'warn' | 'crit' | 'quiet' | null
-  next: { name: string; pct: number; expected: number; due: string | null } | null
+  /** Why the row reads the way it does. See lib/card-health.ts. */
+  reasons: { text: string; tone: 'crit' | 'warn' | 'muted' }[]
 }
 
 const ENDED = new Set(['completed', 'canceled', 'cancelled', 'withdrawn'])
@@ -189,27 +192,13 @@ export function WorkstreamList({
             render={(id) => {
             const r = shown.find((x) => x.id === id)!
             const edge =
-              edgeColor(r.pace, (r.next?.expected ?? 0) - (r.next?.pct ?? 0), r.health.rag) ??
+              edgeColor(r.pace, r.health.rag) ??
               STATUS_TONE[r.status] ??
               'var(--line-2)'
             return (
               <div key={r.id} className="irow" style={{ borderLeftColor: edge }}>
                 <div className="ir-ring">
-                  {r.next && r.pace ? (
-                    <NextMilestoneRing pct={r.next.pct} expected={r.next.expected} health={r.pace} />
-                  ) : (
-                    <span className="ir-noring" title="No milestone recorded">
-                      –
-                    </span>
-                  )}
-                  {r.next && (
-                    <>
-                      <span className="ir-short" title={r.next.name}>
-                        {shortMilestone(r.next.name)}
-                      </span>
-                      <span className="ir-due">{r.next.due ?? 'no date'}</span>
-                    </>
-                  )}
+                  <HealthDot health={r.pace} reasons={r.reasons} />
                 </div>
 
                 <div className="ir-body">
@@ -282,11 +271,11 @@ export function WorkstreamList({
                         id={r.id}
                         field="progress"
                         kind="number"
-                        raw={String(Math.round(r.progress))}
-                        value={`${Math.round(r.progress)}%`}
+                        raw={String(progressPercent(r.progress))}
+                        value={`${progressPercent(r.progress)}%`}
                         after={
                           <span className="wsbar" aria-hidden="true">
-                            <span style={{ width: `${Math.max(0, Math.min(100, r.progress))}%` }} />
+                            <span style={{ width: `${progressPercent(r.progress)}%` }} />
                           </span>
                         }
                       />
@@ -321,7 +310,6 @@ export function WorkstreamList({
                     )}
                   </div>
 
-                  {r.next && <p className="ir-next">Next: {r.next.name}</p>}
                 </div>
               </div>
             )

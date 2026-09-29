@@ -11,7 +11,8 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { SortableRows, SortPicker } from '@/components/sortable-rows'
-import { NextMilestoneRing, edgeColor, shortMilestone } from '@/components/ring'
+import { HealthDot } from '@/components/health-state'
+import { edgeColor } from '@/lib/card-health'
 import { Grouping } from './grouping'
 
 export interface InitiativeRow {
@@ -24,7 +25,8 @@ export interface InitiativeRow {
   workstreamCount: number
   /** From the home board, so the ring and the border mean the same thing there. */
   health: 'good' | 'warn' | 'crit' | 'quiet' | null
-  next: { name: string; pct: number; expected: number; due: string | null } | null
+  /** Why the row reads the way it does. See lib/card-health.ts. */
+  reasons: { text: string; tone: 'crit' | 'warn' | 'muted' }[]
 }
 
 const ENDED = new Set(['completed', 'canceled', 'cancelled', 'withdrawn'])
@@ -145,27 +147,13 @@ export function InitiativeList({
             render={(id) => {
             const r = shown.find((x) => x.id === id)!
             const edge =
-              edgeColor(r.health, (r.next?.expected ?? 0) - (r.next?.pct ?? 0)) ??
+              edgeColor(r.health) ??
               EDGE_TONE[r.status] ??
               'var(--line-2)'
             return (
               <div key={r.id} className="irow" style={{ borderLeftColor: edge }}>
                 <div className="ir-ring">
-                  {r.next && r.health ? (
-                    <NextMilestoneRing pct={r.next.pct} expected={r.next.expected} health={r.health} />
-                  ) : (
-                    <span className="ir-noring" title="No milestone recorded">
-                      –
-                    </span>
-                  )}
-                  {r.next && (
-                    <>
-                      <span className="ir-short" title={r.next.name}>
-                        {shortMilestone(r.next.name)}
-                      </span>
-                      <span className="ir-due">{r.next.due ?? 'no date'}</span>
-                    </>
-                  )}
+                  <HealthDot health={r.health} reasons={r.reasons} />
                 </div>
 
                 <div className="ir-body">
@@ -183,7 +171,6 @@ export function InitiativeList({
                     </span>
                   </div>
 
-                  {r.next && <p className="ir-next">Next: {r.next.name}</p>}
                   {r.description && <p className="ir-desc">{r.description}</p>}
 
                   {r.projects.length === 0 ? (

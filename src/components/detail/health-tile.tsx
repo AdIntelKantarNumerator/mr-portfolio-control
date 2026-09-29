@@ -18,8 +18,8 @@
  * full. The claim is still checkable; it is no longer shouted.
  */
 import { useState } from 'react'
-import { Ring, paceColor } from '@/components/ring'
 import { AssessmentText } from '@/components/assessment-text'
+import { updateMixText } from '@/lib/update-mix'
 import { Tile } from './tile'
 
 export interface UpdateBullet {
@@ -71,28 +71,36 @@ const RAG_COLOR: Record<string, string> = {
   unknown: 'var(--line-2)',
 }
 
+/** The assessment in the words people use for it, not the traffic-light name. */
+const RAG_WORD: Record<string, string> = {
+  green: 'On track',
+  amber: 'At risk',
+  red: 'In trouble',
+}
+
 /**
- * The ring beside a list of updates.
+ * The count beside a list of updates, and what it is made of.
  *
- * It fills with the share of those updates that report progress, and turns
- * the colour of the worst thing in the list. It is a shape of the list, not a
- * measurement of the work — the number in the middle is the count, which is
- * the only hard fact available here, and the tooltip says so.
+ * There was a dial here. The number inside it was the count of bullets,
+ * which is a fact; the arc around it was the share Yaara had classified as
+ * progress, drawn in the shape the rest of the app used for completion — so
+ * "3" in a two-thirds-full ring read as "67% done" and meant "two of the
+ * three things she wrote mention progress".
+ *
+ * The count stays, and so does the colour, which is the worst kind of thing
+ * in the list. The composition is said in words instead of drawn as an arc.
+ * See lib/update-mix.ts.
  */
-function BulletRing({ items, label }: { items: UpdateBullet[]; label: string }) {
-  const good = items.filter((i) => i.kind === 'progress' || i.kind === 'decision_made').length
+function BulletCount({ items, label }: { items: UpdateBullet[]; label: string }) {
   const bad = items.some((i) => i.kind === 'blocker')
   const warn = items.some((i) => i.kind === 'risk' || i.kind === 'decision_needed')
-  const pct = items.length === 0 ? 0 : Math.round((good / items.length) * 100)
   const color = bad ? 'var(--c3)' : warn ? 'var(--c2)' : items.length ? 'var(--c5)' : 'var(--line-2)'
+  const mix = updateMixText(items)
+  // Just the number here. The composition goes on the heading line, where
+  // there is room for it to read as a sentence rather than wrap to four
+  // lines in a gutter sized for a ring.
   return (
-    <span
-      className="hring"
-      title={`${items.length} ${label}${items.length === 1 ? '' : 's'} — ${good} reporting progress${
-        bad ? ', and at least one blocker' : warn ? ', and at least one risk or open decision' : ''
-      }`}
-    >
-      <Ring pct={pct} expected={0} color={color} />
+    <span className="hcount" title={`${items.length} ${label}${items.length === 1 ? '' : 's'}${mix ? ` — ${mix}` : ''}`}>
       <b style={{ color }}>{items.length}</b>
     </span>
   )
@@ -125,8 +133,6 @@ export function HealthTile({
   stakeholder,
   engineering,
   evidence,
-  pct,
-  expected,
   canEdit,
 }: {
   /** "Project", "Workstream", "Initiative" — the tile is titled after it. */
@@ -140,8 +146,6 @@ export function HealthTile({
   engineering: UpdateBullet[]
   evidence: Evidence[]
   /** Milestone completion and where the calendar says it should be. */
-  pct: number
-  expected: number
   canEdit: boolean
 }) {
   const [reading, setReading] = useState(false)
@@ -160,9 +164,16 @@ export function HealthTile({
       }
     >
       <div className="hrow">
-        <span className="hring" title={`${pct}% of the way to the next milestone; the calendar says ${expected}%`}>
-          <Ring pct={pct} expected={expected} color={RAG_COLOR[rag ?? 'unknown'] ?? paceColor('quiet', 0)} />
-          <b style={{ color: RAG_COLOR[rag ?? 'unknown'] }}>{pct}%</b>
+        {/* A dial, not a percentage.
+            This drew the same completion ring the board did, and the number
+            behind it was the share of the calendar elapsed before the next
+            milestone — which moves on its own, every day, whether or not any
+            work happens. The RAG beside it is a real assessment somebody or
+            Yaara made, and it is what this tile is actually reporting. See
+            lib/card-health.ts. */}
+        <span className="hrag" title={rag ? `Assessed ${RAG_WORD[rag] ?? rag}` : 'Nothing assessed yet'}>
+          <i style={{ background: RAG_COLOR[rag ?? 'unknown'] ?? 'var(--line-2)' }} aria-hidden="true" />
+          <b style={{ color: RAG_COLOR[rag ?? 'unknown'] ?? 'var(--muted)' }}>{rag ? (RAG_WORD[rag] ?? rag) : '—'}</b>
         </span>
         <div className="hbody">
           {summary && assessmentId ? (
@@ -188,17 +199,23 @@ export function HealthTile({
       </div>
 
       <div className="hrow">
-        <BulletRing items={stakeholder} label="stakeholder update" />
+        <BulletCount items={stakeholder} label="stakeholder update" />
         <div className="hbody">
-          <h3>Stakeholder Updates</h3>
+          <h3>
+            Stakeholder Updates
+            {stakeholder.length > 0 ? <span className="hmix">{updateMixText(stakeholder)}</span> : null}
+          </h3>
           <Bullets items={stakeholder} />
         </div>
       </div>
 
       <div className="hrow">
-        <BulletRing items={engineering} label="engineering update" />
+        <BulletCount items={engineering} label="engineering update" />
         <div className="hbody">
-          <h3>Engineering Updates</h3>
+          <h3>
+            Engineering Updates
+            {engineering.length > 0 ? <span className="hmix">{updateMixText(engineering)}</span> : null}
+          </h3>
           <Bullets items={engineering} />
         </div>
       </div>

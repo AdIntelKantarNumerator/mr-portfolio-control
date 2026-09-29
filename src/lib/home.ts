@@ -22,7 +22,6 @@ import {
   agentObservations,
   decisions,
   initiatives,
-  milestoneItems,
   milestones,
   people,
   projects,
@@ -34,14 +33,13 @@ import { lateDependencies } from './dependency-risk'
 import { activitySeries } from './activity-series'
 import { getCardOrder } from './card-order'
 import { blockedAtOrBelow } from './blocked'
-import { byTargetDate, nextUpcoming } from './milestone-order'
-import { basisLabel, milestoneProgress, nextConcern, type Basis } from './milestone-progress'
+import { byTargetDate } from './milestone-order'
+import { cardHealth, type Reason } from './card-health'
 
 // The vocabulary lives in home-types.ts, which imports nothing, so client
 // components can use it without dragging this module's database import into
 // the browser bundle. Re-exported here so existing imports keep working.
 export {
-  healthOf,
   MIX_ORDER,
   mixRank,
   statusLabel,
@@ -58,7 +56,6 @@ export {
   type HealthFilter,
 } from './home-types'
 import {
-  healthOf,
   IN_PROGRESS_BLOCKED,
   IN_PROGRESS_OK,
   isInProgress,
@@ -82,9 +79,22 @@ export interface MilestoneMark {
   id: string
   name: string
   status: string
-  /** 0–100 along the rail. */
+  /**
+   * Where it sits on the rail, 0–100, BY DATE.
+   *
+   * It used to be the mark's index — evenly spaced, so six milestones spread
+   * over two years and six crammed into a fortnight drew the same picture,
+   * and the "today" marker beside them was placed by a percentage that had
+   * nothing to do with the spacing. A rail that looks like a timeline and is
+   * not one is worse than a list.
+   */
   at: number
+  /** The date itself, for the hover. Null when nobody set one. */
+  on: string | null
 }
+
+/** Where today falls on the rail, 0–100, or null when it is off either end. */
+export type RailToday = number | null
 
 export interface HomeCard {
   id: string
@@ -111,24 +121,17 @@ export interface HomeCard {
   verdictRolledUp: string | null
   detail: string[]
   evidence: Array<{ source: string; text: string; url: string | null }>
-  next: {
-    id: string
-    name: string
-    due: string | null
-    days: number | null
-    pct: number
-    expected: number
-    /**
-     * Where `pct` came from, and what to put under the ring.
-     *
-     * The ring shows two different things depending on whether anybody has
-     * written a checklist, and a reader cannot be left to guess which. See
-     * lib/milestone-progress.ts.
-     */
-    basis: Basis
-    basisLabel: string
-  } | null
+  /**
+   * Why the card reads the way it does — one clause per fact, worst first.
+   *
+   * The board used to show a completion ring here instead. Three versions of
+   * that number were wrong in the same way: none of them came from anybody
+   * counting anything. See lib/card-health.ts.
+   */
+  reasons: Reason[]
   rail: MilestoneMark[]
+  /** Where today sits on the rail, or null when there is nothing to draw. */
+  railToday: RailToday
   signals: Signal[]
   /**
    * What sits directly beneath, grouped by status, in a fixed order.
@@ -171,45 +174,24 @@ function parse<T>(raw: string | null, fallback: T): T {
 }
 
 /*
- * `healthOf` moved to lib/home-types.ts, which imports nothing.
+ * `healthOf` is gone, and with it the last of the completion ring.
  *
- * It is a pure rule and its tests were pulling a database client in through
- * this module's imports just to call it — the same reason the board's
- * vocabulary lives there. Re-exported below so existing imports keep working.
+ * It judged a card by the gap between a percentage and the share of the
+ * calendar already gone. Both halves of that comparison were about dates
+ * rather than work, so the answer moved on its own. lib/card-health.ts
+ * replaces it with a state built from blockers, missed dependencies, overdue
+ * milestones, children in trouble and silence — each reported as its own
+ * reason rather than folded into a number.
  */
 
-/**
- * How far through a milestone the calendar says we should be.
- *
- * Straight-line between the entity's start and the milestone's date. Crude, and
- * honest about being crude — it is a reference line on a bar, not a forecast.
+/*
+ * `expectedPct` was here: the share of the calendar gone between a start date
+ * and a milestone. It was drawn beside the ring as "% expected" and, in the
+ * last version, AS the ring. It is a fact about the calendar and says nothing
+ * about the work, which is why a milestone added today opened at 80%.
  */
-function expectedPct(start: Date | null, due: Date | null, now: number): number {
-  if (!due) return 0
-  const from = start ? start.getTime() : due.getTime() - 90 * DAY
-  const span = due.getTime() - from
-  if (span <= 0) return 100
-  return Math.max(0, Math.min(100, Math.round(((now - from) / span) * 100)))
-}
 
-/**
- * A date the way the room says it: "30 Sep", or "30 Sep 2027" when it is not
- * this year. The raw ISO string leaked onto the cards for a while, which reads
- * as machine output on the one screen built to be read by people.
- *
- * Formatted here, on the server, and passed down as a finished string —
- * formatting it in the card would make it locale-dependent and desynchronise
- * server and client rendering.
- */
-function dueLabel(d: Date, now: number): string {
-  const sameYear = d.getUTCFullYear() === new Date(now).getUTCFullYear()
-  return d.toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    ...(sameYear ? {} : { year: 'numeric' }),
-    timeZone: 'UTC',
-  })
-}
+
 
 /*
  * `pctFromStatus` lived here: a lookup returning 55 for on_track, 40 for
@@ -225,15 +207,15 @@ export const getHomeCards = cache(async (
   health: HealthFilter = 'all',
 ): Promise<HomeCard[]> => {
   const now = Date.now()
+  // Midnight UTC: a milestone due today is due today all day, and "overdue
+  // by four hours" is not a thing anybody means.
+  const startOfToday = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate())
 
-  const [inits, projs, wss, ms, items, obs, decs, acts, links, peeps, deps] = await Promise.all([
+  const [inits, projs, wss, ms, obs, decs, acts, links, peeps, deps] = await Promise.all([
     db.select().from(initiatives),
     db.select().from(projects),
     db.select().from(workstreams),
     db.select().from(milestones),
-    // The checklists. One query for all of them: every card would otherwise
-    // rescan the same table for its own milestone.
-    db.select({ milestoneId: milestoneItems.milestoneId, state: milestoneItems.state }).from(milestoneItems),
     db.select().from(agentObservations).where(isNull(agentObservations.supersededAt)).orderBy(desc(agentObservations.generatedAt)),
     db.select().from(decisions),
     db.select().from(actionItems).where(eq(actionItems.status, 'open')),
@@ -244,14 +226,7 @@ export const getHomeCards = cache(async (
 
   const personName = new Map(peeps.map((p) => [p.id, p.name]))
 
-  /** Items done and items total, per milestone — the ring's one real number. */
-  const tally = new Map<string, { done: number; total: number }>()
-  for (const it of items) {
-    const at = tally.get(it.milestoneId) ?? { done: 0, total: 0 }
-    at.total += 1
-    if (it.state === 'completed') at.done += 1
-    tally.set(it.milestoneId, at)
-  }
+
 
   // Everything carrying an open blocker, by entity id. Used to split the
   // in-progress segment of the mix bar, and computed once here rather than
@@ -354,68 +329,40 @@ export const getHomeCards = cache(async (
       const railSource = byTargetDate(own.length ? own : mine)
 
       /*
-       * The next milestone is the next one AHEAD, not the oldest one still
-       * open. See lib/milestone-order.ts: taking the oldest put a milestone
-       * from three months ago on the card and, because the plan line is the
-       * share of the calendar already gone, drew it at 100% and green.
+       * Milestones whose date has gone with the work not done.
+       *
+       * A fact, and the only thing a date can honestly contribute to a health
+       * reading. What used to happen here was the reverse: the card measured
+       * how much of the calendar had elapsed and called that progress, so a
+       * milestone added today on work that began in June opened at 80%.
        */
-      const ahead = nextUpcoming(railSource, new Date(now))
-      const openNext = ahead?.milestone ?? null
-      const due = openNext?.targetDate ?? null
-      const counted = openNext ? tally.get(openNext.id) : undefined
-      const progress = openNext
-        ? milestoneProgress({
-            status: openNext.status,
-            done: counted?.done,
-            total: counted?.total,
-            expected: expectedPct(r.startDate, openNext.targetDate, now),
-          })
-        : { pct: 100, basis: 'done' as const }
-      const pct = progress.pct
+      const overdueMilestones = railSource.filter(
+        (m) => m.status !== 'complete' && m.targetDate !== null && m.targetDate.getTime() < startOfToday,
+      ).length
 
       /*
-       * What to worry about, in the order the worries outrank each other.
+       * The rail, as a span of time rather than a row of evenly spaced dots.
        *
-       * Nothing left but missed dates is the loudest thing a card can say,
-       * and it is exactly the case the plan line cannot express: every
-       * overdue milestone measures 100%, so they all look finished.
-       *
-       * Then blockers on the work this milestone belongs to. A milestone is a
-       * date; what will or will not make it is the work underneath, and if
-       * that work is blocked the date is not on track whatever its own status
-       * field says. Only the work beneath THIS milestone counts — an
-       * initiative with a blocker on an unrelated project is not a reason to
-       * call this date at risk.
+       * Positions come from the dates, so the gaps mean something; the span
+       * runs from the earliest mark to the latest, widened to include today
+       * when today falls outside it. Undated milestones cannot be placed and
+       * are left off rather than dropped at one end.
        */
-      const milestoneScope = openNext
-        ? (() => {
-            const sub = scope(openNext.level as Level, openNext.entityId)
-            return new Set<string>([openNext.entityId, ...sub.projects, ...sub.workstreams])
-          })()
-        : new Set<string>()
-      // `blockedIds` is the board's one answer to "is this stuck": open
-      // blockers filed against the work, plus work that is going to miss a
-      // dependency's required date. The mix bar splits its in-progress segment
-      // on exactly this set, so a ring that disagreed with it would be two
-      // parts of one card contradicting each other.
-      const blockingNext = [...milestoneScope].some((id) => blockedIds.has(id))
+      const dated = railSource.filter((m) => m.targetDate !== null).slice(0, 8)
+      const stamps = dated.map((m) => m.targetDate!.getTime())
+      const railFrom = stamps.length ? Math.min(...stamps, now) : now
+      const railTo = stamps.length ? Math.max(...stamps, now) : now
+      const railSpan = railTo - railFrom
+      const place = (t: number) => (railSpan <= 0 ? 50 : Math.round(((t - railFrom) / railSpan) * 100))
 
-      const concern = openNext
-        ? nextConcern({
-            overdue: ahead!.overdue,
-            blocked: blockingNext,
-            status: openNext.status,
-            expected: expectedPct(r.startDate, openNext.targetDate, now),
-          })
-        : 'none'
-      const expected = expectedPct(r.startDate, due, now)
-
-      const rail: MilestoneMark[] = railSource.slice(0, 6).map((m, i, arr) => ({
+      const rail: MilestoneMark[] = dated.map((m) => ({
         id: m.id,
         name: m.name,
         status: m.status,
-        at: arr.length === 1 ? 100 : Math.round((i / (arr.length - 1)) * 100),
+        at: place(m.targetDate!.getTime()),
+        on: m.targetDate!.toISOString().slice(0, 10),
       }))
+      const railToday: RailToday = rail.length ? place(now) : null
 
       const ob = obsFor.get(`${level}:${r.id}`) ?? null
 
@@ -466,7 +413,6 @@ export const getHomeCards = cache(async (
       const activityScore = rolledUp
         ? kids.reduce((n, k) => n + (k.activityScore ?? 0), 0)
         : (ob?.activityScore ?? 0)
-      const ageDays = source ? Math.round((now - source.generatedAt.getTime()) / DAY) : 999
 
       const signals: Signal[] = []
       if (blockers.length) {
@@ -567,6 +513,39 @@ export const getHomeCards = cache(async (
         .map(([status, members]) => ({ status, label: statusLabel(status), members }))
         .sort((a, b) => mixRank(a.status) - mixRank(b.status))
 
+      /*
+       * The card's health, from things that are true. See lib/card-health.ts
+       * for why there is no percentage any more.
+       *
+       * Every count here is the same one another part of the card already
+       * shows — the blockers are the signals panel's blockers, the children
+       * in trouble are the mix bar's blocked segment — so the parts of a card
+       * cannot contradict each other.
+       */
+      const troubled = [...byStatus.entries()]
+        .filter(([status]) => status === IN_PROGRESS_BLOCKED)
+        .reduce((n, [, members]) => n + members.length, 0)
+
+      const lastEvent = recent
+        .map((e) => (e.at ? Date.parse(e.at) : NaN))
+        .filter((t) => Number.isFinite(t))
+        .reduce((a, b) => Math.max(a, b), 0)
+      // Yaara's own last look is a fallback, not the measure: she may have
+      // read the room yesterday and found nothing happening for a month.
+      const lastSeen = lastEvent > 0 ? lastEvent : (source?.generatedAt.getTime() ?? 0)
+
+      const assessed = cardHealth({
+        blockers: blockers.length,
+        oldestBlockerDays: blockers.length
+          ? Math.max(...blockers.map((b) => Math.round((now - (b.raisedAt?.getTime() ?? now)) / DAY)))
+          : null,
+        lateDependencies: [...allIds].filter((id) => late.has(id)).length,
+        overdueMilestones,
+        troubledChildren: troubled,
+        totalChildren: below.length,
+        daysSinceActivity: lastSeen > 0 ? Math.round((now - lastSeen) / DAY) : null,
+      })
+
       const beneath =
         level === 'initiative'
           ? `${plural(sc.projects.length, 'project')} · ${plural(sc.workstreams.length, 'workstream')}`
@@ -580,24 +559,8 @@ export const getHomeCards = cache(async (
         name: r.name,
         owner: r.ownerId ? (personName.get(r.ownerId) ?? null) : null,
         beneath,
-        health: healthOf(
-          openNext
-            ? {
-                id: openNext.id,
-                name: openNext.name,
-                due: null,
-                days: null,
-                pct,
-                expected,
-                basis: progress.basis,
-                basisLabel: basisLabel(progress),
-              }
-            : null,
-          blockers.length,
-          activityScore,
-          ageDays,
-          concern,
-        ),
+        health: assessed.health,
+        reasons: assessed.reasons,
         // Her synthesis if she wrote one, then a child's, and only then the
         // first bullet. That last fallback is why an entity with four updates
         // used to show one of them as though it were the summary.
@@ -615,19 +578,8 @@ export const getHomeCards = cache(async (
             const [source2, text, url] = k.split('\u0000')
             return { source: source2!, text: text!, url: url || null }
           }),
-        next: openNext
-          ? {
-              id: openNext.id,
-              name: openNext.name,
-              due: openNext.targetLabel ?? (due ? dueLabel(due, now) : null),
-              days: due ? Math.round((due.getTime() - now) / DAY) : null,
-              pct,
-              expected,
-              basis: progress.basis,
-              basisLabel: basisLabel(progress),
-            }
-          : null,
         rail,
+        railToday,
         signals,
         mix,
         // What happened per week over the last eight, not the score repeated

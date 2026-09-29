@@ -19,7 +19,9 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { SortableRows, SortPicker } from '@/components/sortable-rows'
-import { NextMilestoneRing, edgeColor, shortMilestone } from '@/components/ring'
+import { progressPercent } from '@/lib/progress'
+import { HealthDot } from '@/components/health-state'
+import { edgeColor } from '@/lib/card-health'
 import { Editable } from '@/components/editable'
 import { HealthEditable } from '@/components/health-editable'
 import { calendarDate } from '@/lib/calendar-date'
@@ -49,7 +51,8 @@ export interface ProjectRow {
   health: 'good' | 'warn' | 'crit' | 'quiet' | null
   /** The project's own assessed health, used for the edge when there is no pace. */
   rag: string | null
-  next: { name: string; pct: number; expected: number; due: string | null } | null
+  /** Why the row reads the way it does. See lib/card-health.ts. */
+  reasons: { text: string; tone: 'crit' | 'warn' | 'muted' }[]
   workstreams: WorkstreamRow[]
 }
 
@@ -181,27 +184,13 @@ export function ProjectList({
             render={(id) => {
             const r = shown.find((x) => x.id === id)!
             const edge =
-              edgeColor(r.health, (r.next?.expected ?? 0) - (r.next?.pct ?? 0), r.rag) ??
+              edgeColor(r.health, r.rag) ??
               STATUS_TONE[r.status] ??
               'var(--line-2)'
             return (
               <div key={r.id} className="irow" style={{ borderLeftColor: edge }}>
                 <div className="ir-ring">
-                  {r.next && r.health ? (
-                    <NextMilestoneRing pct={r.next.pct} expected={r.next.expected} health={r.health} />
-                  ) : (
-                    <span className="ir-noring" title="No milestone recorded">
-                      –
-                    </span>
-                  )}
-                  {r.next && (
-                    <>
-                      <span className="ir-short" title={r.next.name}>
-                        {shortMilestone(r.next.name)}
-                      </span>
-                      <span className="ir-due">{r.next.due ?? 'no date'}</span>
-                    </>
-                  )}
+                  <HealthDot health={r.health} reasons={r.reasons} />
                 </div>
 
                 <div className="ir-body">
@@ -262,7 +251,6 @@ export function ProjectList({
                     </span>
                   </div>
 
-                  {r.next && <p className="ir-next">Next: {r.next.name}</p>}
 
                   {r.workstreams.length === 0 ? (
                     <p className="ir-desc">
@@ -379,11 +367,11 @@ function WorkstreamTable({
                   id={w.id}
                   field="progress"
                   kind="number"
-                  raw={String(Math.round(w.progress))}
-                  value={`${Math.round(w.progress)}%`}
+                  raw={String(progressPercent(w.progress))}
+                  value={`${progressPercent(w.progress)}%`}
                   after={
                     <span className="wsbar" aria-hidden="true">
-                      <span style={{ width: `${Math.max(0, Math.min(100, w.progress))}%` }} />
+                      <span style={{ width: `${progressPercent(w.progress)}%` }} />
                     </span>
                   }
                 />

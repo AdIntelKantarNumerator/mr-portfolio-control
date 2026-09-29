@@ -64,8 +64,6 @@ export function DetailBody({
           stakeholder={data.stakeholder}
           engineering={data.engineering}
           evidence={data.evidence}
-          pct={data.health.pct}
-          expected={data.health.expected}
           canEdit={canEdit}
         />
 

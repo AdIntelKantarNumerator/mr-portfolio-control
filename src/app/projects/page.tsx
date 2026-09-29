@@ -63,9 +63,7 @@ export default async function ProjectsPage({
       datesRolledUp: (!i.startDate && Boolean(start)) || (!i.targetDate && Boolean(target)),
       health: card?.health ?? null,
       rag: i.health.rag,
-      next: card?.next
-        ? { name: card.next.name, pct: card.next.pct, expected: card.next.expected, due: card.next.due }
-        : null,
+      reasons: card?.reasons ?? [],
       workstreams: i.workstreams.map((w) => ({
         id: w.id,
         name: w.name,

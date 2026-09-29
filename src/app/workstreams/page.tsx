@@ -65,9 +65,7 @@ export default async function WorkstreamsPage({
         origin: w.health.origin,
       },
       pace: card?.health ?? null,
-      next: card?.next
-        ? { name: card.next.name, pct: card.next.pct, expected: card.next.expected, due: card.next.due }
-        : null,
+      reasons: card?.reasons ?? [],
     }
   })
 

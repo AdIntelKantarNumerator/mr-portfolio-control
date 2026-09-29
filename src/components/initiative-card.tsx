@@ -22,7 +22,7 @@ import { useActionState, useState } from 'react'
 import type { HomeCard } from '@/lib/home'
 import type { MixGroup } from '@/lib/home-types'
 import { LocalTime } from './local-time'
-import { Ring, paceColor } from './ring'
+import { HealthPanel } from './health-state'
 import { saveVerdict, restoreVerdict, type VerdictState } from '@/app/verdict-actions'
 
 const STATUS = {
@@ -99,10 +99,6 @@ export function InitiativeCard({
   const [, restore] = useActionState<VerdictState, FormData>(restoreVerdict, {})
 
   const st = STATUS[card.health]
-  const behind = card.next ? card.next.expected - card.next.pct : 0
-  // One rule, in components/ring.tsx: three screens draw this ring and a
-  // colour that differs between them for the same work is worse than none.
-  const pace = paceColor(card.health, behind)
 
   const edited = Boolean(card.verdictEditedBy)
   const byline = edited ? card.verdictEditedBy : 'Yaara'
@@ -190,51 +186,11 @@ export function InitiativeCard({
 
       <div className="ibody">
         <div className="panel">
-          <p className="ptitle">Next milestone</p>
-          {card.next ? (
-            <button
-              className="ringwrap"
-              onClick={() =>
-                provenance(
-                  'this number',
-                  card.next!.basis === 'items' ? (
-                    <p>
-                      <b>{card.next!.basisLabel}</b> on {card.next!.name} — {card.next!.pct}% — against{' '}
-                      <b>{card.next!.expected}% expected</b> by today. Both sides are counted, so the gap between them
-                      means something. Expected is a straight line from the start date to{' '}
-                      {card.next!.due ?? 'the target'}: a reference, not a forecast.
-                    </p>
-                  ) : (
-                    <p>
-                      Nobody has written a checklist for {card.next!.name}, so there is no measured progress to show.
-                      This is the <b>plan line</b>: {card.next!.expected}% of the time between the start date and{' '}
-                      {card.next!.due ?? 'the target'} has gone. The colour comes from the milestone&apos;s status, which
-                      is somebody&apos;s judgement rather than a measurement. Add items to the milestone and this
-                      becomes a real count that can disagree with the plan.
-                    </p>
-                  ),
-                )
-              }
-            >
-              <Ring pct={card.next.pct} expected={card.next.expected} color={pace} />
-              <span className="rmid">
-                <span className="pct" style={{ color: pace }}>
-                  {card.next.pct}%
-                </span>
-                <span className="of">
-                  {card.next.basis === 'items' ? `${card.next.expected}% expected` : 'of the plan'}
-                </span>
-              </span>
-              <span className="rcap">
-                {card.next.due ?? 'no date'}
-                {card.next.days !== null ? ` · ${card.next.days}d` : ''}
-                <Chevron />
-              </span>
-              <span className="rsub">{card.next.name}</span>
-            </button>
-          ) : (
-            <p className="empty">No milestone recorded. Nothing to measure health against.</p>
-          )}
+          <p className="ptitle">Health</p>
+          {/* A state and the facts behind it. There was a completion ring
+              here; every version of its number was computed from something
+              other than work done. See lib/card-health.ts. */}
+          <HealthPanel health={card.health} reasons={card.reasons} />
         </div>
 
         <div className="panel">
@@ -360,8 +316,13 @@ export function InitiativeCard({
                 }
               >
                 <span className="railline">
-                  <span className="railfill" style={{ width: `${card.next?.pct ?? 0}%`, background: pace }} />
-                  <span className="railnow" style={{ left: `${card.next?.expected ?? 0}%` }} />
+                  {/* No progress fill: there was one, drawn to a percentage
+                      that measured elapsed time rather than work. What is
+                      left is a span of dates and a line for today, both of
+                      which are facts. */}
+                  {card.railToday !== null ? (
+                    <span className="railnow" style={{ left: `${card.railToday}%` }} title="Today" />
+                  ) : null}
                 </span>
                 <span
                   className="dots"

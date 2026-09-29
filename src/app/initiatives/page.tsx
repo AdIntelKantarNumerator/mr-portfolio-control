@@ -117,9 +117,7 @@ export default async function InitiativesPage({
       })),
       workstreamCount: mine.reduce((n, p) => n + (streamsByProject.get(p.id) ?? 0), 0),
       health: card?.health ?? null,
-      next: card?.next
-        ? { name: card.next.name, pct: card.next.pct, expected: card.next.expected, due: card.next.due }
-        : null,
+      reasons: card?.reasons ?? [],
     }
   })
 
