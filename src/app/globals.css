@@ -1312,18 +1312,25 @@ a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 .tl-bar { position: absolute; text-decoration: none; height: 22px; border-radius: 6px; display: flex; align-items: center; padding: 0 7px; overflow: hidden; }
 .tl-bar em { font-style: normal; font-size: 11px; font-weight: 650; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Green on track, red in trouble, blue finished. There is deliberately no
-   fourth colour for "nothing known" — see lib/timeline-model.ts. */
+/* Green running, amber in trouble, red already late, grey not started, blue
+   finished. Late and at-risk were one colour, which is the distinction that
+   matters most across a year — see lib/timeline-model.ts. */
 .tl-bar.tl-good { background: var(--c5); }
-.tl-bar.tl-crit { background: var(--crit); }
+.tl-bar.tl-risk { background: var(--c2); }
+.tl-bar.tl-late { background: var(--crit); }
+.tl-bar.tl-planned { background: var(--line-2); }
 .tl-bar.tl-done { background: var(--c1); }
+/* Grey is light enough that white text on it is unreadable. */
+.tl-bar.tl-planned em { color: var(--ink); }
 .tl-bar.clip-s { border-top-left-radius: 0; border-bottom-left-radius: 0; }
 .tl-bar.clip-e { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .tl-bar:hover { filter: brightness(1.08); }
 
 .tl-mark { position: absolute; width: 13px; height: 13px; margin-left: -6.5px; transform: rotate(45deg); border-radius: 2px; border: 1.5px solid var(--surface); z-index: 2; }
 .tl-mark.tl-good { background: var(--c5); }
-.tl-mark.tl-crit { background: var(--crit); }
+.tl-mark.tl-risk { background: var(--c2); }
+.tl-mark.tl-late { background: var(--crit); }
+.tl-mark.tl-planned { background: var(--line-2); }
 .tl-mark.tl-done { background: var(--c1); }
 
 .tl-links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
@@ -1334,3 +1341,24 @@ a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }
 .tl-toggle input { accent-color: var(--brand); }
 .tile-add { border: 1px solid var(--line-2); background: var(--surface); border-radius: 7px; font: inherit; font-size: 11px; font-weight: 700; color: var(--muted); padding: 3px 8px; cursor: pointer; }
 .tile-add:hover { border-color: var(--brand); color: var(--brand); }
+.disc-edit { border: 0; background: none; font-size: 12px; line-height: 1; color: var(--line-2); cursor: pointer; padding: 2px 4px; border-radius: 6px; }
+.disc-edit:hover { color: var(--brand); background: var(--surface-2); }
+.disc-none { color: var(--muted); border-style: dashed; }
+.disc-edited { margin: 5px 0 0 !important; font-size: 11.5px !important; color: var(--accent) !important; }
+.modal textarea { width: 100%; font: inherit; font-size: 14px; line-height: 1.5; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--ink); resize: vertical; }
+.dhead-edit { border: 1px solid var(--line-2); background: var(--surface); border-radius: 8px; font: inherit; font-size: 11.5px; font-weight: 650; color: var(--muted); padding: 4px 10px; cursor: pointer; }
+.dhead-edit:hover { border-color: var(--brand); color: var(--brand); }
+.dhead-right { margin-left: auto; }
+
+/* A list row you can drag into your own order. Same rules as the board and
+   the timeline; the grip sits clear of everything in the row that is a link. */
+.rowwrap { position: relative; }
+.rowwrap.held { opacity: .45; }
+.rowwrap.over-above::before, .rowwrap.over-below::after { content: ''; position: absolute; left: 0; right: 0; height: 3px; border-radius: 99px; background: var(--brand); z-index: 4; }
+.rowwrap.over-above::before { top: -5px; }
+.rowwrap.over-below::after { bottom: -5px; }
+.rowgrip { position: absolute; left: -14px; top: 0; bottom: 0; width: 14px; cursor: grab; z-index: 3; background: linear-gradient(var(--line-2), var(--line-2)) center / 2px 50% no-repeat; opacity: .45; border-radius: 4px; }
+.rowgrip:hover { opacity: 1; background-color: color-mix(in srgb, var(--brand) 12%, transparent); }
+.rowgrip:active { cursor: grabbing; }
+/* Room for the grip, so it does not sit on top of the coloured edge. */
+.ilist:has(.rowgrip) { padding-left: 16px; }
