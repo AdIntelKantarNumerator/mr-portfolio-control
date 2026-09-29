@@ -22,6 +22,7 @@
 import { useActionState, useState } from 'react'
 import Link from 'next/link'
 import { RecordTable, type Column } from '@/components/records/table'
+import { EditEntryButton, type EditContext } from '@/components/records/edit-entry'
 import { createDependency, setDependencyStatus, type ActionState } from './actions'
 
 const EMPTY: ActionState = {}
@@ -62,10 +63,13 @@ export function DependencyList({
   rows,
   endpoints,
   people,
+  editing,
 }: {
   rows: DependencyRow[]
   endpoints: EndpointOption[]
   people: { id: string; name: string }[]
+  /** What the edit dialog needs, or null for a reader who cannot write. */
+  editing: EditContext | null
 }) {
   const [adding, setAdding] = useState(false)
 
@@ -118,6 +122,24 @@ export function DependencyList({
     },
     { key: 'description', label: 'Notes', filter: 'text', value: (r) => r.description ?? '' },
   ]
+
+  // Last, and unfilterable: it is a control, not a fact about the row.
+  if (editing) {
+    columns.push({
+      key: 'edit',
+      label: '',
+      className: 'rt-edit',
+      value: () => '',
+      cell: (r) => (
+        <EditEntryButton
+          kind="dependency"
+          id={r.id}
+          ctx={editing}
+          label={`${r.from.label} → ${r.to.label}`}
+        />
+      ),
+    })
+  }
 
   return (
     <>

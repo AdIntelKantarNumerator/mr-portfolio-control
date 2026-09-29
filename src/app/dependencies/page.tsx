@@ -16,6 +16,7 @@ import { db } from '@/db/client'
 import { dependencies, initiatives, milestones, people, projects, workstreams } from '@/db/schema'
 import { Kicker } from '@/components/ui'
 import { lateness } from '@/lib/dependency-risk'
+import { getCurrentUser } from '@/lib/auth/current-user'
 import { DependencyList, type DependencyRow, type EndpointOption } from './list'
 
 export const metadata = { title: 'Dependencies' }
@@ -30,13 +31,14 @@ const HREF: Record<string, string> = {
 const ENDED = new Set(['completed', 'canceled'])
 
 export default async function DependenciesPage() {
-  const [deps, inits, projs, wss, ms, folk] = await Promise.all([
+  const [deps, inits, projs, wss, ms, folk, user] = await Promise.all([
     db.select().from(dependencies),
     db.select().from(initiatives).orderBy(asc(initiatives.name)),
     db.select().from(projects).orderBy(asc(projects.name)),
     db.select().from(workstreams).orderBy(asc(workstreams.name)),
     db.select().from(milestones),
     db.select({ id: people.id, name: people.name }).from(people).orderBy(asc(people.name)),
+    getCurrentUser(),
   ])
 
   const nameOf = new Map(folk.map((p) => [p.id, p.name]))
@@ -127,7 +129,12 @@ export default async function DependenciesPage() {
         </div>
       </div>
 
-      <DependencyList rows={rows} endpoints={endpoints} people={folk} />
+      <DependencyList
+        rows={rows}
+        endpoints={endpoints}
+        people={folk}
+        editing={user.personId ? { people: folk, endpoints } : null}
+      />
     </div>
   )
 }
