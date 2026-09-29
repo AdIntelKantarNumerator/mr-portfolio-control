@@ -131,6 +131,40 @@ export async function createChild(input: {
  * and that was only fixable from the grouping screen, two clicks away from
  * wherever anybody noticed.
  */
+/**
+ * A typed window, and the difference between clearing one and leaving it.
+ *
+ * Start and target are the two fields a roll-up defers to: `rollUpWindow`
+ * takes the row's own date when there is one and the work beneath when there
+ * is not. So typing a date here IS how a reader takes the window off the
+ * roll-up, and emptying the field is how they give it back — which is why an
+ * empty string has to mean "clear" and an absent field has to mean "leave
+ * alone". Collapsing the two would make every save of the name dialog wipe
+ * the dates.
+ */
+function windowChange(
+  field: 'startDate' | 'targetDate',
+  raw: string | undefined,
+  current: Date | null,
+): { patch?: Date | null; said?: string; error?: string } {
+  if (raw === undefined) return {}
+  const text = raw.trim()
+  const label = field === 'startDate' ? 'start' : 'target'
+
+  if (!text) {
+    if (current === null) return {}
+    return { patch: null, said: `${label} cleared — back to the roll-up` }
+  }
+
+  const at = new Date(`${text}T00:00:00Z`)
+  if (Number.isNaN(at.getTime())) return { error: 'That is not a date.' }
+  if (current && current.getTime() === at.getTime()) return {}
+  return {
+    patch: at,
+    said: `${label} ${current ? `${current.toISOString().slice(0, 10)} → ` : 'set to '}${text}`,
+  }
+}
+
 export async function editRecord(input: {
   level: string
   id: string
@@ -138,6 +172,9 @@ export async function editRecord(input: {
   description?: string | null
   /** The parent's id, '' to detach, or undefined to leave it alone. */
   parentId?: string
+  /** yyyy-mm-dd to set, '' to clear back to the roll-up, undefined to leave. */
+  startDate?: string
+  targetDate?: string
 }): Promise<RecordState> {
   if (!isLevel(input.level)) return { error: 'Unknown kind of record.' }
   const table = TABLES[input.level]
@@ -182,6 +219,15 @@ export async function editRecord(input: {
       }
       patch[field] = wanted
       changes.push(`${parentLevel}: ${current ? 'moved' : 'set'} → ${label}`)
+    }
+  }
+
+  for (const field of ['startDate', 'targetDate'] as const) {
+    const got = windowChange(field, input[field], (row as Record<string, unknown>)[field] as Date | null)
+    if (got.error) return { error: got.error }
+    if (got.said) {
+      patch[field] = got.patch
+      changes.push(got.said)
     }
   }
 
