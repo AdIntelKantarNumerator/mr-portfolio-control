@@ -98,13 +98,31 @@ export function isPeriod(value: string): boolean {
 export const PRIORITY = ['urgent', 'high', 'medium', 'low', 'no_priority'] as const
 export type Priority = (typeof PRIORITY)[number]
 
-export const MILESTONE_STATUS = ['pending', 'done', 'missed', 'moved'] as const
+/*
+ * There is no MILESTONE_STATUS. There was one — ['pending','done','missed',
+ * 'moved'] — and nothing read it and nothing ever wrote one of its words. A
+ * milestone's status is a PROJECT_STATUS: that is what the editor offers and
+ * what the column defaults to. An unused constant that looks authoritative is
+ * how the next person writes `status === 'done'` and gets a condition that
+ * never fires.
+ */
 
 export const DEPENDENCY_KIND = ['blocks', 'informs', 'shares_resource', 'related'] as const
 export type DependencyKind = (typeof DEPENDENCY_KIND)[number]
 
 export const DEPENDENCY_STATUS = ['open', 'at_risk', 'resolved', 'accepted_risk'] as const
 export type DependencyStatus = (typeof DEPENDENCY_STATUS)[number]
+
+/**
+ * Settled: somebody has looked at this dependency and finished with it, either
+ * because it landed or because the risk was accepted deliberately.
+ */
+export const DEPENDENCY_SETTLED: ReadonlySet<string> = new Set(['resolved', 'accepted_risk'])
+
+/** Still to worry about. The opposite of settled, and nothing else. */
+export function isLiveDependency(status: string | null | undefined): boolean {
+  return !DEPENDENCY_SETTLED.has(status ?? '')
+}
 
 export const CRITICALITY = ['normal', 'high', 'critical'] as const
 export type Criticality = (typeof CRITICALITY)[number]
@@ -114,6 +132,33 @@ export type AllocationMode = (typeof ALLOCATION_MODE)[number]
 
 export const DECISION_STATUS = ['open', 'watch', 'decided', 'dropped'] as const
 export type DecisionStatus = (typeof DECISION_STATUS)[number]
+
+/**
+ * A register entry is finished when it has been decided or dropped.
+ *
+ * WHY THIS IS A CONSTANT AND NOT A COMPARISON YOU WRITE WHERE YOU NEED IT
+ *
+ * Two vocabularies live in this file and they overlap nowhere. A dependency
+ * settles as `resolved`; a blocker closes as `decided`. Written out by hand at
+ * the call site the two are easy to swap, and a swap does not fail — it
+ * produces a predicate that is simply always true, because no decision row is
+ * ever `resolved` and no dependency row is ever `decided`.
+ *
+ * That is not hypothetical. `home.ts` filtered its blockers with the
+ * dependency words for as long as the home page existed, so every blocker ever
+ * raised counted as open on a card while the register page, which had the rule
+ * right, showed the real list. A closed blocker sat on the home page with
+ * nothing behind it when you clicked through.
+ *
+ * So: both predicates are here, beside the vocabularies they read, and
+ * `tests/register-open.test.ts` fails the build if a call site grows its own.
+ */
+export const DECISION_CLOSED: ReadonlySet<string> = new Set(['decided', 'dropped'])
+
+/** Still live — open or watched. Anything that is not closed. */
+export function isOpenEntry(status: string | null | undefined): boolean {
+  return !DECISION_CLOSED.has(status ?? '')
+}
 
 export const DECISION_CATEGORY = ['strategic', 'delivery', 'risk'] as const
 

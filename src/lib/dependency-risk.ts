@@ -31,6 +31,7 @@
  * both somebody having already looked at it and decided — re-raising it would
  * be arguing with the person who closed it.
  */
+import { DEPENDENCY_SETTLED as SETTLED } from './domain'
 
 export interface DependencyLike {
   id: string
@@ -58,9 +59,6 @@ const day = (v: Date | string | null | undefined): string | null => {
   const d = typeof v === 'string' ? v : v.toISOString()
   return d.slice(0, 10)
 }
-
-/** Statuses that mean somebody has already looked at this and decided. */
-const SETTLED = new Set(['resolved', 'accepted_risk'])
 
 /**
  * Why this dependency is late, or null if it is not.

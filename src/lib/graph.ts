@@ -8,6 +8,7 @@
  */
 import type { DependencyRow, Portfolio } from './portfolio'
 import { labelForEndpoint } from './portfolio'
+import { isLiveDependency } from './domain'
 
 export interface GraphNode {
   id: string // `${type}:${id}`
@@ -45,7 +46,7 @@ export interface DependencyGraph {
 const key = (type: string, id: string) => `${type}:${id}`
 
 function isLive(d: DependencyRow) {
-  return d.status !== 'resolved'
+  return isLiveDependency(d.status)
 }
 
 export function buildGraph(p: Portfolio, opts: { includeResolved?: boolean } = {}): DependencyGraph {

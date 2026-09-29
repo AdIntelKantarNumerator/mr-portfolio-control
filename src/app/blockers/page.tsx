@@ -17,6 +17,7 @@ import { decisionEvents, decisions, objectives, people, initiatives, sourceDocum
 import { Kicker } from '@/components/ui'
 import { addContext } from '@/lib/add-context'
 import { scopeFilter } from '@/lib/scope-filter'
+import { isOpenEntry } from '@/lib/domain'
 import { provenanceOfEntry, type Mention } from '@/lib/provenance'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { RegisterList, type BlockerRow, type Named } from '@/components/records/register-list'
@@ -100,10 +101,9 @@ export default async function BlockersPage({
    */
   const narrow = scopeFilter(scope, projs, wss, inits)
 
-  const open = (s: string) => s !== 'decided' && s !== 'dropped'
   const items: BlockerRow[] = rows
     .filter((d) => narrow.covers(d.entityId))
-    .filter((d) => (closed ? !open(d.status) : open(d.status)))
+    .filter((d) => (closed ? !isOpenEntry(d.status) : isOpenEntry(d.status)))
     .map((d) => ({
       id: d.id,
       ref: d.ref,

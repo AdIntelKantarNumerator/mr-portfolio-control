@@ -31,6 +31,7 @@ import type { TimelineModel } from './timeline-model'
 import { getReadiness, statusFor, type ReadinessModel } from './readiness'
 import type { TileItem } from '@/components/detail/tile'
 import { progressPercent } from './progress'
+import { isLiveDependency, isOpenEntry } from './domain'
 import type { Evidence, UpdateBullet } from '@/components/detail/health-tile'
 import type { ReadinessGateView } from '@/components/detail/readiness-tile'
 
@@ -326,10 +327,9 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
 
   // --- the register --------------------------------------------------------
   const regs = p.decisions.filter((d) => d.entityId && ids.has(d.entityId))
-  const open = (s: string) => s !== 'resolved' && s !== 'closed'
 
   const blockers: TileItem[] = regs
-    .filter((d) => d.kind === 'blocker' && open(d.status))
+    .filter((d) => d.kind === 'blocker' && isOpenEntry(d.status))
     .map((d) => ({
       id: d.id,
       text: d.title,
@@ -380,7 +380,7 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
   }
 
   const dependencies: TileItem[] = deps
-    .filter((d) => d.status !== 'resolved' && d.status !== 'dropped')
+    .filter((d) => isLiveDependency(d.status))
     .map((d) => {
       const outward = ids.has(d.fromId)
       return {
@@ -389,7 +389,10 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
           ? `Waiting on ${nameOf(d.toType, d.toId)}`
           : `${nameOf(d.fromType, d.fromId)} is waiting on this`,
         meta: shortDate(d.dueDate),
-        tone: d.status === 'blocked' ? 'var(--c3)' : 'var(--c2)',
+        // `at_risk`, not `blocked` — there is no such dependency status, so
+        // this was a condition that never once fired and every live
+        // dependency drew the same colour.
+        tone: d.status === 'at_risk' ? 'var(--c3)' : 'var(--c2)',
         toneLabel: d.status,
         detail: d.description ?? undefined,
         href: '/dependencies',

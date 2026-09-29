@@ -28,7 +28,7 @@ import {
   projects,
   dependencies,
 } from '@/db/schema'
-import { ENDED_INITIATIVE_STATUS } from './domain'
+import { ENDED_INITIATIVE_STATUS, isOpenEntry } from './domain'
 import { lateDependencies } from './dependency-risk'
 import { activitySeries } from './activity-series'
 import { getCardOrder } from './card-order'
@@ -234,7 +234,7 @@ export const getHomeCards = cache(async (
   // per card because every card would otherwise rescan the same table.
   const blockedIds = new Set(
     decs
-      .filter((d) => d.kind === 'blocker' && d.status !== 'resolved' && d.status !== 'closed' && d.entityId)
+      .filter((d) => d.kind === 'blocker' && isOpenEntry(d.status) && d.entityId)
       .map((d) => d.entityId as string),
   )
 
@@ -402,7 +402,7 @@ export const getHomeCards = cache(async (
           )
         : parse<Array<{ source: string; title: string; url: string | null }>>(ob?.evidence ?? null, [])
 
-      const openDecs = decs.filter((d) => allIds.has(d.entityId ?? '') && d.status !== 'resolved' && d.status !== 'closed')
+      const openDecs = decs.filter((d) => allIds.has(d.entityId ?? '') && isOpenEntry(d.status))
       const blockers = openDecs.filter((d) => d.kind === 'blocker')
       const decisionsOpen = decs.filter((d) => allIds.has(d.entityId ?? '') && d.kind === 'decision').slice(0, 4)
       const myActionIds = new Set(links.filter((l) => allIds.has(l.entityId)).map((l) => l.actionItemId))

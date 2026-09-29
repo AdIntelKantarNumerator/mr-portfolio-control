@@ -12,3 +12,7 @@ next-env.d.ts
 
 # Incremental build cache — machine-specific, never useful in a diff.
 tsconfig.tsbuildinfo
+
+# Written into the repo root by sync-portfolio.ps1 so the extracted tree can
+# be checked file by file. It describes a transfer, not the source.
+MANIFEST.sha256
