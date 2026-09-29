@@ -35,6 +35,7 @@ import { getCardOrder } from './card-order'
 import { blockedAtOrBelow } from './blocked'
 import { byTargetDate } from './milestone-order'
 import { cardHealth, type Reason } from './card-health'
+import { formatScope } from './hierarchy'
 
 // The vocabulary lives in home-types.ts, which imports nothing, so client
 // components can use it without dragging this module's database import into
@@ -414,6 +415,18 @@ export const getHomeCards = cache(async (
         ? kids.reduce((n, k) => n + (k.activityScore ?? 0), 0)
         : (ob?.activityScore ?? 0)
 
+      /*
+       * Where a signal's link points.
+       *
+       * Every count on a card rolls up — "11 blockers" on an initiative is
+       * eleven across everything beneath it — so the link has to carry which
+       * card it came from, and the page it lands on has to filter by the same
+       * set. `/decisions?ref=…` did neither: blockers and decisions now have
+       * a page each, and neither page read `ref`, so the link 404ed and the
+       * actions link opened the whole board. See lib/hierarchy.ts.
+       */
+      const from = formatScope(level, r.id)
+
       const signals: Signal[] = []
       if (blockers.length) {
         signals.push({
@@ -429,7 +442,7 @@ export const getHomeCards = cache(async (
             text: b.title,
             when: b.raisedAt ? `${Math.round((now - b.raisedAt.getTime()) / DAY)}d` : '',
             who: b.raisedByText ?? null,
-            href: `/decisions?ref=${b.ref}`,
+            href: `/blockers?scope=${from}`,
           })),
         })
       }
@@ -442,7 +455,7 @@ export const getHomeCards = cache(async (
             text: d.title,
             when: d.raisedAt ? d.raisedAt.toISOString().slice(0, 10) : '',
             who: null,
-            href: `/decisions?ref=${d.ref}`,
+            href: `/decisions?scope=${from}`,
           })),
         })
       }
@@ -459,7 +472,7 @@ export const getHomeCards = cache(async (
             text: a.text,
             when: a.dueDate ? a.dueDate.toISOString().slice(0, 10) : '—',
             who: a.ownerId ? (personName.get(a.ownerId) ?? null) : a.ownerName,
-            href: '/actions',
+            href: `/actions?scope=${from}`,
           })),
         })
       }

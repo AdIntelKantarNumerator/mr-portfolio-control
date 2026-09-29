@@ -55,6 +55,7 @@ export function ActionsList({
   projects,
   workstreams,
   closed,
+  scope,
 }: {
   rows: ActionRowView[]
   people: Named[]
@@ -62,6 +63,8 @@ export function ActionsList({
   projects: Named[]
   workstreams: Named[]
   closed: boolean
+  /** Set when a home card linked here for one piece of work. */
+  scope: { label: string; clear: string; param: string } | null
 }) {
   const [editing, setEditing] = useState<ActionRowView | null>(null)
 
@@ -83,6 +86,9 @@ export function ActionsList({
       key: 'initiative',
       label: 'Initiative',
       filter: 'select',
+      // On the name, so the rows nobody placed go to the bottom in both
+      // directions rather than sorting under U for "Unknown".
+      sort: { kind: 'text', by: (r) => r.initiative?.name },
       value: (r) => r.initiative?.name ?? 'Unknown',
       cell: (r) => level(r, 'initiative', initiatives),
     },
@@ -90,6 +96,9 @@ export function ActionsList({
       key: 'project',
       label: 'Project',
       filter: 'select',
+      // On the name, so the rows nobody placed go to the bottom in both
+      // directions rather than sorting under U for "Unknown".
+      sort: { kind: 'text', by: (r) => r.project?.name },
       value: (r) => r.project?.name ?? 'Unknown',
       cell: (r) => level(r, 'project', projects),
     },
@@ -97,6 +106,9 @@ export function ActionsList({
       key: 'workstream',
       label: 'Workstream',
       filter: 'select',
+      // On the name, so the rows nobody placed go to the bottom in both
+      // directions rather than sorting under U for "Unknown".
+      sort: { kind: 'text', by: (r) => r.workstream?.name },
       value: (r) => r.workstream?.name ?? 'Unknown',
       cell: (r) => level(r, 'workstream', workstreams),
     },
@@ -104,6 +116,9 @@ export function ActionsList({
       key: 'owner',
       label: 'Owner',
       filter: 'select',
+      // On the name, so an unowned row goes to the bottom rather than sorting
+      // under N for "Nobody named".
+      sort: { kind: 'text', by: (r) => r.owner },
       value: (r) => r.owner ?? 'Nobody named',
       className: 'rt-owner',
       cell: (r) => (r.owner ? r.owner : <span className="rt-unknown">Nobody named</span>),
@@ -112,6 +127,9 @@ export function ActionsList({
       key: 'due',
       label: 'Due',
       filter: 'select',
+      // The column Scott asked for by name. Sorts on the date, not on the
+      // three buckets the filter offers.
+      sort: { kind: 'date', by: (r) => r.due },
       // Grouped for the filter rather than offering forty individual dates,
       // which is a filter nobody can use.
       value: (r) => (r.overdue ? 'Past due' : r.due ? 'Dated' : 'Unknown'),
@@ -127,6 +145,9 @@ export function ActionsList({
       key: 'text',
       label: 'What was said',
       filter: 'text',
+      // By reference, which is the order they were raised in — sorting forty
+      // commitments by their first word is no use to anybody.
+      sort: { kind: 'text', by: (r) => r.ref },
       value: (r) => `${r.ref ?? ''} ${r.text}`,
       cell: (r) => (
         <>
@@ -156,9 +177,19 @@ export function ActionsList({
             : 'Nothing outstanding. Yaara writes these out of the meeting notes she reads — if a meeting produced commitments and none are here, check whether she has the document.'
         }
         action={
-          <Link className="rt-add" href={closed ? '/actions' : '/actions?show=closed'}>
-            {closed ? 'Show open' : 'Show closed and dropped'}
-          </Link>
+          <span className="rt-actions">
+            {scope ? (
+              <span className="rt-scope">
+                {scope.label}
+                <a href={scope.clear} title="Show everything">
+                  ×
+                </a>
+              </span>
+            ) : null}
+            <Link className="rt-add" href={toggleHref(closed, scope?.param)}>
+              {closed ? 'Show open' : 'Show closed and dropped'}
+            </Link>
+          </span>
         }
       />
 
@@ -249,4 +280,13 @@ function EditDialog({
       </div>
     </div>
   )
+}
+
+/** The open/closed toggle, carrying any narrowing with it. */
+function toggleHref(closed: boolean, scope: string | undefined): string {
+  const params = new URLSearchParams()
+  if (!closed) params.set('show', 'closed')
+  if (scope) params.set('scope', scope)
+  const q = params.toString()
+  return q ? `/actions?${q}` : '/actions'
 }
