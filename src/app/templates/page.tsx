@@ -44,7 +44,7 @@ export default async function TemplatesPage() {
     <div className="grid gap-4">
       <div>
         <Kicker>Reference</Kicker>
-        <h2 className="m-0 mt-0.5 text-[18px] font-bold tracking-[-0.01em]">Initiative Documents</h2>
+        <h2 className="m-0 mt-0.5 text-[18px] font-bold tracking-[-0.01em]">Project Documents</h2>
       </div>
 
       <SectionNote tone="amber">Make copies of these — do not alter the templates.</SectionNote>

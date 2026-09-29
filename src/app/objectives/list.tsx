@@ -8,6 +8,7 @@
  * you came for meant scrolling past a control you use once a month. It is
  * collapsed now, and the list is the page.
  */
+import { TIER_PLURAL } from '@/lib/home-types'
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { SortableRows, SortPicker } from '@/components/sortable-rows'
@@ -122,7 +123,7 @@ export function ObjectiveList({
           onClick={() => setEditing(!editing)}
           aria-expanded={editing}
         >
-          {editing ? 'Close' : 'Edit Objectives'}
+          {editing ? 'Close' : `Edit ${TIER_PLURAL.objective}`}
         </button>
         <SortPicker sort={sort} />
       </div>

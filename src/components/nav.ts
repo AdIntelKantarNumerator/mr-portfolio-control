@@ -106,7 +106,7 @@ export const NAV: NavSection[] = [
       // answers a real question — who is committed to two things at once —
       // but nobody was opening it, and a reference section is the first place
       // an unused link becomes clutter.
-      { href: '/templates', label: 'Initiative Documents', icon: IconTemplates },
+      { href: '/templates', label: 'Project Documents', icon: IconTemplates },
     ],
   },
   {
