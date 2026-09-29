@@ -17,7 +17,7 @@ import { resolveHealth, computeScore, TSHIRT_WEEKS } from '../src/lib/domain'
 import { applyOverrides, overrideSurvivesSourceChange, type OverrideMap } from '../src/lib/merge'
 import { parseCsv, rowsToObjects, csvUrlFor } from '../src/lib/sources/csv'
 import { verifySlackSignature, parseSlackIntake } from '../src/lib/sources/slack-protocol'
-import { mapInitiativeStatus, mapObjectiveStatus } from '../src/lib/sources/linear-map'
+import { mapProjectStatus, mapInitiativeStatus } from '../src/lib/sources/linear-map'
 import { nextRef, slugify } from '../src/lib/util'
 
 // ---------------------------------------------------------------------------
@@ -280,19 +280,19 @@ describe('Slack intake parsing', () => {
 
 describe('Linear value mapping', () => {
   test('both the legacy state string and the newer status type map to our vocabulary', () => {
-    assert.equal(mapInitiativeStatus('started', null), 'in_progress')
-    assert.equal(mapInitiativeStatus(null, 'started'), 'in_progress')
-    assert.equal(mapInitiativeStatus('completed', null), 'completed')
-    assert.equal(mapInitiativeStatus('cancelled', null), 'canceled')
+    assert.equal(mapProjectStatus('started', null), 'in_progress')
+    assert.equal(mapProjectStatus(null, 'started'), 'in_progress')
+    assert.equal(mapProjectStatus('completed', null), 'completed')
+    assert.equal(mapProjectStatus('cancelled', null), 'canceled')
   })
 
   test('the status object wins over the legacy string when both are present', () => {
-    assert.equal(mapInitiativeStatus('backlog', 'completed'), 'completed')
+    assert.equal(mapProjectStatus('backlog', 'completed'), 'completed')
   })
 
   test('an unknown state falls back to backlog rather than throwing', () => {
-    assert.equal(mapInitiativeStatus('something-new', null), 'backlog')
-    assert.equal(mapObjectiveStatus(undefined), 'planned')
+    assert.equal(mapProjectStatus('something-new', null), 'backlog')
+    assert.equal(mapInitiativeStatus(undefined), 'planned')
   })
 })
 

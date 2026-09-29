@@ -16,38 +16,38 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mapObjectiveStatus } from '../src/lib/sources/linear-map'
+import { mapInitiativeStatus } from '../src/lib/sources/linear-map'
 
 test('the objective status maps from either shape Linear has used', async (t) => {
   await t.test('the old enum string', () => {
-    assert.equal(mapObjectiveStatus('active'), 'active')
-    assert.equal(mapObjectiveStatus('completed'), 'completed')
-    assert.equal(mapObjectiveStatus('canceled'), 'canceled')
-    assert.equal(mapObjectiveStatus('paused'), 'paused')
+    assert.equal(mapInitiativeStatus('active'), 'active')
+    assert.equal(mapInitiativeStatus('completed'), 'completed')
+    assert.equal(mapInitiativeStatus('canceled'), 'canceled')
+    assert.equal(mapInitiativeStatus('paused'), 'paused')
   })
 
   await t.test('the object Linear sends now', () => {
-    assert.equal(mapObjectiveStatus({ name: 'In Progress', type: 'started' }), 'active')
-    assert.equal(mapObjectiveStatus({ name: 'Backlog', type: 'backlog' }), 'planned')
-    assert.equal(mapObjectiveStatus({ name: 'Done', type: 'completed' }), 'completed')
-    assert.equal(mapObjectiveStatus({ name: 'Cancelled', type: 'canceled' }), 'canceled')
+    assert.equal(mapInitiativeStatus({ name: 'In Progress', type: 'started' }), 'active')
+    assert.equal(mapInitiativeStatus({ name: 'Backlog', type: 'backlog' }), 'planned')
+    assert.equal(mapInitiativeStatus({ name: 'Done', type: 'completed' }), 'completed')
+    assert.equal(mapInitiativeStatus({ name: 'Cancelled', type: 'canceled' }), 'canceled')
   })
 
   await t.test('type beats name, because names are workspace-editable', () => {
     // Somebody renaming their "Done" column to "Shipped" must not silently
     // turn every completed objective back into a planned one.
-    assert.equal(mapObjectiveStatus({ name: 'Shipped', type: 'completed' }), 'completed')
+    assert.equal(mapInitiativeStatus({ name: 'Shipped', type: 'completed' }), 'completed')
   })
 
   await t.test('falls back to the name when there is no type', () => {
-    assert.equal(mapObjectiveStatus({ name: 'paused' }), 'paused')
+    assert.equal(mapInitiativeStatus({ name: 'paused' }), 'paused')
   })
 
   await t.test('anything unrecognised is planned, not a crash', () => {
-    assert.equal(mapObjectiveStatus(undefined), 'planned')
-    assert.equal(mapObjectiveStatus(null), 'planned')
-    assert.equal(mapObjectiveStatus({}), 'planned')
-    assert.equal(mapObjectiveStatus('something new they added'), 'planned')
+    assert.equal(mapInitiativeStatus(undefined), 'planned')
+    assert.equal(mapInitiativeStatus(null), 'planned')
+    assert.equal(mapInitiativeStatus({}), 'planned')
+    assert.equal(mapInitiativeStatus('something new they added'), 'planned')
   })
 })
 

@@ -38,9 +38,9 @@ import {
 import { logChange } from '../portfolio'
 import { slugify } from '../util'
 import {
-  mapObjectiveStatus,
-  mapPriority,
   mapInitiativeStatus,
+  mapPriority,
+  mapProjectStatus,
   normaliseProgress,
   parseLinearDate as date,
 } from './linear-map'
@@ -176,8 +176,8 @@ export async function introspect(): Promise<LinearCapabilities> {
 // ---------------------------------------------------------------------------
 
 export {
+  mapProjectStatus,
   mapInitiativeStatus,
-  mapObjectiveStatus,
   mapPriority,
   normaliseProgress,
 } from './linear-map'
@@ -610,7 +610,7 @@ export async function upsertObjective(n: Record<string, unknown>, counters: Coun
   const values = {
     name: n.name as string,
     description: (n.description as string) ?? null,
-    status: mapObjectiveStatus(n.status as string | { name?: string; type?: string } | null),
+    status: mapInitiativeStatus(n.status as string | { name?: string; type?: string } | null),
     startDate: date(n.startedAt as string),
     targetDate: date(n.targetDate as string),
     ownerId: ownerLocal?.entityId ?? null,
@@ -660,7 +660,7 @@ export async function upsertInitiative(n: Record<string, unknown>, counters: Cou
   const values = {
     name: n.name as string,
     description: (n.description as string) ?? null,
-    status: mapInitiativeStatus(n.state as string, statusObj?.type),
+    status: mapProjectStatus(n.state as string, statusObj?.type),
     priority: mapPriority(n.priority as number),
     progress: normaliseProgress(n.progress),
     sourceHealth: (n.health as string) ?? null,

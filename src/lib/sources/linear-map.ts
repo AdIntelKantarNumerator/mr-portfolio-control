@@ -9,7 +9,7 @@
  * meaning. The status object wins when both are present, because it is the
  * field Linear is moving towards; the rest of the app never sees either shape.
  */
-export function mapInitiativeStatus(state?: string | null, statusType?: string | null): string {
+export function mapProjectStatus(state?: string | null, statusType?: string | null): string {
   const v = (statusType ?? state ?? '').toLowerCase()
   switch (v) {
     case 'backlog':
@@ -46,7 +46,7 @@ export function mapInitiativeStatus(state?: string | null, statusType?: string |
  * is preferred over `name` because names are workspace-editable and types are
  * the fixed vocabulary.
  */
-export function mapObjectiveStatus(v?: string | null | { name?: string; type?: string }): string {
+export function mapInitiativeStatus(v?: string | null | { name?: string; type?: string }): string {
   const raw = typeof v === 'string' || v == null ? v : (v.type ?? v.name)
   switch ((raw ?? '').toLowerCase()) {
     // The object form's `type` vocabulary, which the enum did not have.
