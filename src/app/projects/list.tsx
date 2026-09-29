@@ -18,6 +18,7 @@
  */
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import { SortableRows, SortPicker } from '@/components/sortable-rows'
 import { NextMilestoneRing, edgeColor, shortMilestone } from '@/components/ring'
 import { Editable } from '@/components/editable'
 import { HealthEditable } from '@/components/health-editable'
@@ -101,9 +102,12 @@ const STATUS_WORD = new Map([...PROJECT_STATUS, ...WORKSTREAM_STATUS].map((s) =>
 export function ProjectList({
   rows,
   people,
+  sort,
 }: {
   rows: ProjectRow[]
   people: { id: string; name: string }[]
+  /** The sort the page applied; 'custom' is the one you can drag under. */
+  sort: string
 }) {
   const [find, setFind] = useState('')
   const [showEnded, setShowEnded] = useState(false)
@@ -156,6 +160,7 @@ export function ProjectList({
             </select>
           </span>
         </label>
+        <SortPicker sort={sort} />
       </div>
 
       {shown.length === 0 ? (
@@ -169,7 +174,12 @@ export function ProjectList({
         </div>
       ) : (
         <div className="ilist">
-          {shown.map((r) => {
+          <SortableRows
+            ids={shown.map((r) => r.id)}
+            level="project"
+            draggable={sort === 'custom'}
+            render={(id) => {
+            const r = shown.find((x) => x.id === id)!
             const edge =
               edgeColor(r.health, (r.next?.expected ?? 0) - (r.next?.pct ?? 0), r.rag) ??
               STATUS_TONE[r.status] ??
@@ -265,7 +275,8 @@ export function ProjectList({
                 </div>
               </div>
             )
-          })}
+            }}
+          />
         </div>
       )}
 

@@ -13,6 +13,7 @@
  */
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import { SortableRows, SortPicker } from '@/components/sortable-rows'
 import { NextMilestoneRing, edgeColor, shortMilestone } from '@/components/ring'
 import { Editable } from '@/components/editable'
 import { HealthEditable } from '@/components/health-editable'
@@ -87,8 +88,11 @@ const PRIORITY_WORD = new Map(PRIORITY.map((s) => [s.value, s.label]))
 export function WorkstreamList({
   rows,
   people,
+  sort,
 }: {
   rows: WsListRow[]
+  /** The sort the page applied; 'custom' is the one you can drag under. */
+  sort: string
   people: { id: string; name: string }[]
 }) {
   const [find, setFind] = useState('')
@@ -108,13 +112,18 @@ export function WorkstreamList({
           (r.project?.name ?? '').toLowerCase().includes(q)
         )
       })
+      // Status order is the DEFAULT, not an override: the page now has a Sort
+      // By picker, and a list that re-sorted underneath it would make the
+      // control look broken. `rows` already arrives in the order the picker
+      // asked for, so anything other than the default is left alone.
       .sort((a, b) => {
+        if (sort !== 'active') return 0
         const ra = STATUS_RANK[a.status] ?? 99
         const rb = STATUS_RANK[b.status] ?? 99
         if (ra !== rb) return ra - rb
         return a.name.localeCompare(b.name)
       })
-  }, [rows, find, showEnded, loose])
+  }, [rows, find, showEnded, loose, sort])
 
   const orphans = rows.filter((r) => !r.project && !ENDED.has(r.status)).length
   const hidden = rows.length - shown.length
@@ -159,6 +168,7 @@ export function WorkstreamList({
             </span>
           </button>
         )}
+        <SortPicker sort={sort} />
       </div>
 
       {shown.length === 0 ? (
@@ -172,7 +182,12 @@ export function WorkstreamList({
         </div>
       ) : (
         <div className="ilist">
-          {shown.map((r) => {
+          <SortableRows
+            ids={shown.map((r) => r.id)}
+            level="workstream"
+            draggable={sort === 'custom'}
+            render={(id) => {
+            const r = shown.find((x) => x.id === id)!
             const edge =
               edgeColor(r.pace, (r.next?.expected ?? 0) - (r.next?.pct ?? 0), r.health.rag) ??
               STATUS_TONE[r.status] ??
@@ -310,7 +325,8 @@ export function WorkstreamList({
                 </div>
               </div>
             )
-          })}
+            }}
+          />
         </div>
       )}
 
