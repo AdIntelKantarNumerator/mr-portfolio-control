@@ -57,17 +57,34 @@ export function Ring({ pct, expected, color }: { pct: number; expected: number; 
 }
 
 /**
- * How far behind the calendar says this is, as a colour.
+ * The health of a piece of work, as a colour.
+ *
+ * WHY IT NO LONGER COLOURS BY THE GAP
+ *
+ * It took `health` and ignored it, except to paint quiet work grey; the colour
+ * came entirely from `behind` — the distance between the ring's number and the
+ * plan line. That worked while the number was a fixed figure per status, and
+ * stopped working the moment the ring started showing the plan itself where
+ * nothing has been counted: the gap is then always zero, so every ring came
+ * out green. A card could be blocked, say so in its own status pill, and still
+ * draw a green ring beside it.
+ *
+ * The health is already the answer. It is computed in one place from the
+ * milestone's status, the blockers under it, whether anything is overdue and —
+ * where a checklist exists — the gap itself. Recomputing a worse version of it
+ * here was how the two came to disagree.
  *
  * Quiet work gets the neutral line colour rather than green: nobody has
  * touched it, so "on track" would be a claim the evidence does not support.
- * Everything else is the gap between done and due — four points is noise,
- * fifteen is a conversation.
+ *
+ * `behind` is kept in the signature and is still honoured as an escalation, so
+ * a counted ring that has fallen a long way behind cannot read as merely
+ * warning.
  */
 export function paceColor(health: 'good' | 'warn' | 'crit' | 'quiet', behind: number): string {
   if (health === 'quiet') return 'var(--line-2)'
-  if (behind > 15) return 'var(--crit)'
-  if (behind > 4) return 'var(--warn)'
+  if (health === 'crit' || behind > 15) return 'var(--crit)'
+  if (health === 'warn' || behind > 4) return 'var(--warn)'
   return 'var(--good)'
 }
 
