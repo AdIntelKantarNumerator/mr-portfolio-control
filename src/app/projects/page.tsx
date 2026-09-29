@@ -11,6 +11,8 @@
  * was an answer to anything; all of it was between the reader and the rows.
  */
 import { Kicker } from '@/components/ui'
+import { cookies } from 'next/headers'
+import { HOME_PREFS_COOKIE, resolveHomePrefs } from '@/lib/home-prefs'
 import { getPortfolio } from '@/lib/portfolio'
 import { getHomeCards } from '@/lib/home'
 import { ProjectList, type ProjectRow } from './list'
@@ -20,14 +22,30 @@ export const dynamic = 'force-dynamic'
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null)
 
-export default async function ProjectsPage() {
+export default async function ProjectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string }>
+}) {
+  // The same four sorts as the home board, read the same way, so the order a
+  // reader arranged in one place is the order they get in the other.
+  const [{ sort: asked }, jar] = await Promise.all([searchParams, cookies()])
+  const prefs = resolveHomePrefs({ sort: asked }, jar.get(HOME_PREFS_COOKIE)?.value)
   // The home board's own computation, reused rather than repeated: a ring
   // that means one thing here and another there is worse than no ring.
-  const [p, cards] = await Promise.all([getPortfolio(), getHomeCards('project')])
+  const [p, cards] = await Promise.all([getPortfolio(), getHomeCards('project', prefs.sort)])
 
   const cardById = new Map(cards.map((c) => [c.id, c]))
 
-  const rows: ProjectRow[] = p.projects.map((i) => {
+  // In the order the sort produced. `p.projects` is alphabetical, so without
+  // this the picker would change nothing — which is the shape of bug that
+  // makes a reader stop trusting a control.
+  const rank = new Map(cards.map((c, ix) => [c.id, ix]))
+  const ordered = [...p.projects].sort(
+    (a, b) => (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9) || a.name.localeCompare(b.name),
+  )
+
+  const rows: ProjectRow[] = ordered.map((i) => {
     const card = cardById.get(i.id)
     const start = i.startDate ?? i.derivedStart
     const target = i.targetDate ?? i.derivedTarget
@@ -74,7 +92,7 @@ export default async function ProjectsPage() {
         <h1>Projects</h1>
       </div>
 
-      <ProjectList rows={rows} people={p.people.map((x) => ({ id: x.id, name: x.name }))} />
+      <ProjectList rows={rows} people={p.people.map((x) => ({ id: x.id, name: x.name }))} sort={prefs.sort} />
     </div>
   )
 }

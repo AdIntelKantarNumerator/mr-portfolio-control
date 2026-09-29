@@ -12,6 +12,8 @@
  * read differently.
  */
 import { Kicker } from '@/components/ui'
+import { cookies } from 'next/headers'
+import { HOME_PREFS_COOKIE, resolveHomePrefs } from '@/lib/home-prefs'
 import { getPortfolio } from '@/lib/portfolio'
 import { getHomeCards } from '@/lib/home'
 import { WorkstreamList, type WsListRow } from './list'
@@ -21,13 +23,28 @@ export const dynamic = 'force-dynamic'
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null)
 
-export default async function WorkstreamsPage() {
-  const [p, cards] = await Promise.all([getPortfolio(), getHomeCards('workstream')])
+export default async function WorkstreamsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string }>
+}) {
+  // The same four sorts as the home board, read the same way, so the order a
+  // reader arranged in one place is the order they get in the other.
+  const [{ sort: asked }, jar] = await Promise.all([searchParams, cookies()])
+  const prefs = resolveHomePrefs({ sort: asked }, jar.get(HOME_PREFS_COOKIE)?.value)
+  const [p, cards] = await Promise.all([getPortfolio(), getHomeCards('workstream', prefs.sort)])
 
   const cardById = new Map(cards.map((c) => [c.id, c]))
   const projectById = new Map(p.projects.map((i) => [i.id, i]))
 
-  const rows: WsListRow[] = p.workstreams.map((w) => {
+  // In the order the sort produced. The source list is alphabetical, so
+  // without this the picker would change nothing — which is the shape of bug
+  // that makes a reader stop trusting a control.
+  const rank = new Map(cards.map((c, ix) => [c.id, ix]))
+  const byRank = <T extends { id: string; name: string }>(a: T, b: T) =>
+    (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9) || a.name.localeCompare(b.name)
+
+  const rows: WsListRow[] = [...p.workstreams].sort(byRank).map((w) => {
     const card = cardById.get(w.id)
     const parent = w.projectId ? projectById.get(w.projectId) : null
     return {
@@ -61,7 +78,7 @@ export default async function WorkstreamsPage() {
         <h1>Workstreams</h1>
       </div>
 
-      <WorkstreamList rows={rows} people={p.people.map((x) => ({ id: x.id, name: x.name }))} />
+      <WorkstreamList sort={prefs.sort} rows={rows} people={p.people.map((x) => ({ id: x.id, name: x.name }))} />
     </div>
   )
 }
