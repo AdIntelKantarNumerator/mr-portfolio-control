@@ -22,7 +22,8 @@
     "check:drift": "tsx scripts/check-schema-drift.ts",
     "check:agent-writes": "tsx scripts/check-agent-writes.ts",
     "check:grouping": "tsx scripts/check-grouping.ts",
-    "check:objective-lifecycle": "tsx scripts/check-objective-lifecycle.ts"
+    "check:objective-lifecycle": "tsx scripts/check-objective-lifecycle.ts",
+    "check:discussions": "tsx scripts/check-discussion-resolve.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

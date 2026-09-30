@@ -1460,6 +1460,15 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .disc-edit:hover { color: var(--brand); background: var(--surface-2); }
 .disc-none { color: var(--muted); border-style: dashed; }
 .disc-edited { margin: 5px 0 0 !important; font-size: 11.5px !important; color: var(--accent) !important; }
+/* Resolving: a quiet button on the row, a filter above the list, and a
+   resolved row dimmed when shown so it cannot be mistaken for a live one. */
+.disc-resolve { border: 1px solid var(--line); background: var(--surface); font-size: 11px; font-weight: 650; color: var(--muted); cursor: pointer; padding: 1px 8px; border-radius: 6px; }
+.disc-resolve:hover { color: var(--brand); border-color: var(--brand); }
+.disc-resolve:disabled { opacity: .5; cursor: default; }
+.disc-filter { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; font-size: 12.5px; color: var(--muted); }
+.disc-filter label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.disc-resolved { opacity: .6; }
+.disc-back { color: var(--amber) !important; }
 .modal textarea { width: 100%; font: inherit; font-size: 14px; line-height: 1.5; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--ink); resize: vertical; }
 .dhead-edit { border: 1px solid var(--line-2); background: var(--surface); border-radius: 8px; font: inherit; font-size: 11.5px; font-weight: 650; color: var(--muted); padding: 4px 10px; cursor: pointer; }
 .dhead-edit:hover { border-color: var(--brand); color: var(--brand); }

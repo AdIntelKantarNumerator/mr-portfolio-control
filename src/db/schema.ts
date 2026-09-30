@@ -848,6 +848,15 @@ export const entityThemes = pgTable(
     editedBy: text('edited_by'),
     editedAt: timestamp('edited_at', { withTimezone: true }),
     editedFields: text('edited_fields'),
+    /**
+     * Settled, as far as anybody knows. Hidden from the Discussions page by
+     * default, never deleted. A mention dated after this clears it and sets
+     * `reopenedAt`: something that comes up again was not settled. See
+     * drizzle/0020_theme_resolved.sql.
+     */
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolvedBy: text('resolved_by'),
+    reopenedAt: timestamp('reopened_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

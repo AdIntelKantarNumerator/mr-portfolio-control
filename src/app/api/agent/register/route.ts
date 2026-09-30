@@ -404,6 +404,10 @@ export async function POST(req: Request) {
           lastMeeting: document.title,
           lastDocumentId: document.id,
           updatedAt: new Date(),
+          // Resolved, then discussed again: it was not resolved. Only a
+          // mention dated after the resolution counts — re-reading an older or
+          // undated document says nothing about what happened since.
+          ...(occurredAt ? reopenIfMentionedAfter(occurredAt) : {}),
         },
       })
     themesWritten++
@@ -543,4 +547,15 @@ export async function GET(req: Request) {
         lastMeeting: t.lastMeeting,
       })),
   })
+}
+
+/** The upsert columns that bring a resolved topic back when it comes up again. */
+function reopenIfMentionedAfter(mentioned: Date) {
+  const at = mentioned.toISOString()
+  const after = sql`${entityThemes.resolvedAt} IS NOT NULL AND ${entityThemes.resolvedAt} < ${at}::timestamptz`
+  return {
+    resolvedAt: sql`CASE WHEN ${after} THEN NULL ELSE ${entityThemes.resolvedAt} END`,
+    resolvedBy: sql`CASE WHEN ${after} THEN NULL ELSE ${entityThemes.resolvedBy} END`,
+    reopenedAt: sql`CASE WHEN ${after} THEN now() ELSE ${entityThemes.reopenedAt} END`,
+  }
 }

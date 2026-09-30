@@ -27,7 +27,7 @@ const HREF: Record<string, string> = {
 }
 
 export default async function DiscussionsPage() {
-  const [themes, inits, projs, wss] = await Promise.all([
+  const [recent, inits, projs, wss] = await Promise.all([
     recentThemes(60),
     db.select({ id: objectives.id, name: objectives.name }).from(objectives).orderBy(asc(objectives.name)),
     db.select({ id: initiatives.id, name: initiatives.name }).from(initiatives).orderBy(asc(initiatives.name)),
@@ -38,6 +38,9 @@ export default async function DiscussionsPage() {
   for (const i of inits) named.set(`objective:${i.id}`, i.name)
   for (const p of projs) named.set(`initiative:${p.id}`, p.name)
   for (const w of wss) named.set(`project:${w.id}`, w.name)
+
+  const themes = [...recent.open, ...recent.resolved]
+  const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null)
 
   const topics: TopicRow[] = themes.map((t) => {
     const key = t.entityId ? `${t.entityType}:${t.entityId}` : ''
@@ -55,6 +58,9 @@ export default async function DiscussionsPage() {
       href: where && HREF[t.entityType] ? `${HREF[t.entityType]}/${t.entityId}` : null,
       editedBy: t.editedBy,
       editedAt: t.editedAt ? t.editedAt.toISOString().slice(0, 10) : null,
+      resolvedAt: day(t.resolvedAt),
+      resolvedBy: t.resolvedBy,
+      reopenedAt: day(t.reopenedAt),
     }
   })
 

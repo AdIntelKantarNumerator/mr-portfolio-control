@@ -7,7 +7,7 @@
  * in exactly one place.
  */
 import { cache } from 'react'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { db } from '@/db/client'
 import {
   allocations,
@@ -559,8 +559,16 @@ export async function logChange(entry: {
  * the database — a record of what came up, not a thing anyone is accountable
  * for — so a page that needs them asks for them.
  */
+/**
+ * Recent topics, open and resolved fetched separately so a page of resolved
+ * ones never pushes the live ones past the limit.
+ */
 export async function recentThemes(limit = 24) {
-  return db.select().from(entityThemes).orderBy(desc(entityThemes.lastSeenAt)).limit(limit)
+  const [open, resolved] = await Promise.all([
+    db.select().from(entityThemes).where(isNull(entityThemes.resolvedAt)).orderBy(desc(entityThemes.lastSeenAt)).limit(limit),
+    db.select().from(entityThemes).where(isNotNull(entityThemes.resolvedAt)).orderBy(desc(entityThemes.resolvedAt)).limit(limit),
+  ])
+  return { open, resolved }
 }
 
 /**

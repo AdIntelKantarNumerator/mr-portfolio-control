@@ -105,3 +105,46 @@ export async function editTopic(input: {
 
   return { ok: true, stamp: Date.now(), message: 'Saved.' }
 }
+
+/**
+ * Mark a topic resolved, or bring it back.
+ *
+ * Resolved hides it from the page by default; it is never deleted, and it
+ * comes back on its own if a later meeting raises it again (see the register
+ * route). Bringing it back by hand clears the "came up again" note too: a
+ * person reopening it is a fresh start, not a recurrence.
+ */
+export async function setTopicResolved(input: { id: string; resolved: boolean }): Promise<TopicState> {
+  const [row] = await db.select().from(entityThemes).where(eq(entityThemes.id, input.id)).limit(1)
+  if (!row) return { error: 'That topic no longer exists — reload the page.' }
+  if (Boolean(row.resolvedAt) === input.resolved) {
+    return { ok: true, stamp: Date.now(), message: input.resolved ? 'Already resolved.' : 'Already open.' }
+  }
+
+  const who = await actorName()
+  await db
+    .update(entityThemes)
+    .set(
+      input.resolved
+        ? { resolvedAt: new Date(), resolvedBy: who, updatedAt: new Date() }
+        : { resolvedAt: null, resolvedBy: null, reopenedAt: null, updatedAt: new Date() },
+    )
+    .where(eq(entityThemes.id, input.id))
+
+  await logChange({
+    actor: who,
+    kind: 'change',
+    summary: `Discussion topic ${input.resolved ? 'resolved' : 'reopened'}: ${row.theme.slice(0, 80)}`,
+    entityType: row.entityType || null,
+    entityId: row.entityId || null,
+  })
+
+  try {
+    revalidatePath('/discussions')
+    revalidatePath('/changes')
+  } catch (err) {
+    if (!(err instanceof Error) || !/static generation store/i.test(err.message)) throw err
+  }
+
+  return { ok: true, stamp: Date.now(), message: input.resolved ? 'Resolved.' : 'Reopened.' }
+}

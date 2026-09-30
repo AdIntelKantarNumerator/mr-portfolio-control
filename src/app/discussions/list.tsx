@@ -21,7 +21,7 @@
 import { TIER_PLURAL } from '@/lib/home-types'
 import { useState } from 'react'
 import Link from 'next/link'
-import { editTopic, type TopicState } from './actions'
+import { editTopic, setTopicResolved, type TopicState } from './actions'
 
 export interface TopicRow {
   id: string
@@ -34,6 +34,11 @@ export interface TopicRow {
   href: string | null
   editedBy: string | null
   editedAt: string | null
+  /** Set when somebody marked it settled; hidden by default then. */
+  resolvedAt: string | null
+  resolvedBy: string | null
+  /** It was resolved, then came up again in a later meeting. */
+  reopenedAt: string | null
 }
 
 export interface Named {
@@ -53,6 +58,22 @@ export function DiscussionsList({
   projects: Named[]
 }) {
   const [editing, setEditing] = useState<TopicRow | null>(null)
+  const [showResolved, setShowResolved] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const resolvedCount = topics.filter((t) => t.resolvedAt).length
+  const shown = showResolved ? topics : topics.filter((t) => !t.resolvedAt)
+
+  async function toggle(t: TopicRow) {
+    setBusy(t.id)
+    setError(null)
+    const res = await setTopicResolved({ id: t.id, resolved: !t.resolvedAt }).catch(
+      (): TopicState => ({ error: 'That could not be saved.' }),
+    )
+    setBusy(null)
+    if (res.error) setError(res.error)
+  }
 
   if (topics.length === 0) {
     return (
@@ -65,9 +86,29 @@ export function DiscussionsList({
 
   return (
     <>
+      <div className="disc-filter">
+        {/* Resolved topics are hidden, not gone: settled in the room and never
+            recorded anywhere, they would otherwise crowd out what is live. */}
+        <label>
+          <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
+          Show resolved{resolvedCount ? ` (${resolvedCount})` : ''}
+        </label>
+        {error ? (
+          <span className="mr-said mr-bad" role="alert">
+            {error}
+          </span>
+        ) : null}
+      </div>
+
+      {shown.length === 0 ? (
+        <p className="tile-empty">
+          Every recurring topic is marked resolved. Tick “Show resolved” to see them.
+        </p>
+      ) : null}
+
       <ul className="disc">
-        {topics.map((t) => (
-          <li key={t.id}>
+        {shown.map((t) => (
+          <li key={t.id} className={t.resolvedAt ? 'disc-resolved' : undefined}>
             <div className="disc-head">
               <b>{t.theme}</b>
               {t.where ? (
@@ -90,12 +131,28 @@ export function DiscussionsList({
               >
                 ✎
               </button>
+              <button
+                type="button"
+                className="disc-resolve"
+                onClick={() => toggle(t)}
+                disabled={busy === t.id}
+                title={t.resolvedAt ? 'Show it in the default list again' : 'Settled — hide it from the default list'}
+              >
+                {busy === t.id ? '…' : t.resolvedAt ? 'Reopen' : 'Resolve'}
+              </button>
               <em>
                 {t.mentions === 1 ? 'mentioned once' : `${t.mentions} mentions`}
                 {t.lastMeeting ? ` · last in ${t.lastMeeting}` : ''}
               </em>
             </div>
             {t.summary ? <p>{t.summary}</p> : null}
+            {t.resolvedAt ? (
+              <p className="disc-edited">
+                Resolved{t.resolvedBy ? ` by ${t.resolvedBy}` : ''} on {t.resolvedAt}
+              </p>
+            ) : t.reopenedAt ? (
+              <p className="disc-edited disc-back">Came up again after being resolved — {t.reopenedAt}</p>
+            ) : null}
             {t.editedBy ? (
               <p className="disc-edited">
                 Edited by {t.editedBy}
