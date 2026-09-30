@@ -24,6 +24,7 @@
 import Link from 'next/link'
 import { Kicker } from './ui'
 import { Editable } from './editable'
+import { isEnded } from '@/lib/domain'
 
 export interface DetailHeadProps {
   /** The tier, and where its list lives: shown as the kicker. */
@@ -62,19 +63,30 @@ export function DetailHead({ tier, name, parent, orphan, status, pills, edit, ch
 
       <div className="dhead-line">
         <h1>{name}</h1>
-        {status && (
-          <Editable
-            level={status.level}
-            id={status.id}
-            field="status"
-            kind="choice"
-            options={status.options}
-            raw={status.value}
-            value={status.label}
-            className="dstatus"
-            before={<i style={{ background: status.tone }} aria-hidden="true" />}
-          />
-        )}
+        {status &&
+          // Ended work shows its state but cannot be changed from here: the
+          // way back is Reopen on the lifecycle control below, which asks why.
+          // Live work offers live states only, for the same reason.
+          (isEnded(status.value) ? (
+            <span className="ed dstatus">
+              <span className="ed-val fixed" title="Reopen it below to change this">
+                <i style={{ background: status.tone }} aria-hidden="true" />
+                {status.label}
+              </span>
+            </span>
+          ) : (
+            <Editable
+              level={status.level}
+              id={status.id}
+              field="status"
+              kind="choice"
+              options={status.options.filter((o) => !isEnded(o.value))}
+              raw={status.value}
+              value={status.label}
+              className="dstatus"
+              before={<i style={{ background: status.tone }} aria-hidden="true" />}
+            />
+          ))}
         {pills}
         {edit ? <span className="dhead-right">{edit}</span> : null}
       </div>

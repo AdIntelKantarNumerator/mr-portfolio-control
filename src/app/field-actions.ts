@@ -25,7 +25,7 @@ import { revalidatePath } from 'next/cache'
 import { asc, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { objectives, people, initiatives, projects } from '@/db/schema'
-import { isLevel, isSameValue, parseDate, parsePercent, specFor } from '@/lib/field-rules'
+import { isLevel, isSameValue, parseDate, parsePercent, pillMayChangeStatus, specFor } from '@/lib/field-rules'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
 import { closest, exact } from '@/lib/match-name'
@@ -106,6 +106,10 @@ export async function setField(_prev: FieldState, formData: FormData): Promise<F
   }
 
   if (isSameValue(before, value)) return { ok: true, stamp: Date.now(), message: 'Unchanged.' }
+
+  if (field === 'status' && !pillMayChangeStatus(before as string | null, value as string)) {
+    return { error: 'Closing, withdrawing and reopening ask for a reason — use Close or withdraw… on its page.' }
+  }
 
   await db
     .update(table)

@@ -24,7 +24,7 @@ import { rollUpWindow } from '@/lib/rollup-window'
 import { calendarRange } from '@/lib/calendar-date'
 import { LifecycleControl } from '@/app/lifecycle/control'
 import { objectiveFootprint } from '@/lib/objective-footprint'
-import { describeRemoval } from '@/lib/objective-delete'
+import { deleteBlockers, describeRemoval } from '@/lib/objective-delete'
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null)
 // What a <input type="date"> takes; empty means nobody typed one, so that end
@@ -72,12 +72,18 @@ export default async function ObjectiveDetailPage({ params }: { params: Promise<
 
   const live = mine.filter((x) => !isEnded(x.status))
 
-  // Delete is offered only when nothing is filed under it; the action checks
-  // again, because this page can be minutes old by the time somebody clicks.
-  const deletion =
-    user.personId && mine.length === 0
-      ? { name: row.name, summary: describeRemoval(await objectiveFootprint(id)) }
-      : undefined
+  // Delete is always offered to editors, and says what has to move first when
+  // something blocks it: a button that only appears on empty objectives is one
+  // nobody finds. The action checks again, because this page can be minutes
+  // old by the time somebody clicks.
+  const footprint = user.personId ? await objectiveFootprint(id) : null
+  const deletion = footprint
+    ? {
+        name: row.name,
+        summary: describeRemoval(footprint),
+        blockers: deleteBlockers({ initiativeCount: footprint.initiatives, decisionCount: footprint.decisions }),
+      }
+    : undefined
 
   /*
    * The window, rolled up the one way.

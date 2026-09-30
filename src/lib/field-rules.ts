@@ -7,7 +7,7 @@
  * controls, the agent API and anything added later all read the same table
  * rather than each re-deciding what a valid status is.
  */
-import { PRIORITY, INITIATIVE_STATUS, OBJECTIVE_STATUS, PROJECT_STATUS_SET } from './domain'
+import { PRIORITY, INITIATIVE_STATUS, OBJECTIVE_STATUS, PROJECT_STATUS_SET, isEnded } from './domain'
 
 export interface FieldSpec {
   /** The column it lands in. */
@@ -112,4 +112,17 @@ export function isSameValue(before: unknown, after: unknown): boolean {
   const a = before === undefined || before === '' ? null : before
   const b = after === undefined || after === '' ? null : after
   return a === b
+}
+
+/**
+ * Whether click-to-edit may make this status change.
+ *
+ * Only between live states. Ending work and bringing it back are decisions
+ * somebody should be able to explain later, so they go through the lifecycle
+ * control, which asks why (app/lifecycle). A pill that could close something
+ * in one click was a second, unguarded way to do the same thing, and every
+ * closure made that way reached the changelog with no reason.
+ */
+export function pillMayChangeStatus(before: string | null | undefined, after: string): boolean {
+  return !isEnded(before) && !isEnded(after)
 }

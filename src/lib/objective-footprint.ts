@@ -26,7 +26,7 @@ import {
   statusUpdates,
   transcripts,
 } from '@/db/schema'
-import type { RemovalCounts } from './objective-delete'
+import { deleteBlockers, type RemovalCounts } from './objective-delete'
 
 const OBJ = 'objective'
 
@@ -37,7 +37,9 @@ async function n(q: Promise<{ n: number }[]>): Promise<number> {
   return Number(row?.n ?? 0)
 }
 
-export async function objectiveFootprint(id: string): Promise<RemovalCounts & { initiatives: number }> {
+export async function objectiveFootprint(
+  id: string,
+): Promise<RemovalCounts & { initiatives: number; decisions: number }> {
   const [inits, ms, links, assess, obs, updates, sources, decs] = await Promise.all([
     n(db.select({ n: count() }).from(initiatives).where(eq(initiatives.objectiveId, id))),
     n(db.select({ n: count() }).from(milestones).where(and(eq(milestones.level, OBJ), eq(milestones.entityId, id)))),
@@ -75,15 +77,29 @@ export async function objectiveFootprint(id: string): Promise<RemovalCounts & { 
   }
 }
 
+/** Thrown inside the transaction when something was filed since the check. */
+export class DeleteBlocked extends Error {}
+
 /**
  * Remove the objective's own records, inside the caller's transaction.
  *
- * Decisions and blockers are unfiled rather than deleted: the register is a
- * record of what was decided, with refs people quote in meetings ("D14"), and
- * an unfiled entry is a state the register already has. The changelog is
- * never touched, because it is how anyone finds out this objective existed.
+ * Initiatives and decisions are counted again first, in the transaction: the
+ * action's check ran a moment earlier, and somebody may have filed a decision
+ * here since. Anything found aborts the whole delete rather than being swept
+ * up with it. See lib/objective-delete.ts for why neither is ever removed.
+ *
+ * The changelog is never touched, because it is how anyone finds out this
+ * objective existed.
  */
 export async function removeObjectiveRecords(tx: Tx, id: string): Promise<void> {
+  const [inits] = await tx.select({ n: count() }).from(initiatives).where(eq(initiatives.objectiveId, id))
+  const [decs] = await tx
+    .select({ n: count() })
+    .from(decisions)
+    .where(and(eq(decisions.entityType, OBJ), eq(decisions.entityId, id)))
+  const blocked = deleteBlockers({ initiativeCount: Number(inits?.n ?? 0), decisionCount: Number(decs?.n ?? 0) })
+  if (blocked) throw new DeleteBlocked(blocked)
+
   await tx.delete(milestones).where(and(eq(milestones.level, OBJ), eq(milestones.entityId, id)))
   await tx.delete(actionItemLinks).where(and(eq(actionItemLinks.level, OBJ), eq(actionItemLinks.entityId, id)))
   await tx.delete(assessments).where(and(eq(assessments.entityType, OBJ), eq(assessments.entityId, id)))
@@ -96,10 +112,6 @@ export async function removeObjectiveRecords(tx: Tx, id: string): Promise<void> 
   await tx.delete(conversationSources).where(and(eq(conversationSources.entityType, OBJ), eq(conversationSources.entityId, id)))
   await tx.delete(briefs).where(and(eq(briefs.entityType, OBJ), eq(briefs.entityId, id)))
   await tx.delete(dateObservations).where(and(eq(dateObservations.entityType, OBJ), eq(dateObservations.entityId, id)))
-  await tx
-    .update(decisions)
-    .set({ entityType: null, entityId: null, updatedAt: new Date() })
-    .where(and(eq(decisions.entityType, OBJ), eq(decisions.entityId, id)))
   // The suggestion keeps its history; it just no longer points at something gone.
   await tx.update(groupingSuggestions).set({ objectiveId: null }).where(eq(groupingSuggestions.objectiveId, id))
 }

@@ -73,8 +73,11 @@ export function LifecycleControl({
   status: string
   /** Live initiatives beneath an objective, which ending it takes off the home page. */
   liveChildren?: number
-  /** Objectives only, and only when nothing is filed under it. */
-  deletion?: { name: string; summary: string }
+  /**
+   * Objectives only. `blockers` says what has to move before it can go; while
+   * it is set the panel explains that instead of asking for the name.
+   */
+  deletion?: { name: string; summary: string; blockers: string | null }
 }) {
   const [open, setOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -82,9 +85,12 @@ export function LifecycleControl({
   const [state, action, pending] = useActionState<LifecycleState, FormData>(setLifecycle, {})
 
   const ended = isEnded(status)
-  const statuses = STATUSES[kind]
+  // Live work is only ever ended here: moving between live states is the
+  // pill's job, which keeps the two controls from being two ways to do one
+  // thing. Ended work can go anywhere but where it is.
+  const statuses = STATUSES[kind].filter((s) => (ended ? s !== status : isEnded(s)))
   const back = reopenedStatus(kind)
-  const chosen = picked ?? (ended ? back : status)
+  const chosen = picked ?? (ended ? back : statuses[0])
 
   if (deleting && deletion) {
     return <DeleteObjective id={id} {...deletion} onCancel={() => setDeleting(false)} />
@@ -117,7 +123,7 @@ export function LifecycleControl({
     return (
       <div className="no-print flex items-center gap-2">
         <Btn type="button" onClick={() => setOpen(true)}>
-          {kind === 'objective' ? 'Close, withdraw or change status…' : 'Change status…'}
+          Close or withdraw…
         </Btn>
         {del}
       </div>
@@ -165,8 +171,8 @@ export function LifecycleControl({
         className={field}
         placeholder={
           ended
-            ? 'Why is it coming back?'
-            : 'Why — required when closing or withdrawing, optional otherwise.'
+            ? 'Why is it coming back? Required when reopening.'
+            : 'Why is it ending? Required.'
         }
       />
       <div className="flex items-center gap-2">
@@ -193,16 +199,40 @@ function DeleteObjective({
   id,
   name,
   summary,
+  blockers,
   onCancel,
 }: {
   id: string
   name: string
   summary: string
+  blockers: string | null
   onCancel: () => void
 }) {
   const [typed, setTyped] = useState('')
   const [state, action, pending] = useActionState<GroupState, FormData>(deleteObjective, {})
   const matches = typed.trim() === name.trim()
+
+  // Something has to move first. Said plainly, with where to do it, and with
+  // nothing to type or click that could look like it might work anyway.
+  if (blockers) {
+    return (
+      <div
+        className="no-print flex flex-col gap-1.5 rounded-md border px-3 py-2.5"
+        style={{ background: 'var(--raised)', borderColor: 'var(--line)' }}
+        role="status"
+      >
+        <p className="text-[12.5px] font-semibold">This Strategic Objective cannot be deleted yet.</p>
+        <p className="text-[12px]" style={{ color: 'var(--muted)' }}>
+          {blockers}
+        </p>
+        <div>
+          <Btn type="button" onClick={onCancel}>
+            OK
+          </Btn>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <form

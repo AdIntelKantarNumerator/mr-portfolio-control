@@ -20,6 +20,7 @@ import { edgeColor } from '@/lib/card-health'
 import { Editable } from '@/components/editable'
 import { HealthEditable } from '@/components/health-editable'
 import { calendarDate } from '@/lib/calendar-date'
+import { isEnded } from '@/lib/domain'
 
 export interface WsListRow {
   id: string
@@ -206,16 +207,23 @@ export function ProjectList({
                     <Link href={`/projects/${r.id}`} className="ir-name">
                       {r.name}
                     </Link>
-                    <Editable
-                      level="project"
-                      id={r.id}
-                      field="status"
-                      kind="choice"
-                      options={PROJECT_STATUS}
-                      raw={r.status}
-                      value={STATUS_WORD.get(r.status) ?? r.status}
-                      className="ir-status-ed"
-                    />
+                    {isEnded(r.status) ? (
+                      // Ended work is reopened on its own page, which asks why.
+                      <span className="ed ir-status-ed">
+                        <span className="ed-val">{STATUS_WORD.get(r.status) ?? r.status}</span>
+                      </span>
+                    ) : (
+                      <Editable
+                        level="project"
+                        id={r.id}
+                        field="status"
+                        kind="choice"
+                        options={PROJECT_STATUS.filter((o) => !isEnded(o.value))}
+                        raw={r.status}
+                        value={STATUS_WORD.get(r.status) ?? r.status}
+                        className="ir-status-ed"
+                      />
+                    )}
                     <HealthEditable
                       level="project"
                       id={r.id}

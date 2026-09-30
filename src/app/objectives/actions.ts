@@ -34,7 +34,7 @@ import { actorName } from '@/lib/auth/current-user'
 import { slugify } from '@/lib/util'
 import { OBJECTIVE_STATUS } from '@/lib/domain'
 import { canDeleteObjective, describeRemoval } from '@/lib/objective-delete'
-import { objectiveFootprint, removeObjectiveRecords } from '@/lib/objective-footprint'
+import { DeleteBlocked, objectiveFootprint, removeObjectiveRecords } from '@/lib/objective-footprint'
 
 export interface GroupState {
   ok?: boolean
@@ -251,11 +251,12 @@ export async function editObjective(_prev: GroupState, formData: FormData): Prom
 /**
  * Delete an objective outright.
  *
- * Only an empty one: see lib/objective-delete.ts for why any initiative, even
- * a closed one, blocks it. The check is repeated here rather than trusted from
- * the page, because the page was rendered before somebody else moved an
- * initiative in. The row and everything filed on it go in one transaction, so
- * a failure half way leaves the objective whole rather than stripped.
+ * Only an empty one: see lib/objective-delete.ts for why any initiative or
+ * decision, even a closed one, blocks it. The check is repeated here rather
+ * than trusted from the page, and once more inside the transaction, because
+ * somebody may have filed something here since. The row and everything filed
+ * on it go in one transaction, so a failure half way leaves the objective
+ * whole rather than stripped.
  *
  * The changelog line is written after, and survives: it is the only trace the
  * objective ever existed.
@@ -268,13 +269,24 @@ export async function deleteObjective(_prev: GroupState, formData: FormData): Pr
   if (!row) return { error: 'That objective no longer exists.' }
 
   const footprint = await objectiveFootprint(id)
-  const check = canDeleteObjective({ initiativeCount: footprint.initiatives, name: row.name, typed })
+  const check = canDeleteObjective({
+    initiativeCount: footprint.initiatives,
+    decisionCount: footprint.decisions,
+    name: row.name,
+    typed,
+  })
   if (!check.ok) return { error: check.reason }
 
-  await db.transaction(async (tx) => {
-    await removeObjectiveRecords(tx, id)
-    await tx.delete(objectives).where(eq(objectives.id, id))
-  })
+  try {
+    await db.transaction(async (tx) => {
+      await removeObjectiveRecords(tx, id)
+      await tx.delete(objectives).where(eq(objectives.id, id))
+    })
+  } catch (err) {
+    // Something was filed here between the check above and the transaction.
+    if (err instanceof DeleteBlocked) return { error: err.message }
+    throw err
+  }
 
   await logChange({
     actor: await actorName(),

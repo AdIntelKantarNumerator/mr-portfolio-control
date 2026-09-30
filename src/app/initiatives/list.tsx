@@ -25,6 +25,7 @@ import { edgeColor } from '@/lib/card-health'
 import { Editable } from '@/components/editable'
 import { HealthEditable } from '@/components/health-editable'
 import { calendarDate } from '@/lib/calendar-date'
+import { isEnded } from '@/lib/domain'
 
 export interface ProjectRow {
   id: string
@@ -198,16 +199,23 @@ export function InitiativeList({
                     <Link href={`/initiatives/${r.id}`} className="ir-name">
                       {r.name}
                     </Link>
-                    <Editable
-                      level="initiative"
-                      id={r.id}
-                      field="status"
-                      kind="choice"
-                      options={INITIATIVE_STATUS}
-                      raw={r.status}
-                      value={STATUS_WORD.get(r.status) ?? r.status}
-                      className="ir-status-ed"
-                    />
+                    {isEnded(r.status) ? (
+                      // Ended work is reopened on its own page, which asks why.
+                      <span className="ed ir-status-ed">
+                        <span className="ed-val">{STATUS_WORD.get(r.status) ?? r.status}</span>
+                      </span>
+                    ) : (
+                      <Editable
+                        level="initiative"
+                        id={r.id}
+                        field="status"
+                        kind="choice"
+                        options={INITIATIVE_STATUS.filter((o) => !isEnded(o.value))}
+                        raw={r.status}
+                        value={STATUS_WORD.get(r.status) ?? r.status}
+                        className="ir-status-ed"
+                      />
+                    )}
                     <span className="ir-meta">
                       {r.projects.length} project{r.projects.length === 1 ? '' : 's'}
                     </span>
@@ -339,15 +347,22 @@ function ProjectTable({
                 </Link>
               </td>
               <td>
-                <Editable
-                  level="project"
-                  id={w.id}
-                  field="status"
-                  kind="choice"
-                  options={PROJECT_STATUS}
-                  raw={w.status}
-                  value={STATUS_WORD.get(w.status) ?? w.status}
-                />
+                {isEnded(w.status) ? (
+                  // Ended work is reopened on its own page, which asks why.
+                  <span className="ed">
+                    <span className="ed-val">{STATUS_WORD.get(w.status) ?? w.status}</span>
+                  </span>
+                ) : (
+                  <Editable
+                    level="project"
+                    id={w.id}
+                    field="status"
+                    kind="choice"
+                    options={PROJECT_STATUS.filter((o) => !isEnded(o.value))}
+                    raw={w.status}
+                    value={STATUS_WORD.get(w.status) ?? w.status}
+                  />
+                )}
               </td>
               <td>
                 <Editable

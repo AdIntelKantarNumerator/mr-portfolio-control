@@ -14,6 +14,8 @@
  */
 import { assignInitiatives, createObjective, deleteObjective } from '../src/app/objectives/actions'
 import { setLifecycle } from '../src/app/lifecycle/actions'
+import { setField } from '../src/app/field-actions'
+import { editRegisterEntry } from '../src/app/register-actions'
 import { getHomeCards } from '../src/lib/home'
 import { db } from '../src/db/client'
 import {
@@ -97,7 +99,25 @@ async function main() {
   check('withdrawing works', s.ok === true, s.error)
   check('a withdrawn objective is off the home board', !(await onBoard(so.id)))
 
-  // --- delete is refused while an initiative is filed under it, even a withdrawn objective ---
+  // --- the pill cannot end or reopen; only the control, which asks why ---
+  const pill = await setField({}, form({ level: 'objective', id: so.id, field: 'status', value: 'active' }))
+  check('the pill cannot reopen a withdrawn objective', Boolean(pill.error), pill.error)
+  await setLifecycle({}, form({ kind: 'objective', id: so.id, status: 'active', note: 'Back for the check' }))
+  const pill2 = await setField({}, form({ level: 'objective', id: so.id, field: 'status', value: 'completed' }))
+  check('the pill cannot close a live objective', Boolean(pill2.error), pill2.error)
+  // setField refreshes the cache after writing, which needs a request this
+  // script does not have. The write has landed by then, so that one error is
+  // allowed and the row is checked instead.
+  try {
+    const pill3 = await setField({}, form({ level: 'objective', id: so.id, field: 'status', value: 'paused' }))
+    check('the pill still moves between live states', !pill3.error, pill3.error)
+  } catch (err) {
+    if (!/static generation store/i.test((err as Error).message)) throw err
+  }
+  const [paused] = await db.select().from(objectives).where(eq(objectives.id, so.id))
+  check('and the move landed', paused.status === 'paused', paused.status)
+
+  // --- delete is refused while an initiative is filed under it ---
   s = (await redirected(() => deleteObjective({}, form({ id: so.id, confirmName: NAME })))).result as typeof s
   check('delete is refused while it holds an initiative', Boolean(s?.error) && /1 initiative is still/.test(s?.error ?? ''), s?.error)
 
@@ -107,8 +127,28 @@ async function main() {
   await db.insert(agentObservations).values({ entityType: 'objective', entityId: so.id, items: '[]', evidence: '[]', model: 'check' } as never)
   await db.insert(decisions).values({ ref: 'LC-D1', title: 'LC decision', body: 'Check row', entityType: 'objective', entityId: so.id } as never)
 
+  s = (await redirected(() => deleteObjective({}, form({ id: so.id, confirmName: NAME })))).result as typeof s
+  check(
+    'delete is refused while a decision is filed on it',
+    Boolean(s?.error) && /1 decision or blocker is filed here/.test(s?.error ?? ''),
+    s?.error,
+  )
+
+  // Moved the way a person would: "Filed against" in the register.
+  const [filed] = await db.select().from(decisions).where(eq(decisions.ref, 'LC-D1'))
+  const moved = await editRegisterEntry({
+    kind: 'decision',
+    id: filed.id,
+    title: filed.title,
+    body: filed.body,
+    status: filed.status,
+    category: filed.category,
+    at: 'initiative:lc1',
+  })
+  check('the decision can be re-filed elsewhere', !moved.error, moved.error)
+
   s = (await redirected(() => deleteObjective({}, form({ id: so.id, confirmName: 'wrong name' })))).result as typeof s
-  check('delete needs the name typed', Boolean(s?.error), s?.error)
+  check('delete needs the name typed', Boolean(s?.error) && /Type the objective/.test(s?.error ?? ''), s?.error)
 
   const done = await redirected(() => deleteObjective({}, form({ id: so.id, confirmName: NAME })))
   check('delete succeeds and redirects', done.redirected)
@@ -122,7 +162,7 @@ async function main() {
     (await db.select().from(agentObservations).where(and(eq(agentObservations.entityType, 'objective'), eq(agentObservations.entityId, so.id)))).length === 0,
   )
   const [dec] = await db.select().from(decisions).where(eq(decisions.ref, 'LC-D1'))
-  check('its decision stays in the register, unfiled', Boolean(dec) && dec.entityId === null)
+  check('its decision survived, filed where it was moved', dec?.entityType === 'initiative' && dec?.entityId === 'lc1')
   const lines = await db.select().from(changelogEntries).where(eq(changelogEntries.entityId, so.id))
   check('the changelog remembers it, deletion included', lines.some((l) => /deleted/.test(l.summary)), `${lines.length} lines`)
   check('the initiative survived', (await db.select().from(initiatives).where(eq(initiatives.id, 'lc1'))).length === 1)
