@@ -22,6 +22,7 @@ import { useActionState, useState } from 'react'
 import type { HomeCard } from '@/lib/home'
 import type { MixGroup } from '@/lib/home-types'
 import { LocalTime } from './local-time'
+import { railLabels } from '@/lib/rail-labels'
 import { HealthPanel } from './health-state'
 import { saveVerdict, restoreVerdict, type VerdictState } from '@/app/verdict-actions'
 
@@ -324,23 +325,27 @@ export function ObjectiveCard({
                     <span className="railnow" style={{ left: `${card.railToday}%` }} title="Today" />
                   ) : null}
                 </span>
-                <span
-                  className="dots"
-                  // The label caps are arithmetic on the number of marks, done
-                  // in CSS so the first and last — which are edge-aligned
-                  // rather than centred — can get half the allowance without
-                  // a second inline style.
-                  style={{ ['--slots' as string]: card.rail.length }}
-                >
+                <span className="dots">
+                  {/* Every dot where its date puts it; the words are laid out
+                      separately, from the real gaps. See lib/rail-labels.ts. */}
                   {card.rail.map((m) => (
                     <span
                       className="dot"
                       key={m.id}
-                      title={m.name}
+                      title={m.on ? `${m.name} — ${m.on}` : m.name}
                       style={{ left: `${m.at}%`, color: MS_COLOR[m.status] }}
                     >
                       <i style={{ background: MS_COLOR[m.status] }} />
-                      <span>{m.name}</span>
+                    </span>
+                  ))}
+                  {railLabels(card.rail).map((l) => (
+                    <span
+                      className={`rlabel ${l.anchor}`}
+                      key={l.key}
+                      title={l.title}
+                      style={{ left: `${l.at}%`, maxWidth: `${l.width}%` }}
+                    >
+                      {l.text}
                     </span>
                   ))}
                 </span>

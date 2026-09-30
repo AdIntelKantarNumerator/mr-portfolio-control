@@ -507,17 +507,20 @@ table.dtable thead th {
 .rail:hover { background: var(--surface-2); }
 .railline { position: relative; display: block; height: 6px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--line); }
 .railnow { position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--ink); opacity: .55; }
-/* Each milestone label gets its share of the rail and no more. Without a cap,
-   "Migration spend across all 5 data sets" ran straight through its
-   neighbour and both became unreadable — worse than truncation, because you
-   cannot tell it happened. The first and last are edge-aligned rather than
-   centred, so they only have half a neighbour's gap to work with. */
-.dots { position: relative; display: block; height: 34px; margin-top: 2px; --gap: calc(100% / (var(--slots, 2) - 1)); }
-.dot { position: absolute; transform: translateX(-50%); text-align: center; max-width: calc(var(--gap) - 12px); }
-.dot:first-child { transform: none; text-align: left; max-width: calc(var(--gap) / 2 - 6px); }
-.dot:last-child { transform: translateX(-100%); text-align: right; max-width: calc(var(--gap) / 2 - 6px); }
-.dot i { display: block; width: 11px; height: 11px; border-radius: 99px; margin: 0 auto 4px; border: 2.5px solid var(--surface); box-shadow: 0 0 0 1.5px currentColor; }
-.dot span { display: block; font-size: 10.5px; color: var(--muted); white-space: nowrap; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+/* Each milestone label gets the room up to halfway to its neighbours and no
+   more. Without a cap, "Migration spend across all 5 data sets" ran straight
+   through its neighbour and both became unreadable — worse than truncation,
+   because you cannot tell it happened. The room comes from the real gaps
+   (dots are placed by date), worked out in lib/rail-labels.ts: close marks
+   share one label, and a label near an end is aligned to it so it grows
+   inwards instead of off the rail. The dot always sits on its date. */
+.dots { position: relative; display: block; height: 34px; margin-top: 2px; }
+.dot { position: absolute; top: 0; transform: translateX(-50%); }
+.dot i { display: block; width: 11px; height: 11px; border-radius: 99px; border: 2.5px solid var(--surface); box-shadow: 0 0 0 1.5px currentColor; }
+.rlabel { position: absolute; top: 15px; display: block; font-size: 10.5px; color: var(--muted); white-space: nowrap; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.rlabel.center { transform: translateX(-50%); text-align: center; }
+.rlabel.left { text-align: left; }
+.rlabel.right { transform: translateX(-100%); text-align: right; }
 
 .sig-row { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer; padding: 7px 8px; border-radius: 8px; }
 .sig-row:hover, .sig-row[aria-expanded='true'] { background: var(--surface-2); }
