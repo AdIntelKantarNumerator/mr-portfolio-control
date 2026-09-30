@@ -73,7 +73,15 @@ export interface Signal {
   kind: 'blocker' | 'decision' | 'action'
   /** Yaara's one line covering all of `items`, or the single item's own text. */
   summary: string
-  items: Array<{ id: string; text: string; when: string; who: string | null; href: string | null }>
+  items: Array<{
+    id: string
+    text: string
+    when: string
+    who: string | null
+    href: string | null
+    /** The project it is about, else the initiative, else null. See `whereOf`. */
+    where: string | null
+  }>
 }
 
 export interface MilestoneMark {
@@ -226,6 +234,27 @@ export const getHomeCards = cache(async (
   ])
 
   const personName = new Map(peeps.map((p) => [p.id, p.name]))
+
+  /*
+   * What a signal is about, said under it in small type: the project when one
+   * is known, otherwise the initiative, otherwise nothing. An objective's card
+   * rolls up everything beneath it, so "Waiting on the schema review" means
+   * little until you know which of its fourteen projects is waiting. The
+   * objective itself is never named — it is the card the reader is on.
+   */
+  const projectName = new Map(wss.map((w) => [w.id, w.name]))
+  const initiativeName = new Map(projs.map((p) => [p.id, p.name]))
+  const linksByAction = new Map<string, typeof links>()
+  for (const l of links) linksByAction.set(l.actionItemId, [...(linksByAction.get(l.actionItemId) ?? []), l])
+  const whereOf = (filed: Array<{ type: string | null; id: string | null }>): string | null => {
+    for (const f of filed) if (f.type === 'project' && f.id && projectName.has(f.id)) return projectName.get(f.id)!
+    for (const f of filed) if (f.type === 'initiative' && f.id && initiativeName.has(f.id)) return initiativeName.get(f.id)!
+    return null
+  }
+  const whereDecision = (d: { entityType: string | null; entityId: string | null }) =>
+    whereOf([{ type: d.entityType, id: d.entityId }])
+  const whereAction = (id: string) =>
+    whereOf((linksByAction.get(id) ?? []).map((l) => ({ type: l.level, id: l.entityId })))
 
 
 
@@ -443,6 +472,7 @@ export const getHomeCards = cache(async (
             when: b.raisedAt ? `${Math.round((now - b.raisedAt.getTime()) / DAY)}d` : '',
             who: b.raisedByText ?? null,
             href: `/blockers?scope=${from}`,
+            where: whereDecision(b),
           })),
         })
       }
@@ -456,6 +486,7 @@ export const getHomeCards = cache(async (
             when: d.raisedAt ? d.raisedAt.toISOString().slice(0, 10) : '',
             who: null,
             href: `/decisions?scope=${from}`,
+            where: whereDecision(d),
           })),
         })
       }
@@ -473,6 +504,7 @@ export const getHomeCards = cache(async (
             when: a.dueDate ? a.dueDate.toISOString().slice(0, 10) : '—',
             who: a.ownerId ? (personName.get(a.ownerId) ?? null) : a.ownerName,
             href: `/actions?scope=${from}`,
+            where: whereAction(a.id),
           })),
         })
       }

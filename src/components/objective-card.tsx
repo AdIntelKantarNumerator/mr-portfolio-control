@@ -365,7 +365,12 @@ export function ObjectiveCard({
                   <div className="kids">
                     {s.items.map((it) => (
                       <a key={it.id} href={it.href ?? '#'}>
-                        <span>{it.text}</span>
+                        <span>
+                          {it.text}
+                          {/* Which project — or, failing that, initiative — it
+                              is about. Nothing when neither is known. */}
+                          {it.where ? <small className="where">{it.where}</small> : null}
+                        </span>
                         <span className="when">
                           {it.who ? `${it.who} · ` : ''}
                           {it.when}

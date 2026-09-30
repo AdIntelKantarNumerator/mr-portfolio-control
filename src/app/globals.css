@@ -533,6 +533,7 @@ table.dtable thead th {
 .kids a { display: flex; gap: 8px; font-size: 12.5px; color: var(--muted); padding: 4px 6px; border-radius: 6px; text-decoration: none; }
 .kids a:hover { background: var(--surface-2); color: var(--ink); }
 .kids .when { margin-left: auto; font-size: 11px; flex: none; }
+.kids .where { display: block; font-size: 10.5px; line-height: 1.3; margin-top: 1px; opacity: .8; }
 
 .ifoot { border-top: 1px solid var(--line); background: var(--surface-2); padding: 11px 16px; display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; }
 @media (max-width: 760px) { .ifoot { grid-template-columns: 1fr; } }
