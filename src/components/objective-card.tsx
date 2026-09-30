@@ -23,6 +23,7 @@ import type { HomeCard } from '@/lib/home'
 import type { MixGroup } from '@/lib/home-types'
 import { LocalTime } from './local-time'
 import { railLabels } from '@/lib/rail-labels'
+import { SourceIcon, sourceLabel } from './source-icon'
 import { HealthPanel } from './health-state'
 import { saveVerdict, restoreVerdict, type VerdictState } from '@/app/verdict-actions'
 
@@ -139,18 +140,7 @@ export function ObjectiveCard({
             <h4>Sources</h4>
             <div className="ev">
               {card.evidence.map((e, i) => (
-                <div key={i}>
-                  <span className="s">{e.source}</span>
-                  <span>
-                    {e.url ? (
-                      <a href={e.url} target="_blank" rel="noreferrer noopener" className="lnk">
-                        {e.text}
-                      </a>
-                    ) : (
-                      e.text
-                    )}
-                  </span>
-                </div>
+                <EvidenceRow key={i} e={e} />
               ))}
             </div>
           </>
@@ -250,10 +240,7 @@ export function ObjectiveCard({
                           <h4>What this is based on</h4>
                           <div className="ev">
                             {card.evidence.map((e, i) => (
-                              <div key={i}>
-                                <span className="s">{e.source}</span>
-                                <span>{e.text}</span>
-                              </div>
+                              <EvidenceRow key={i} e={e} />
                             ))}
                           </div>
                         </>
@@ -446,5 +433,28 @@ export function ObjectiveCard({
         </button>
       </div>
     </article>
+  )
+}
+
+/**
+ * One thing she read: where from, what it was, and a link to it when there is
+ * one — a meeting's document included. Both evidence lists on the card use
+ * this, so the one behind "see the evidence" links the same as the other.
+ */
+function EvidenceRow({ e }: { e: { source: string; text: string; url: string | null } }) {
+  return (
+    <div>
+      <span className="s">{sourceLabel(e.source)}</span>
+      <span>
+        {e.url ? (
+          <a href={e.url} target="_blank" rel="noreferrer noopener" className="lnk">
+            {e.text}
+          </a>
+        ) : (
+          e.text
+        )}
+      </span>
+      <SourceIcon source={e.source} hasLink={Boolean(e.url)} />
+    </div>
   )
 }

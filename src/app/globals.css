@@ -582,7 +582,9 @@ table.dtable thead th {
 .mb .lnk { color: var(--brand); }
 .ev { display: grid; gap: 5px; }
 .ev div { display: flex; gap: 10px; font-size: 12.5px; background: var(--surface-2); padding: 7px 10px; border-radius: 7px; }
-.ev .s { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; width: 56px; flex: none; padding-top: 2px; }
+.ev .s { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; width: 64px; flex: none; padding-top: 2px; }
+/* The source's mark, pushed to the end of the row. */
+.ev .srcicon { margin-left: auto; flex: none; display: inline-flex; padding-top: 1px; }
 
 /* ---- Grouping form (objectives) -------------------------------------- */
 /* Create an objective, or move initiatives into one. Both are the same gesture
