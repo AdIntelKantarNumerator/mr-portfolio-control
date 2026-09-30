@@ -233,7 +233,19 @@ export function ObjectiveCard({
                         </p>
                       )}
                       {card.detail.map((d, i) => (
-                        <p key={i}>{d}</p>
+                        <p key={i} className="point">
+                          {d.text}
+                          {/* The sources this point rests on, at its end:
+                              each one opens what she read, a meeting's
+                              document included. */}
+                          {d.cites.length > 0 && (
+                            <span className="cites">
+                              {d.cites.map((c, j) => (
+                                <SourceIcon key={j} source={c.source} href={c.url} what={c.title} />
+                              ))}
+                            </span>
+                          )}
+                        </p>
                       ))}
                       {card.evidence.length > 0 && (
                         <>
@@ -443,8 +455,9 @@ export function ObjectiveCard({
 
 /**
  * One thing she read: where from, what it was, and a link to it when there is
- * one — a meeting's document included. Both evidence lists on the card use
- * this, so the one behind "see the evidence" links the same as the other.
+ * one. Both evidence lists on the card use this, so the one behind "see the
+ * evidence" links the same as the other. The source marks live on the points
+ * above instead, next to the sentence each source supports.
  */
 function EvidenceRow({ e }: { e: { source: string; text: string; url: string | null } }) {
   return (
@@ -459,7 +472,6 @@ function EvidenceRow({ e }: { e: { source: string; text: string; url: string | n
           e.text
         )}
       </span>
-      <SourceIcon source={e.source} hasLink={Boolean(e.url)} />
     </div>
   )
 }

@@ -28,10 +28,15 @@ export function sourceLabel(source: string): string {
   return SOURCES[source]?.label ?? source
 }
 
-export function SourceIcon({ source, hasLink }: { source: string; hasLink?: boolean }) {
+/**
+ * `href` makes the mark a link to the thing itself; `what` names it in the
+ * hover ("Slack — #gpc-taxonomy"), so a reader knows where it goes first.
+ */
+export function SourceIcon({ source, href, what }: { source: string; href?: string | null; what?: string }) {
   const s = SOURCES[source] ?? { label: source, glyph: 'doc' as const, color: 'var(--muted)' }
   const isMeeting = s.glyph === 'meeting'
-  const title =
+  const hasLink = Boolean(href)
+  const base =
     isMeeting && !hasLink
       ? `${s.label} — read from a transcript file, so there is no document to open`
       : isMeeting
@@ -39,12 +44,20 @@ export function SourceIcon({ source, hasLink }: { source: string; hasLink?: bool
         : source === 'initiative'
           ? 'An initiative’s latest assessment, rolled up into this objective'
           : s.label
+  const title = what ? `${base}: ${what}` : base
 
-  return (
+  const mark = (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {GLYPHS[s.glyph]}
+    </svg>
+  )
+  return href ? (
+    <a className="srcicon" href={href} target="_blank" rel="noreferrer noopener" title={title} aria-label={title} style={{ color: s.color }}>
+      {mark}
+    </a>
+  ) : (
     <span className="srcicon" title={title} aria-label={title} role="img" style={{ color: s.color }}>
-      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        {GLYPHS[s.glyph]}
-      </svg>
+      {mark}
     </span>
   )
 }

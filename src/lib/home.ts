@@ -13,6 +13,7 @@
  * count is a second answer to a question the tables already answer, and it goes
  * stale the first time somebody moves an initiative.
  */
+import { citedPoints, dedupePoints, type CitedPoint } from './cited-points'
 import { cache } from 'react'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
 import { db } from '@/db/client'
@@ -128,7 +129,8 @@ export interface HomeCard {
    * every initiative inside has one, and beats a silent merge either way.
    */
   verdictRolledUp: string | null
-  detail: string[]
+  /** Her points, each with the sources it cites. */
+  detail: CitedPoint[]
   evidence: Array<{ source: string; text: string; url: string | null }>
   /**
    * Why the card reads the way it does — one clause per fact, worst first.
@@ -421,9 +423,11 @@ export const getHomeCards = cache(async (
 
       // Every child's bullets, newest child first. The detail panel shows
       // them all; the one-line summary is chosen below.
+      // Each bullet joined to the evidence it cites, within its own
+      // observation: citation ids are only meaningful there.
       const items = rolledUp
-        ? kids.flatMap((k) => parse<Array<{ text: string; kind: string }>>(k.items, []))
-        : parse<Array<{ text: string; kind: string }>>(ob?.items ?? null, [])
+        ? kids.flatMap((k) => citedPoints(k.items, k.evidence))
+        : citedPoints(ob?.items, ob?.evidence)
 
       const ev = rolledUp
         ? kids.flatMap((k) =>
@@ -616,7 +620,7 @@ export const getHomeCards = cache(async (
         verdictRolledUp: rolledUp
           ? `${kids.length} ${level === 'objective' ? 'initiative' : 'project'}${kids.length === 1 ? '' : 's'}`
           : null,
-        detail: dedupe(items.map((i) => i.text)).slice(0, 6),
+        detail: dedupePoints(items).slice(0, 6),
         evidence: dedupe(ev.map((e) => `${e.source}\u0000${e.title}\u0000${e.url ?? ''}`))
           .slice(0, 8)
           .map((k) => {
