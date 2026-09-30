@@ -15,6 +15,7 @@ import { HealthEditable } from '@/components/health-editable'
 import { Editable } from '@/components/editable'
 import { SourceBadge } from '@/components/ui'
 import { calendarRange } from '@/lib/calendar-date'
+import { LifecycleControl } from '@/app/lifecycle/control'
 import { rollUpWindow } from '@/lib/rollup-window'
 
 export const dynamic = 'force-dynamic'
@@ -162,6 +163,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           </span>
         </div>
       </DetailHead>
+
+      {user.personId ? <LifecycleControl kind="project" id={id} status={w.status} /> : null}
 
       <MilestoneEditor level="project" entityId={id} milestones={plan} />
 

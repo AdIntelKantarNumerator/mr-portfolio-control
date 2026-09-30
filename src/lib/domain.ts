@@ -20,6 +20,14 @@ export type Confidence = (typeof CONFIDENCE)[number]
 export const INITIATIVE_STATUS = ['planned', 'active', 'paused', 'completed', 'canceled'] as const
 export type InitiativeStatus = (typeof INITIATIVE_STATUS)[number]
 
+/**
+ * A Strategic Objective's states. The same five as an initiative, named
+ * separately because four places used to keep their own copy and no two of
+ * them agreed on whether `planned` was allowed.
+ */
+export const OBJECTIVE_STATUS = INITIATIVE_STATUS
+export type ObjectiveStatus = (typeof OBJECTIVE_STATUS)[number]
+
 export const PROJECT_STATUS_SET = [
   'backlog',
   'planned',
@@ -51,8 +59,20 @@ export function isEnded(status: string | null | undefined): boolean {
 }
 
 /** What reopening puts it back to: the earliest state that means "live". */
-export function reopenedStatus(kind: 'project' | 'initiative'): string {
+export function reopenedStatus(kind: 'project' | 'initiative' | 'objective'): string {
   return kind === 'project' ? 'planned' : 'active'
+}
+
+/**
+ * What a tier's status is called on screen.
+ *
+ * `LABELS.initiativeStatus` still holds the project words from before the tier
+ * rename, and `LABELS.projectStatus` is the milestone legend, so looking a
+ * status up by `${kind}Status` gets the wrong list for two of the three tiers.
+ * Objectives and initiatives share one vocabulary; projects use the other.
+ */
+export function tierStatusLabel(kind: 'project' | 'initiative' | 'objective', status: string): string {
+  return label(kind === 'project' ? 'initiativeStatus' : 'objectiveStatus', status)
 }
 
 /**

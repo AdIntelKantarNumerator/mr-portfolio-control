@@ -16,7 +16,9 @@
  *
  * Delete. Work that is over is `completed` or `canceled` and drops off the
  * board; deleting it would take its changelog with it, and the changelog is
- * the only record of why anything was ever arranged the way it was.
+ * the only record of why anything was ever arranged the way it was. The one
+ * exception is an empty Strategic Objective, which its own page can delete;
+ * see `deleteObjective` in objectives/actions.ts.
  */
 import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'

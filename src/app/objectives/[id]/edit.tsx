@@ -3,10 +3,10 @@
 /**
  * Renaming an objective, and ending one.
  *
- * There is no delete. An objective that is over is `completed` or `canceled`
- * and stops appearing on the home board; deleting it would take its changelog
- * with it, and the changelog is the only record of why a set of initiatives was
- * ever grouped this way.
+ * No delete here. An objective that is over is `completed` or `canceled` and
+ * stops appearing on the home board. An empty one can be deleted from the
+ * lifecycle control on its page (`deleteObjective`); the changelog keeps a line
+ * saying it existed.
  */
 import { useActionState } from 'react'
 import { editObjective, type GroupState } from '../actions'

@@ -11,7 +11,7 @@ import { notFound } from 'next/navigation'
 import { asc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { objectives, milestones, initiatives, projects } from '@/db/schema'
-import { isEnded } from '@/lib/domain'
+import { OBJECTIVE_STATUS, isEnded, tierStatusLabel } from '@/lib/domain'
 import { DetailHead } from '@/components/detail-head'
 import { DetailBody } from '@/components/detail/body'
 import { MilestoneEditor } from '@/components/milestone-editor'
@@ -22,6 +22,9 @@ import { addContext } from '@/lib/add-context'
 import { EditRecordButton } from '@/components/detail/edit-record'
 import { rollUpWindow } from '@/lib/rollup-window'
 import { calendarRange } from '@/lib/calendar-date'
+import { LifecycleControl } from '@/app/lifecycle/control'
+import { objectiveFootprint } from '@/lib/objective-footprint'
+import { describeRemoval } from '@/lib/objective-delete'
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null)
 // What a <input type="date"> takes; empty means nobody typed one, so that end
@@ -30,13 +33,7 @@ const ymd = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : 
 
 export const dynamic = 'force-dynamic'
 
-const STATUS = [
-  { value: 'planned', label: 'Planned' },
-  { value: 'active', label: 'Active' },
-  { value: 'paused', label: 'Paused' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'canceled', label: 'Canceled' },
-]
+const STATUS = OBJECTIVE_STATUS.map((value) => ({ value, label: tierStatusLabel('objective', value) }))
 
 const TONE: Record<string, string> = {
   planned: 'var(--line-2)',
@@ -74,6 +71,13 @@ export default async function ObjectiveDetailPage({ params }: { params: Promise<
   }
 
   const live = mine.filter((x) => !isEnded(x.status))
+
+  // Delete is offered only when nothing is filed under it; the action checks
+  // again, because this page can be minutes old by the time somebody clicks.
+  const deletion =
+    user.personId && mine.length === 0
+      ? { name: row.name, summary: describeRemoval(await objectiveFootprint(id)) }
+      : undefined
 
   /*
    * The window, rolled up the one way.
@@ -147,6 +151,16 @@ export default async function ObjectiveDetailPage({ params }: { params: Promise<
         </div>
         {row.description ? <p className="dnote">{row.description}</p> : null}
       </DetailHead>
+
+      {user.personId ? (
+        <LifecycleControl
+          kind="objective"
+          id={id}
+          status={row.status}
+          liveChildren={live.length}
+          deletion={deletion}
+        />
+      ) : null}
 
       <MilestoneEditor level="objective" entityId={id} milestones={plan} />
 

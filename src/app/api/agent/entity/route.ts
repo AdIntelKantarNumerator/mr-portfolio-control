@@ -25,7 +25,9 @@
  * it.
  *
  * NOTHING IS DELETED. There is no delete path. Ending a piece of work is a
- * status change, which is reversible and visible, rather than a removal.
+ * status change, which is reversible and visible, rather than a removal. A
+ * person can delete an empty Strategic Objective from its page; an agent
+ * cannot, here or anywhere.
  *
  * EVERY CHANGE CARRIES A REASON. Refused without one. The reason goes in the
  * changelog beside the old and new value, so "why is this called that now" has

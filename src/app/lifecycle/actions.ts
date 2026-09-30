@@ -1,7 +1,8 @@
 'use server'
 
 /**
- * Closing, withdrawing and reopening a project or an initiative.
+ * Closing, withdrawing and reopening a project, an initiative or a Strategic
+ * Objective.
  *
  * The status column has always existed and nothing in the UI could set it —
  * everything arrived from the tracker sync, which works right up until a piece
@@ -21,8 +22,8 @@
 import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { initiatives, projects } from '@/db/schema'
-import { INITIATIVE_STATUS, PROJECT_STATUS_SET, isEnded, label, reopenedStatus } from '@/lib/domain'
+import { initiatives, objectives, projects } from '@/db/schema'
+import { INITIATIVE_STATUS, OBJECTIVE_STATUS, PROJECT_STATUS_SET, isEnded, reopenedStatus, tierStatusLabel } from '@/lib/domain'
 import { logChange } from '@/lib/portfolio'
 import { actorName } from '@/lib/auth/current-user'
 
@@ -34,13 +35,30 @@ export interface LifecycleState {
 const MIN_NOTE = 4
 const MAX_NOTE = 1000
 
-function refresh(kind: 'project' | 'initiative', id: string) {
-  revalidatePath(`/${kind}s/${id}`)
-  revalidatePath('/projects')
-  revalidatePath('/initiatives')
-  revalidatePath('/applications')
-  revalidatePath('/')
-  revalidatePath('/changes')
+type Kind = 'project' | 'initiative' | 'objective'
+
+const TABLE = { project: projects, initiative: initiatives, objective: objectives } as const
+const ALLOWED: Record<Kind, readonly string[]> = {
+  project: PROJECT_STATUS_SET,
+  initiative: INITIATIVE_STATUS,
+  objective: OBJECTIVE_STATUS,
+}
+
+function refresh(kind: Kind, id: string) {
+  try {
+    revalidatePath(`/${kind}s/${id}`)
+    revalidatePath('/objectives')
+    revalidatePath('/projects')
+    revalidatePath('/initiatives')
+    revalidatePath('/applications')
+    revalidatePath('/')
+    revalidatePath('/changes')
+  } catch (err) {
+    // Only the no-request invariant is swallowed, for the same reason as in
+    // objectives/actions.ts: scripts/check-objective-lifecycle.ts calls this
+    // with no request, to test what reaches the database.
+    if (!(err instanceof Error) || !/static generation store/i.test(err.message)) throw err
+  }
 }
 
 /**
@@ -60,16 +78,19 @@ export async function setLifecycle(
   const status = String(formData.get('status') ?? '')
   const note = String(formData.get('note') ?? '').trim()
 
-  if (kind !== 'project' && kind !== 'initiative') return { error: 'Unknown kind of work.' }
+  if (kind !== 'project' && kind !== 'initiative' && kind !== 'objective') return { error: 'Unknown kind of work.' }
 
-  const allowed: readonly string[] = kind === 'project' ? PROJECT_STATUS_SET : INITIATIVE_STATUS
-  if (!allowed.includes(status)) return { error: 'That is not a status this can be set to.' }
+  if (!ALLOWED[kind].includes(status)) return { error: 'That is not a status this can be set to.' }
 
-  const table = kind === 'project' ? projects : initiatives
-  const [row] = await db.select().from(table).where(eq(table.id, id)).limit(1)
+  const table = TABLE[kind]
+  const [row] = await db
+    .select({ name: table.name, status: table.status })
+    .from(table)
+    .where(eq(table.id, id))
+    .limit(1)
   if (!row) return { error: `That ${kind} no longer exists.` }
 
-  if (row.status === status) return { error: `It is already ${label(`${kind}Status`, status)}.` }
+  if (row.status === status) return { error: `It is already ${tierStatusLabel(kind, status)}.` }
 
   // Ending something and bringing it back are both decisions somebody should
   // be able to explain later. Moving between two live states is routine and is
@@ -84,13 +105,18 @@ export async function setLifecycle(
     }
   }
 
-  await db.update(table).set({ status, updatedAt: new Date() }).where(eq(table.id, id))
+  // One statement per table rather than through `table`: the three are
+  // different Drizzle types and a union of them has no callable `update`.
+  const at = new Date()
+  if (kind === 'objective') await db.update(objectives).set({ status, updatedAt: at }).where(eq(objectives.id, id))
+  else if (kind === 'initiative') await db.update(initiatives).set({ status, updatedAt: at }).where(eq(initiatives.id, id))
+  else await db.update(projects).set({ status, updatedAt: at }).where(eq(projects.id, id))
 
   const who = await actorName()
   await logChange({
     actor: who,
     kind: 'change',
-    summary: `${row.name} moved ${label(`${kind}Status`, row.status)} → ${label(`${kind}Status`, status)}`,
+    summary: `${row.name} moved ${tierStatusLabel(kind, row.status)} → ${tierStatusLabel(kind, status)}`,
     detail: note ? note.slice(0, MAX_NOTE) : null,
     entityType: kind,
     entityId: id,
@@ -101,6 +127,6 @@ export async function setLifecycle(
 }
 
 /** What reopening means for this kind, so the button can say it. */
-export async function reopenTarget(kind: 'project' | 'initiative'): Promise<string> {
+export async function reopenTarget(kind: Kind): Promise<string> {
   return reopenedStatus(kind)
 }

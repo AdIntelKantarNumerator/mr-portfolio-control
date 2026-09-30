@@ -34,7 +34,9 @@ export const addContext = cache(async () => {
     // The records something could be moved under. Both lists, because the
     // caller knows which tier it is and picking the wrong one here would be
     // a silent mis-parenting rather than a type error.
-    objectives: inits.map((i) => ({ id: i.id, name: i.name })),
+    // Closed and withdrawn objectives are left out: moving live work into
+    // one hides it from the home page, which is never what the mover meant.
+    objectives: inits.filter((i) => !ENDED.has(i.status)).map((i) => ({ id: i.id, name: i.name })),
     initiatives: projs.map((p) => ({ id: p.id, name: p.name })),
     endpoints: [
       ...inits.filter((i) => !ENDED.has(i.status)).map((i) => ({ value: `objective:${i.id}`, label: i.name, group: TIER_PLURAL.objective })),

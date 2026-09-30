@@ -25,12 +25,16 @@
  * doing.
  */
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { eq, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { groupingSuggestions, objectives, initiatives } from '@/db/schema'
 import { logChange } from '@/lib/portfolio'
 import { actorName } from '@/lib/auth/current-user'
 import { slugify } from '@/lib/util'
+import { OBJECTIVE_STATUS } from '@/lib/domain'
+import { canDeleteObjective, describeRemoval } from '@/lib/objective-delete'
+import { objectiveFootprint, removeObjectiveRecords } from '@/lib/objective-footprint'
 
 export interface GroupState {
   ok?: boolean
@@ -48,7 +52,7 @@ export interface GroupState {
   stamp?: number
 }
 
-const STATUSES = new Set(['active', 'paused', 'completed', 'canceled'])
+const STATUSES = new Set<string>(OBJECTIVE_STATUS)
 
 function refresh(id?: string) {
   try {
@@ -202,7 +206,7 @@ export async function assignInitiatives(_prev: GroupState, formData: FormData): 
   }
 }
 
-/** Rename, re-describe, or end an objective. Never deletes — see the note below. */
+/** Rename, re-describe, or end an objective. Deleting is `deleteObjective`, below. */
 export async function editObjective(_prev: GroupState, formData: FormData): Promise<GroupState> {
   const id = String(formData.get('id') ?? '')
   const name = String(formData.get('name') ?? '').trim()
@@ -243,6 +247,47 @@ export async function editObjective(_prev: GroupState, formData: FormData): Prom
   return { ok: true, stamp: Date.now(), message: 'Saved.' }
 }
 
+
+/**
+ * Delete an objective outright.
+ *
+ * Only an empty one: see lib/objective-delete.ts for why any initiative, even
+ * a closed one, blocks it. The check is repeated here rather than trusted from
+ * the page, because the page was rendered before somebody else moved an
+ * initiative in. The row and everything filed on it go in one transaction, so
+ * a failure half way leaves the objective whole rather than stripped.
+ *
+ * The changelog line is written after, and survives: it is the only trace the
+ * objective ever existed.
+ */
+export async function deleteObjective(_prev: GroupState, formData: FormData): Promise<GroupState> {
+  const id = String(formData.get('id') ?? '')
+  const typed = String(formData.get('confirmName') ?? '')
+
+  const [row] = await db.select().from(objectives).where(eq(objectives.id, id)).limit(1)
+  if (!row) return { error: 'That objective no longer exists.' }
+
+  const footprint = await objectiveFootprint(id)
+  const check = canDeleteObjective({ initiativeCount: footprint.initiatives, name: row.name, typed })
+  if (!check.ok) return { error: check.reason }
+
+  await db.transaction(async (tx) => {
+    await removeObjectiveRecords(tx, id)
+    await tx.delete(objectives).where(eq(objectives.id, id))
+  })
+
+  await logChange({
+    actor: await actorName(),
+    kind: 'change',
+    summary: `${row.name}: Strategic Objective deleted`,
+    detail: describeRemoval(footprint),
+    entityType: 'objective',
+    entityId: id,
+  })
+
+  refresh()
+  redirect('/objectives')
+}
 
 /**
  * Accepting one of Yaara's groupings.

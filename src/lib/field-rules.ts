@@ -7,7 +7,7 @@
  * controls, the agent API and anything added later all read the same table
  * rather than each re-deciding what a valid status is.
  */
-import { PRIORITY, INITIATIVE_STATUS, PROJECT_STATUS_SET } from './domain'
+import { PRIORITY, INITIATIVE_STATUS, OBJECTIVE_STATUS, PROJECT_STATUS_SET } from './domain'
 
 export interface FieldSpec {
   /** The column it lands in. */
@@ -34,7 +34,7 @@ export const FIELDS: Record<'objective' | 'initiative' | 'project', Record<strin
   // The grouping tier. Same four fields as an initiative, because the question
   // "who owns this and when does it land" does not change with the tier.
   objective: {
-    status: { column: 'status', allowed: new Set<string>(INITIATIVE_STATUS) },
+    status: { column: 'status', allowed: new Set<string>(OBJECTIVE_STATUS) },
     owner: { column: 'ownerId', person: true },
     startDate: { column: 'startDate', date: true },
     targetDate: { column: 'targetDate', date: true },

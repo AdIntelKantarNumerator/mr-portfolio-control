@@ -128,7 +128,13 @@ export function ObjectiveList({
         <SortPicker sort={sort} />
       </div>
 
-      {editing && <Grouping objectives={rows.map((r) => ({ id: r.id, name: r.name }))} initiatives={options} />}
+      {editing && (
+        <Grouping
+          // Closed and withdrawn objectives are not somewhere to move live work.
+          objectives={rows.filter((r) => !ENDED.has(r.status)).map((r) => ({ id: r.id, name: r.name }))}
+          initiatives={options}
+        />
+      )}
 
       {shown.length === 0 ? (
         <div className="blank">

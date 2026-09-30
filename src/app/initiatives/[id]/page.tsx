@@ -24,6 +24,7 @@ import { HealthEditable } from '@/components/health-editable'
 import { Editable } from '@/components/editable'
 import { SourceBadge } from '@/components/ui'
 import { calendarRange } from '@/lib/calendar-date'
+import { LifecycleControl } from '@/app/lifecycle/control'
 
 export const dynamic = 'force-dynamic'
 
@@ -82,7 +83,11 @@ export default async function InitiativeDetailPage({ params }: { params: Promise
               name={i.name}
               description={i.description ?? ''}
               parentId={i.objectiveId ?? null}
-              parents={adding.objectives}
+              parents={
+                parent && !adding.objectives.some((o) => o.id === parent.id)
+                  ? [...adding.objectives, parent]
+                  : adding.objectives
+              }
               window={{
                 startDate: ymd(i.startDate),
                 targetDate: ymd(i.targetDate),
@@ -136,6 +141,8 @@ export default async function InitiativeDetailPage({ params }: { params: Promise
           </span>
         </div>
       </DetailHead>
+
+      {user.personId ? <LifecycleControl kind="initiative" id={id} status={i.status} /> : null}
 
       <MilestoneEditor level="initiative" entityId={id} milestones={plan} />
 
