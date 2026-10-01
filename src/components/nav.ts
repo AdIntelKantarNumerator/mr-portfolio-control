@@ -30,6 +30,7 @@ import {
   IconConversations,
   IconDecisions,
   IconDependencies,
+  IconDictionary,
   IconHome,
   IconObjectives,
   IconIntake,
@@ -40,6 +41,7 @@ import {
   IconTemplates,
   IconTimeline,
   IconProjects,
+  IconWorkflow,
 } from './icons'
 
 export interface NavItem {
@@ -107,6 +109,18 @@ export const NAV: NavSection[] = [
       // but nobody was opening it, and a reference section is the first place
       // an unused link becomes clutter.
       { href: '/templates', label: 'Project Documents', icon: IconTemplates },
+      {
+        href: '/workflow',
+        label: 'Workflow Assessment',
+        icon: IconWorkflow,
+        hint: 'What our systems and people depend on, and what a change reaches',
+      },
+      {
+        href: '/data-dictionary',
+        label: 'Data Dictionary',
+        icon: IconDictionary,
+        hint: 'ClickHouse: what is loaded, and what every table and field means',
+      },
     ],
   },
   {

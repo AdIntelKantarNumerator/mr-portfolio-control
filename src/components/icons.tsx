@@ -185,6 +185,25 @@ export const IconTemplates = (p: IconProps) => (
   </Glyph>
 )
 
+/** Workflow Assessment — three boxes, one feeding two. */
+export const IconWorkflow = (p: IconProps) => (
+  <Glyph {...p}>
+    <rect x="1.8" y="6" width="4" height="4" rx="1" />
+    <rect x="10.2" y="2" width="4" height="4" rx="1" />
+    <rect x="10.2" y="10" width="4" height="4" rx="1" />
+    <path d="M5.8 8h1.8c.6 0 1-.4 1-1V5c0-.6.4-1 1-1h.6M7.6 8c.6 0 1 .4 1 1v2c0 .6.4 1 1 1h.6" />
+  </Glyph>
+)
+
+/** Data Dictionary — a stacked cylinder, the usual sign for a database. */
+export const IconDictionary = (p: IconProps) => (
+  <Glyph {...p}>
+    <ellipse cx="8" cy="3.6" rx="5.2" ry="1.8" />
+    <path d="M2.8 3.6v8.8c0 1 2.3 1.8 5.2 1.8s5.2-.8 5.2-1.8V3.6" />
+    <path d="M2.8 8c0 1 2.3 1.8 5.2 1.8s5.2-.8 5.2-1.8" />
+  </Glyph>
+)
+
 /** The section disclosure caret. */
 export const IconCaret = ({ open = false, ...p }: IconProps & { open?: boolean }) => (
   <Glyph

@@ -35,7 +35,7 @@ Three independent things, in the order they usually happen:
 
 | Command | What it loads | When |
 |---|---|---|
-| `npm run setup` | Schema, lifecycle gates, templates, discovery questions, a starting scoring model | Once, at install |
+| `npm run setup` | Schema, lifecycle gates, templates, discovery questions, a starting scoring model, and the starting Workflow Assessment map and Data Dictionary | Once, at install |
 | `npm run sync:linear` | Objectives, initiatives, milestones, dates, leads | Whenever; then on a schedule |
 | *(the app itself)* | Assessments, decisions, dependencies, contention, intake, readiness | Continuously, by the program team |
 
@@ -43,6 +43,12 @@ Three independent things, in the order they usually happen:
 a live system when your process changes. It is transcribed from MediaRadar's
 program references site; edit `scripts/seed-process.ts` (or the rows) if yours
 differs.
+
+`npm run seed:reference` loads the starting Workflow Assessment map and Data
+Dictionary from `src/lib/reference-seed.ts`. It is the opposite of
+`seed:process`: it only fills tables that are empty, because from the moment it
+runs that content belongs to the people editing it on screen. Safe to run after
+every deploy; it never overwrites an edit.
 
 ### Optional: an example portfolio
 
@@ -125,6 +131,9 @@ value itself moves — the most-recent-dated-source-wins rule, in code.
 | `/prioritization` | Weighted scoring with a capacity cut line |
 | `/readiness` | The documented kick-off process, made checkable per initiative |
 | `/templates` | The standard template library and the discovery question bank |
+| `/workflow` | Workflow Assessment: our software components and human workflows, what feeds what, and what a change reaches. Grouped by stage by default; every box and arrow editable |
+| `/data-dictionary` | Data Dictionary for ClickHouse, Dev and Prod: datasets defined above the schemas with loaded-versus-intended status, every database and whether it is the client contract, every table |
+| `/data-dictionary/<database>/<table>` | One table down to the field: live structure from ClickHouse beside what people know, warnings, and why it is empty if it is |
 | `/changes` | Append-only log of every sync and hand edit |
 
 The **Full / Lead** toggle in the header hides operational detail for a
@@ -359,6 +368,7 @@ same VNet. Then run the migration once, from anywhere that can reach it:
 ```bash
 DATABASE_URL=... DATABASE_SSL=require npm run db:migrate
 DATABASE_URL=... DATABASE_SSL=require npm run seed:process
+DATABASE_URL=... DATABASE_SSL=require npm run seed:reference
 ```
 
 **The URLs must agree.** `APP_URL` has to be the real public hostname, and the
@@ -369,8 +379,10 @@ means the app keeps working while DNS is still propagating.
 
 Set every environment variable as an App Service **Application setting**
 (Container Apps: an environment variable or secret reference). `AUTH_SECRET`,
-`GOOGLE_CLIENT_SECRET` and `LINEAR_API_KEY` belong in Key Vault with a
-reference, not typed into the portal as plain text.
+`GOOGLE_CLIENT_SECRET`, `LINEAR_API_KEY` and the ClickHouse passwords belong in
+Key Vault with a reference, not typed into the portal as plain text. The
+ClickHouse connection is read-only by design; deploy/AZURE.md has the steps and
+the read-only user to ask for.
 
 Deploying to Azure changes nothing about Google sign-in. The Google Cloud
 initiative exists only to hold the OAuth client registration; no code or data

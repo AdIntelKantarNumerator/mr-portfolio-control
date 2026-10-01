@@ -192,6 +192,7 @@ $env:DATABASE_SSL = 'require'
 
 npm.cmd run db:migrate      # tables
 npm.cmd run seed:process    # lifecycle gates, templates, scoring model
+npm.cmd run seed:reference  # starting Workflow Assessment map and Data Dictionary
 npm.cmd run init            # settings defaults
 ```
 
@@ -290,6 +291,16 @@ az postgres flexible-server execute -n mr-portfolio-control-pg -d pcr `
   -u pcradmin -q "\dt" --output table
 ```
 
+If the change added a seed — migration `0021_reference_screens` did, for the
+Workflow Assessment map and the Data Dictionary — run it in the same shell:
+
+```powershell
+npm.cmd run seed:reference
+```
+
+It only fills tables that are empty, so running it on every deploy is safe and
+never overwrites an edit somebody made on screen.
+
 ### 4. Build and deploy
 
 ```powershell
@@ -314,6 +325,152 @@ az postgres flexible-server firewall-rule delete -g rg-mr-portfolio-control `
 ```
 
 Then commit and push, so the deployed image and the repository agree.
+
+## Connecting ClickHouse for the Data Dictionary
+
+The Data Dictionary reads ClickHouse's system tables to show what is loaded.
+It is the one place the portfolio reads another system directly, and it was
+allowed on one condition: **it only ever reads.** Three layers hold that, and
+this section sets up the third.
+
+1. The app checks every statement before sending it and refuses anything that
+   is not a read (`src/lib/clickhouse-guard.ts`, pinned by
+   `tests/clickhouse-guard.test.ts`).
+2. Every request carries `readonly=2`, so ClickHouse itself refuses writes
+   whatever the account allows, and a query cannot switch it back off.
+3. The account can only read. **This is the part to set up.** The Dev account
+   handed over on 1 October 2026, `isapp_dev_user`, has the `app_readwrite`
+   role: INSERT, ALTER UPDATE and ALTER DELETE on every database. Layers 1 and
+   2 make that safe today, but the deployed app should not hold a credential
+   that can write.
+
+### 1. Ask for a read-only user
+
+Hand this to whoever administers the cluster. It reads structure only: it can
+list databases, tables, columns and parts, and cannot read a single row of
+data, which is all the dictionary needs.
+
+```sql
+CREATE USER portfolio_ro IDENTIFIED WITH sha256_password BY '<generated, 32+ characters>'
+  SETTINGS readonly = 2;
+
+-- See that tables and columns exist, without reading them.
+GRANT SHOW DATABASES, SHOW TABLES, SHOW COLUMNS ON *.* TO portfolio_ro;
+
+-- The four system tables the dictionary queries.
+GRANT SELECT ON system.databases TO portfolio_ro;
+GRANT SELECT ON system.tables    TO portfolio_ro;
+GRANT SELECT ON system.columns   TO portfolio_ro;
+GRANT SELECT ON system.parts     TO portfolio_ro;
+```
+
+Create it with SQL, not in the operator's `ClickHouseInstallation` config.
+The clickhouse-serving repository found on 18 September that users defined in
+the CHI config live in read-only XML storage and cannot receive `GRANT` at all
+(`sql/migrations/2026-09-18_grafana_ro_prod_user.sql` there). Do the same on
+Prod when it is ready, as a separate user with its own password.
+
+### 2. Put the password in Key Vault — a vault of the web app's own
+
+**Not the vault Yaara uses.** `kv-mr-portfolio-control` uses access policies,
+and an access policy is granted on the whole vault, never on one secret. Giving
+the web app `get` there would let it read every Yaara credential beside the
+ClickHouse password: the Slack tokens, the GitHub token, the Azure DevOps PAT.
+A small vault holding only what the web app needs keeps that boundary:
+
+```powershell
+az keyvault create --name kv-mr-portfolio-web --resource-group rg-mr-portfolio-control `
+  --location eastus --enable-rbac-authorization false
+```
+
+The name is global across Azure; add a suffix if it is taken, and use the same
+name in the steps below.
+
+`vault-set.ps1` in the Yaara repository works with any vault. It prompts
+without echoing, never puts the value on a command line, trims the trailing
+newline a browser copy carries, and converts the underscore Key Vault does not
+allow:
+
+```powershell
+cd C:\temp\Portfolio\yaara
+.\deploy\vault-set.ps1 -KeyVault kv-mr-portfolio-web -Name CLICKHOUSE_DEV_PASSWORD -Verify
+```
+
+It is stored as `CLICKHOUSE-DEV-PASSWORD`. Copy the password first and add
+`-FromClipboard` if you are in the legacy console, where Ctrl+V does not paste.
+For Prod later: `-Name CLICKHOUSE_PROD_PASSWORD`.
+
+### 3. Let the web app read that secret
+
+The web app reads Key Vault with its own managed identity. Assigning one is
+idempotent, so running this again is harmless:
+
+```powershell
+$rg    = 'rg-mr-portfolio-control'
+$app   = 'mr-portfolio-control'
+$vault = 'kv-mr-portfolio-web'
+
+az webapp identity assign -g $rg -n $app
+$principal = az webapp identity show -g $rg -n $app --query principalId -o tsv
+```
+
+Then grant it read access to secrets. Which command depends on how the vault
+was created; `az keyvault show -n $vault --query properties.enableRbacAuthorization`
+says which.
+
+```powershell
+# false (access policies, as step 2 creates it):
+az keyvault set-policy --name $vault --object-id $principal --secret-permissions get
+
+# true (RBAC; needs Owner or User Access Administrator):
+az role assignment create --assignee $principal --role "Key Vault Secrets User" `
+  --scope (az keyvault show -n $vault --query id -o tsv)
+```
+
+`get` only. The app never lists the vault or writes to it.
+
+### 4. Point the app at it
+
+```powershell
+az webapp config appsettings set -g $rg -n $app --settings `
+  CLICKHOUSE_DEV_URL=http://20.10.60.14:8123 `
+  CLICKHOUSE_DEV_USER=portfolio_ro
+
+az webapp config appsettings set -g rg-mr-portfolio-control -n mr-portfolio-control --% --settings "CLICKHOUSE_DEV_PASSWORD=@Microsoft.KeyVault(SecretUri=https://kv-mr-portfolio-web.vault.azure.net/secrets/CLICKHOUSE-DEV-PASSWORD/)"
+
+az webapp restart -g $rg -n $app
+```
+
+**The `--%` in the second command is load-bearing.** `az` on Windows is a
+batch file run by `cmd.exe`. PowerShell strips the quotes from an argument
+with no spaces in it, and `cmd.exe` then silently drops the closing
+parenthesis, leaving a value that ends in `/` instead of `/)`. Azure does not
+recognise that as a Key Vault reference and hands the app the literal text as
+the password; ClickHouse refuses it. That happened on the first real setup,
+1 October 2026. `--%` tells PowerShell to pass the rest of the line untouched,
+which is also why that line spells out the names rather than using `$rg` and
+`$app`: variables are not expanded after it. The `SecretUri` form, rather than
+`VaultName=...;SecretName=...`, avoids a semicolon for the same reason. Leaving the version off the end of the URI means the app follows
+the latest version of the secret.
+
+Until `portfolio_ro` exists, `CLICKHOUSE_DEV_USER=isapp_dev_user` with its
+password in the same secret works, and layers 1 and 2 keep it read-only.
+
+### 5. Check it
+
+In the portal, **Configuration → Application settings** shows
+`CLICKHOUSE_DEV_PASSWORD` with a green tick and "Key Vault Reference". A red
+cross there means the identity cannot read the secret; step 3 is the fix.
+
+Then open `/data-dictionary`. The bar under the title reads
+`Read <time> · <n> databases · <n> tables`. If it says ClickHouse refused the
+credentials, the user or password is wrong; if it says it could not be reached,
+the web app has no network path to port 8123.
+
+### Rotating the password
+
+Run step 2 again with the new value, then `az webapp restart`. App Service
+re-reads Key Vault references on restart, and otherwise within about a day.
 
 ## When it does not work
 

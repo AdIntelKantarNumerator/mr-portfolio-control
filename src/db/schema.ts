@@ -1641,3 +1641,202 @@ export const routingCorrections = pgTable(
   },
   (t) => [index('routing_corrections_pending_idx').on(t.consumedAt, t.createdAt)],
 )
+
+// ---------------------------------------------------------------------------
+// Reference: Workflow Assessment — the component and workflow map
+// ---------------------------------------------------------------------------
+
+/**
+ * The columns of the grouped view: Collect, Ingest, Classify and so on, plus
+ * the lanes people work in.
+ *
+ * Keyed by a readable slug rather than a uuid because the seed, the tests and
+ * a person reading the database all refer to groups by name.
+ *
+ * Where a group sits left to right is NOT stored. It is computed from the
+ * links between the components inside it (lib/workflow-map.ts), because a
+ * stored column position is wrong the first time somebody adds a connection,
+ * and nobody remembers to fix it.
+ */
+export const workflowGroups = pgTable('workflow_groups', {
+  key: text('key').primaryKey(),
+  name: text('name').notNull(),
+  /** software | human */
+  kind: text('kind').notNull().default('software'),
+  /** Order within a column when two groups land in the same one. */
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+})
+
+/**
+ * One box on the map: a piece of software, a human workflow, or a rule set
+ * somebody owns.
+ *
+ * `description` is the field that matters most and the one most likely to be
+ * left empty. It is what the assessment chat will match a request against — a
+ * component nobody described is a component no question will ever land on —
+ * so the page shows a missing description as a gap, not as blank space.
+ */
+export const workflowComponents = pgTable(
+  'workflow_components',
+  {
+    id: id(),
+    name: text('name').notNull(),
+    /** software | human | rule */
+    kind: text('kind').notNull().default('software'),
+    groupKey: text('group_key')
+      .notNull()
+      .references(() => workflowGroups.key, { onUpdate: 'cascade' }),
+    /** Free text, like app_areas.owner: a team or a person, before either has a row. */
+    owner: text('owner'),
+    /** What it handles, in a few sentences. */
+    description: text('description'),
+    /** The one-line detail under the name: the rules it enforces, the tables it owns. */
+    detail: text('detail'),
+    /** Comma-separated words people use for it. Matched as well as the name. */
+    aliases: text('aliases'),
+    /** True when the box is a ClickHouse database or table rather than a service. */
+    isData: boolean('is_data').notNull().default(false),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('workflow_components_group_idx').on(t.groupKey)],
+)
+
+/**
+ * One arrow: `from` feeds `to`.
+ *
+ * Direction is the whole meaning. A change to `from` can reach `to`; a change
+ * to `to` cannot reach `from`. The impact walk follows these and nothing else,
+ * so a link drawn the wrong way round is a wrong answer, not a cosmetic one.
+ */
+export const workflowLinks = pgTable(
+  'workflow_links',
+  {
+    id: id(),
+    fromId: text('from_id')
+      .notNull()
+      .references(() => workflowComponents.id, { onDelete: 'cascade' }),
+    toId: text('to_id')
+      .notNull()
+      .references(() => workflowComponents.id, { onDelete: 'cascade' }),
+    note: text('note'),
+    createdBy: text('created_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('workflow_links_pair_unique').on(t.fromId, t.toId)],
+)
+
+// ---------------------------------------------------------------------------
+// Reference: Data Dictionary — what people know about ClickHouse
+// ---------------------------------------------------------------------------
+//
+// Structure is never stored here. Engines, columns, types and row counts are
+// read live from ClickHouse's system tables (lib/dictionary.ts), because a
+// copy of them is wrong the next time a loader runs. What is stored is the
+// part only a person can supply: what a thing means, whether it should be
+// loaded, and what will produce a wrong number.
+//
+// Tables and columns are referred to as "database.table" text rather than by
+// foreign key for the same reason: the thing they describe lives in another
+// system, and a note about a table that was dropped is worth keeping and
+// showing as drift rather than cascading away.
+
+/**
+ * A named thing a client or a loader team talks about — Sports Sponsorship,
+ * Television — and the ClickHouse tables it is made of.
+ *
+ * Its loaded status is computed from those tables. Its intent, per
+ * environment, is stated by a person. The gap between the two is what the
+ * screen exists to show.
+ */
+export const dictionaryDatasets = pgTable('dictionary_datasets', {
+  id: id(),
+  name: text('name').notNull(),
+  owner: text('owner'),
+  description: text('description'),
+  /** loaded | awaiting_feed | by_design | planned | undecided */
+  intentDev: text('intent_dev').notNull().default('undecided'),
+  intentProd: text('intent_prod').notNull().default('undecided'),
+  /** The Blocker, Decision or Initiative that explains the status, in words. */
+  explainedBy: text('explained_by'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  updatedBy: text('updated_by'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+})
+
+export const dictionaryDatasetTables = pgTable(
+  'dictionary_dataset_tables',
+  {
+    datasetId: text('dataset_id')
+      .notNull()
+      .references(() => dictionaryDatasets.id, { onDelete: 'cascade' }),
+    /** "database.table" */
+    tableRef: text('table_ref').notNull(),
+  },
+  (t) => [primaryKey({ name: 'dictionary_dataset_tables_pk', columns: [t.datasetId, t.tableRef] })],
+)
+
+/**
+ * Whether a ClickHouse database is part of what clients consume.
+ *
+ * Every database on the instance shows up; this says which ones count. A
+ * database with no row here is "unreviewed", which the screen shows as a
+ * question rather than assuming either way.
+ */
+export const dictionaryDatabases = pgTable('dictionary_databases', {
+  name: text('name').primaryKey(),
+  /** contract | internal | transition | superseded | excluded | unreviewed */
+  status: text('status').notNull().default('unreviewed'),
+  description: text('description'),
+  updatedBy: text('updated_by'),
+  updatedAt: updatedAt(),
+})
+
+/** What people know about one table. */
+export const dictionaryTables = pgTable('dictionary_tables', {
+  /** "database.table" */
+  tableRef: text('table_ref').primaryKey(),
+  description: text('description'),
+  owner: text('owner'),
+  /** What will produce a wrong number if you do not know it. */
+  watchOut: text('watch_out'),
+  /**
+   * Why an empty table is empty: by_design | awaiting_feed | undecided.
+   *
+   * The GPC serving model's sharpest open question. An empty table that will
+   * fill when a feed lands and one that never will look identical in the
+   * schema and mean opposite things to whoever is building on it.
+   */
+  emptyReason: text('empty_reason'),
+  /** Hidden from the dictionary: a backup, a scratch table, a mistake. */
+  excluded: boolean('excluded').notNull().default(false),
+  updatedBy: text('updated_by'),
+  updatedAt: updatedAt(),
+})
+
+/** What people know about one column. */
+export const dictionaryColumns = pgTable(
+  'dictionary_columns',
+  {
+    tableRef: text('table_ref').notNull(),
+    columnName: text('column_name').notNull(),
+    description: text('description'),
+    meaning: text('meaning'),
+    watchOut: text('watch_out'),
+    source: text('source'),
+    /**
+     * Set when a machine wrote the notes and no person has touched them since
+     * ("seed", later "yaara"). Cleared on the first human save, at which point
+     * `updatedBy` names the person and the cell stops saying "draft".
+     */
+    draftedBy: text('drafted_by'),
+    updatedBy: text('updated_by'),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ name: 'dictionary_columns_pk', columns: [t.tableRef, t.columnName] })],
+)
