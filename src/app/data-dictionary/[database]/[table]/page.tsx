@@ -11,15 +11,22 @@
  * column with only a comment in its DDL shows that comment, labelled as such,
  * so the gap between "somebody wrote this down in the schema" and "somebody
  * confirmed it here" stays visible.
+ *
+ * Two tabs under the table's notes: Fields, and Preview, which shows the
+ * first ten rows. The preview is read only when its tab is open, so the
+ * Fields tab costs ClickHouse nothing extra, and it goes through the same
+ * read-only guard as everything else (lib/clickhouse-guard.ts).
  */
 import Link from 'next/link'
 import { Kicker } from '@/components/ui'
-import { readCatalog, readColumnNotes, readColumns, readDictionaryNotes } from '@/lib/dictionary'
+import { readCatalog, readColumnNotes, readColumns, readDictionaryNotes, readPreview, type PreviewResult } from '@/lib/dictionary'
 import {
   DATABASE_STATUS_LABEL,
   EMPTY_REASON_LABEL,
   compactCount,
   excludedByRule,
+  previewCell,
+  previewProblem,
   readDatabaseStatus,
   readEmptyReason,
   readEnvironment,
@@ -28,7 +35,7 @@ import {
 } from '@/lib/dictionary-rules'
 import { ConnectionNote, DictionaryHeader } from '../../header'
 import { ColumnTable, TableNoteEditor, type ColumnRow } from '../../editors'
-import { dictHref, tableHref } from '../../href'
+import { dictHref, tableHref, type TablePane } from '../../href'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,6 +56,7 @@ export default async function TablePage({ params, searchParams }: { params: Para
   const ref = tableRef(database, table)
   const env = readEnvironment(one(sp.env))
   const edit = one(sp.edit) === '1'
+  const pane: TablePane = one(sp.view) === 'preview' ? 'preview' : 'fields'
 
   const [result, notes, columnNotes, columns] = await Promise.all([
     readCatalog(env),
@@ -58,6 +66,10 @@ export default async function TablePage({ params, searchParams }: { params: Para
   ])
 
   const facts = result.state === 'ok' ? result.catalog.tables.find((t) => t.ref === ref) ?? null : null
+  // Only a table ClickHouse says exists, on an engine whose read stays inside
+  // ClickHouse, is previewed. The check is made here, before anything is sent.
+  const blocked = facts ? previewProblem(facts.engine) : null
+  const preview: PreviewResult | null = pane === 'preview' && facts && !blocked ? await readPreview(env, database, table) : null
   const note = notes.tables.find((t) => t.tableRef === ref)
   const dbStatus = readDatabaseStatus(notes.databases.find((d) => d.name === database)?.status) ?? 'unreviewed'
   const datasets = notes.datasets.filter((d) => d.tables.includes(ref))
@@ -81,7 +93,12 @@ export default async function TablePage({ params, searchParams }: { params: Para
   const drafts = rows.filter((r) => r.note?.draftedBy).length
 
   const view = { env, edit }
-  const hrefFor = (change: { env?: typeof env; edit?: boolean }) => tableHref({ env: change.env ?? env, edit: change.edit ?? edit }, database, table)
+  const hrefFor = (change: { env?: typeof env; edit?: boolean }) =>
+    tableHref({ env: change.env ?? env, edit: change.edit ?? edit, pane }, database, table)
+  // SELECT * leaves out MATERIALIZED and ALIAS columns, so the preview has
+  // fewer columns than the Fields tab. Said on screen rather than left to look
+  // like a bug.
+  const computed = live.filter((c) => c.defaultKind === 'MATERIALIZED' || c.defaultKind === 'ALIAS').length
 
   return (
     <div className="stack">
@@ -178,14 +195,24 @@ export default async function TablePage({ params, searchParams }: { params: Para
       </section>
 
       <section className="dd-section">
-        <h2 className="dd-h2">
-          Fields
-          <span className="dd-h2-note">
-            {columns.ok
-              ? `${rows.length} fields · ${rows.length - undescribed} described${drafts ? ` · ${drafts} drafts to confirm` : ''}`
-              : ''}
-          </span>
-        </h2>
+        <nav className="dd-tabs" aria-label="Table sections">
+          <Link href={tableHref({ env, edit, pane: 'fields' }, database, table)} className={pane === 'fields' ? 'on' : ''} aria-current={pane === 'fields' ? 'page' : undefined}>
+            Fields
+          </Link>
+          <Link href={tableHref({ env, edit, pane: 'preview' }, database, table)} className={pane === 'preview' ? 'on' : ''} aria-current={pane === 'preview' ? 'page' : undefined}>
+            Preview
+          </Link>
+        </nav>
+
+        {pane === 'preview' ? (
+          <PreviewPane envLabel={env === 'prod' ? 'Prod' : 'Dev'} exists={Boolean(facts)} catalogOk={result.state === 'ok'} blocked={blocked} preview={preview} computed={computed} />
+        ) : (
+          <>
+        <p className="dd-h2-note dd-pane-note">
+          {columns.ok
+            ? `${rows.length} fields · ${rows.length - undescribed} described${drafts ? ` · ${drafts} drafts to confirm` : ''}`
+            : ''}
+        </p>
         {columns.ok ? (
           <ColumnTable tableRef={ref} columns={rows} edit={edit} />
         ) : (
@@ -197,6 +224,8 @@ export default async function TablePage({ params, searchParams }: { params: Para
             moving the notes or deleting them.
           </div>
         ) : null}
+          </>
+        )}
       </section>
 
       <p className="dd-foot">
@@ -204,6 +233,67 @@ export default async function TablePage({ params, searchParams }: { params: Para
         {facts ? <span className="dd-quiet"> · {compactCount(facts.rows)} rows · {facts.columnCount} fields</span> : null}
       </p>
     </div>
+  )
+}
+
+function PreviewPane({
+  envLabel,
+  exists,
+  catalogOk,
+  blocked,
+  preview,
+  computed,
+}: {
+  envLabel: string
+  exists: boolean
+  catalogOk: boolean
+  blocked: string | null
+  preview: PreviewResult | null
+  computed: number
+}) {
+  if (!catalogOk) return <p className="dd-foot">ClickHouse {envLabel} could not be read, so there is nothing to preview.</p>
+  if (!exists) return <p className="dd-foot">This table is not in ClickHouse {envLabel}, so there are no rows to show.</p>
+  if (blocked) return <div className="dd-note dd-note-info">{blocked}</div>
+  if (!preview) return null
+  if (!preview.ok) return <p className="dd-foot">{preview.message}</p>
+  if (preview.rows.length === 0) return <p className="dd-foot">ClickHouse returned no rows: the table is empty in {envLabel}.</p>
+
+  return (
+    <>
+      <p className="dd-h2-note dd-pane-note">
+        The first {preview.rows.length} rows ClickHouse read, in no particular order · {preview.columns.length} columns · read{' '}
+        {preview.readAt.slice(11, 16)} UTC, read-only, not stored
+        {computed ? ` · ${computed} computed ${computed === 1 ? 'column is' : 'columns are'} not part of a plain read and ${computed === 1 ? 'is' : 'are'} left out` : ''}
+      </p>
+      <div className="dd-tablewrap dd-preview-wrap">
+        <table className="dd-table dd-preview">
+          <thead>
+            <tr>
+              {preview.columns.map((c) => (
+                <th key={c.name} title={c.type}>
+                  {c.name}
+                  <span className="dd-preview-type">{c.type}</span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {preview.rows.map((row, i) => (
+              <tr key={i}>
+                {preview.columns.map((c) => {
+                  const cell = previewCell(row[c.name], c.type)
+                  return (
+                    <td key={c.name} className={`dd-cell-${cell.kind}`} title={cell.title}>
+                      {cell.text}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   )
 }
 

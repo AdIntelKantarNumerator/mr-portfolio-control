@@ -175,6 +175,85 @@ export function readDatabaseStatus(raw: unknown): DatabaseStatus | null {
   return (DATABASE_STATUSES as readonly string[]).includes(String(raw)) ? (raw as DatabaseStatus) : null
 }
 
+// ---------------------------------------------------------------------------
+// Preview
+// ---------------------------------------------------------------------------
+
+/**
+ * Engines whose rows are read from ClickHouse's own storage, or from a query
+ * over it. Anything in the MergeTree family is covered by the suffix test in
+ * previewProblem, Replicated and Shared variants included.
+ */
+const LOCAL_ENGINES = new Set([
+  'View',
+  'MaterializedView',
+  'Memory',
+  'Log',
+  'TinyLog',
+  'StripeLog',
+  'Distributed',
+  'Merge',
+  'Dictionary',
+  'Buffer',
+  'Join',
+  'Null',
+])
+
+/**
+ * Engines where a SELECT is not a harmless read: it consumes messages, so the
+ * preview would take them from whatever was meant to load them.
+ */
+const STREAM_ENGINES = new Set(['Kafka', 'RabbitMQ', 'NATS', 'FileLog', 'S3Queue', 'AzureQueue', 'Redis'])
+
+/**
+ * Why a table is not previewed, or null when it may be.
+ *
+ * Everything else (MySQL, PostgreSQL, S3, URL, the lake formats) is refused
+ * too, because a SELECT on one of those is a query against another system,
+ * made with ClickHouse's credentials for it. The preview is for looking at
+ * what is loaded here, not for reaching through to there.
+ */
+export function previewProblem(engine: string): string | null {
+  const e = engine.trim()
+  if (/MergeTree$/.test(e) || LOCAL_ENGINES.has(e)) return null
+  if (STREAM_ENGINES.has(e)) return `Reading a ${e} table consumes its messages, so it is never previewed.`
+  return `A ${e || 'table with no engine'} table is read from another system when it is queried, so the preview does not reach into it.`
+}
+
+export type PreviewCell = { kind: 'null' | 'empty' | 'text' | 'number' | 'json'; text: string; title?: string }
+
+const CELL_CHARS = 120
+const TITLE_CHARS = 2000
+
+/**
+ * One value as the preview shows it. Long text is cut so one wide JSON column
+ * does not push the rest of the row off the screen; the hover carries more of
+ * it. NULL is shown as NULL, distinct from an empty string, because the
+ * difference is exactly what someone previewing a table is checking for.
+ *
+ * `type` is the ClickHouse column type. It matters for one case: JSON output
+ * sends 64-bit integers and decimals as strings, so JavaScript does not round
+ * them, and without the type they would be shown as text.
+ */
+export function previewCell(value: unknown, type = ''): PreviewCell {
+  if (value === null || value === undefined) return { kind: 'null', text: 'NULL' }
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return { kind: 'number', text: String(value) }
+  }
+  if (typeof value === 'string' && /^(?:Nullable\()?(?:LowCardinality\()?(?:U?Int\d+|Float\d+|Decimal)/.test(type)) {
+    return { kind: 'number', text: value }
+  }
+  const kind = typeof value === 'string' ? 'text' : 'json'
+  const full = typeof value === 'string' ? value : JSON.stringify(value)
+  if (full === '') return { kind: 'empty', text: '' }
+  if (full.length <= CELL_CHARS) return { kind, text: full }
+  return {
+    kind,
+    text: `${full.slice(0, CELL_CHARS)}…`,
+    title: full.length > TITLE_CHARS ? `${full.slice(0, TITLE_CHARS)}…` : full,
+  }
+}
+
 /** 5,450,000,000 → "5.45bn". Row counts read better compact; the exact figure is on hover. */
 export function compactCount(n: number): string {
   if (!Number.isFinite(n)) return '—'

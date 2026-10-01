@@ -114,3 +114,39 @@ test('small things', async (t) => {
     assert.equal(compactCount(1_080), '1,080')
   })
 })
+
+test('the preview', async (t) => {
+  const { previewProblem, previewCell } = await import('../src/lib/dictionary-rules')
+
+  await t.test('every engine on Dev today is previewable', () => {
+    // Read from Dev on 1 October 2026: MergeTree 467, ReplacingMergeTree 53,
+    // Dictionary 7, View 3.
+    for (const e of ['MergeTree', 'ReplacingMergeTree', 'ReplicatedMergeTree', 'Dictionary', 'View', 'MaterializedView']) {
+      assert.equal(previewProblem(e), null, e)
+    }
+  })
+  await t.test('a stream engine is refused: reading it would consume the messages', () => {
+    assert.match(previewProblem('Kafka')!, /consumes/)
+    assert.match(previewProblem('S3Queue')!, /consumes/)
+  })
+  await t.test('an engine that reaches another system is refused', () => {
+    for (const e of ['MySQL', 'PostgreSQL', 'S3', 'URL', 'IcebergS3']) assert.match(previewProblem(e)!, /another system/, e)
+  })
+  await t.test('NULL and an empty string look different', () => {
+    assert.deepEqual(previewCell(null), { kind: 'null', text: 'NULL' })
+    assert.deepEqual(previewCell(''), { kind: 'empty', text: '' })
+  })
+  await t.test('64-bit integers arrive as strings and are still numbers', () => {
+    assert.equal(previewCell('951987', 'Int64').kind, 'number')
+    assert.equal(previewCell('12', 'Nullable(UInt64)').kind, 'number')
+    assert.equal(previewCell('US', 'LowCardinality(String)').kind, 'text')
+  })
+  await t.test('long values are cut on screen and kept on hover', () => {
+    const cell = previewCell('x'.repeat(500))
+    assert.equal(cell.text.length, 121)
+    assert.equal(cell.title, 'x'.repeat(500))
+  })
+  await t.test('arrays and maps are shown as JSON', () => {
+    assert.deepEqual(previewCell([1, 2]), { kind: 'json', text: '[1,2]' })
+  })
+})

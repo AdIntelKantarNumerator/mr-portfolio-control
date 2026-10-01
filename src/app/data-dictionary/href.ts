@@ -34,6 +34,10 @@ export function dictHref(v: DictView): string {
   return `/data-dictionary${query(v)}`
 }
 
-export function tableHref(v: Pick<DictView, 'env' | 'edit'>, database: string, table: string): string {
-  return `/data-dictionary/${encodeURIComponent(database)}/${encodeURIComponent(table)}${query({ env: v.env, edit: v.edit })}`
+/** The two tabs on a table page. Fields is the default and has no parameter. */
+export type TablePane = 'fields' | 'preview'
+
+export function tableHref(v: Pick<DictView, 'env' | 'edit'> & { pane?: TablePane }, database: string, table: string): string {
+  const extra: Record<string, string> = v.pane === 'preview' ? { view: 'preview' } : {}
+  return `/data-dictionary/${encodeURIComponent(database)}/${encodeURIComponent(table)}${query({ env: v.env, edit: v.edit }, extra)}`
 }

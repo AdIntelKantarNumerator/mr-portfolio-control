@@ -98,3 +98,46 @@ test('connection settings, per environment', async (t) => {
     assert.equal(clickhouseConfig('prod', env)!.url, 'https://prod.example:8443')
   })
 })
+
+/**
+ * The Preview tab, added 1 October 2026, is the first query that reads a
+ * table's rows rather than ClickHouse's own catalog. It is also the first
+ * whose target comes from the URL, so these pin how that target travels and
+ * that its tighter settings cannot loosen readonly.
+ */
+test('the preview reads ten rows of the named table and nothing else', async (t) => {
+  const { Q_PREVIEW, PREVIEW_SETTINGS } = await import('../src/lib/dictionary-queries')
+  const { chSelect } = await import('../src/lib/clickhouse')
+
+  await t.test('the table is a parameter, not part of the SQL', () => {
+    assert.match(Q_PREVIEW, /\{db:Identifier\}\.\{tbl:Identifier\}/)
+    assert.match(Q_PREVIEW, /LIMIT 10$/)
+  })
+
+  await t.test('rows and bytes are capped by ClickHouse as well as by the LIMIT', () => {
+    assert.equal(PREVIEW_SETTINGS.max_result_rows, '10')
+    assert.equal(PREVIEW_SETTINGS.result_overflow_mode, 'break')
+    assert.ok(Number(PREVIEW_SETTINGS.max_result_bytes) <= 5_000_000)
+  })
+
+  await t.test('a hostile table name is sent as a parameter, and readonly cannot be overridden', async () => {
+    const sent: string[] = []
+    const real = globalThis.fetch
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+      sent.push(String(url))
+      assert.equal(init?.body, Q_PREVIEW, 'the statement is sent exactly as written')
+      return new Response(JSON.stringify({ meta: [{ name: 'a', type: 'UInt8' }], data: [{ a: 1 }] }), { status: 200 })
+    }) as typeof fetch
+    try {
+      const config = clickhouseConfig('dev', { CLICKHOUSE_DEV_URL: 'http://ch.test:8123' })!
+      const r = await chSelect(config, Q_PREVIEW, { db: 'gpc_reference', tbl: "x`; DROP TABLE y; --" }, { ...PREVIEW_SETTINGS, readonly: '0' })
+      assert.deepEqual(r.meta, [{ name: 'a', type: 'UInt8' }])
+      const qs = new URL(sent[0]!).searchParams
+      assert.equal(qs.get('readonly'), '2', 'a caller asking for readonly=0 still sends 2')
+      assert.equal(qs.get('param_tbl'), "x`; DROP TABLE y; --")
+      assert.equal(qs.get('max_result_rows'), '10')
+    } finally {
+      globalThis.fetch = real
+    }
+  })
+})

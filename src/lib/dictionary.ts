@@ -25,8 +25,8 @@ import {
   dictionaryDatasetTables,
   dictionaryTables,
 } from '@/db/schema'
-import { chQuery, clickhouseConfig, ClickHouseError } from './clickhouse'
-import { Q_COLUMNS, Q_COLUMN_COUNTS, Q_DATABASES, Q_PARTS, Q_TABLES } from './dictionary-queries'
+import { chQuery, chSelect, clickhouseConfig, ClickHouseError } from './clickhouse'
+import { PREVIEW_SETTINGS, Q_COLUMNS, Q_COLUMN_COUNTS, Q_DATABASES, Q_PARTS, Q_PREVIEW, Q_TABLES } from './dictionary-queries'
 import { isSystemDatabase, tableRef, type Environment } from './dictionary-rules'
 
 export interface CatalogDatabase {
@@ -183,6 +183,31 @@ export function readColumns(
             defaultExpression: String(r.default_expression ?? ''),
           })),
         }
+      } catch (err) {
+        return { ok: false as const, message: err instanceof ClickHouseError ? err.message : (err as Error).message }
+      }
+    },
+  )
+}
+
+export type PreviewResult =
+  | { ok: true; readAt: string; columns: Array<{ name: string; type: string }>; rows: Array<Record<string, unknown>> }
+  | { ok: false; message: string }
+
+/**
+ * The first rows of one table, for the Preview tab. Held for a minute, so
+ * flicking between tabs does not re-read, and never stored anywhere.
+ */
+export function readPreview(env: Environment, database: string, table: string): Promise<PreviewResult> {
+  return cached(
+    `${env}:preview:${database}.${table}`,
+    (v) => (v.ok ? 60_000 : ERROR_TTL_MS),
+    async () => {
+      const config = clickhouseConfig(env)
+      if (!config) return { ok: false as const, message: `ClickHouse ${env} is not connected.` }
+      try {
+        const { meta, data } = await chSelect<Record<string, unknown>>(config, Q_PREVIEW, { db: database, tbl: table }, PREVIEW_SETTINGS)
+        return { ok: true as const, readAt: new Date().toISOString(), columns: meta, rows: data.slice(0, 10) }
       } catch (err) {
         return { ok: false as const, message: err instanceof ClickHouseError ? err.message : (err as Error).message }
       }

@@ -71,10 +71,27 @@ export async function chQuery<T = Record<string, unknown>>(
   config: ClickHouseConfig,
   sql: string,
   params: Record<string, string> = {},
+  settings: Record<string, string> = {},
 ): Promise<T[]> {
+  return (await chSelect<T>(config, sql, params, settings)).data
+}
+
+/**
+ * The same read, keeping the column list ClickHouse sends beside the rows.
+ * The rows are objects, so the order of the columns is only in `meta`.
+ *
+ * `settings` tighten a read (a lower time limit, a row cap). They are applied
+ * before `readonly`, which is set last so that no caller can loosen it.
+ */
+export async function chSelect<T = Record<string, unknown>>(
+  config: ClickHouseConfig,
+  sql: string,
+  params: Record<string, string> = {},
+  settings: Record<string, string> = {},
+): Promise<{ meta: Array<{ name: string; type: string }>; data: T[] }> {
   assertReadOnly(sql)
 
-  const qs = new URLSearchParams({ ...READ_ONLY_PARAMS, default_format: 'JSON' })
+  const qs = new URLSearchParams({ ...READ_ONLY_PARAMS, ...settings, readonly: READ_ONLY_PARAMS.readonly!, default_format: 'JSON' })
   for (const [k, v] of Object.entries(params)) qs.set(`param_${k}`, v)
 
   let res: Response
@@ -111,7 +128,8 @@ export async function chQuery<T = Record<string, unknown>>(
   }
 
   try {
-    return (JSON.parse(body) as { data: T[] }).data
+    const parsed = JSON.parse(body) as { meta?: Array<{ name: string; type: string }>; data: T[] }
+    return { meta: parsed.meta ?? [], data: parsed.data }
   } catch {
     throw new ClickHouseError(`ClickHouse ${config.env} returned something that is not JSON.`)
   }
