@@ -16,6 +16,7 @@
  *   /api/webhooks/linear   HMAC signature over the raw body
  *   /api/slack/*           Slack's v0 request signature
  *   /api/sync/*, /api/digest, /api/agent/*   SYNC_TOKEN bearer
+ *   /api/yaara/*           YAARA_CHAT_TOKEN bearer plus a signed user token
  */
 import { NextResponse, type NextRequest } from 'next/server'
 import { jwtVerify } from 'jose'
@@ -33,6 +34,9 @@ import { SESSION_COOKIE } from '@/lib/auth/config'
  *   /api/sync/*            SYNC_TOKEN bearer; refuses in production if unset
  *   /api/digest            SYNC_TOKEN bearer; refuses in production if unset
  *   /api/agent/*           SYNC_TOKEN bearer; the agent's read and write path
+ *   /api/yaara/*           the chat screen (Open WebUI) asking Yaara a question:
+ *                          YAARA_CHAT_TOKEN bearer, and the person verified from
+ *                          Open WebUI's signed user token (lib/yaara-chat.ts)
  *   /api/health            the one genuinely open endpoint — returns {ok:true}
  *                          and nothing else, so a load balancer can probe it
  */
@@ -44,6 +48,7 @@ export const PUBLIC_PREFIXES = [
   '/api/sync/',
   '/api/digest',
   '/api/agent/',
+  '/api/yaara/',
   '/api/health',
 ]
 

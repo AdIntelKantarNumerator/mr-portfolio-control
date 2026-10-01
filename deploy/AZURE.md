@@ -540,6 +540,20 @@ a host not on the verified list. If answers come back marked as keyword
 matches, the key did not resolve: check the Key Vault reference has a green
 tick.
 
+## Ask Yaara: the chat window
+
+The home page's **Ask Yaara** button opens Open WebUI, deployed as its own web
+app beside this one. `deploy/open-webui/README.md` explains how it fits
+together, and one script deploys it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\open-webui\chat-up.ps1
+```
+
+It ends by listing the three things left to do by hand: a redirect URI on the
+Google OAuth client, signing in first as the admin, and giving Yaara her
+picture.
+
 ## When it does not work
 
 `az webapp log tail -g $rg -n $app` streams the container's stdout, which is

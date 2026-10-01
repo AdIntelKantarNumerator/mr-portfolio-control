@@ -1870,3 +1870,38 @@ export const dictionaryColumns = pgTable(
   },
   (t) => [primaryKey({ name: 'dictionary_columns_pk', columns: [t.tableRef, t.columnName] })],
 )
+
+/**
+ * Questions asked of Yaara in the portfolio's chat, while she answers them.
+ *
+ * A relay, not a record. Open WebUI keeps the conversation; Yaara keeps what
+ * she was told to remember; the portfolio keeps what she concluded. This
+ * table only carries a question from the chat screen to her and her answer
+ * back, because she cannot be reached directly (lib/yaara-chat.ts explains
+ * why). Rows are deleted two days after they are asked, so it never becomes
+ * a second copy of anyone's conversations.
+ */
+export const yaaraChats = pgTable(
+  'yaara_chats',
+  {
+    id: id(),
+    askedAt: timestamp('asked_at', { withTimezone: true }).notNull().defaultNow(),
+    askedByEmail: text('asked_by_email').notNull(),
+    askedByName: text('asked_by_name'),
+    /** Open WebUI's id for the conversation, so a run of questions can be told apart from separate ones. */
+    chatId: text('chat_id'),
+    /** JSON: the conversation as she should see it, [{role, content}], last turn the question. */
+    messages: text('messages').notNull(),
+    /** queued | working | answered | failed | abandoned */
+    status: text('status').notNull().default('queued'),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    /** JSON: what she said she was doing, in order, shown while the person waits. */
+    progress: text('progress').notNull().default('[]'),
+    reply: text('reply'),
+    model: text('model'),
+    servedBy: text('served_by'),
+    error: text('error'),
+  },
+  (t) => [index('yaara_chats_status_idx').on(t.status, t.askedAt)],
+)

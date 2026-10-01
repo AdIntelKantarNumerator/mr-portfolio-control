@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { isPublic } from '../src/proxy'
 
 /**
@@ -15,8 +16,10 @@ import { isPublic } from '../src/proxy'
  *
  * So the list is derived from the filesystem rather than trusted.
  */
-const MACHINE_ROUTE_DIRS = ['sync', 'digest', 'webhooks', 'slack', 'agent', 'health']
-const apiDir = join(new URL('..', import.meta.url).pathname, 'src/app/api')
+const MACHINE_ROUTE_DIRS = ['sync', 'digest', 'webhooks', 'slack', 'agent', 'yaara', 'health']
+// fileURLToPath, not URL.pathname: on Windows the pathname is /C:/..., which
+// join() turns into C:C:... and every test here failed to find the folder.
+const apiDir = join(fileURLToPath(new URL('..', import.meta.url)), 'src/app/api')
 
 test('every machine route directory that exists is exempt from the session gate', () => {
   for (const dir of MACHINE_ROUTE_DIRS) {

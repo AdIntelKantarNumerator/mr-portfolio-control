@@ -402,6 +402,9 @@ table.dtable thead th {
 .home .titlerow { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .home .titlerow h1 { margin: 0; font-size: 25px; letter-spacing: -.022em; }
 .home .titlerow .sub { margin: 0; font-size: 13px; color: var(--muted); }
+.home-ask { margin-left: auto; align-self: center; display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px 6px 6px; border-radius: 999px; background: var(--brand); color: #fff; font-size: 13px; font-weight: 650; text-decoration: none; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.home-ask:hover { background: color-mix(in srgb, var(--brand) 88%, #000); }
+.home-ask img { border-radius: 50%; background: #fff; }
 
 .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
 .fpill {
@@ -1577,9 +1580,6 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .dd-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); }
 .dd-tabs a { padding: 7px 12px; margin-bottom: -1px; font-size: 13px; font-weight: 650; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; }
 .dd-tabs a.on { color: var(--brand); border-bottom-color: var(--brand); }
-.dd-note { padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; line-height: 1.5; }
-.dd-note-info { background: var(--blue-bg); color: var(--ink); }
-.dd-note-warn { background: var(--amber-bg); color: var(--ink); }
 /* Table page: Fields | Preview. The note sits under the tabs, where the heading count used to be. */
 .dd-pane-note { display: block; margin: 10px 0 8px; }
 .dd-preview-wrap { max-height: 520px; overflow: auto; }
@@ -1589,6 +1589,9 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .dd-cell-null { color: var(--muted); font-style: italic; }
 .dd-cell-number { text-align: right; }
 .dd-cell-json { color: var(--muted); }
+.dd-note { padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; line-height: 1.5; }
+.dd-note-info { background: var(--blue-bg); color: var(--ink); }
+.dd-note-warn { background: var(--amber-bg); color: var(--ink); }
 .dd-note-bad { background: var(--red-bg); color: var(--ink); }
 .dd-note code, .dd-foot code { font-family: var(--font-mono); font-size: 11.5px; }
 .dd-actions { display: flex; gap: 8px; margin: 10px 0; }

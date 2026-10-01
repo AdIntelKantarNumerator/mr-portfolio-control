@@ -1,0 +1,4 @@
+# Read by bash (run-local.sh sources settings.env), where a CRLF ending puts a
+# stray carriage return on the end of every value.
+*.sh text eol=lf
+*.env text eol=lf

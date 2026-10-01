@@ -1,0 +1,20 @@
+{
+  "description": "Yaara reads the program's sources and keeps the portfolio current. Ask her how anything is going, what is blocked, what was decided, what is in intake, what a change would affect, or what is loaded in ClickHouse.",
+  "capabilities": {
+    "vision": false,
+    "file_upload": false,
+    "web_search": false,
+    "image_generation": false,
+    "code_interpreter": false,
+    "citations": false,
+    "usage": false
+  },
+  "suggestion_prompts": [
+    { "title": ["How is the portfolio doing?", "objectives and their health"], "content": "How is the portfolio doing overall? Which objectives need attention?" },
+    { "title": ["What is blocked?", "and who owns clearing it"], "content": "What is blocked right now, and who owns clearing each one?" },
+    { "title": ["What would a change affect?", "asked of the workflow map"], "content": "If we change how we classify automotive ads, what would that affect?" },
+    { "title": ["Is a dataset loaded?", "from the Data Dictionary"], "content": "Is the Sports Sponsorship dataset loaded in ClickHouse, and what should I watch out for?" },
+    { "title": ["What is top of intake?", "ranked by score"], "content": "What are the top requests in intake by score?" },
+    { "title": ["How is engineering doing?", "from the Engineering Weekly"], "content": "How is the engineering team doing this week?" }
+  ]
+}
