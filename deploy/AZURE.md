@@ -472,6 +472,74 @@ the web app has no network path to port 8123.
 Run step 2 again with the new value, then `az webapp restart`. App Service
 re-reads Key Vault references on restart, and otherwise within about a day.
 
+## The language model: DeepSeek through OpenRouter
+
+The conversation briefs and the Workflow Assessment chat both use a language
+model. Production uses DeepSeek through OpenRouter, the same model Yaara runs
+on, under the same residency rule: the app refuses to call OpenRouter unless
+`OPENROUTER_PROVIDERS` names verified US hosts, and every request forbids
+fallbacks (`src/lib/openrouter.ts`). It moved from Azure OpenAI on
+1 October 2026, when the `mr-portfolio-ai` resource was deleted.
+
+**What this means for data.** With Azure OpenAI, questions and transcripts
+stayed in the tenant. With OpenRouter they go to OpenRouter and to the pinned
+provider, in the US, with `data_collection: "deny"`. The screens say so.
+
+### 1. The key, in the web app's own vault
+
+The key goes in `kv-mr-portfolio-web`, never Yaara's vault, for the reason in
+the ClickHouse section: access policies are vault-wide. It can be the same
+OpenRouter key Yaara uses or a separate one; a separate one lets OpenRouter's
+usage page show the two apart.
+
+```powershell
+cd C:\temp\Portfolio\yaara
+.\deploy\vault-set.ps1 -KeyVault kv-mr-portfolio-web -Name OPENROUTER_API_KEY -Verify
+```
+
+It is stored as `OPENROUTER-API-KEY`. The web app's identity already has
+`get` on this vault from the ClickHouse setup.
+
+### 2. Point the app at it
+
+```powershell
+az webapp config appsettings set -g rg-mr-portfolio-control -n mr-portfolio-control --settings `
+  OPENROUTER_PROVIDERS=CoreWeave,DeepInfra `
+  OPENROUTER_MODEL=deepseek/deepseek-chat-v3.1
+
+az webapp config appsettings set -g rg-mr-portfolio-control -n mr-portfolio-control --% --settings "OPENROUTER_API_KEY=@Microsoft.KeyVault(SecretUri=https://kv-mr-portfolio-web.vault.azure.net/secrets/OPENROUTER-API-KEY/)"
+
+az webapp restart -g rg-mr-portfolio-control -n mr-portfolio-control
+```
+
+The `--%` matters for the reason in the ClickHouse section: without it the
+closing parenthesis is lost and the app is handed the literal text as its key.
+
+**Why CoreWeave first, when Yaara lists DeepInfra first.** Measured on
+1 October 2026 with the same key and model, the assessment's first call took
+about 2.5 s on CoreWeave and 12 s on DeepInfra, and a whole question 2-9 s
+against 60-77 s. Yaara works in the background, where that matters less;
+someone is waiting on the chat. SambaNova, Together and Fireworks returned
+"no endpoints" for this key and model, so they are left off.
+
+Any Azure OpenAI settings left behind must go, because Azure wins when both
+are configured:
+
+```powershell
+az webapp config appsettings delete -g rg-mr-portfolio-control -n mr-portfolio-control `
+  --setting-names AZURE_OPENAI_ENDPOINT AZURE_OPENAI_API_KEY AZURE_OPENAI_DEPLOYMENT AZURE_OPENAI_API_VERSION
+```
+
+### 3. Check it
+
+`/workflow` says under the chat which model answers: "DeepSeek
+(deepseek/deepseek-chat-v3.1) through OpenRouter, pinned to US providers
+CoreWeave, DeepInfra". Each answer records which provider actually served it.
+If it says OpenRouter is configured incorrectly, `OPENROUTER_PROVIDERS` names
+a host not on the verified list. If answers come back marked as keyword
+matches, the key did not resolve: check the Key Vault reference has a green
+tick.
+
 ## When it does not work
 
 `az webapp log tail -g $rg -n $app` streams the container's stdout, which is

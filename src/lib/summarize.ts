@@ -206,8 +206,9 @@ export async function summariseTranscripts(
 ): Promise<SummaryResult> {
   if (!resolveProvider()) {
     throw new SummariseError(
-      'No summariser is configured, so briefs cannot be generated. Set an Azure OpenAI ' +
-        'deployment, a Gemini key or an Anthropic key. Everything else works without one.',
+      'No summariser is configured, so briefs cannot be generated. Set OpenRouter (key and ' +
+        'pinned US providers), an Azure OpenAI deployment, a Gemini key or an Anthropic key. ' +
+        'Everything else works without one.',
     )
   }
   if (transcripts.length === 0) {

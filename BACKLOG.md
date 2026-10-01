@@ -65,12 +65,10 @@ and initiatives; pasting or uploading transcripts; generating briefs with
 Anthropic; bullets categorised as decision / open issue / risk / change, each
 citing the transcripts it came from; per-source opt-in, off by default.
 
-- [ ] **Choose a summariser provider.** Azure OpenAI (in-tenant), Gemini or
-      Anthropic — all three are implemented behind one interface, chosen by
-      environment variable. Azure is the shortest path here: the subscription
-      already exists, nothing leaves the tenant, and no third-party data review
-      is needed. The feature is inert until one is configured, so this decides
-      itself whenever someone wants briefs, not before.
+- [x] **Choose a summariser provider.** Decided 1 October 2026: DeepSeek
+      through OpenRouter, pinned to US providers, the same model and rule as
+      Yaara. Azure OpenAI, Gemini and Anthropic remain implemented behind the
+      same interface; production's Azure OpenAI resource was deleted.
 - [ ] **Automatic Slack ingestion.** The linking model is built; fetching
       channel history needs a Slack app with `channels:history` and a bot
       token, which needs workspace approval. Until then, paste.

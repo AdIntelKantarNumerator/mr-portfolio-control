@@ -10,7 +10,18 @@
  * Callers own their prompt and their parsing. This module only picks the
  * provider, sends one system and one user message, asks for JSON, and returns
  * the text.
+ *
+ * PRODUCTION RUNS ON OPENROUTER
+ *
+ * Since 1 October 2026 the deployed portfolio answers with DeepSeek through
+ * OpenRouter, pinned to US providers, the same model and rule as Yaara
+ * (lib/openrouter.ts). The Azure OpenAI resource it used before was deleted.
+ * Azure, Gemini and Anthropic stay supported: which one runs is a deployment
+ * setting, and Azure still wins when it is configured alongside OpenRouter,
+ * matching Yaara's own order.
  */
+
+import { callOpenRouter, DEFAULT_OPENROUTER_MODEL, readOpenRouterConfig, type OpenRouterConfig } from './openrouter'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5'
@@ -18,7 +29,7 @@ const DEFAULT_AZURE_API_VERSION = '2024-10-21'
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
 const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash'
 
-export type Provider = 'azure-openai' | 'gemini' | 'anthropic'
+export type Provider = 'azure-openai' | 'openrouter' | 'gemini' | 'anthropic'
 
 export interface ProviderConfig {
   provider: Provider
@@ -34,6 +45,7 @@ const azureReady = () =>
       process.env.AZURE_OPENAI_API_KEY?.trim() &&
       process.env.AZURE_OPENAI_DEPLOYMENT?.trim(),
   )
+const openrouterReady = () => Boolean(process.env.OPENROUTER_API_KEY?.trim())
 const geminiReady = () => Boolean(process.env.GEMINI_API_KEY?.trim())
 const anthropicReady = () => Boolean(process.env.ANTHROPIC_API_KEY?.trim())
 
@@ -41,6 +53,8 @@ function describe(provider: Provider): ProviderConfig {
   switch (provider) {
     case 'azure-openai':
       return { provider, model: `azure:${process.env.AZURE_OPENAI_DEPLOYMENT?.trim() ?? 'unset'}` }
+    case 'openrouter':
+      return { provider, model: `openrouter:${process.env.OPENROUTER_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL}` }
     case 'gemini':
       return { provider, model: process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL }
     default:
@@ -58,8 +72,9 @@ function describe(provider: Provider): ProviderConfig {
  */
 export function resolveProvider(): ProviderConfig | null {
   const forced = process.env.SUMMARISER_PROVIDER?.trim() as Provider | undefined
-  if (forced === 'azure-openai' || forced === 'gemini' || forced === 'anthropic') return describe(forced)
+  if (forced === 'azure-openai' || forced === 'openrouter' || forced === 'gemini' || forced === 'anthropic') return describe(forced)
   if (azureReady()) return describe('azure-openai')
+  if (openrouterReady()) return describe('openrouter')
   if (geminiReady()) return describe('gemini')
   if (anthropicReady()) return describe('anthropic')
   return null
@@ -72,6 +87,15 @@ export function providerDescription(what: string): string | null {
   switch (config.provider) {
     case 'azure-openai':
       return `Azure OpenAI deployment "${process.env.AZURE_OPENAI_DEPLOYMENT?.trim()}" — ${what} stay in your Azure tenant.`
+    case 'openrouter': {
+      try {
+        const or = readOpenRouterConfig()
+        if (!or) return null
+        return `DeepSeek (${or.model}) through OpenRouter, pinned to US providers ${or.providers.join(', ')} — ${what} leave the Azure tenant for OpenRouter and that provider.`
+      } catch (err) {
+        return `OpenRouter is configured incorrectly: ${(err as Error).message}`
+      }
+    }
     case 'gemini':
       return `Google Gemini (${config.model}) — ${what} are sent to Google.`
     default:
@@ -200,9 +224,26 @@ export async function completeJson(
 ): Promise<{ text: string; model: string }> {
   const config = resolveProvider()
   if (!config) {
-    throw new ModelError('No language model is configured. Set an Azure OpenAI deployment, a Gemini key or an Anthropic key.')
+    throw new ModelError('No language model is configured. Set OpenRouter (key and pinned US providers), an Azure OpenAI deployment, a Gemini key or an Anthropic key.')
   }
   const o: CallOptions = { maxTokens: options.maxTokens ?? 1500, timeoutMs: options.timeoutMs ?? 120_000 }
+
+  if (config.provider === 'openrouter') {
+    let or: OpenRouterConfig | null
+    try {
+      or = readOpenRouterConfig()
+    } catch (err) {
+      // A residency failure is a configuration error, reported like any other
+      // model failure, so callers fall back rather than send the request.
+      throw new ModelError((err as Error).message)
+    }
+    if (!or) throw new ModelError('OPENROUTER_API_KEY is not set.')
+    const reply = await callOpenRouter(or, system, user, o, (m) => new ModelError(m))
+    // Which provider served it is recorded on whatever the reply produced: the
+    // pinning says where it may run; this says where it did.
+    return { text: reply.text, model: `openrouter:${or.model}${reply.servedBy ? ` via ${reply.servedBy}` : ''}` }
+  }
+
   const text =
     config.provider === 'azure-openai'
       ? await callAzure(system, user, o)

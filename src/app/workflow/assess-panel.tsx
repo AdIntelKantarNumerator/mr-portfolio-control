@@ -199,7 +199,7 @@ function AnswerView({
     <section className="wa-answer" aria-label="Assessment">
       <div className="wa-panel-head">
         <span className="wa-muted wa-small">
-          Asked by {view.askedBy ?? 'someone'}, {when(view.askedAt)} · {view.method === 'model' ? 'model' : 'keywords'}
+          Asked by {view.askedBy ?? 'someone'}, {when(view.askedAt)} · {view.method === 'model' ? (view.model ?? 'model') : 'keywords'}
         </span>
         <button type="button" className="wa-x" aria-label="Close this answer" onClick={onClose}>
           ×
