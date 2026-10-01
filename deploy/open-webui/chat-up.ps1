@@ -51,12 +51,24 @@ $repo = Resolve-Path (Join-Path $here '..\..')
 function Step($text) { Write-Host "`n=== $text" -ForegroundColor Cyan }
 function Note($text) { Write-Host "    $text" -ForegroundColor DarkGray }
 
+# Windows PowerShell 5.1 turns anything a native command writes to stderr into
+# a terminating error while $ErrorActionPreference is Stop, even when it is
+# redirected, and az writes warnings and "not found" there. So both helpers
+# drop to Continue while az runs, and judge it by its exit code instead.
 function Invoke-Az {
-  $out = & az @args 2>&1
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { $out = & az @args 2>&1 } finally { $ErrorActionPreference = $prev }
   if ($LASTEXITCODE -ne 0) { throw "az $($args[0..2] -join ' ') failed: $($out | Out-String)" }
-  return $out
+  # Warnings came back as error records; they are not part of the value.
+  return ($out | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
 }
-function Test-Az { & az @args 2>$null | Out-Null; return ($LASTEXITCODE -eq 0) }
+function Test-Az {
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & az @args 2>$null | Out-Null } finally { $ErrorActionPreference = $prev }
+  return ($LASTEXITCODE -eq 0)
+}
 
 function Write-NoBom([string]$Path, [string]$Text) {
   [IO.File]::WriteAllText($Path, $Text, (New-Object Text.UTF8Encoding $false))
