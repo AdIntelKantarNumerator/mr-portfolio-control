@@ -131,7 +131,7 @@ value itself moves — the most-recent-dated-source-wins rule, in code.
 | `/prioritization` | Weighted scoring with a capacity cut line |
 | `/readiness` | The documented kick-off process, made checkable per initiative |
 | `/templates` | The standard template library and the discovery question bank |
-| `/workflow` | Workflow Assessment: our software components and human workflows, what feeds what, and what a change reaches. Grouped by stage by default; every box and arrow editable |
+| `/workflow` | Workflow Assessment: our software components and human workflows, what feeds what, and what a change reaches. Grouped by stage by default; every box and arrow editable. Beside the map, an assessment chat: describe a change and get what it changes directly, what is likely and possibly affected, lit on the map. It reads the map as it is when asked, uses the same model setting as the briefs (keywords when none is set), and flags an older answer when the map has changed since |
 | `/data-dictionary` | Data Dictionary for ClickHouse, Dev and Prod: datasets defined above the schemas with loaded-versus-intended status, every database and whether it is the client contract, every table |
 | `/data-dictionary/<database>/<table>` | One table down to the field: live structure from ClickHouse beside what people know, warnings, and why it is empty if it is |
 | `/changes` | Append-only log of every sync and hand edit |

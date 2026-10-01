@@ -7,20 +7,23 @@
  * does this touch", and the component view answers the second one. Both are
  * the same data, laid out from the links every time (lib/workflow-map.ts).
  *
- * The assessment chat that will sit beside it is the next phase. It will
- * stand on exactly what this page already shows: a component's name, aliases
- * and description to match a request against, and the downstream walk the
- * card already draws.
+ * Beside it, the assessment chat: describe a change in plain words, and the
+ * answer names what changes directly, what is likely and what is possibly
+ * affected, lit on the map. It reads the map as it is at the moment of asking,
+ * so an edit made a minute ago shapes the next answer; and each answer
+ * remembers what it relied on, so an older one says when the map has moved on
+ * since (lib/assessment.ts).
  */
 import { Kicker } from '@/components/ui'
-import { readWorkflowMap } from '@/lib/workflow'
+import { providerDescription } from '@/lib/llm'
+import { readAssessments, readWorkflowMap } from '@/lib/workflow'
 import { WorkflowMap } from './map'
 
 export const metadata = { title: 'Workflow Assessment' }
 export const dynamic = 'force-dynamic'
 
 export default async function WorkflowPage() {
-  const map = await readWorkflowMap()
+  const [map, assessments] = await Promise.all([readWorkflowMap(), readAssessments(20)])
 
   return (
     <div className="stack">
@@ -30,7 +33,13 @@ export default async function WorkflowPage() {
           <h1>Workflow Assessment</h1>
         </div>
       </div>
-      <WorkflowMap groups={map.groups} components={map.components} links={map.links} />
+      <WorkflowMap
+        groups={map.groups}
+        components={map.components}
+        links={map.links}
+        assessments={assessments}
+        answeredBy={providerDescription('questions')}
+      />
     </div>
   )
 }

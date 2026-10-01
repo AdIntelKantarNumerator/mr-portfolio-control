@@ -1730,6 +1730,36 @@ export const workflowLinks = pgTable(
   (t) => [uniqueIndex('workflow_links_pair_unique').on(t.fromId, t.toId)],
 )
 
+/**
+ * One question asked of the map, and the answer it got.
+ *
+ * Kept, not thrown away, for two reasons. People come back to an answer — "what
+ * did it say about the automotive rules?" — and the next person asking much
+ * the same thing should see it. And an answer is only as good as the map was
+ * when it was given: `relied` records exactly which components (with their
+ * edit time) and which connections the answer stood on, so the page can say
+ * "the map has changed since this answer" and name what changed, instead of
+ * leaving an old answer looking current.
+ */
+export const workflowAssessments = pgTable(
+  'workflow_assessments',
+  {
+    id: id(),
+    question: text('question').notNull(),
+    askedBy: text('asked_by'),
+    askedAt: timestamp('asked_at', { withTimezone: true }).notNull().defaultNow(),
+    /** model | keywords — whether a language model matched and explained, or the keyword fallback did. */
+    method: text('method').notNull(),
+    /** The model that answered, when one did. */
+    model: text('model'),
+    /** JSON: the answer as shown — summary, tiers with reasons, a suggestion when nothing matched. */
+    answer: text('answer').notNull(),
+    /** JSON: what the answer relied on — components with their updatedAt, and the connections walked. */
+    relied: text('relied').notNull(),
+  },
+  (t) => [index('workflow_assessments_asked_idx').on(t.askedAt)],
+)
+
 // ---------------------------------------------------------------------------
 // Reference: Data Dictionary — what people know about ClickHouse
 // ---------------------------------------------------------------------------

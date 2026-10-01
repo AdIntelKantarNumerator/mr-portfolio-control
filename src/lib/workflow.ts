@@ -1,12 +1,14 @@
 /**
- * Reading the Workflow Assessment map out of the database.
+ * Reading the Workflow Assessment map, and the questions asked of it, out of
+ * the database.
  *
  * The page needs everything at once — the layout depends on every link — and
- * the map is tens of boxes, so this is three unfiltered selects and no more.
+ * the map is tens of boxes, so this is a few unfiltered selects and no more.
  */
-import { asc } from 'drizzle-orm'
+import { asc, desc } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { workflowComponents, workflowGroups, workflowLinks } from '@/db/schema'
+import { workflowAssessments, workflowComponents, workflowGroups, workflowLinks } from '@/db/schema'
+import { readAnswer, readRelied, type Answer, type AssessComponent, type AssessGroup, type AssessLink, type Relied } from './assessment'
 import type { ComponentKind, GroupKind } from './workflow-map'
 
 export interface WorkflowGroupRow {
@@ -28,6 +30,7 @@ export interface WorkflowComponentRow {
   isData: boolean
   updatedBy: string | null
   updatedAt: string
+  createdAt: string
 }
 
 export interface WorkflowLinkRow {
@@ -35,6 +38,20 @@ export interface WorkflowLinkRow {
   from: string
   to: string
 }
+
+export interface AssessmentView {
+  id: string
+  question: string
+  askedBy: string | null
+  askedAt: string
+  method: 'model' | 'keywords'
+  model: string | null
+  answer: Answer
+  relied: Relied
+}
+
+// Everything that crosses into a client component travels as a string.
+const iso = (d: Date | string) => (d instanceof Date ? d : new Date(d)).toISOString()
 
 export async function readWorkflowMap(): Promise<{
   groups: WorkflowGroupRow[]
@@ -59,9 +76,55 @@ export async function readWorkflowMap(): Promise<{
       aliases: c.aliases,
       isData: c.isData,
       updatedBy: c.updatedBy,
-      // Crosses into a client component, so it travels as a string.
-      updatedAt: (c.updatedAt instanceof Date ? c.updatedAt : new Date(c.updatedAt)).toISOString(),
+      updatedAt: iso(c.updatedAt),
+      createdAt: iso(c.createdAt),
     })),
     links: links.map((l) => ({ id: l.id, from: l.fromId, to: l.toId })),
   }
+}
+
+/** The map in the shape the assessment reads: every component with its group's name. */
+export async function readAssessmentInputs(): Promise<{
+  components: AssessComponent[]
+  links: AssessLink[]
+  groups: AssessGroup[]
+}> {
+  const map = await readWorkflowMap()
+  const groupName = new Map(map.groups.map((g) => [g.key, g.name]))
+  return {
+    components: map.components.map((c) => ({
+      id: c.id,
+      name: c.name,
+      kind: c.kind,
+      groupKey: c.groupKey,
+      groupName: groupName.get(c.groupKey) ?? c.groupKey,
+      owner: c.owner,
+      description: c.description,
+      detail: c.detail,
+      aliases: c.aliases,
+      updatedAt: c.updatedAt,
+      createdAt: c.createdAt,
+    })),
+    links: map.links.map((l) => ({ from: l.from, to: l.to })),
+    groups: map.groups.map((g) => ({ key: g.key, name: g.name })),
+  }
+}
+
+export function toAssessmentView(row: typeof workflowAssessments.$inferSelect): AssessmentView {
+  return {
+    id: row.id,
+    question: row.question,
+    askedBy: row.askedBy,
+    askedAt: iso(row.askedAt),
+    method: row.method === 'model' ? 'model' : 'keywords',
+    model: row.model,
+    answer: readAnswer(row.answer),
+    relied: readRelied(row.relied),
+  }
+}
+
+/** The most recent questions anybody asked, newest first. */
+export async function readAssessments(limit = 20): Promise<AssessmentView[]> {
+  const rows = await db.select().from(workflowAssessments).orderBy(desc(workflowAssessments.askedAt)).limit(limit)
+  return rows.map(toAssessmentView)
 }

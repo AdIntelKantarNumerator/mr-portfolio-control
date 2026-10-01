@@ -7,11 +7,12 @@
  * WHAT THE COLOURS MEAN
  *
  * Box fill says what a thing is: plain for software, violet and rounded for a
- * human workflow, dashed for a rule set somebody owns. Red and amber are
- * reserved for reach: when a component's card has "Show what this reaches"
- * switched on, red is what it feeds directly and amber is everything further
- * downstream. Those two colours mean nothing else on this page, so the eye
- * can trust them.
+ * human workflow, dashed for a rule set somebody owns. Red, amber and blue
+ * are reserved for reach and mean nothing else on this page, so the eye can
+ * trust them. On an assessment answer: red is what the change touches
+ * directly, amber is likely affected, blue possibly. On a component's card
+ * with "Show what this reaches" on: red is what it feeds directly, amber
+ * everything further downstream.
  *
  * WHY THE SIDE PANEL AND NOT A MODAL
  *
@@ -19,8 +20,9 @@
  * the other end of a connection while a dialog covers the map. The panel
  * keeps the map visible and the selection live.
  */
-import { useActionState, useEffect, useMemo, useState, useTransition } from 'react'
-import type { WorkflowComponentRow, WorkflowGroupRow, WorkflowLinkRow } from '@/lib/workflow'
+import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import type { AssessmentView, WorkflowComponentRow, WorkflowGroupRow, WorkflowLinkRow } from '@/lib/workflow'
+import type { Suggestion } from '@/lib/assessment'
 import {
   COMPONENT_KINDS,
   KIND_LABEL,
@@ -31,9 +33,15 @@ import {
   type MapLink,
 } from '@/lib/workflow-map'
 import { addLink, deleteComponent, removeLink, saveComponent, type ComponentState } from './actions'
+import { AssessPanel, tierMap, type Tier } from './assess-panel'
 
 type View = 'groups' | 'components'
-type Panel = { mode: 'none' } | { mode: 'card'; id: string } | { mode: 'edit'; id: string } | { mode: 'new'; kind: ComponentKind }
+type Prefill = { name: string; groupKey: string | null; description: string }
+type Panel =
+  | { mode: 'assess' }
+  | { mode: 'card'; id: string }
+  | { mode: 'edit'; id: string }
+  | { mode: 'new'; kind: ComponentKind; prefill?: Prefill }
 
 const SIZE = {
   groups: { w: 176, h: 56, colGap: 58, rowGap: 22 },
@@ -50,10 +58,14 @@ export function WorkflowMap({
   groups,
   components,
   links,
+  assessments,
+  answeredBy,
 }: {
   groups: WorkflowGroupRow[]
   components: WorkflowComponentRow[]
   links: WorkflowLinkRow[]
+  assessments: AssessmentView[]
+  answeredBy: string | null
 }) {
   const [view, setView] = useState<View>('groups')
   const [editing, setEditing] = useState(false)
@@ -75,10 +87,47 @@ export function WorkflowMap({
   // Derived during render rather than reset in an effect, so there is no
   // frame where the stale card shows and no extra render to remove it.
   const [createdId, setCreatedId] = useState<string | null>(null)
-  const [panelState, setPanel] = useState<Panel>({ mode: 'none' })
+  const [panelState, setPanel] = useState<Panel>({ mode: 'assess' })
   const chosen = panelState.mode === 'card' || panelState.mode === 'edit' ? panelState.id : null
-  const panel: Panel = chosen && !byId.has(chosen) && chosen !== createdId ? { mode: 'none' } : panelState
+  const panel: Panel = chosen && !byId.has(chosen) && chosen !== createdId ? { mode: 'assess' } : panelState
   const selectedId = panel.mode === 'card' || panel.mode === 'edit' ? panel.id : null
+
+  // The answer being looked at. A fresh one is held here until the page's
+  // own list, refreshed by the action, includes it.
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [fresh, setFresh] = useState<AssessmentView | null>(null)
+  const allAssessments = useMemo(
+    () => (fresh && !assessments.some((a) => a.id === fresh.id) ? [fresh, ...assessments] : assessments),
+    [fresh, assessments],
+  )
+  const activeAssessment = panel.mode === 'assess' ? (allAssessments.find((a) => a.id === activeId) ?? null) : null
+  const assessTiers = useMemo(() => (activeAssessment ? tierMap(activeAssessment) : null), [activeAssessment])
+  const groupTiers = useMemo(() => {
+    if (!assessTiers) return null
+    const rank: Record<Tier, number> = { direct: 3, likely: 2, possible: 1 }
+    const out = new Map<string, Tier>()
+    for (const [id, tier] of assessTiers) {
+      const g = byId.get(id)?.groupKey
+      if (!g) continue
+      const was = out.get(g)
+      if (!was || rank[tier] > rank[was]) out.set(g, tier)
+    }
+    return out
+  }, [assessTiers, byId])
+
+  // When an answer opens, bring what it changes directly into view. The map
+  // is wider than the panel beside it, and an answer whose lit boxes are all
+  // off to the right reads as "nothing here" — every visible box dimmed.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!assessTiers) return
+    const box = scrollRef.current
+    const target = box?.querySelector<SVGGElement>('.wa-direct') ?? box?.querySelector<SVGGElement>('.wa-likely')
+    if (!box || !target) return
+    const b = box.getBoundingClientRect()
+    const t = target.getBoundingClientRect()
+    box.scrollTo({ left: Math.max(0, box.scrollLeft + (t.left - b.left) - 40), behavior: 'smooth' })
+  }, [assessTiers, view])
 
   const rankComponent = useMemo(() => {
     return (id: string) => {
@@ -135,7 +184,7 @@ export function WorkflowMap({
     const next = !editing
     setEditing(next)
     if (next && panel.mode === 'card') setPanel({ mode: 'edit', id: panel.id })
-    if (!next && (panel.mode === 'edit' || panel.mode === 'new')) setPanel(panel.mode === 'edit' ? { mode: 'card', id: panel.id } : { mode: 'none' })
+    if (!next && (panel.mode === 'edit' || panel.mode === 'new')) setPanel(panel.mode === 'edit' ? { mode: 'card', id: panel.id } : { mode: 'assess' })
   }
 
   const empty = components.length === 0
@@ -197,7 +246,13 @@ export function WorkflowMap({
               <span className="wa-lg wa-lg-sw">Software</span>
               <span className="wa-lg wa-lg-hu">Human workflow</span>
               <span className="wa-lg wa-lg-rule">Rule set</span>
-              {reachSets ? (
+              {assessTiers ? (
+                <>
+                  <span className="wa-lg wa-lg-direct">Directly changed</span>
+                  <span className="wa-lg wa-lg-further">Likely</span>
+                  <span className="wa-lg wa-lg-possible">Possibly</span>
+                </>
+              ) : reachSets ? (
                 <>
                   <span className="wa-lg wa-lg-direct">Fed directly</span>
                   <span className="wa-lg wa-lg-further">Further downstream</span>
@@ -211,7 +266,7 @@ export function WorkflowMap({
               the first component.
             </div>
           ) : (
-            <div className="scroll-x wa-scroll">
+            <div className="scroll-x wa-scroll" ref={scrollRef}>
               {view === 'groups' ? (
                 <GroupsSvg
                   groups={groups}
@@ -219,6 +274,7 @@ export function WorkflowMap({
                   edges={groupEdges}
                   counts={counts}
                   selectedGroup={selectedId ? byId.get(selectedId)?.groupKey ?? null : null}
+                  groupTiers={groupTiers}
                   onOpen={(key) => {
                     setFocusGroup(key)
                     setView('components')
@@ -232,6 +288,7 @@ export function WorkflowMap({
                   backLinks={componentLayout.backLinks}
                   selectedId={selectedId}
                   reach={reachSets}
+                  assess={assessTiers}
                   matches={matches}
                   focusGroup={focusGroup}
                   editing={editing}
@@ -243,8 +300,25 @@ export function WorkflowMap({
         </div>
 
         <aside className="wa-side" aria-live="polite">
-          {panel.mode === 'none' ? (
-            <Intro components={components} onOpen={openComponent} editing={editing} />
+          {panel.mode === 'assess' ? (
+            <AssessPanel
+              assessments={allAssessments}
+              activeId={activeId}
+              setActiveId={setActiveId}
+              onFresh={setFresh}
+              components={components}
+              links={links}
+              answeredBy={answeredBy}
+              onOpen={(id) => {
+                setView('components')
+                setPanel({ mode: 'card', id })
+              }}
+              onAddSuggested={(sugg: Suggestion) => {
+                setEditing(true)
+                setPanel({ mode: 'new', kind: sugg.kind, prefill: { name: sugg.name, groupKey: sugg.groupKey, description: sugg.description } })
+              }}
+              gaps={<Intro components={components} onOpen={openComponent} editing={editing} />}
+            />
           ) : panel.mode === 'card' && byId.get(panel.id) ? (
             <Card
               component={byId.get(panel.id)!}
@@ -254,7 +328,7 @@ export function WorkflowMap({
               reach={reach}
               setReach={setReach}
               onOpen={openComponent}
-              onClose={() => setPanel({ mode: 'none' })}
+              onClose={() => setPanel({ mode: 'assess' })}
               onEdit={() => {
                 setEditing(true)
                 setPanel({ mode: 'edit', id: panel.id })
@@ -270,13 +344,14 @@ export function WorkflowMap({
               links={mapLinks}
               onSaved={(id) => setPanel({ mode: 'edit', id })}
               onClose={() => setPanel({ mode: 'card', id: panel.id })}
-              onDeleted={() => setPanel({ mode: 'none' })}
+              onDeleted={() => setPanel({ mode: 'assess' })}
             />
           ) : panel.mode === 'new' ? (
             <Editor
-              key={`new-${panel.kind}`}
+              key={`new-${panel.kind}-${panel.prefill?.name ?? ''}`}
               component={null}
               defaultKind={panel.kind}
+              prefill={panel.prefill ?? null}
               groups={groups}
               byId={byId}
               links={mapLinks}
@@ -285,8 +360,8 @@ export function WorkflowMap({
                 setPanel({ mode: 'edit', id })
                 setView('components')
               }}
-              onClose={() => setPanel({ mode: 'none' })}
-              onDeleted={() => setPanel({ mode: 'none' })}
+              onClose={() => setPanel({ mode: 'assess' })}
+              onDeleted={() => setPanel({ mode: 'assess' })}
             />
           ) : null}
         </aside>
@@ -342,6 +417,7 @@ function GroupsSvg({
   edges,
   counts,
   selectedGroup,
+  groupTiers,
   onOpen,
 }: {
   groups: WorkflowGroupRow[]
@@ -349,6 +425,7 @@ function GroupsSvg({
   edges: (MapLink & { count: number })[]
   counts: Map<string, number>
   selectedGroup: string | null
+  groupTiers: Map<string, Tier> | null
   onOpen: (key: string) => void
 }) {
   const { w, h, colGap, rowGap } = SIZE.groups
@@ -375,7 +452,7 @@ function GroupsSvg({
         return (
           <g
             key={key}
-            className={`wa-node${g.kind === 'human' ? ' wa-human' : ''}${selectedGroup === key ? ' wa-selected' : ''}`}
+            className={`wa-node${g.kind === 'human' ? ' wa-human' : ''}${groupTiers?.has(key) ? ` wa-${groupTiers.get(key)}` : groupTiers ? ' wa-dim' : ''}${selectedGroup === key ? ' wa-selected' : ''}`}
             transform={`translate(${p.x},${p.y})`}
             role="button"
             tabIndex={0}
@@ -405,6 +482,7 @@ function ComponentsSvg({
   backLinks,
   selectedId,
   reach,
+  assess,
   matches,
   focusGroup,
   editing,
@@ -416,6 +494,7 @@ function ComponentsSvg({
   backLinks: MapLink[]
   selectedId: string | null
   reach: { direct: Set<string>; further: Set<string> } | null
+  assess: Map<string, Tier> | null
   matches: Set<string> | null
   focusGroup: string | null
   editing: boolean
@@ -429,6 +508,7 @@ function ComponentsSvg({
   // the selection, matched by Find, or in the focused group. Everything else
   // dims, so the lit set reads at a glance.
   const lit = (id: string): boolean | null => {
+    if (assess) return assess.has(id)
     if (reach) return id === selectedId || reach.direct.has(id) || reach.further.has(id)
     if (matches) return matches.has(id)
     if (focusGroup) return byId.get(id)?.groupKey === focusGroup
@@ -442,9 +522,11 @@ function ComponentsSvg({
         const a = pos.get(l.from)
         const b = pos.get(l.to)
         if (!a || !b) return null
-        const hot = reach && l.from === selectedId
-        const warm = reach && !hot && (reach.direct.has(l.from) || reach.further.has(l.from)) && (reach.direct.has(l.to) || reach.further.has(l.to))
-        const touchesSelection = !reach && selectedId && (l.from === selectedId || l.to === selectedId)
+        const hot = assess ? assess.get(l.from) === 'direct' && assess.has(l.to) : reach && l.from === selectedId
+        const warm = assess
+          ? !hot && assess.has(l.from) && assess.has(l.to)
+          : reach && !hot && (reach.direct.has(l.from) || reach.further.has(l.from)) && (reach.direct.has(l.to) || reach.further.has(l.to))
+        const touchesSelection = !reach && !assess && selectedId && (l.from === selectedId || l.to === selectedId)
         const cls = `wa-edge${hot ? ' wa-edge-hot' : warm ? ' wa-edge-warm' : touchesSelection ? ' wa-edge-sel' : ''}${back.has(`${l.from}\u0000${l.to}`) ? ' wa-edge-back' : ''}`
         return (
           <path
@@ -462,7 +544,19 @@ function ComponentsSvg({
         const p = pos.get(id)
         if (!c || !p) return null
         const state = lit(id)
-        const tier = reach ? (id === selectedId ? '' : reach.direct.has(id) ? ' wa-direct' : reach.further.has(id) ? ' wa-further' : '') : ''
+        const tier = assess
+          ? assess.has(id)
+            ? ` wa-${assess.get(id)}`
+            : ''
+          : reach
+            ? id === selectedId
+              ? ''
+              : reach.direct.has(id)
+                ? ' wa-direct'
+                : reach.further.has(id)
+                  ? ' wa-further'
+                  : ''
+            : ''
         const cls =
           'wa-node' +
           (c.kind === 'human' ? ' wa-human' : c.kind === 'rule' ? ' wa-rule' : '') +
@@ -522,15 +616,15 @@ function Intro({
   const seeded = components.filter((c) => c.updatedBy === 'seed').length
   return (
     <div className="wa-panel">
-      <h2 className="wa-panel-title">How to use this</h2>
-      <p className="wa-p">
+      <h3 className="wa-h3">Reading the map</h3>
+      <p className="wa-p wa-small">
         Click any box to see what it handles, what feeds it and what it feeds. On a component&apos;s card, <b>Show what this
         reaches</b> lights up everything downstream of it.
       </p>
-      <p className="wa-p wa-muted">
-        The assessment chat, where you describe a change in plain words and get the likely reach back, is the next phase. It
-        will match against each component&apos;s name, aliases and description, so filling those in now is what makes it
-        accurate later.
+      <p className="wa-p wa-muted wa-small">
+        The assessment above matches a request against each component&apos;s name, aliases and description, and follows the
+        connections from there. A component with no description, or a missing connection, is a gap in every answer, so the
+        lists below are the edits that most improve it.
       </p>
       {seeded ? (
         <p className="wa-p wa-muted">
@@ -657,6 +751,7 @@ const EMPTY: ComponentState = {}
 function Editor({
   component,
   defaultKind,
+  prefill = null,
   groups,
   byId,
   links,
@@ -666,6 +761,8 @@ function Editor({
 }: {
   component: WorkflowComponentRow | null
   defaultKind: ComponentKind
+  /** Starting values for a new component, from an answer that found nothing on the map. */
+  prefill?: Prefill | null
   groups: WorkflowGroupRow[]
   byId: Map<string, WorkflowComponentRow>
   links: MapLink[]
@@ -688,7 +785,8 @@ function Editor({
   const ups = id ? links.filter((l) => l.to === id).map((l) => l.from) : []
   const downs = id ? links.filter((l) => l.from === id).map((l) => l.to) : []
   const others = [...byId.values()].filter((c) => c.id !== id).sort((a, b) => a.name.localeCompare(b.name))
-  const defaultGroup = component?.groupKey ?? (defaultKind === 'human' ? groups.find((g) => g.kind === 'human')?.key : groups[0]?.key) ?? ''
+  const defaultGroup =
+    component?.groupKey ?? prefill?.groupKey ?? (defaultKind === 'human' ? groups.find((g) => g.kind === 'human')?.key : groups[0]?.key) ?? ''
 
   const run = (fn: () => Promise<{ ok?: boolean; error?: string }>, after?: () => void) => {
     setLinkError(null)
@@ -716,7 +814,7 @@ function Editor({
         <label className="wa-label" htmlFor="wa-name">
           Name
         </label>
-        <input id="wa-name" name="name" defaultValue={component?.name ?? ''} placeholder="What people call it" required />
+        <input id="wa-name" name="name" defaultValue={component?.name ?? prefill?.name ?? ''} placeholder="What people call it" required />
         {err.name ? <p className="wa-err">{err.name}</p> : null}
 
         <div className="wa-two">
@@ -759,7 +857,7 @@ function Editor({
           id="wa-desc"
           name="description"
           rows={5}
-          defaultValue={component?.description ?? ''}
+          defaultValue={component?.description ?? prefill?.description ?? ''}
           placeholder="Two or three sentences: what it does, what it reads, what it produces. The assessment chat matches requests against this."
         />
 

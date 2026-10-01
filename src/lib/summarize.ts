@@ -24,79 +24,12 @@
 import { BRIEF_ITEM_KIND, type BriefItem, type BriefItemKind } from './domain'
 
 /*
- * Two providers, one contract.
- *
- * Which one runs is a deployment decision, not a code decision: Azure OpenAI
- * keeps transcripts inside the tenant, which is the easier governance story
- * and needs no account outside Azure; Anthropic's API is a key away for anyone
- * who has one. The prompt, the citation rules and the parsing are identical
- * either way, so a brief means the same thing whichever answered.
- *
- * Azure wins when both are set, on the principle that the in-tenant option
- * should never lose by accident.
+ * Which provider answers, and how it is called, lives in lib/llm.ts, shared
+ * with the Workflow Assessment chat so the residency decision is made once.
+ * The prompt, the citation rules and the parsing below are this module's own,
+ * so a brief means the same thing whichever provider answered.
  */
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
-const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5'
-const DEFAULT_AZURE_API_VERSION = '2024-10-21'
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
-const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash'
-
-type Provider = 'azure-openai' | 'gemini' | 'anthropic'
-
-interface ProviderConfig {
-  provider: Provider
-  /** What gets recorded on the brief, so an odd bullet can be traced. */
-  model: string
-}
-
-const azureReady = () =>
-  Boolean(
-    process.env.AZURE_OPENAI_ENDPOINT?.trim() &&
-      process.env.AZURE_OPENAI_API_KEY?.trim() &&
-      process.env.AZURE_OPENAI_DEPLOYMENT?.trim(),
-  )
-const geminiReady = () => Boolean(process.env.GEMINI_API_KEY?.trim())
-const anthropicReady = () => Boolean(process.env.ANTHROPIC_API_KEY?.trim())
-
-function describe(provider: Provider): ProviderConfig {
-  switch (provider) {
-    case 'azure-openai':
-      return {
-        provider,
-        model: `azure:${process.env.AZURE_OPENAI_DEPLOYMENT?.trim() ?? 'unset'}`,
-      }
-    case 'gemini':
-      return {
-        provider,
-        model: process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL,
-      }
-    default:
-      return {
-        provider,
-        model: process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_ANTHROPIC_MODEL,
-      }
-  }
-}
-
-/**
- * Which provider answers.
- *
- * SUMMARISER_PROVIDER forces one; otherwise the first configured wins, in an
- * order that prefers keeping transcripts inside infrastructure the
- * organisation already controls. Nothing here changes what a brief means —
- * same prompt, same citation rules, same parsing.
- */
-function resolveProvider(): ProviderConfig | null {
-  const forced = process.env.SUMMARISER_PROVIDER?.trim() as Provider | undefined
-  if (forced === 'azure-openai' || forced === 'gemini' || forced === 'anthropic') {
-    return describe(forced)
-  }
-
-  if (azureReady()) return describe('azure-openai')
-  if (geminiReady()) return describe('gemini')
-  if (anthropicReady()) return describe('anthropic')
-  return null
-}
+import { completeJson, ModelError, providerDescription, resolveProvider } from './llm'
 
 /** Per-transcript cap. Long enough for an hour's meeting, short enough to bound cost. */
 const MAX_CHARS_PER_TRANSCRIPT = 40_000
@@ -128,16 +61,7 @@ export function summariserConfigured(): boolean {
 
 /** For the screens: which provider will answer, in words a person can act on. */
 export function summariserDescription(): string | null {
-  const config = resolveProvider()
-  if (!config) return null
-  switch (config.provider) {
-    case 'azure-openai':
-      return `Azure OpenAI deployment "${process.env.AZURE_OPENAI_DEPLOYMENT?.trim()}" — transcripts stay in your Azure tenant.`
-    case 'gemini':
-      return `Google Gemini (${config.model}) — transcripts are sent to Google.`
-    default:
-      return `Anthropic API (${config.model}) — transcripts are sent to Anthropic.`
-  }
+  return providerDescription('transcripts')
 }
 
 const SYSTEM_PROMPT = `You summarise project conversations for a program-management tool.
@@ -277,147 +201,10 @@ export function parseItems(
   return { items: items.slice(0, 8), warnings }
 }
 
-/** Unwraps Node's uniformly unhelpful "fetch failed" into something actionable. */
-function transportDetail(err: unknown): string {
-  const cause = (err as { cause?: unknown }).cause
-  if (cause instanceof Error) return `${cause.name}: ${cause.message}`
-  if (cause) return String(cause)
-  return (err as Error).message
-}
-
-interface ProviderReply {
-  text: string
-}
-
-async function callAzure(system: string, user: string): Promise<ProviderReply> {
-  const endpoint = process.env.AZURE_OPENAI_ENDPOINT!.trim().replace(/\/$/, '')
-  const deployment = process.env.AZURE_OPENAI_DEPLOYMENT!.trim()
-  const apiVersion = process.env.AZURE_OPENAI_API_VERSION?.trim() || DEFAULT_AZURE_API_VERSION
-  const url = `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`
-
-  let res: Response
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'api-key': process.env.AZURE_OPENAI_API_KEY!.trim() },
-      body: JSON.stringify({
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        max_tokens: 1500,
-        temperature: 0,
-        // Asking for JSON rather than hoping for it. The parser is strict
-        // either way, but this removes the most common reason it has to be.
-        response_format: { type: 'json_object' },
-      }),
-      signal: AbortSignal.timeout(120_000),
-      cache: 'no-store',
-    })
-  } catch (err) {
-    throw new SummariseError(`Could not reach the Azure OpenAI endpoint — ${transportDetail(err)}`)
-  }
-
-  const body = (await res.json().catch(() => ({}))) as {
-    choices?: Array<{ message?: { content?: string } }>
-    error?: { message?: string }
-  }
-  if (!res.ok) {
-    throw new SummariseError(
-      `Azure OpenAI returned ${res.status}${body.error?.message ? `: ${body.error.message}` : ''}` +
-        (res.status === 404
-          ? ` — check AZURE_OPENAI_DEPLOYMENT matches a deployment name, not a model name.`
-          : ''),
-    )
-  }
-  return { text: body.choices?.[0]?.message?.content ?? '' }
-}
-
-async function callGemini(system: string, user: string): Promise<ProviderReply> {
-  const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL
-  const url = `${GEMINI_URL}/${model}:generateContent`
-
-  let res: Response
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-goog-api-key': process.env.GEMINI_API_KEY!.trim(),
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts: [{ text: user }] }],
-        generationConfig: {
-          temperature: 0,
-          maxOutputTokens: 1500,
-          responseMimeType: 'application/json',
-        },
-      }),
-      signal: AbortSignal.timeout(120_000),
-      cache: 'no-store',
-    })
-  } catch (err) {
-    throw new SummariseError(`Could not reach the Gemini API — ${transportDetail(err)}`)
-  }
-
-  const body = (await res.json().catch(() => ({}))) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
-    error?: { message?: string }
-  }
-  if (!res.ok) {
-    throw new SummariseError(
-      `Gemini returned ${res.status}${body.error?.message ? `: ${body.error.message}` : ''}`,
-    )
-  }
-  const text = (body.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('')
-  return { text }
-}
-
-async function callAnthropic(system: string, user: string, model: string): Promise<ProviderReply> {
-  let res: Response
-  try {
-    res = await fetch(ANTHROPIC_URL, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY!.trim(),
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 1500,
-        system,
-        messages: [{ role: 'user', content: user }],
-      }),
-      signal: AbortSignal.timeout(120_000),
-      cache: 'no-store',
-    })
-  } catch (err) {
-    throw new SummariseError(`Could not reach the Anthropic API — ${transportDetail(err)}`)
-  }
-
-  const body = (await res.json().catch(() => ({}))) as {
-    content?: Array<{ type: string; text?: string }>
-    error?: { message?: string }
-  }
-  if (!res.ok) {
-    throw new SummariseError(
-      `Anthropic API returned ${res.status}${body.error?.message ? `: ${body.error.message}` : ''}`,
-    )
-  }
-  const text = (body.content ?? [])
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text ?? '')
-    .join('')
-  return { text }
-}
-
 export async function summariseTranscripts(
   transcripts: TranscriptForSummary[],
 ): Promise<SummaryResult> {
-  const config = resolveProvider()
-  if (!config) {
+  if (!resolveProvider()) {
     throw new SummariseError(
       'No summariser is configured, so briefs cannot be generated. Set an Azure OpenAI ' +
         'deployment, a Gemini key or an Anthropic key. Everything else works without one.',
@@ -430,12 +217,15 @@ export async function summariseTranscripts(
   const { used, warnings } = budget(transcripts)
   const user = `Summarise these ${used.length} conversation(s).\n\n${renderTranscripts(used)}`
 
-  const reply =
-    config.provider === 'azure-openai'
-      ? await callAzure(SYSTEM_PROMPT, user)
-      : config.provider === 'gemini'
-        ? await callGemini(SYSTEM_PROMPT, user)
-        : await callAnthropic(SYSTEM_PROMPT, user, config.model)
+  // Provider errors are rethrown as this module's own type, which is what
+  // briefs.ts and the tests have always caught.
+  let reply: { text: string; model: string }
+  try {
+    reply = await completeJson(SYSTEM_PROMPT, user, { maxTokens: 1500 })
+  } catch (err) {
+    if (err instanceof ModelError) throw new SummariseError(err.message)
+    throw err
+  }
 
   const { items, warnings: parseWarnings } = parseItems(
     reply.text,
@@ -444,7 +234,7 @@ export async function summariseTranscripts(
 
   return {
     items,
-    model: config.model,
+    model: reply.model,
     used,
     warnings: [...warnings, ...parseWarnings],
   }

@@ -773,7 +773,7 @@ export const SEED_LINKS: [string, string][] = [
   ["mapq", "catalog"], ["prodcreate", "catalog"], ["sponsrev", "catalog"], ["ews", "gold"],
   ["catalog", "cdc"], ["catalog", "gold"], ["cdc", "gold"], ["spend", "gold"],
   ["vxmap", "legacyetl"], ["catalog", "vxmap"], ["gold", "gpcetl"], ["gold", "legacyetl"],
-  ["gold", "iceberg"], ["gold", "mdb"], ["gpcetl", "review"], ["mdb", "review"],
+  ["gold", "iceberg"], ["gold", "mdb"], ["mdb", "chgpc"], ["gpcetl", "review"], ["mdb", "review"],
   ["gpcetl", "triage"], ["review", "chgpc"], ["triage", "chgpc"], ["gpcetl", "chgpc"],
   ["legacyetl", "legacy360"], ["legacyetl", "solr"], ["pkgdef", "entpub"], ["pkgdef", "legacyent"],
   ["entpub", "gpcent"], ["chgpc", "mcp"], ["chgpc", "dapi"], ["chgpc", "is"],
