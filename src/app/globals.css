@@ -1769,3 +1769,10 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 
 /* A card summary older than an assessment beneath it (lib/home.ts, verdictStale). */
 .sig-stale { color: var(--warn); font-weight: 600; }
+
+/* Workflow map: renaming groups (app/workflow/groups-editor.tsx). */
+.wa-groups-edit { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.wa-group-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.wa-group-label { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.wa-group-label input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); color: var(--ink); font: inherit; font-size: 13px; }
+.wa-error { color: var(--crit); width: 100%; margin: 0; }

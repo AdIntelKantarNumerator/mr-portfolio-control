@@ -147,3 +147,19 @@ test('reading a component from a form', async (t) => {
     assert.equal(tidyAliases(' , '), null)
   })
 })
+
+test('renaming a group', async (t) => {
+  const { groupNameProblem } = await import('../src/lib/workflow-map')
+  const groups = [
+    { key: 'ops', name: 'Vivvix Central Operations' },
+    { key: 'qa', name: 'Data QA & Ownership Review' },
+  ]
+  await t.test('the reported rename is allowed', () => {
+    assert.equal(groupNameProblem('Data Operations', 'ops', groups), null)
+  })
+  await t.test('a blank name, a missing group, and a name another group has are refused', () => {
+    assert.match(groupNameProblem('   ', 'ops', groups)!, /needs a name/)
+    assert.match(groupNameProblem('X', 'gone', groups)!, /no longer exists/)
+    assert.match(groupNameProblem('data qa & ownership review', 'ops', groups)!, /already called/)
+  })
+})

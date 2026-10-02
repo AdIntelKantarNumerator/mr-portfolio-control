@@ -34,6 +34,7 @@ import {
 } from '@/lib/workflow-map'
 import { addLink, deleteComponent, removeLink, saveComponent, type ComponentState } from './actions'
 import { AssessPanel, tierMap, type Tier } from './assess-panel'
+import { GroupsEditor } from './groups-editor'
 
 type View = 'groups' | 'components'
 type Prefill = { name: string; groupKey: string | null; description: string }
@@ -42,6 +43,7 @@ type Panel =
   | { mode: 'card'; id: string }
   | { mode: 'edit'; id: string }
   | { mode: 'new'; kind: ComponentKind; prefill?: Prefill }
+  | { mode: 'groups' }
 
 const SIZE = {
   groups: { w: 176, h: 56, colGap: 58, rowGap: 22 },
@@ -230,6 +232,9 @@ export function WorkflowMap({
           <button type="button" className="btn" onClick={() => setPanel({ mode: 'new', kind: 'human' })}>
             + Add human workflow
           </button>
+          <button type="button" className="btn" onClick={() => setPanel({ mode: 'groups' })}>
+            Rename groups
+          </button>
           <span className="wa-editbar-note">Each save is recorded in Activity with your name.</span>
         </div>
       ) : null}
@@ -319,6 +324,8 @@ export function WorkflowMap({
               }}
               gaps={<Intro components={components} onOpen={openComponent} editing={editing} />}
             />
+          ) : panel.mode === 'groups' ? (
+            <GroupsEditor groups={groups} counts={counts} onClose={() => setPanel({ mode: 'assess' })} />
           ) : panel.mode === 'card' && byId.get(panel.id) ? (
             <Card
               component={byId.get(panel.id)!}

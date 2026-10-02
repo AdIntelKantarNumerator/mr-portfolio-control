@@ -16,7 +16,7 @@ import { db } from '@/db/client'
 import { workflowComponents, workflowGroups, workflowLinks } from '@/db/schema'
 import { editor } from '@/lib/auth/editor'
 import { logChange } from '@/lib/portfolio'
-import { linkProblem, readComponentInput } from '@/lib/workflow-map'
+import { groupNameProblem, linkProblem, readComponentInput } from '@/lib/workflow-map'
 
 export interface ComponentState {
   ok?: boolean
@@ -92,6 +92,29 @@ export async function saveComponent(_prev: ComponentState, formData: FormData): 
   })
   refresh()
   return { ok: true, id, stamp: Date.now() }
+}
+
+/** Rename a group. Its key, and so every component in it, stays the same. */
+export async function renameGroup(key: string, rawName: string): Promise<LinkState> {
+  const who = await editor()
+  if (!who.ok) return { error: who.error }
+
+  const name = rawName.replace(/\s+/g, ' ').trim()
+  const groups = await db.select({ key: workflowGroups.key, name: workflowGroups.name }).from(workflowGroups)
+  const problem = groupNameProblem(name, key, groups)
+  if (problem) return { error: problem }
+  const before = groups.find((g) => g.key === key)!.name
+  if (before === name) return { ok: true }
+
+  await db.update(workflowGroups).set({ name }).where(eq(workflowGroups.key, key))
+  await logChange({
+    actor: who.name,
+    summary: `Workflow map: group "${before}" renamed "${name}"`,
+    entityType: 'workflow_group',
+    entityId: key,
+  })
+  refresh()
+  return { ok: true }
 }
 
 export async function deleteComponent(id: string): Promise<LinkState> {

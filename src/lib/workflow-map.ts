@@ -217,6 +217,21 @@ export function downstream(id: string, links: MapLink[]): { direct: string[]; al
   return { direct, all }
 }
 
+/**
+ * Why a group cannot take this name, or null when it can. Names are what
+ * people read on the map and what the assessment chat is shown, so two
+ * groups with one name would make both ambiguous.
+ */
+export function groupNameProblem(name: string, key: string, groups: Array<{ key: string; name: string }>): string | null {
+  const n = name.replace(/\s+/g, ' ').trim()
+  if (!n) return 'A group needs a name.'
+  if (n.length > 80) return 'Keep the name under 80 characters.'
+  if (!groups.some((g) => g.key === key)) return 'That group no longer exists. Reload the page.'
+  const clash = groups.find((g) => g.key !== key && g.name.trim().toLowerCase() === n.toLowerCase())
+  if (clash) return `Another group is already called "${clash.name}".`
+  return null
+}
+
 /** Why a proposed link cannot be added, or null when it can. */
 export function linkProblem(from: string, to: string, existing: MapLink[], knownIds: Set<string>): string | null {
   if (!from || !to) return 'Pick a component for both ends.'
