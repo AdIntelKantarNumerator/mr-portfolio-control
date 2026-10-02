@@ -117,7 +117,7 @@ value itself moves — the most-recent-dated-source-wins rule, in code.
 
 | Route | What it answers |
 |---|---|
-| `/` | What is on fire, who is over-committed, what nobody has answered for. **Ask Yaara** opens a chat with her about anything in the portfolio, in its own window (`deploy/open-webui/README.md`); shown when `YAARA_CHAT_URL` is set |
+| `/` | What is on fire, who is over-committed, what nobody has answered for. **Ask Yaara**, at the right of the picker row, opens a chat panel on the right of the screen that stays open across pages and tells her which page you are on. **Open Full Chat** at its top opens Open WebUI for longer conversations (`deploy/open-webui/README.md`), shown when `YAARA_CHAT_URL` is set |
 | `/roadmap` | Objective lanes, initiative bars coloured by assessed health, milestone diamonds, dated commitments |
 | `/dependencies` | What has to be true first — layered graph, critical chain, cross-team matrix, manual entry |
 | `/objectives` | Drill-down per objective with assessment reasoning |
@@ -281,7 +281,8 @@ except one health probe.
 | `/api/slack/intake` | Slack | Slack v0 signature, 5 min replay window | 401 |
 | `/api/sync/*`, `/api/digest` | Your scheduler | `SYNC_TOKEN` bearer | 401 |
 | `/api/agent/*` | Yaara | `SYNC_TOKEN` bearer (her `PORTFOLIO_TOKEN`) | 401 |
-| `/api/yaara/v1/*` | The Ask Yaara chat (Open WebUI) | `YAARA_CHAT_TOKEN` bearer, and the person from Open WebUI's signed token, checked with `YAARA_CHAT_USER_SECRET` and `AUTH_ALLOWED_DOMAINS` | 401 |
+| `/api/ask-yaara` | The Ask Yaara panel | Google session cookie, like every page | 307 to `/signin` |
+| `/api/yaara/v1/*` | The full chat (Open WebUI) | `YAARA_CHAT_TOKEN` bearer, and the person from Open WebUI's signed token, checked with `YAARA_CHAT_USER_SECRET` and `AUTH_ALLOWED_DOMAINS` | 401 |
 | `/api/health` | Load balancer | **None, deliberately** | `{"ok":true}` |
 
 `/api/health` is the one genuinely open endpoint, and it exists because Azure

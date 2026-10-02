@@ -1890,6 +1890,10 @@ export const yaaraChats = pgTable(
     askedByName: text('asked_by_name'),
     /** Open WebUI's id for the conversation, so a run of questions can be told apart from separate ones. */
     chatId: text('chat_id'),
+    /** Where it was asked: 'open-webui' (the full chat) or 'sidebar' (the panel inside the portfolio). */
+    surface: text('surface').notNull().default('open-webui'),
+    /** JSON {path, title}: the portfolio page the person had open, for a sidebar question. */
+    page: text('page'),
     /** JSON: the conversation as she should see it, [{role, content}], last turn the question. */
     messages: text('messages').notNull(),
     /** queued | working | answered | failed | abandoned */

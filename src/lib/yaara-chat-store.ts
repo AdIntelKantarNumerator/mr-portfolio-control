@@ -21,7 +21,7 @@ import { EventEmitter } from 'node:events'
 import { and, asc, eq, lt } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { yaaraChats } from '@/db/schema'
-import type { Asker, Turn } from './yaara-chat'
+import type { Asker, PageContext, Surface, Turn } from './yaara-chat'
 
 type ChatRow = typeof yaaraChats.$inferSelect
 export type ChatStatus = 'queued' | 'working' | 'answered' | 'failed' | 'abandoned'
@@ -50,12 +50,24 @@ function waitFor(event: string, ms: number, signal?: AbortSignal): Promise<void>
   })
 }
 
-export async function enqueueChat(asker: Asker, chatId: string | null, turns: Turn[]): Promise<string> {
+export async function enqueueChat(
+  asker: Asker,
+  chatId: string | null,
+  turns: Turn[],
+  where: { surface: Surface; page: PageContext | null } = { surface: 'open-webui', page: null },
+): Promise<string> {
   // Housekeeping on the way in: nothing here is worth keeping past two days.
   await db.delete(yaaraChats).where(lt(yaaraChats.askedAt, new Date(Date.now() - KEEP_FOR_MS)))
   const [row] = await db
     .insert(yaaraChats)
-    .values({ askedByEmail: asker.email, askedByName: asker.name, chatId, messages: JSON.stringify(turns) })
+    .values({
+      askedByEmail: asker.email,
+      askedByName: asker.name,
+      chatId,
+      messages: JSON.stringify(turns),
+      surface: where.surface,
+      page: where.page ? JSON.stringify(where.page) : null,
+    })
     .returning({ id: yaaraChats.id })
   bus.emit('queued')
   return row!.id
@@ -67,6 +79,10 @@ export interface ClaimedChat {
   askedBy: Asker
   chatId: string | null
   messages: Turn[]
+  /** Where it was asked. Yaara is told, because the two windows behave differently. */
+  surface: Surface
+  /** The portfolio page the person had open, for a sidebar question. */
+  page: PageContext | null
 }
 
 async function claimOne(): Promise<ClaimedChat | null> {
@@ -91,6 +107,8 @@ async function claimOne(): Promise<ClaimedChat | null> {
         askedBy: { email: row.askedByEmail, name: row.askedByName },
         chatId: row.chatId,
         messages: JSON.parse(row.messages) as Turn[],
+        surface: row.surface === 'sidebar' ? 'sidebar' : 'open-webui',
+        page: row.page ? (JSON.parse(row.page) as PageContext) : null,
       }
     }
     // Somebody else claimed it between the read and the update. Try the next.

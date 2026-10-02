@@ -169,6 +169,13 @@
       "when": 1790901023125,
       "tag": "0023_yaara_chats",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1790987423125,
+      "tag": "0024_yaara_chat_page",
+      "breakpoints": true
     }
   ]
 }

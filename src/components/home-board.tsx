@@ -14,6 +14,7 @@ import type { HomeCard } from '@/lib/home'
 import type { HealthFilter, Level, Sort } from '@/lib/home-types'
 import { HOME_PREFS_COOKIE, serialiseHomePrefs, type HomePrefs } from '@/lib/home-prefs'
 import { SortableCards } from './sortable-cards'
+import { AskYaaraButton } from './yaara-panel'
 
 const LABEL: Record<Level, { one: string; many: string; beneath: string }> = {
   objective: { one: TIER_LABEL.objective, many: 'Active strategic objectives', beneath: 'initiatives' },
@@ -120,6 +121,8 @@ export function HomeBoard({
             </select>
           </span>
         </label>
+        {/* Far right of the picker row. Opens the panel in the shell. */}
+        <AskYaaraButton className="push-right" />
       </div>
 
       {cards.length === 0 ? (

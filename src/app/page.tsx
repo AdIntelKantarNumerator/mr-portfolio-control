@@ -11,12 +11,8 @@
  * how this reader last had them. See lib/home-prefs.ts for why a cookie
  * rather than localStorage.
  *
- * "Ask Yaara" opens the chat (Open WebUI, at YAARA_CHAT_URL) in its own
- * window, named so a second click returns to it rather than opening another.
- * A new window rather than a panel here because the chat signs in with Google
- * on its own address, and a sign-in inside a frame from another site is
- * exactly what browsers now block. Unset, the button is not shown: a button
- * that leads nowhere is worse than none.
+ * "Ask Yaara" sits at the right of the picker row (components/home-board.tsx)
+ * and opens the chat panel in the shell (components/yaara-panel.tsx).
  */
 import { TIER_PLURAL } from '@/lib/home-types'
 import { cookies } from 'next/headers'
@@ -47,7 +43,6 @@ export default async function Home({
     getUngrouped(),
   ])
 
-  const chatUrl = process.env.YAARA_CHAT_URL?.trim() || null
   const assessed = cards.filter((c) => c.verdict).length
   const filtered = prefs.health !== 'all'
 
@@ -65,14 +60,6 @@ export default async function Home({
                 assessed ? `, ${assessed} assessed by Yaara` : ', none assessed yet'
               }.`}
         </p>
-        {chatUrl ? (
-          <a className="home-ask" href={chatUrl} target="yaara-chat" rel="noopener" title="Ask Yaara anything about the portfolio">
-            {/* A 64px file that ships with the app, as in the shell: the optimiser would add a request to save nothing. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/brand/yaara-64.png" alt="" width={22} height={22} />
-            Ask Yaara
-          </a>
-        ) : null}
       </div>
 
       <HomeBoard cards={cards} prefs={prefs} ungrouped={ungrouped} />

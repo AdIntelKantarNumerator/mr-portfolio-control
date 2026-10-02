@@ -11,15 +11,13 @@ export const metadata: Metadata = {
 }
 
 /**
- * Applies the stored theme and detail level before first paint, so a viewer
+ * Applies the stored theme before first paint, so a viewer
  * who chose dark mode never sees a white flash on navigation. React picks the
  * same values up from localStorage on hydration.
  */
 const NO_FLASH = `(function(){try{
 var t=localStorage.getItem('pcr:theme');
 if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;
-var d=localStorage.getItem('pcr:detail');
-if(d==='lead'||d==='full')document.documentElement.dataset.detail=d;
 }catch(e){}})();`
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -61,6 +59,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             picture: user.picture,
             authenticated: user.authenticated,
           }}
+          // Open WebUI, for the panel's "Open Full Chat". Unset hides that button only.
+          chatUrl={process.env.YAARA_CHAT_URL?.trim() || null}
         >
           {children}
         </Shell>

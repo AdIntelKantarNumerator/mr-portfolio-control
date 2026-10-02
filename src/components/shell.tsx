@@ -7,6 +7,7 @@ import { LogoMark } from './logo'
 import { IconCaret, IconPanel } from './icons'
 import { NAV, isActive, sectionFor } from './nav'
 import { usePreference } from '@/lib/use-preference'
+import { YaaraPanel } from './yaara-panel'
 import { BRAND_NAME, BRAND_CREDIT, BRAND_CREDIT_TAG } from '@/lib/brand'
 
 export interface ShellUser {
@@ -16,10 +17,8 @@ export interface ShellUser {
   authenticated: boolean
 }
 
-const DETAIL = ['full', 'lead'] as const
 const THEMES = ['system', 'light', 'dark'] as const
 const RAIL = ['open', 'closed'] as const
-type Detail = (typeof DETAIL)[number]
 type Theme = (typeof THEMES)[number]
 type Rail = (typeof RAIL)[number]
 
@@ -41,9 +40,8 @@ type Rail = (typeof RAIL)[number]
  * visit — and then occupied the top of every screen forever. What the app is
  * for belongs in the onboarding, not in the furniture.
  */
-export function Shell({ children, user }: { children: ReactNode; user: ShellUser }) {
+export function Shell({ children, user, chatUrl = null }: { children: ReactNode; user: ShellUser; chatUrl?: string | null }) {
   const pathname = usePathname()
-  const [detail, setDetail] = usePreference<Detail>('pcr:detail', DETAIL, 'full')
   const [theme, setTheme] = usePreference<Theme>('pcr:theme', THEMES, 'system')
   const [rail, setRail] = usePreference<Rail>('pcr:sidebar', RAIL, 'open')
 
@@ -53,10 +51,6 @@ export function Shell({ children, user }: { children: ReactNode; user: ShellUser
   // read as a bug.
   const [shut, setShut] = useState<Set<string>>(new Set())
   const [menu, setMenu] = useState(false)
-
-  useEffect(() => {
-    document.body.dataset.detail = detail
-  }, [detail])
 
   useEffect(() => {
     const root = document.documentElement
@@ -199,19 +193,11 @@ export function Shell({ children, user }: { children: ReactNode; user: ShellUser
             reader, not to the navigation, and at the foot of a 15-item rail
             they were below the fold on a laptop. */}
         <div className="pagebar no-print">
-          <div className="seg" role="group" aria-label="Detail level">
-            {DETAIL.map((d) => (
-              <button
-                key={d}
-                onClick={() => setDetail(d)}
-                aria-pressed={detail === d}
-                className={detail === d ? 'on' : undefined}
-                title={d === 'lead' ? 'Leadership view — hides operational detail' : 'Full view — everything'}
-              >
-                {d === 'full' ? 'Full' : 'Lead'}
-              </button>
-            ))}
-          </div>
+          {/* The Full / Lead detail toggle was removed on 1 October 2026, at
+              Scott's request: the app always shows Full for now. The
+              .full-only rule in globals.css is left in place, inert, so
+              bringing the toggle back is this button and the line in the
+              layout's NO_FLASH script. */}
           <select
             aria-label="Theme"
             value={theme}
@@ -232,6 +218,9 @@ export function Shell({ children, user }: { children: ReactNode; user: ShellUser
 
         {children}
       </main>
+
+      {/* In the shell, not the page, so it stays open across navigation. */}
+      <YaaraPanel chatUrl={chatUrl} />
     </div>
   )
 }

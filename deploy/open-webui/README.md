@@ -1,8 +1,12 @@
 # Ask Yaara
 
-The portfolio's home page has an **Ask Yaara** button. It opens
-[Open WebUI](https://github.com/open-webui/open-webui) in its own window,
-signed in with Google, where Yaara is the only model. She answers with the
+The portfolio's home page has an **Ask Yaara** button. It opens a chat panel
+on the right of the portfolio (`src/components/yaara-panel.tsx`), signed in
+as whoever is signed in to the portfolio, which stays open across pages and
+tells Yaara which page you are on. **Open Full Chat** at the top of the panel
+opens [Open WebUI](https://github.com/open-webui/open-webui) in its own window,
+with its own Google sign-in, for long conversations and chat history; this
+folder is about that window. In both, Yaara is the only model. She answers with the
 same agent and tools she uses in Slack, and two more made for this chat: one
 reads the rest of the portfolio (intake, prioritization, dependencies,
 readiness, teams, activity, the workflow map, the data dictionary), and one
@@ -10,7 +14,14 @@ asks the workflow map what a change would affect.
 
 ## How it fits together
 
+Why the panel is not Open WebUI in a frame: Open WebUI lives on its own
+address, `azurewebsites.net` is a public suffix so the browser treats the two
+as unrelated sites, a framed copy would get its own partitioned sign-in, and
+Google's sign-in page refuses to load in a frame at all. So the panel asks
+through the portfolio itself (`POST /api/ask-yaara`) over the same relay:
+
 ```
+ panel      ─► portfolio /api/ask-yaara                (portfolio sign-in)
  person ─► Open WebUI ─► portfolio /api/yaara/v1/chat/completions
                               │  queues the question (yaara_chats)
                               ▼

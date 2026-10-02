@@ -109,6 +109,27 @@ export function readConversation(body: unknown): { turns: Turn[]; droppedParts: 
   return { turns: recent, droppedParts }
 }
 
+export type Surface = 'open-webui' | 'sidebar'
+
+export interface PageContext {
+  path: string
+  title: string | null
+}
+
+/**
+ * The page a sidebar question was asked from, or null. A path in this app
+ * and a short title, nothing else: it goes into Yaara's prompt, so it is
+ * held to what the browser would show in its address bar and tab.
+ */
+export function readPage(raw: unknown): PageContext | null {
+  const p = raw as { path?: unknown; title?: unknown } | null
+  if (!p || typeof p.path !== 'string') return null
+  const path = p.path.trim()
+  if (!path.startsWith('/') || path.startsWith('//') || path.length > 300 || /[\s<>"]/.test(path)) return null
+  const title = typeof p.title === 'string' ? p.title.replace(/\s+/g, ' ').trim().slice(0, 200) || null : null
+  return { path, title }
+}
+
 /** The domains a person's email may be on, from AUTH_ALLOWED_DOMAINS. Empty means any. */
 export function emailAllowed(email: string, allowedDomains: string | undefined): boolean {
   const domains = (allowedDomains ?? '')
