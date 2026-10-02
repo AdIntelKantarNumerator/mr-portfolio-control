@@ -10,7 +10,7 @@
  * the in-memory cache so the next page load reads afresh.
  */
 import { revalidatePath } from 'next/cache'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import {
   dictionaryColumns,
@@ -52,6 +52,15 @@ const text = (fd: FormData, k: string, max = 4000) => {
   return v ? v.slice(0, max) : null
 }
 
+/**
+ * Where a new dataset goes: at the end of the board, after the ones people
+ * have already arranged, rather than jumping to the front with sortOrder 0.
+ */
+async function nextDatasetOrder(): Promise<number> {
+  const [row] = await db.select({ n: sql<number>`coalesce(max(${dictionaryDatasets.sortOrder}), -1)` }).from(dictionaryDatasets)
+  return Number(row?.n ?? -1) + 1
+}
+
 export async function saveDataset(_prev: DictState, fd: FormData): Promise<DictState> {
   const who = await editor()
   if (!who.ok) return { error: who.error }
@@ -90,7 +99,7 @@ export async function saveDataset(_prev: DictState, fd: FormData): Promise<DictS
     before = (await db.select().from(dictionaryDatasetTables).where(eq(dictionaryDatasetTables.datasetId, id))).map((r) => r.tableRef)
     await db.update(dictionaryDatasets).set(values).where(eq(dictionaryDatasets.id, id))
   } else {
-    const [row] = await db.insert(dictionaryDatasets).values(values).returning({ id: dictionaryDatasets.id })
+    const [row] = await db.insert(dictionaryDatasets).values({ ...values, sortOrder: await nextDatasetOrder() }).returning({ id: dictionaryDatasets.id })
     id = row!.id
   }
 
@@ -141,7 +150,13 @@ export async function addTablesToDataset(_prev: DictState, fd: FormData): Promis
     name = newName!.replace(/\s+/g, ' ').trim()
     const [row] = await db
       .insert(dictionaryDatasets)
-      .values({ name, intentDev: 'undecided', intentProd: 'undecided', updatedBy: who.name })
+      .values({
+        name,
+        intentDev: 'undecided',
+        intentProd: 'undecided',
+        updatedBy: who.name,
+        sortOrder: await nextDatasetOrder(),
+      })
       .returning({ id: dictionaryDatasets.id })
     id = row!.id
   }
@@ -162,6 +177,47 @@ export async function addTablesToDataset(_prev: DictState, fd: FormData): Promis
     ? `Added ${fresh.length} to ${name}; ${already} ${already === 1 ? 'was' : 'were'} already in it.`
     : `Added ${fresh.length} table${fresh.length === 1 ? '' : 's'} to ${name}.`
   return { ok: true, id: id!, stamp: Date.now(), message }
+}
+
+/**
+ * The order of the dataset tiles, as somebody arranged them by dragging.
+ *
+ * One order for everybody, unlike the home page's per-person card order: the
+ * Datasets tab is shared reference, and the arrangement is part of what it
+ * says (what matters first). Ids not on the board are ignored, and any
+ * dataset left out keeps its place after the ones that were sent, so a
+ * dataset added in another tab mid-drag is not lost to the bottom of nowhere.
+ */
+export async function reorderDatasets(ids: string[]): Promise<DictState> {
+  const who = await editor()
+  if (!who.ok) return { error: who.error }
+
+  const rows = await db
+    .select({ id: dictionaryDatasets.id, sortOrder: dictionaryDatasets.sortOrder, name: dictionaryDatasets.name })
+    .from(dictionaryDatasets)
+  const known = new Set(rows.map((r) => r.id))
+  const sent = [...new Set(ids)].filter((id) => known.has(id))
+  const rest = rows
+    .filter((r) => !sent.includes(r.id))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+    .map((r) => r.id)
+  const order = [...sent, ...rest]
+
+  await db.transaction(async (tx) => {
+    for (const [i, id] of order.entries()) {
+      await tx.update(dictionaryDatasets).set({ sortOrder: i }).where(eq(dictionaryDatasets.id, id))
+    }
+  })
+  const first = rows.find((r) => r.id === order[0])?.name
+  await logChange({
+    actor: who.name,
+    summary: 'Data dictionary: datasets reordered',
+    detail: first ? `${first} is now first` : null,
+    entityType: 'dataset',
+    entityId: order[0] ?? 'datasets',
+  })
+  refresh()
+  return { ok: true }
 }
 
 /** Take one table out of one dataset. The table and its notes are untouched. */

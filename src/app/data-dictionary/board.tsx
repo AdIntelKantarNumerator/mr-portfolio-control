@@ -21,7 +21,8 @@ import {
   type Environment,
   type Intent,
 } from '@/lib/dictionary-rules'
-import { deleteDataset, saveDataset, type DictState } from './actions'
+import { deleteDataset, reorderDatasets, saveDataset, type DictState } from './actions'
+import { dropsBelow, moveCard } from '@/lib/reorder'
 
 export interface DatasetTile {
   id: string
@@ -58,6 +59,43 @@ export function DatasetBoard({
 }) {
   const [editing, setEditing] = useState<DatasetTile | 'new' | null>(null)
 
+  /*
+   * Dragging tiles into a new order, in edit mode.
+   *
+   * The same arrangement as the home page's cards (components/sortable-cards
+   * and lib/reorder): a grip to hold, so the table chips and buttons inside a
+   * tile still click; the tile moves at once and the server is told after;
+   * a failed save says so and the next render puts it back. The grip also
+   * takes the arrow keys, so the order can be changed without a mouse.
+   */
+  const [order, setOrder] = useState<string[] | null>(null)
+  const [held, setHeld] = useState<string | null>(null)
+  const [over, setOver] = useState<string | null>(null)
+  const [orderError, setOrderError] = useState<string | null>(null)
+  const serverIds = tiles.map((t) => t.id).join(',')
+  const [seenIds, setSeenIds] = useState(serverIds)
+  if (serverIds !== seenIds) {
+    setSeenIds(serverIds)
+    setOrder(null)
+  }
+  const byId = new Map(tiles.map((t) => [t.id, t]))
+  const shown = order ? (order.map((id) => byId.get(id)).filter(Boolean) as DatasetTile[]) : tiles
+  const ids = shown.map((t) => t.id)
+
+  function commit(next: string[]) {
+    if (next === ids || next.join(',') === ids.join(',')) return
+    setOrder(next)
+    setOrderError(null)
+    void reorderDatasets(next)
+      .then((r) => setOrderError(r.error ?? null))
+      .catch(() => setOrderError('The new order could not be saved.'))
+  }
+  const nudge = (id: string, by: -1 | 1) => {
+    const at = ids.indexOf(id)
+    const to = ids[at + by]
+    if (to) commit(moveCard(ids, id, to))
+  }
+
   return (
     <>
       {edit ? (
@@ -65,6 +103,7 @@ export function DatasetBoard({
           <button type="button" className="btn" onClick={() => setEditing('new')}>
             + Add dataset
           </button>
+          {orderError ? <b className="dd-bad">{orderError}</b> : null}
         </div>
       ) : null}
       {tiles.length === 0 ? (
@@ -73,9 +112,61 @@ export function DatasetBoard({
         </p>
       ) : (
         <div className="dd-tiles">
-          {tiles.map((t) => (
-            <article key={t.id} className={`dd-tile dd-s-${t.status}`}>
+          {shown.map((t) => (
+            <article
+              key={t.id}
+              className={[
+                `dd-tile dd-s-${t.status}`,
+                held === t.id ? 'dd-held' : '',
+                over === t.id && held && held !== t.id ? (dropsBelow(ids, held, t.id) ? 'dd-over-after' : 'dd-over-before') : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              onDragOver={(e) => {
+                if (!edit || !held) return
+                // Without this the drop is refused and the tile springs back.
+                e.preventDefault()
+                setOver(t.id)
+              }}
+              onDrop={(e) => {
+                if (!edit || !held) return
+                e.preventDefault()
+                commit(moveCard(ids, held, t.id))
+                setHeld(null)
+                setOver(null)
+              }}
+            >
               <header className="dd-tile-head">
+                {edit ? (
+                  <button
+                    type="button"
+                    className="dd-grip"
+                    draggable
+                    onDragStart={(e) => {
+                      setHeld(t.id)
+                      e.dataTransfer.effectAllowed = 'move'
+                      // Firefox refuses to start a drag with an empty payload.
+                      e.dataTransfer.setData('text/plain', t.id)
+                    }}
+                    onDragEnd={() => {
+                      setHeld(null)
+                      setOver(null)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                        e.preventDefault()
+                        nudge(t.id, -1)
+                      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                        e.preventDefault()
+                        nudge(t.id, 1)
+                      }
+                    }}
+                    aria-label={`Move ${t.name}: drag, or use the arrow keys`}
+                    title="Drag to reorder (or focus and use the arrow keys)"
+                  >
+                    ⠿
+                  </button>
+                ) : null}
                 <h3>{t.name}</h3>
                 <span className={`pill ${STATUS_TONE[t.status]}`}>{DATASET_STATUS_LABEL[t.status]}</span>
               </header>
