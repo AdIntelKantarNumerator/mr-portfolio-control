@@ -32,7 +32,6 @@ import {
 import { ENDED_INITIATIVE_STATUS, isOpenEntry } from './domain'
 import { lateDependencies } from './dependency-risk'
 import { activitySeries } from './activity-series'
-import { getCardOrder } from './card-order'
 import { blockedAtOrBelow } from './blocked'
 import { byTargetDate } from './milestone-order'
 import { cardHealth, type Reason } from './card-health'
@@ -687,26 +686,11 @@ export const getHomeCards = cache(async (
 
   const busy = (c: HomeCard) => c.activity.reduce((x, y) => x + y, 0)
 
-  // Most active first by default. A silent piece of work sinks and is
-  // flagged, rather than sitting at the top because its name starts with A.
-  //
-  // Custom is this reader's own arrangement, if they have one. Two things it
-  // has to get right, and both are about a board that has changed since they
-  // last dragged it:
-  //
-  //   - a card they have never placed goes to the END, not to position zero.
-  //     A new initiative appearing silently at the top of somebody's hand-made
-  //     order would look like the app had rearranged their board.
-  //   - a card in their saved list that no longer exists is simply absent;
-  //     the ones after it keep their relative order.
-  //
-  // With no saved arrangement at all, it falls back to `sort_order` — the
-  // column that has always carried "the order these read in" — so Custom
-  // opens as something to rearrange rather than as an empty-looking board.
+  // Custom is the one shared order, the sort_order column, which everybody
+  // drags (app/order-actions.ts) and every move of which is in Activity.
+  // Until 2 October 2026 it was each reader's own arrangement.
   const rank = new Map(rows.map((r) => [r.id, r.rank]))
-  const mine = sort === 'custom' ? await getCardOrder(level) : null
-  const placed = new Map(mine?.map((id, ix) => [id, ix]))
-  const customRank = (c: HomeCard) => (mine ? (placed.get(c.id) ?? Number.MAX_SAFE_INTEGER) : (rank.get(c.id) ?? 0))
+  const customRank = (c: HomeCard) => rank.get(c.id) ?? 0
 
   return wanted.sort((a, b) => {
     if (sort === 'name') return a.name.localeCompare(b.name)

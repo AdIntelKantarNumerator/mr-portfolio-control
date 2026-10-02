@@ -1,130 +1,82 @@
 /**
- * Prove the home board's Custom order belongs to one reader, not to everyone.
+ * Prove the board order is one shared order, and that every move is recorded.
  *
+ *   npx tsx scripts/check-card-order.ts                    (the local database)
  *   DATABASE_URL=postgres://... npx tsx scripts/check-card-order.ts
  *
- * The first version of this feature wrote the shared `sort_order` column, so
- * one person dragging a card changed what the next person saw. The property
- * that matters now cannot be checked without a database: two rows, two
- * readers, no leakage between them — and, just as important, `sort_order`
- * left exactly as it was, because that column still means something to the
- * rest of the app.
+ * Since 2 October 2026 dragging a card writes the shared sort_order column
+ * (app/order-actions.ts) and logs who moved what. Until then each reader had
+ * their own arrangement in card_orders, and this script proved the opposite
+ * property. What matters now, and needs a database to check:
  *
- * It writes test rows and leaves them. Point it at a scratch database.
+ *   - the order sent lands in sort_order, for everybody
+ *   - a filtered board reorders only the cards it shows, in their own slots
+ *   - each move is in Activity, naming the card and the positions
+ *   - ids that have gone, an order of nothing, and unknown levels are refused
+ *
+ * It reorders initiatives and leaves them reordered, and adds Activity lines.
+ * Point it at a scratch database.
  */
-import { and, eq, inArray } from 'drizzle-orm'
+import { asc, desc } from 'drizzle-orm'
 import { setCardOrder } from '../src/app/order-actions'
 import { db } from '../src/db/client'
-import { cardOrders, initiatives } from '../src/db/schema'
+import { changelogEntries, initiatives } from '../src/db/schema'
 
 function check(label: string, ok: boolean, extra = '') {
   console.log(`${ok ? ' ok ' : 'FAIL'}  ${label}${extra ? ` — ${extra}` : ''}`)
   if (!ok) process.exitCode = 1
 }
 
-/** What the action writes for whoever the request belongs to. */
-async function savedFor(personId: string, level: string): Promise<string[]> {
-  const [row] = await db
-    .select({ ids: cardOrders.orderedIds })
-    .from(cardOrders)
-    .where(and(eq(cardOrders.personId, personId), eq(cardOrders.level, level)))
-    .limit(1)
-  return row?.ids.split(',').filter(Boolean) ?? []
+async function order(): Promise<string[]> {
+  return (await db.select({ id: initiatives.id }).from(initiatives).orderBy(asc(initiatives.sortOrder), asc(initiatives.name))).map((r) => r.id)
 }
 
-/**
- * Write an arrangement as a named reader.
- *
- * The action reads the current user from the session cookie, which a script
- * has no way to set, so the row is written the way the action writes it and
- * the action itself is exercised separately for the anonymous reader. Keeping
- * both in one file is the point: the shapes have to match, and the day they
- * stop matching is the day this check earns its keep.
- */
-async function writeAs(personId: string, level: string, ids: string[]) {
-  await db
-    .insert(cardOrders)
-    .values({ personId, level, orderedIds: ids.join(',') })
-    .onConflictDoUpdate({
-      target: [cardOrders.personId, cardOrders.level],
-      set: { orderedIds: ids.join(','), updatedAt: new Date() },
-    })
+async function lastLog() {
+  const [row] = await db.select().from(changelogEntries).orderBy(desc(changelogEntries.at)).limit(1)
+  return row
 }
 
 async function main() {
-  const rows = await db.select({ id: initiatives.id, name: initiatives.name, sortOrder: initiatives.sortOrder }).from(initiatives)
-  if (rows.length < 3) {
-    console.log('Needs at least three initiatives. Seed the scratch database first.')
+  const start = await order()
+  if (start.length < 4) {
+    console.log('Needs at least four initiatives. Seed the scratch database first.')
     process.exitCode = 1
     return
   }
 
-  const ids = rows.map((r) => r.id)
-  const sortBefore = new Map(rows.map((r) => [r.id, r.sortOrder]))
-
-  // --- two readers, two arrangements ---
-  const alice = 'check-alice'
-  const bob = 'check-bob'
-  const aliceOrder = [ids[2]!, ids[0]!, ids[1]!]
-  const bobOrder = [ids[1]!, ids[2]!, ids[0]!]
-
-  await writeAs(alice, 'initiative', aliceOrder)
-  await writeAs(bob, 'initiative', bobOrder)
-
-  check('each reader gets their own row', (await savedFor(alice, 'initiative')).join() === aliceOrder.join())
-  check("and one reader's drag does not move the other's", (await savedFor(bob, 'initiative')).join() === bobOrder.join())
-
-  // Re-arranging replaces, rather than appending a second row for the same
-  // reader and level - the primary key is what guarantees it.
-  const again = [ids[0]!, ids[1]!, ids[2]!]
-  await writeAs(alice, 'initiative', again)
-  const aliceRows = await db
-    .select({ ids: cardOrders.orderedIds })
-    .from(cardOrders)
-    .where(and(eq(cardOrders.personId, alice), eq(cardOrders.level, 'initiative')))
-  check('re-arranging overwrites rather than accumulating', aliceRows.length === 1, `${aliceRows.length} rows`)
-  check('and the newest arrangement is the one stored', (await savedFor(alice, 'initiative')).join() === again.join())
-
-  // Each board is arranged separately: the same reader at a different level
-  // is a different row.
-  await writeAs(alice, 'objective', [ids[1]!])
-  check('levels do not share an arrangement', (await savedFor(alice, 'initiative')).join() === again.join())
-
-  // --- the action itself ---
-  //
-  // With no session it runs as 'local', which is the development case. What
-  // is being checked is that it wrote SOMEWHERE and did not touch sort_order.
-  const res = await setCardOrder('initiative', [ids[1]!, ids[0]!])
+  // --- the whole board: move the last card to the front ---
+  const wanted = [start.at(-1)!, ...start.slice(0, -1)]
+  const res = await setCardOrder('initiative', wanted)
   check('the action accepts a valid order', res.ok === true, res.error ?? '')
-  check('and writes it against the anonymous reader', (await savedFor('local', 'initiative')).join() === [ids[1], ids[0]].join())
-
-  const after = await db
-    .select({ id: initiatives.id, sortOrder: initiatives.sortOrder })
-    .from(initiatives)
-    .where(inArray(initiatives.id, ids))
+  check('and it is the shared order now', (await order()).join() === wanted.join())
+  const log = await lastLog()
   check(
-    'sort_order is untouched — the arrangement is nobody else’s business',
-    after.every((r) => r.sortOrder === sortBefore.get(r.id)),
-    after
-      .filter((r) => r.sortOrder !== sortBefore.get(r.id))
-      .map((r) => `${r.id}: ${sortBefore.get(r.id)} → ${r.sortOrder}`)
-      .join(', '),
+    'the move is recorded, naming the positions',
+    Boolean(log && log.summary.startsWith('Order: moved') && log.summary.includes(`from ${start.length}th`) && log.summary.includes('to 1st')),
+    log?.summary ?? '(no log line)',
   )
+  check('against the card that moved', log?.entityId === wanted[0], `${log?.entityId}`)
 
-  // Ids that have gone are dropped rather than stored, so a saved order never
-  // disagrees with the board it describes.
-  const withGhost = await setCardOrder('initiative', [ids[0]!, 'no-such-initiative', ids[1]!])
-  check('a deleted id is refused entry', withGhost.ok === true)
-  check(
-    'and only the live ids are stored',
-    (await savedFor('local', 'initiative')).join() === [ids[0], ids[1]].join(),
-    (await savedFor('local', 'initiative')).join(),
-  )
+  // --- a filtered board: only the visible cards move, in their own slots ---
+  const now = await order()
+  const visible = [now[0]!, now[2]!] // as though the 2nd card were filtered out
+  const before = [...now]
+  await setCardOrder('initiative', [visible[1]!, visible[0]!])
+  const after = await order()
+  check('the visible cards swap places', after[0] === before[2] && after[2] === before[0], after.slice(0, 3).join(', '))
+  check('and the hidden card between them stays where it was', after[1] === before[1])
+  check('and nothing else moved', after.slice(3).join() === before.slice(3).join())
 
-  const allGone = await setCardOrder('initiative', ['nope-1', 'nope-2'])
-  check('an order of nothing that exists is refused', Boolean(allGone.error), allGone.error ?? '(no error)')
+  // --- dropping a card where it already is changes nothing and logs nothing ---
+  const quiet = await lastLog()
+  await setCardOrder('initiative', await order())
+  check('an unchanged order writes no Activity line', (await lastLog())?.id === quiet?.id)
 
-  check('an unknown level is refused', Boolean((await setCardOrder('theme', ids)).error))
+  // --- refusals ---
+  const ghost = await setCardOrder('initiative', [after[1]!, 'no-such-initiative', after[0]!])
+  check('a deleted id is ignored rather than stored', ghost.ok === true && (await order()).every((id) => id !== 'no-such-initiative'))
+  check('an order of nothing that exists changes nothing', (await setCardOrder('initiative', ['nope-1', 'nope-2'])).ok === true)
+  check('an unknown level is refused', Boolean((await setCardOrder('theme', after)).error))
 
   console.log(process.exitCode ? '\nSOME CHECKS FAILED' : '\nall checks passed')
 }

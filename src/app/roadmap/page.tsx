@@ -19,7 +19,6 @@
  */
 import { cookies } from 'next/headers'
 import { Kicker } from '@/components/ui'
-import { getCardOrder } from '@/lib/card-order'
 import { HOME_PREFS_COOKIE, resolveHomePrefs } from '@/lib/home-prefs'
 import { timelineModel } from '@/lib/timeline-source'
 import { TimelineControls } from './controls'
@@ -49,7 +48,6 @@ export default async function RoadmapPage({
     sort: prefs.sort,
     find,
     includeEnded,
-    order: await getCardOrder(level),
   })
 
   return (

@@ -1587,6 +1587,13 @@ export const groupingSuggestions = pgTable(
  * drizzle/0015_card_order.sql for why the list lives in one row rather than
  * one row per card, and why nothing here references `people.id`.
  */
+/**
+ * No longer read or written, since 2 October 2026: the board order is shared
+ * again, in each entity's sort_order (app/order-actions.ts). Migration 0025
+ * copied the newest arrangement at each level from here into sort_order.
+ * Kept rather than dropped, so nobody's saved arrangement is destroyed by a
+ * deploy.
+ */
 export const cardOrders = pgTable(
   'card_orders',
   {

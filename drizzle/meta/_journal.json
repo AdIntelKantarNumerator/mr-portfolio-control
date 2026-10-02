@@ -176,6 +176,13 @@
       "when": 1790987423125,
       "tag": "0024_yaara_chat_page",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791073823125,
+      "tag": "0025_shared_card_order",
+      "breakpoints": true
     }
   ]
 }

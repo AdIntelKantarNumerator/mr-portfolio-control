@@ -38,7 +38,10 @@ export interface TimelineQuery {
   level: Level
   /** Which sort to apply. Ignored when `only` narrows it to one lane. */
   sort?: Sort
-  /** The reader's own arrangement, when the sort is 'custom'. */
+  /**
+   * An explicit order for the 'custom' sort. Nothing passes one since the
+   * order became shared (2 October 2026): custom then uses sort_order.
+   */
   order?: string[] | null
   find?: string
   includeEnded?: boolean

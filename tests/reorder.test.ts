@@ -75,3 +75,21 @@ test('which edge the guide line goes on', async (t) => {
     assert.equal(dropsBelow(ids, 'a', 'zz'), false)
   })
 })
+
+test('one shared order: a filtered board reorders only what it shows', async (t) => {
+  const { mergeOrder, describeMove } = await import('../src/lib/reorder')
+  await t.test('the visible cards swap within their own slots and the hidden ones stay put', () => {
+    // a, c and e are on screen (say, the Blocked filter); b and d are hidden.
+    assert.deepEqual(mergeOrder(['a', 'b', 'c', 'd', 'e'], ['e', 'a', 'c']), ['e', 'b', 'a', 'd', 'c'])
+  })
+  await t.test('the whole list reordered is just the new order', () => {
+    assert.deepEqual(mergeOrder(['a', 'b', 'c'], ['c', 'a', 'b']), ['c', 'a', 'b'])
+  })
+  await t.test('an id that has gone is ignored', () => {
+    assert.deepEqual(mergeOrder(['a', 'b'], ['b', 'gone', 'a']), ['b', 'a'])
+  })
+  await t.test('the Activity line names the card that moved and where to', () => {
+    assert.deepEqual(describeMove(['a', 'b', 'c', 'd'], ['d', 'a', 'b', 'c']), { id: 'd', from: 4, to: 1 })
+    assert.equal(describeMove(['a', 'b'], ['a', 'b']), null)
+  })
+})

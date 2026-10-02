@@ -1,11 +1,11 @@
 'use client'
 
 /**
- * A list of rows you can put in your own order.
+ * A list of rows you can drag into order.
  *
  * The home board and the timeline already do this; the three list pages did
- * not, so the order a reader arranged in one place was not the order they got
- * in another. Same storage, same rules, same words — see app/order-actions.ts
+ * not, so an order arranged in one place was not the order shown in another.
+ * Since 2 October 2026 it is one shared order, recorded in Activity. Same storage, same rules, same words — see app/order-actions.ts
  * for whose order it is, and lib/reorder.ts for the arithmetic.
  *
  * WHY IT WRAPS ROWS RATHER THAN RENDERING THEM
