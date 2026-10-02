@@ -129,6 +129,17 @@ export interface HomeCard {
    * every initiative inside has one, and beats a silent merge either way.
    */
   verdictRolledUp: string | null
+  /**
+   * Set when something beneath was reassessed after this card's own summary
+   * was written: "Sports (initiative) was reassessed after this". The summary
+   * is then older than what it summarises. Yaara now refreshes the levels
+   * above whatever she reassesses (see her evaluate/rollup.ts), so this
+   * should only show for the minute that takes, or when that refresh failed.
+   * Said rather than hidden, because on 2 October 2026 the Sports card kept
+   * a constraint its initiative had just dropped and nothing on the screen
+   * said so.
+   */
+  verdictStale: string | null
   /** Her points, each with the sources it cites. */
   detail: CitedPoint[]
   evidence: Array<{ source: string; text: string; url: string | null }>
@@ -415,6 +426,26 @@ export const getHomeCards = cache(async (
       const source = ob ?? kids[0] ?? null
       const rolledUp = !ob && kids.length > 0
 
+      // Is anything beneath newer than the card's own summary? Compared with
+      // when the summary was last written, by Yaara or by a person editing it.
+      const ownAt = ob ? (ob.verdictAt ?? ob.generatedAt).getTime() : null
+      let newerBelow: { name: string; type: string } | null = null
+      if (ownAt !== null) {
+        let newest = ownAt
+        for (const [type, ids, names] of [
+          ['initiative', sc.initiatives, initiativeName],
+          ['project', sc.projects, projectName],
+        ] as const) {
+          for (const id of ids) {
+            const o = obsFor.get(`${type}:${id}`)
+            if (o && o.generatedAt.getTime() > newest) {
+              newest = o.generatedAt.getTime()
+              newerBelow = { name: names.get(id) ?? 'something beneath', type }
+            }
+          }
+        }
+      }
+
       const recent = rolledUp
         ? kids.flatMap((k) =>
             parse<Array<{ text: string; at: string | null; source: string | null }>>(k.recent, []),
@@ -617,6 +648,7 @@ export const getHomeCards = cache(async (
         verdictBy: source?.verdictBy ?? source?.agent ?? null,
         verdictAt: source?.verdictAt ?? source?.generatedAt ?? null,
         verdictEditedBy: ob?.verdictBy ?? null,
+        verdictStale: newerBelow ? `${newerBelow.name} (${newerBelow.type}) was reassessed after this` : null,
         verdictRolledUp: rolledUp
           ? `${kids.length} ${level === 'objective' ? 'initiative' : 'project'}${kids.length === 1 ? '' : 's'}`
           : null,

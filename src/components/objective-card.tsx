@@ -269,6 +269,7 @@ export function ObjectiveCard({
                       sentence as though it were written about the objective
                       would be the kind of quiet inaccuracy nobody catches. */}
                   {card.verdictRolledUp ? ` · from ${card.verdictRolledUp}` : ''}
+                  {card.verdictStale ? <span className="sig-stale"> · {card.verdictStale}</span> : null}
                   {card.verdictAt ? (
                     <>
                       {' · '}

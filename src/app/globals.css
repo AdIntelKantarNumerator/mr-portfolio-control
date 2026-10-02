@@ -1766,3 +1766,6 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .md table { border-collapse: collapse; font-size: 12.5px; }
 .md th, .md td { border: 1px solid var(--line); padding: 4px 7px; text-align: left; vertical-align: top; }
 .md th { background: var(--raised); }
+
+/* A card summary older than an assessment beneath it (lib/home.ts, verdictStale). */
+.sig-stale { color: var(--warn); font-weight: 600; }
