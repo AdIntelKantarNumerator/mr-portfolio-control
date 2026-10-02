@@ -232,6 +232,57 @@ export function groupNameProblem(name: string, key: string, groups: Array<{ key:
   return null
 }
 
+/**
+ * A key for a new group, from its name: short, lowercase, unique. The key is
+ * what components point at and never changes after this, so the name can be
+ * renamed freely without anything moving.
+ */
+export function groupKeyFor(name: string, existingKeys: Iterable<string>): string {
+  const taken = new Set(existingKeys)
+  const base =
+    name
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'group'
+  if (!taken.has(base)) return base
+  for (let i = 2; ; i++) if (!taken.has(`${base}-${i}`)) return `${base}-${i}`
+}
+
+/** Why a new group cannot be added with this name, or null when it can. */
+export function newGroupProblem(name: string, groups: Array<{ key: string; name: string }>): string | null {
+  const n = name.replace(/\s+/g, ' ').trim()
+  if (!n) return 'A group needs a name.'
+  if (n.length > 80) return 'Keep the name under 80 characters.'
+  const clash = groups.find((g) => g.name.trim().toLowerCase() === n.toLowerCase())
+  if (clash) return `There is already a group called "${clash.name}".`
+  return null
+}
+
+/**
+ * Why a group cannot be removed, or null when it can.
+ *
+ * A group with components in it is removed only by saying where they go.
+ * Removing them with it would delete boxes and every connection they have,
+ * which is not what "remove this group" means to anyone, and leaving them
+ * ungrouped is not something the map can draw.
+ */
+export function removeGroupProblem(
+  key: string,
+  moveTo: string | null,
+  groups: Array<{ key: string; name: string }>,
+  memberCount: number,
+): string | null {
+  if (!groups.some((g) => g.key === key)) return 'That group no longer exists. Reload the page.'
+  if (groups.length <= 1) return 'The map needs at least one group.'
+  if (memberCount === 0) return null
+  if (!moveTo) return `Choose a group to move its ${memberCount} component${memberCount === 1 ? '' : 's'} to first.`
+  if (moveTo === key) return 'Choose a different group to move them to.'
+  if (!groups.some((g) => g.key === moveTo)) return 'The group to move them to no longer exists. Reload the page.'
+  return null
+}
+
 /** Why a proposed link cannot be added, or null when it can. */
 export function linkProblem(from: string, to: string, existing: MapLink[], knownIds: Set<string>): string | null {
   if (!from || !to) return 'Pick a component for both ends.'

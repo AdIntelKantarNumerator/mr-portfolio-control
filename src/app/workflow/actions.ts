@@ -16,7 +16,7 @@ import { db } from '@/db/client'
 import { workflowComponents, workflowGroups, workflowLinks } from '@/db/schema'
 import { editor } from '@/lib/auth/editor'
 import { logChange } from '@/lib/portfolio'
-import { groupNameProblem, linkProblem, readComponentInput } from '@/lib/workflow-map'
+import { GROUP_KINDS, groupKeyFor, groupNameProblem, linkProblem, newGroupProblem, readComponentInput, removeGroupProblem } from '@/lib/workflow-map'
 
 export interface ComponentState {
   ok?: boolean
@@ -92,6 +92,84 @@ export async function saveComponent(_prev: ComponentState, formData: FormData): 
   })
   refresh()
   return { ok: true, id, stamp: Date.now() }
+}
+
+/** Add a group. It appears on the map once something is put in it. */
+export async function addGroup(rawName: string, rawKind: string): Promise<LinkState & { key?: string }> {
+  const who = await editor()
+  if (!who.ok) return { error: who.error }
+
+  const name = rawName.replace(/\s+/g, ' ').trim()
+  const kind = (GROUP_KINDS as readonly string[]).includes(rawKind) ? rawKind : 'software'
+  const groups = await db.select().from(workflowGroups)
+  const problem = newGroupProblem(name, groups)
+  if (problem) return { error: problem }
+
+  const key = groupKeyFor(name, groups.map((g) => g.key))
+  // Last in the order. The map lays groups out from their connections, so
+  // this only decides which goes first when two land in the same column.
+  const sortOrder = groups.reduce((n, g) => Math.max(n, g.sortOrder), 0) + 1
+  await db.insert(workflowGroups).values({ key, name, kind, sortOrder })
+  await logChange({ actor: who.name, summary: `Workflow map: added group "${name}"`, entityType: 'workflow_group', entityId: key })
+  refresh()
+  return { ok: true, key }
+}
+
+/**
+ * Remove a group, moving any components in it to another group first.
+ * Both happen together or not at all, so no component is ever left
+ * pointing at a group that is gone (the database refuses that anyway).
+ */
+export async function removeGroup(key: string, moveTo: string | null): Promise<LinkState> {
+  const who = await editor()
+  if (!who.ok) return { error: who.error }
+
+  const groups = await db.select({ key: workflowGroups.key, name: workflowGroups.name }).from(workflowGroups)
+  const members = await db.select({ id: workflowComponents.id }).from(workflowComponents).where(eq(workflowComponents.groupKey, key))
+  const problem = removeGroupProblem(key, moveTo, groups, members.length)
+  if (problem) return { error: problem }
+
+  const name = groups.find((g) => g.key === key)!.name
+  const target = moveTo ? groups.find((g) => g.key === moveTo)?.name : null
+  await db.transaction(async (tx) => {
+    if (members.length && moveTo) {
+      await tx.update(workflowComponents).set({ groupKey: moveTo, updatedBy: who.name, updatedAt: new Date() }).where(eq(workflowComponents.groupKey, key))
+    }
+    await tx.delete(workflowGroups).where(eq(workflowGroups.key, key))
+  })
+  await logChange({
+    actor: who.name,
+    summary: `Workflow map: removed group "${name}"`,
+    detail: members.length ? `${members.length} component${members.length === 1 ? '' : 's'} moved to "${target}"` : null,
+    entityType: 'workflow_group',
+    entityId: key,
+  })
+  refresh()
+  return { ok: true }
+}
+
+/** Put one component in a different group, without opening its editor. */
+export async function moveComponent(id: string, groupKey: string): Promise<LinkState> {
+  const who = await editor()
+  if (!who.ok) return { error: who.error }
+
+  const [row] = await db.select().from(workflowComponents).where(eq(workflowComponents.id, id)).limit(1)
+  if (!row) return { error: 'That component no longer exists. Reload the page.' }
+  if (row.groupKey === groupKey) return { ok: true }
+  const groups = await db.select({ key: workflowGroups.key, name: workflowGroups.name }).from(workflowGroups)
+  const from = groups.find((g) => g.key === row.groupKey)?.name ?? row.groupKey
+  const to = groups.find((g) => g.key === groupKey)?.name
+  if (!to) return { error: 'That group no longer exists. Reload the page.' }
+
+  await db.update(workflowComponents).set({ groupKey, updatedBy: who.name, updatedAt: new Date() }).where(eq(workflowComponents.id, id))
+  await logChange({
+    actor: who.name,
+    summary: `Workflow map: moved ${row.name} from "${from}" to "${to}"`,
+    entityType: 'component',
+    entityId: id,
+  })
+  refresh()
+  return { ok: true }
 }
 
 /** Rename a group. Its key, and so every component in it, stays the same. */

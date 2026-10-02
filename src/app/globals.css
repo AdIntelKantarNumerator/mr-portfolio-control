@@ -1776,3 +1776,16 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .wa-group-label { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .wa-group-label input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); color: var(--ink); font: inherit; font-size: 13px; }
 .wa-error { color: var(--crit); width: 100%; margin: 0; }
+.wa-group-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 4px; padding: 10px; border: 1px dashed var(--line); border-radius: 10px; }
+.wa-group-add input { flex: 1; min-width: 140px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); color: var(--ink); font: inherit; font-size: 13px; }
+.wa-group-add select, .wa-group-remove select, .wa-group-members select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--ink); font: inherit; font-size: 12px; max-width: 100%; }
+.wa-full { width: 100%; margin: 0; }
+.wa-group-card { padding: 8px 0 10px; border-bottom: 1px solid var(--line); }
+.wa-group-tools { display: flex; gap: 14px; margin-top: 4px; }
+.wa-linkbtn { border: 0; background: none; padding: 0; color: var(--brand-2); font: inherit; font-size: 12px; cursor: pointer; text-align: left; }
+.wa-linkbtn:hover { text-decoration: underline; }
+.wa-danger { color: var(--crit); }
+.wa-group-remove { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; padding: 8px; border-radius: 8px; background: color-mix(in srgb, var(--crit) 6%, var(--surface)); }
+.wa-btn-danger { color: var(--crit); }
+.wa-group-members { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.wa-group-members li { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

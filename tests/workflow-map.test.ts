@@ -163,3 +163,33 @@ test('renaming a group', async (t) => {
     assert.match(groupNameProblem('data qa & ownership review', 'ops', groups)!, /already called/)
   })
 })
+
+test('adding and removing groups', async (t) => {
+  const { groupKeyFor, newGroupProblem, removeGroupProblem } = await import('../src/lib/workflow-map')
+  const groups = [
+    { key: 'ops', name: 'Data Operations' },
+    { key: 'qa', name: 'Data QA & Ownership Review' },
+  ]
+  await t.test('a new group gets a short, unique key from its name, which never changes after', () => {
+    assert.equal(groupKeyFor('Sales Ops & Planning', ['ops']), 'sales-ops-planning')
+    assert.equal(groupKeyFor('Ops', ['ops']), 'ops-2')
+    assert.equal(groupKeyFor('!!!', []), 'group')
+  })
+  await t.test('a new group needs a name nobody else has', () => {
+    assert.equal(newGroupProblem('Partner Data', groups), null)
+    assert.match(newGroupProblem('data operations', groups)!, /already a group/)
+    assert.match(newGroupProblem('  ', groups)!, /needs a name/)
+  })
+  await t.test('an empty group is removed as it is', () => {
+    assert.equal(removeGroupProblem('qa', null, groups, 0), null)
+  })
+  await t.test('a group with components is removed only by saying where they go', () => {
+    assert.match(removeGroupProblem('ops', null, groups, 5)!, /move its 5 components/)
+    assert.match(removeGroupProblem('ops', 'ops', groups, 5)!, /different group/)
+    assert.match(removeGroupProblem('ops', 'gone', groups, 5)!, /no longer exists/)
+    assert.equal(removeGroupProblem('ops', 'qa', groups, 5), null)
+  })
+  await t.test('the last group cannot be removed: the map draws components inside groups', () => {
+    assert.match(removeGroupProblem('ops', null, [groups[0]!], 0)!, /at least one group/)
+  })
+})

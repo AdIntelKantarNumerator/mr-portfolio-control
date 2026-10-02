@@ -233,7 +233,7 @@ export function WorkflowMap({
             + Add human workflow
           </button>
           <button type="button" className="btn" onClick={() => setPanel({ mode: 'groups' })}>
-            Rename groups
+            Manage groups
           </button>
           <span className="wa-editbar-note">Each save is recorded in Activity with your name.</span>
         </div>
@@ -325,7 +325,7 @@ export function WorkflowMap({
               gaps={<Intro components={components} onOpen={openComponent} editing={editing} />}
             />
           ) : panel.mode === 'groups' ? (
-            <GroupsEditor groups={groups} counts={counts} onClose={() => setPanel({ mode: 'assess' })} />
+            <GroupsEditor groups={groups} components={components} onOpen={openComponent} onClose={() => setPanel({ mode: 'assess' })} />
           ) : panel.mode === 'card' && byId.get(panel.id) ? (
             <Card
               component={byId.get(panel.id)!}
