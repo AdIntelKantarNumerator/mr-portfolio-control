@@ -40,6 +40,7 @@ import { DatasetBoard, type DatasetTile } from './board'
 import { DatabaseRow } from './editors'
 import { dictHref, tableHref, type DictView } from './href'
 import { BULK_FORM, BulkAssignBar, SelectAllBox } from './assign'
+import { AutoSubmitSelect } from './auto-submit'
 
 export const metadata = { title: 'Data Dictionary' }
 export const dynamic = 'force-dynamic'
@@ -371,18 +372,18 @@ function TablesTab({
         {view.edit ? <input type="hidden" name="edit" value="1" /> : null}
         {view.showAll ? <input type="hidden" name="show" value="all" /> : null}
         <input type="search" name="q" defaultValue={view.q} placeholder="Filter by table, dataset or description" aria-label="Filter tables" />
-        <select name="db" defaultValue={view.db} aria-label="Database">
+        <AutoSubmitSelect name="db" defaultValue={view.db} aria-label="Database">
           <option value="">All databases</option>
           {databases.map((d) => (
             <option key={d} value={d}>
               {d}
             </option>
           ))}
-        </select>
-        <select name="only" defaultValue={view.unassigned ? 'unassigned' : ''} aria-label="Which tables">
+        </AutoSubmitSelect>
+        <AutoSubmitSelect name="only" defaultValue={view.unassigned ? 'unassigned' : ''} aria-label="Which tables">
           <option value="">All tables</option>
           <option value="unassigned">Not in a dataset</option>
-        </select>
+        </AutoSubmitSelect>
         <button type="submit" className="btn">
           Filter
         </button>
