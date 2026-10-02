@@ -25,6 +25,7 @@ import {
   type AssessGroup,
   type AssessLink,
   type Relied,
+  addFlagged,
 } from './assessment'
 import { completeJson, ModelError, resolveProvider } from './llm'
 
@@ -90,8 +91,11 @@ async function withModel(
 
   const direct: AnswerItem[] = match.direct.map((d) => ({ id: d.id, name: byId.get(d.id)!.name, why: d.why }))
 
-  // 2. What is downstream: arithmetic, not the model.
-  const { reached, walked, walkedFrom } = walkDownstream(direct.map((d) => d.id), links)
+  // 2. What is downstream: arithmetic, not the model. Then the components
+  // that flagged themselves in their descriptions, wherever they are, first.
+  const walk = walkDownstream(direct.map((d) => d.id), links)
+  const { reached, walked } = addFlagged(walk.reached, walk.walked, match.affected, direct.map((d) => d.id), links)
+  const walkedFrom = walk.walkedFrom
 
   if (!reached.length) {
     const answer: Answer = {

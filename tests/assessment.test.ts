@@ -219,3 +219,71 @@ test('an answer knows when the map has moved on', async (t) => {
     assert.deepEqual(whatChanged(relied, asked, map, LINKS), [])
   })
 })
+
+/*
+ * Reported 2 October 2026. Scott asked what adding Linear TV from six more
+ * countries would take. He had written on Classification Queues and the other
+ * review steps that more coverage needs more people there, and the answer
+ * named none of them: Classification Queues is seven connections from
+ * DeepListen TV, the walk stops at three, and the matcher had been told to
+ * pick only what the request changes itself.
+ */
+test('a component whose own description says this kind of change affects it is judged, however far away', async (t) => {
+  const { addFlagged, explainPrompt, EXPLAIN_SYSTEM, MATCH_SYSTEM, MAX_DEPTH } = await import('../src/lib/assessment')
+  const near = walkDownstream(['deeplisten'], LINKS)
+
+  await t.test('the reported case: the walk alone never reaches Classification Queues', () => {
+    assert.ok(!near.reached.some((r) => r.id === 'clsq'), 'if this fails the seed map changed; the case below still matters')
+    assert.equal(MAX_DEPTH, 3)
+  })
+
+  await t.test('flagged by the matcher, it is placed at its real distance and judged first', () => {
+    const r = addFlagged(near.reached, near.walked, [{ id: 'clsq', why: 'its description says more coverage needs more classifiers' }], ['deeplisten'], LINKS)
+    assert.equal(r.reached[0]!.id, 'clsq')
+    assert.ok(r.reached[0]!.depth > MAX_DEPTH)
+    assert.equal(r.reached[0]!.flagged, 'its description says more coverage needs more classifiers')
+    // The path to it is part of what the answer relied on, so a removed link there marks the answer stale.
+    assert.ok(r.walked.some(([, to]) => to === 'clsq'))
+    assert.equal(r.reached.length, near.reached.length + 1)
+  })
+
+  await t.test('flagging something already in reach marks it rather than adding it twice', () => {
+    const first = near.reached[0]!.id
+    const r = addFlagged(near.reached, near.walked, [{ id: first, why: 'noted' }], ['deeplisten'], LINKS)
+    assert.equal(r.reached.length, near.reached.length)
+    assert.equal(r.reached[0]!.id, first)
+    assert.equal(r.reached[0]!.flagged, 'noted')
+  })
+
+  await t.test('a flagged component not connected at all is still judged, and says so', () => {
+    const r = addFlagged([], [], [{ id: 'island', why: 'says so' }], ['deeplisten'], LINKS)
+    assert.deepEqual(r.reached.map((x) => [x.id, x.unconnected]), [['island', true]])
+  })
+
+  await t.test('a directly changed component is never also flagged', () => {
+    const r = addFlagged(near.reached, near.walked, [{ id: 'deeplisten', why: 'x' }], ['deeplisten'], LINKS)
+    assert.equal(r.reached.length, near.reached.length)
+  })
+
+  await t.test('if the model judges nothing, a flagged component is still likely, with its own reason', () => {
+    const tiers = combine([{ id: 'clsq', depth: 7, via: 'vxcui', flagged: 'more coverage needs more classifiers' }], new Map(), new Map(MAP.map((c) => [c.id, c])))
+    assert.deepEqual(tiers.likely.map((l) => [l.id, l.why]), [['clsq', 'more coverage needs more classifiers']])
+  })
+
+  await t.test('the matcher reads "affected" from the reply, checked against the map', () => {
+    const { toLong } = shortIds(MAP)
+    const r = parseMatch('{"direct":[{"id":"c1","why":"a"}],"affected":[{"id":"c2","why":"capacity"},{"id":"c1","why":"dup"},{"id":"c999","why":"made up"}]}', toLong, new Set())
+    assert.deepEqual(r.affected.map((a) => a.why), ['capacity'])
+    assert.equal(r.dropped, 1)
+  })
+
+  await t.test('both prompts tell the model to honour what a description says', () => {
+    assert.match(MATCH_SYSTEM, /"affected"/)
+    assert.match(MATCH_SYSTEM, /additional coverage requires added capacity here/)
+    assert.match(EXPLAIN_SYSTEM, /that is the organisation telling you/)
+    const { toShort } = shortIds(MAP)
+    const byId = new Map(MAP.map((c) => [c.id, c]))
+    const prompt = explainPrompt('add Linear TV in six countries', [{ id: 'deeplisten', name: 'DeepListen TV', why: 'x' }], [{ id: 'clsq', depth: 7, via: 'vxcui', flagged: 'more classifiers' }], byId, toShort)
+    assert.match(prompt, /7 steps away, via .* \| flagged: more classifiers/)
+  })
+})

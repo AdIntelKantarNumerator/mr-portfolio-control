@@ -221,6 +221,15 @@ export interface Reached {
   depth: number
   /** The component one step nearer the change, for "via …". */
   via: string
+  /**
+   * Set when the component's own description says a change of this kind
+   * affects it ("additional coverage requires added capacity here"), with
+   * the matcher's one-line reason. Such a component is judged however far
+   * downstream it is, and judged first. See addFlagged.
+   */
+  flagged?: string
+  /** True when it is not downstream on the map at all, only flagged by its description. */
+  unconnected?: boolean
 }
 
 /**
@@ -326,20 +335,24 @@ const DATA_RULE =
 
 export const MATCH_SYSTEM = `You help a company assess the reach of a proposed change across its map of software components, human workflows and rule sets.
 
-You are given the map as a list of components, each with a short id, and a request somebody typed. Decide which components the request would DIRECTLY change: the thing itself being altered, not what is downstream of it (that is worked out separately from the map's connections).
+You are given the map as a list of components, each with a short id, and a request somebody typed. Decide two things.
+
+1. "direct": which components the request would DIRECTLY change: the thing itself being altered, not what is downstream of it (that is worked out separately from the map's connections).
+2. "affected": which OTHER components say, in their own description or detail, that a change of this kind affects them. People write these notes on purpose, for example "additional coverage requires added capacity here" on a human review step, so that a request like "add Linear TV from six more countries" (more coverage, more volume) reaches it. Read every description for such a statement about the KIND of change (more coverage, more data sources, new markets, new attributes or definitions, more volume) and list each component that has one, however far downstream it is. Only list a component when its own text makes the connection; do not guess.
 
 Rules:
 - Use ONLY ids from the map. Never invent a component.
-- Pick the smallest set that is directly changed, usually one to three. Prefer the specific component over its group.
+- For "direct", pick the smallest set that is directly changed, usually one to three. Prefer the specific component over its group.
 - A rule set or a human workflow can be what changes, as well as software.
 - When the request names where the change is seen (an app, a screen, a report), include that component too if it would itself have to change.
+- In each "affected" reason, quote or closely paraphrase the description's own words.
 - If nothing on the map is about this request, return an empty "direct" list, say why in "none", and suggest one new component that would cover it.
 - ${DATA_RULE}
 
 Reply with JSON only:
-{"direct":[{"id":"c12","why":"one sentence"}],"none":null,"suggestion":null}
+{"direct":[{"id":"c12","why":"one sentence"}],"affected":[{"id":"c30","why":"its description says added coverage needs more classifier capacity"}],"none":null,"suggestion":null}
 or, when nothing matches:
-{"direct":[],"none":"one sentence","suggestion":{"name":"...","group":"<a group key from the list>","kind":"software|human|rule","description":"two sentences"}}`
+{"direct":[],"affected":[],"none":"one sentence","suggestion":{"name":"...","group":"<a group key from the list>","kind":"software|human|rule","description":"two sentences"}}`
 
 export const EXPLAIN_SYSTEM = `You help a company assess the reach of a proposed change across its map of software components and human workflows.
 
@@ -349,6 +362,8 @@ You are given a request, the components it directly changes, and the components 
 - "unaffected": it is downstream but this particular change will not reach it in practice.
 
 Give each a reason of one short sentence, specific to this request. Then write a summary of two or three sentences a program manager could read aloud.
+
+The descriptions are written by the people who run each component. When one says a change of this kind needs more capacity, volume, people or work there, that is the organisation telling you: judge it "likely", say what the description says it needs, and name the capacity need in the summary. Components marked "flagged" are ones whose description makes that statement; some are further away than the others, or not connected on the map at all, and they count all the same. Extra work or headcount on a human step is a real effect, not "unaffected".
 
 Rules:
 - Use ONLY the ids given. Judge every one of them.
@@ -395,7 +410,8 @@ export function explainPrompt(
     'Downstream:',
     ...reached.map((r) => {
       const c = byId.get(r.id)!
-      return `- ${componentLine(c, toShort.get(r.id)!)} | ${r.depth} step${r.depth === 1 ? '' : 's'} away, via ${byId.get(r.via)?.name ?? r.via}`
+      const where = r.unconnected ? 'not connected on the map' : `${r.depth} step${r.depth === 1 ? '' : 's'} away, via ${byId.get(r.via)?.name ?? r.via}`
+      return `- ${componentLine(c, toShort.get(r.id)!)} | ${where}${r.flagged ? ` | flagged: ${r.flagged}` : ''}`
     }),
     '</map>',
   ].join('\n')
@@ -415,8 +431,14 @@ export function parseMatch(
   text: string,
   toLong: Map<string, string>,
   groupKeys: Set<string>,
-): { direct: { id: string; why: string }[]; none: string | null; suggestion: Suggestion | null; dropped: number } {
-  const raw = jsonOf(text) as { direct?: unknown; none?: unknown; suggestion?: unknown }
+): {
+  direct: { id: string; why: string }[]
+  affected: { id: string; why: string }[]
+  none: string | null
+  suggestion: Suggestion | null
+  dropped: number
+} {
+  const raw = jsonOf(text) as { direct?: unknown; affected?: unknown; none?: unknown; suggestion?: unknown }
   const list = Array.isArray(raw.direct) ? raw.direct : []
   const seen = new Set<string>()
   const direct: { id: string; why: string }[] = []
@@ -443,7 +465,84 @@ export function parseMatch(
       description: clip(s.description, 800),
     }
   }
-  return { direct, none: direct.length ? null : clip(raw.none, 400) || null, suggestion, dropped }
+  // Components flagged by their own description. Never one already changed
+  // directly; capped, because a model that flags half the map has stopped
+  // reading descriptions and started guessing.
+  const affected: { id: string; why: string }[] = []
+  for (const item of (Array.isArray(raw.affected) ? raw.affected : []).slice(0, 12)) {
+    const short = clip((item as { id?: unknown })?.id, 20)
+    const id = toLong.get(short)
+    if (!id) {
+      dropped++
+      continue
+    }
+    if (seen.has(id)) continue
+    seen.add(id)
+    affected.push({ id, why: clip((item as { why?: unknown }).why, 300) || 'Its description says a change like this affects it.' })
+  }
+  return { direct, affected, none: direct.length ? null : clip(raw.none, 400) || null, suggestion, dropped }
+}
+
+/**
+ * Bring the flagged components into what gets judged, first.
+ *
+ * Added 2 October 2026. Scott asked what adding Linear TV from six more
+ * countries would take. He had written on Classification Queues, Product
+ * Creation, Mapping Users and the other review steps that more coverage
+ * needs more people there, and the answer mentioned none of them: they are
+ * six or seven connections from DeepListen TV and the walk stops at
+ * MAX_DEPTH, so the model never saw their descriptions. The matcher now
+ * flags them from their own words; this places each one (at its real
+ * distance when the map connects it, or as unconnected), and puts them at
+ * the front so the MAX_JUDGED cut can never drop them.
+ */
+export function addFlagged(
+  reached: Reached[],
+  walked: [string, string][],
+  affected: { id: string; why: string }[],
+  direct: string[],
+  links: AssessLink[],
+): { reached: Reached[]; walked: [string, string][] } {
+  if (!affected.length) return { reached, walked }
+  const directSet = new Set(direct)
+  const flags = new Map(affected.filter((a) => !directSet.has(a.id)).map((a) => [a.id, a.why]))
+  if (!flags.size) return { reached, walked }
+
+  // The whole downstream, to place a flagged component at its real distance
+  // and to show the path that leads to it.
+  const far = walkDownstream(direct, links, Number.MAX_SAFE_INTEGER)
+  const farById = new Map(far.reached.map((r) => [r.id, r]))
+  const extraLinks: [string, string][] = []
+  const pathTo = (id: string) => {
+    let at = farById.get(id)
+    const seen = new Set<string>()
+    while (at && !directSet.has(at.id) && !seen.has(at.id)) {
+      seen.add(at.id)
+      extraLinks.push([at.via, at.id])
+      at = farById.get(at.via)
+    }
+  }
+
+  const flagged: Reached[] = []
+  const rest: Reached[] = []
+  for (const r of reached) (flags.has(r.id) ? flagged : rest).push(flags.has(r.id) ? { ...r, flagged: flags.get(r.id)! } : r)
+  const already = new Set(reached.map((r) => r.id))
+  for (const [id, why] of flags) {
+    if (already.has(id)) continue
+    const hit = farById.get(id)
+    if (hit) {
+      flagged.push({ ...hit, flagged: why })
+      pathTo(id)
+    } else {
+      flagged.push({ id, depth: 0, via: direct[0]!, flagged: why, unconnected: true })
+    }
+  }
+  const key = (l: [string, string]) => `${l[0]}>${l[1]}`
+  const have = new Set(walked.map(key))
+  return {
+    reached: [...flagged, ...rest],
+    walked: [...walked, ...extraLinks.filter((l) => !have.has(key(l)))],
+  }
 }
 
 export function parseExplain(
@@ -486,6 +585,12 @@ export function combine(
     const j = judged.get(r.id)
     if (!j) {
       unjudged++
+      // A component that flagged itself in its own description is likely
+      // whatever its distance: the people who run it said so.
+      if (r.flagged) {
+        likely.push({ id: r.id, name: name(r.id), why: r.flagged })
+        continue
+      }
       ;(r.depth === 1 ? likely : possible).push({
         id: r.id,
         name: name(r.id),
