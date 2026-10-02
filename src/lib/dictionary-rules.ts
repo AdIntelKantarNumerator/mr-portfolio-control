@@ -176,6 +176,36 @@ export function readDatabaseStatus(raw: unknown): DatabaseStatus | null {
 }
 
 // ---------------------------------------------------------------------------
+// Assigning tables to datasets
+// ---------------------------------------------------------------------------
+
+/**
+ * Why a set of tables cannot be added to a dataset, or null when it can.
+ * Either an existing dataset or the name of a new one, never both and never
+ * neither; at least one table, and every one a real "database.table" ref.
+ */
+export function assignProblem(input: {
+  datasetId: string | null
+  newName: string | null
+  refs: string[]
+  datasets: Array<{ id: string; name: string }>
+}): string | null {
+  const name = input.newName?.replace(/\s+/g, ' ').trim() || null
+  if (!input.refs.length) return 'Tick at least one table.'
+  const bad = input.refs.filter((r) => !parseTableRef(r))
+  if (bad.length) return `Not a database.table name: ${bad.join(', ')}`
+  if (input.datasetId && name) return 'Choose an existing dataset or name a new one, not both.'
+  if (!input.datasetId && !name) return 'Choose a dataset, or name a new one.'
+  if (input.datasetId && !input.datasets.some((d) => d.id === input.datasetId)) return 'That dataset no longer exists. Reload the page.'
+  if (name) {
+    if (name.length > 120) return 'Keep the dataset name under 120 characters.'
+    const clash = input.datasets.find((d) => d.name.trim().toLowerCase() === name.toLowerCase())
+    if (clash) return `There is already a dataset called "${clash.name}"; choose it from the list instead.`
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
 

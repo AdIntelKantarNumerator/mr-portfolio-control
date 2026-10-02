@@ -10,7 +10,7 @@
  * the in-memory cache so the next page load reads afresh.
  */
 import { revalidatePath } from 'next/cache'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import {
   dictionaryColumns,
@@ -22,6 +22,7 @@ import {
 import { editor } from '@/lib/auth/editor'
 import { forgetCatalog } from '@/lib/dictionary'
 import {
+  assignProblem,
   parseTableRef,
   readDatabaseStatus,
   readEmptyReason,
@@ -33,6 +34,8 @@ import { logChange } from '@/lib/portfolio'
 
 export interface DictState {
   ok?: boolean
+  /** A line to show after a success, e.g. "Added 3 tables to Sports Sponsorship." */
+  message?: string
   error?: string
   fieldErrors?: Record<string, string>
   id?: string
@@ -109,6 +112,75 @@ export async function saveDataset(_prev: DictState, fd: FormData): Promise<DictS
   })
   refresh()
   return { ok: true, id, stamp: Date.now() }
+}
+
+/**
+ * Add tables to a dataset, an existing one or a new one made on the spot.
+ *
+ * Added 2 October 2026 so the tables nobody has put in a dataset can be
+ * found and sorted from the Tables tab, several at a time, rather than by
+ * opening each dataset and typing table names into it. Adding a table a
+ * dataset already has is not an error; it is simply already there. A new
+ * dataset starts "Undecided" for Dev and Prod, which is what puts it on the
+ * Datasets tab's needs-attention count until somebody says what it should be.
+ */
+export async function addTablesToDataset(_prev: DictState, fd: FormData): Promise<DictState> {
+  const who = await editor()
+  if (!who.ok) return { error: who.error }
+
+  const refs = [...new Set(fd.getAll('table').map((v) => String(v).trim()).filter(Boolean))]
+  const datasetId = text(fd, 'datasetId', 64)
+  const newName = text(fd, 'newName', 200)
+  const datasets = await db.select({ id: dictionaryDatasets.id, name: dictionaryDatasets.name }).from(dictionaryDatasets)
+  const problem = assignProblem({ datasetId, newName, refs, datasets })
+  if (problem) return { error: problem }
+
+  let id = datasetId
+  let name = datasets.find((d) => d.id === datasetId)?.name ?? ''
+  if (!id) {
+    name = newName!.replace(/\s+/g, ' ').trim()
+    const [row] = await db
+      .insert(dictionaryDatasets)
+      .values({ name, intentDev: 'undecided', intentProd: 'undecided', updatedBy: who.name })
+      .returning({ id: dictionaryDatasets.id })
+    id = row!.id
+  }
+  const had = new Set((await db.select().from(dictionaryDatasetTables).where(eq(dictionaryDatasetTables.datasetId, id!))).map((r) => r.tableRef))
+  const fresh = refs.filter((r) => !had.has(r))
+  if (fresh.length) await db.insert(dictionaryDatasetTables).values(fresh.map((tableRef) => ({ datasetId: id!, tableRef })))
+
+  await logChange({
+    actor: who.name,
+    summary: datasetId ? `Data dictionary: added ${fresh.length} table${fresh.length === 1 ? '' : 's'} to ${name}` : `Data dictionary: added dataset ${name}`,
+    detail: fresh.length ? fresh.join(', ') : 'Every table was already in it.',
+    entityType: 'dataset',
+    entityId: id!,
+  })
+  refresh()
+  const already = refs.length - fresh.length
+  const message = already
+    ? `Added ${fresh.length} to ${name}; ${already} ${already === 1 ? 'was' : 'were'} already in it.`
+    : `Added ${fresh.length} table${fresh.length === 1 ? '' : 's'} to ${name}.`
+  return { ok: true, id: id!, stamp: Date.now(), message }
+}
+
+/** Take one table out of one dataset. The table and its notes are untouched. */
+export async function removeTableFromDataset(datasetId: string, tableRef: string): Promise<DictState> {
+  const who = await editor()
+  if (!who.ok) return { error: who.error }
+  const [ds] = await db.select().from(dictionaryDatasets).where(eq(dictionaryDatasets.id, datasetId)).limit(1)
+  if (!ds) return { ok: true }
+  await db
+    .delete(dictionaryDatasetTables)
+    .where(and(eq(dictionaryDatasetTables.datasetId, datasetId), eq(dictionaryDatasetTables.tableRef, tableRef)))
+  await logChange({
+    actor: who.name,
+    summary: `Data dictionary: removed ${tableRef} from ${ds.name}`,
+    entityType: 'dataset',
+    entityId: datasetId,
+  })
+  refresh()
+  return { ok: true }
 }
 
 export async function deleteDataset(id: string): Promise<DictState> {

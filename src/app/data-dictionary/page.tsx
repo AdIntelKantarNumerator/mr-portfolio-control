@@ -39,6 +39,7 @@ import { ConnectionNote, DictionaryHeader } from './header'
 import { DatasetBoard, type DatasetTile } from './board'
 import { DatabaseRow } from './editors'
 import { dictHref, tableHref, type DictView } from './href'
+import { BULK_FORM, BulkAssignBar, SelectAllBox } from './assign'
 
 export const metadata = { title: 'Data Dictionary' }
 export const dynamic = 'force-dynamic'
@@ -66,6 +67,7 @@ export default async function DataDictionaryPage({ searchParams }: { searchParam
     showAll: one(sp.show) === 'all',
     q: one(sp.q).trim(),
     db: one(sp.db).trim(),
+    unassigned: one(sp.only) === 'unassigned',
   }
 
   const [result, notes, described] = await Promise.all([readCatalog(view.env), readDictionaryNotes(), describedColumnCounts()])
@@ -135,6 +137,7 @@ export default async function DataDictionaryPage({ searchParams }: { searchParam
           datasetsOfTable={datasetsOfTable}
           described={described}
           databases={[...new Set(allTables.map((t) => t.database))].sort()}
+          datasets={notes.datasets.map((d) => ({ id: d.id, name: d.name }))}
         />
       )}
     </div>
@@ -335,9 +338,11 @@ function TablesTab({
   datasetsOfTable,
   described,
   databases,
+  datasets,
 }: {
   view: DictView
   catalogOk: boolean
+  datasets: Array<{ id: string; name: string }>
   tables: CatalogTable[]
   hiddenCount: number
   hiddenWhy: (t: CatalogTable) => string | null
@@ -347,8 +352,12 @@ function TablesTab({
   databases: string[]
 }) {
   const q = (view.q ?? '').toLowerCase()
-  const list = tables
-    .filter((t) => !view.db || t.database === view.db)
+  const inDb = tables.filter((t) => !view.db || t.database === view.db)
+  // Counted before the text filter, so the number answers "how many tables
+  // in this database still need a dataset?" whatever is typed in the box.
+  const unassignedCount = inDb.filter((t) => !(datasetsOfTable.get(t.ref) ?? []).length).length
+  const list = inDb
+    .filter((t) => !view.unassigned || !(datasetsOfTable.get(t.ref) ?? []).length)
     .filter((t) => !q || `${t.ref} ${(datasetsOfTable.get(t.ref) ?? []).join(' ')} ${tableNote.get(t.ref)?.description ?? ''}`.toLowerCase().includes(q))
     .sort((a, b) => a.ref.localeCompare(b.ref))
 
@@ -370,17 +379,33 @@ function TablesTab({
             </option>
           ))}
         </select>
+        <select name="only" defaultValue={view.unassigned ? 'unassigned' : ''} aria-label="Which tables">
+          <option value="">All tables</option>
+          <option value="unassigned">Not in a dataset</option>
+        </select>
         <button type="submit" className="btn">
           Filter
         </button>
         <span className="dd-count">
           {list.length} table{list.length === 1 ? '' : 's'}
+          {!view.unassigned && unassignedCount ? (
+            <>
+              {' · '}
+              <Link href={dictHref({ ...view, unassigned: true })}>{unassignedCount} not in a dataset</Link>
+            </>
+          ) : null}
         </span>
       </form>
+      {view.edit ? <BulkAssignBar datasets={datasets} /> : null}
       <div className="dd-tablewrap">
         <table className="dd-table">
           <thead>
             <tr>
+              {view.edit ? (
+                <th className="dd-check">
+                  <SelectAllBox />
+                </th>
+              ) : null}
               <th>Table</th>
               <th className="dd-num">Rows</th>
               <th>Status</th>
@@ -396,6 +421,11 @@ function TablesTab({
               const hid = hiddenWhy(t)
               return (
                 <tr key={t.ref} className={hid ? 'dd-hidden' : ''}>
+                  {view.edit ? (
+                    <td className="dd-check">
+                      <input type="checkbox" name="table" value={t.ref} form={BULK_FORM} aria-label={`Select ${t.ref}`} />
+                    </td>
+                  ) : null}
                   <td className="dd-mono">
                     <Link href={tableHref(view, t.database, t.name)}>{t.ref}</Link>
                     {note?.watchOut ? (

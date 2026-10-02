@@ -35,6 +35,7 @@ import {
 } from '@/lib/dictionary-rules'
 import { ConnectionNote, DictionaryHeader } from '../../header'
 import { ColumnTable, TableNoteEditor, type ColumnRow } from '../../editors'
+import { TableDatasets } from '../../assign'
 import { dictHref, tableHref, type TablePane } from '../../href'
 
 export const dynamic = 'force-dynamic'
@@ -156,6 +157,13 @@ export default async function TablePage({ params, searchParams }: { params: Para
               excluded: note?.excluded ?? false,
             }}
             isEmpty={Boolean(facts && facts.rows === 0)}
+          />
+        ) : null}
+        {edit ? (
+          <TableDatasets
+            tableRef={ref}
+            current={datasets.map((d) => ({ id: d.id, name: d.name }))}
+            datasets={notes.datasets.map((d) => ({ id: d.id, name: d.name }))}
           />
         ) : (
           <dl className="dd-kv">

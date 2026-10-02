@@ -150,3 +150,25 @@ test('the preview', async (t) => {
     assert.deepEqual(previewCell([1, 2]), { kind: 'json', text: '[1,2]' })
   })
 })
+
+test('putting tables into a dataset from the Tables tab', async (t) => {
+  const { assignProblem } = await import('../src/lib/dictionary-rules')
+  const datasets = [{ id: 'd1', name: 'Sports Sponsorship' }]
+  const refs = ['gpc_raw.sponsorship_gold_placements', 'gpc_reference.sponsorship_asset']
+  await t.test('an existing dataset, or a new one by name', () => {
+    assert.equal(assignProblem({ datasetId: 'd1', newName: null, refs, datasets }), null)
+    assert.equal(assignProblem({ datasetId: null, newName: 'Ratings', refs, datasets }), null)
+  })
+  await t.test('at least one table, each a real database.table', () => {
+    assert.match(assignProblem({ datasetId: 'd1', newName: null, refs: [], datasets })!, /at least one/)
+    assert.match(assignProblem({ datasetId: 'd1', newName: null, refs: ['nodot'], datasets })!, /Not a database.table/)
+  })
+  await t.test('one destination: not both, not neither, and not one that is gone', () => {
+    assert.match(assignProblem({ datasetId: 'd1', newName: 'X', refs, datasets })!, /not both/)
+    assert.match(assignProblem({ datasetId: null, newName: '  ', refs, datasets })!, /Choose a dataset/)
+    assert.match(assignProblem({ datasetId: 'gone', newName: null, refs, datasets })!, /no longer exists/)
+  })
+  await t.test('a new name that is already a dataset points you at it instead', () => {
+    assert.match(assignProblem({ datasetId: null, newName: 'sports sponsorship', refs, datasets })!, /choose it from the list/)
+  })
+})

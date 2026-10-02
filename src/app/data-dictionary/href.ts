@@ -15,6 +15,8 @@ export interface DictView {
   showAll?: boolean
   q?: string
   db?: string
+  /** Tables tab: only tables in no dataset. */
+  unassigned?: boolean
 }
 
 function query(v: DictView, extra: Record<string, string> = {}): string {
@@ -25,6 +27,7 @@ function query(v: DictView, extra: Record<string, string> = {}): string {
   if (v.showAll) p.set('show', 'all')
   if (v.q) p.set('q', v.q)
   if (v.db) p.set('db', v.db)
+  if (v.unassigned) p.set('only', 'unassigned')
   for (const [k, val] of Object.entries(extra)) p.set(k, val)
   const s = p.toString()
   return s ? `?${s}` : ''
