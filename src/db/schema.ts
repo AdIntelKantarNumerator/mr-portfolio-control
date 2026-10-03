@@ -1916,3 +1916,30 @@ export const yaaraChats = pgTable(
   },
   (t) => [index('yaara_chats_status_idx').on(t.status, t.askedAt)],
 )
+
+/**
+ * "Reassess now" requests from the home page, waiting for Yaara to collect
+ * them (GET /api/agent/reassess). She cannot be called, so the card leaves one
+ * here and waits. See src/lib/reassess-rules.ts. Kept for two days.
+ */
+export const reassessRequests = pgTable(
+  'reassess_requests',
+  {
+    id: id(),
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    requestedBy: text('requested_by').notNull(),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+    /** queued | working | done | failed */
+    status: text('status').notNull().default('queued'),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    /** What she had to say when she finished, if anything. */
+    note: text('note'),
+    error: text('error'),
+  },
+  (t) => [
+    index('reassess_requests_status_idx').on(t.status, t.requestedAt),
+    index('reassess_requests_entity_idx').on(t.entityType, t.entityId),
+  ],
+)

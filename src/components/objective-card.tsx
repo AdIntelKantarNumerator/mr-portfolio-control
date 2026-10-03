@@ -26,6 +26,7 @@ import { railLabels } from '@/lib/rail-labels'
 import { SourceIcon, sourceLabel } from './source-icon'
 import { HealthPanel } from './health-state'
 import { saveVerdict, restoreVerdict, type VerdictState } from '@/app/verdict-actions'
+import { useReassess } from './reassess-button'
 
 const STATUS = {
   good: { label: 'On track', tone: 'good' },
@@ -99,6 +100,7 @@ export function ObjectiveCard({
   const [open, setOpen] = useState<number | null>(null)
   const [saveState, save, saving] = useActionState<VerdictState, FormData>(saveVerdict, {})
   const [, restore] = useActionState<VerdictState, FormData>(restoreVerdict, {})
+  const reassess = useReassess(card.level, card.id)
 
   const st = STATUS[card.health]
 
@@ -221,7 +223,8 @@ export function ObjectiveCard({
           ) : (
             <div className="vwrap">
               <button
-                className="verdict"
+                className={`verdict${reassess.running ? ' reassessing' : ''}`}
+                aria-busy={reassess.running}
                 onClick={() =>
                   onOpen(`${card.name} — assessment`, (
                     <div>
@@ -280,6 +283,7 @@ export function ObjectiveCard({
                   <b>see the evidence ›</b>
                 </span>
               </button>
+              <div className="vtools">
               <button className="pencil" onClick={() => setEditing(true)} title="Edit this assessment" aria-label="Edit assessment">
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path
@@ -291,8 +295,11 @@ export function ObjectiveCard({
                   />
                 </svg>
               </button>
+              {reassess.button}
+              </div>
             </div>
           )}
+          {!editing && reassess.note}
 
           {card.rail.length > 0 && (
             <>
