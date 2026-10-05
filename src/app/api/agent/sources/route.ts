@@ -174,7 +174,15 @@ export async function POST(req: Request) {
   return Response.json({
     source: row,
     created: true,
-    note: 'Attached, but not being read: someone has to turn ingestion on in the app.',
+    // What linking does, in words the agent can repeat. It said 'someone has
+    // to turn ingestion on in the app' until 5 October 2026, and Yaara
+    // repeated it to people, sending them looking for a switch on no page:
+    // a channel is read because she is in it, and a linked repository is
+    // read because it is linked.
+    note:
+      kind === 'slack_channel' || kind === 'github_repo' || kind === 'azure_repo'
+        ? 'Attached. It is now the home of what is in it, and Yaara reads it.'
+        : 'Attached.',
   })
 }
 
