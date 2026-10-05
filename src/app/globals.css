@@ -1501,6 +1501,9 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
    gutter the drag grips get and stuck out to the left of every card above it
    whenever the sort was Custom (Scott, 5 October 2026). */
 .ilist:has(.rowgrip) ~ .orphan-row { margin-left: 16px; }
+/* And the same space above it as between the cards (.ilist's gap), which
+   it also missed by sitting outside the list. */
+.ilist ~ .orphan-row { margin-top: 9px; }
 
 /* ---- Workflow Assessment ------------------------------------------------ */
 /* Every class here is prefixed wa- so none can collide with a Tailwind
