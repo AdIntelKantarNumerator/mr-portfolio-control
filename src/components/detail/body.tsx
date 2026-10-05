@@ -49,6 +49,10 @@ export function DetailBody({
   // wants 'initiative'.
   const tierLevel = tier.toLowerCase() as 'objective' | 'initiative' | 'project'
 
+  // Each register tile's title opens its dashboard, narrowed to this record
+  // and everything beneath it (Scott, 5 October 2026): the same scope a home
+  // card's arrow uses. See lib/hierarchy.ts formatScope.
+  const listOf = (page: 'blockers' | 'decisions' | 'actions') => `/${page}?scope=${entity.entityType}:${entity.entityId}`
   return (
     <>
       {/* When there is a tier beneath, the right column carries the updates
@@ -111,6 +115,7 @@ export function DetailBody({
         <ListTile
           title="Blockers"
           icon="blocker"
+          href={listOf('blockers')}
           items={data.blockers}
           empty="Nothing is blocked."
           add={plus('blocker')}
@@ -119,6 +124,7 @@ export function DetailBody({
         <ListTile
           title="Decisions"
           icon="decision"
+          href={listOf('decisions')}
           items={data.decisions}
           empty="No decisions recorded."
           add={plus('decision')}
@@ -129,6 +135,7 @@ export function DetailBody({
         <ListTile
           title="Action Items"
           icon="action"
+          href={listOf('actions')}
           items={data.actions}
           empty="No open actions."
           add={plus('action')}

@@ -89,18 +89,30 @@ export function Tile({
   children,
   className = '',
   right,
+  href,
 }: {
   title: string
   icon?: IconName
   children: React.ReactNode
   className?: string
   right?: React.ReactNode
+  /** Where the title goes when clicked: the full list this tile is a glimpse of. */
+  href?: string
 }) {
   return (
     <section className={`tile ${className}`}>
       <div className="tile-head">
         {icon ? (() => { const I = ICONS[icon]; return <I /> })() : null}
-        <h2>{title}</h2>
+        <h2>
+          {href ? (
+            <Link href={href} className="tile-link" title={`All ${title.toLowerCase()} for this, on their own page`}>
+              {title}
+              <span aria-hidden="true"> ›</span>
+            </Link>
+          ) : (
+            title
+          )}
+        </h2>
         {right ? <span className="tile-right">{right}</span> : null}
       </div>
       {children}
@@ -117,10 +129,13 @@ export function ListTile({
   correctable,
   add,
   editable,
+  href,
 }: {
   title: string
   icon?: IconName
   items: TileItem[]
+  /** The title's link to the full list, narrowed to this record. */
+  href?: string
   perPage?: number
   empty: string
   /** The entity this tile is on, when its rows can be corrected. */
@@ -148,6 +163,7 @@ export function ListTile({
     <Tile
       title={title}
       icon={icon}
+      href={href}
       right={
         <>
           {add}

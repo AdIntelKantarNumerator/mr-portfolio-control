@@ -1079,6 +1079,11 @@ a.ir-meta:hover { text-decoration: underline; text-underline-offset: 3px; }
 .tile-wide { grid-column: 1 / -1; }
 .tile-head { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
 .tile-head h2 { margin: 0; font-size: 15px; font-weight: 750; letter-spacing: -.01em; }
+/* A register tile's title, linked to its full list (components/detail/tile.tsx). */
+.tile-link { color: inherit; text-decoration: none; }
+.tile-link span { color: var(--muted); }
+.tile-link:hover { color: var(--brand); text-decoration: underline; text-underline-offset: 3px; }
+.tile-link:hover span { color: var(--brand); }
 .tile-head svg { flex: none; }
 .tile-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .tile-link { border: 0; background: none; font: inherit; font-size: 11.5px; font-weight: 650; color: var(--brand-2); cursor: pointer; text-decoration: none; padding: 0; }
