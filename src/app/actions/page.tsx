@@ -21,7 +21,7 @@ import { isTier, placeOf, TIERS, type Tier } from '@/lib/hierarchy'
 import { scopeFilter } from '@/lib/scope-filter'
 import { provenanceOfAction } from '@/lib/provenance'
 import { Kicker } from '@/components/ui'
-import { ActionsList, type ActionRowView } from './list'
+import { ActionEditButton, ActionsList, type ActionRowView } from './list'
 
 export const dynamic = 'force-dynamic'
 
@@ -169,7 +169,12 @@ export default async function ActionsPage({
   // The dashboard (Scott, 5 October 2026): closure health and the top five,
   // then the open items, then the ones nobody has touched for a week.
   const dash = await dashboardFor('action', scope)
-  const openRows = items.filter((r) => r.ref && dash.activeRefs.has(r.ref))
+  // The top five are shown once, in their tile; the list is everything else
+  // that is open (Scott, 5 October 2026).
+  const top = new Set(dash.top.map((t) => t.ref))
+  const openRows = items.filter((r) => r.ref && dash.activeRefs.has(r.ref) && !top.has(r.ref))
+  const edits: Record<string, React.ReactNode> = {}
+  for (const r of items) if (r.ref && top.has(r.ref)) edits[r.ref] = <ActionEditButton row={r} people={folk} />
   const inactiveRows = items.filter((r) => r.ref && dash.inactiveRefs.has(r.ref))
 
   return (
@@ -182,12 +187,12 @@ export default async function ActionsPage({
       </div>
 
       <div className="imp-tiles">
-        <HealthTile rag={dash.health.rag} reasons={dash.health.reasons} noun="action items" />
-        <TopItems items={dash.top} noun="action items" />
+        <HealthTile rag={dash.health.rag} facts={dash.health.facts} noun="action items" />
+        <TopItems items={dash.top} noun="action items" edits={edits} />
       </div>
 
       <section className="tile imp-section">
-        <p className="ptitle">Open action items</p>
+        <p className="ptitle">Additional action items</p>
         {list(openRows, { info: dash.info, variant: 'open' })}
       </section>
 

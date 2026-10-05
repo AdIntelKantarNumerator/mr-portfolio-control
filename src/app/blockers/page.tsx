@@ -21,6 +21,7 @@ import { isOpenEntry } from '@/lib/domain'
 import { provenanceOfEntry, type Mention } from '@/lib/provenance'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { RegisterList, type BlockerRow, type Named } from '@/components/records/register-list'
+import { EditEntryButton } from '@/components/records/edit-entry'
 import { dashboardFor } from '@/lib/items-dashboard'
 import { HealthTile, TopItems, WithdrawAll } from '@/components/items/parts'
 
@@ -164,10 +165,20 @@ export default async function BlockersPage({
   }
 
   const dash = await dashboardFor('blocker', scope)
-  const openRows = items.filter((r) => dash.activeRefs.has(r.ref))
+  // The top five are shown once, in their tile; the list is everything else
+  // that is open (Scott, 5 October 2026).
+  const top = new Set(dash.top.map((t) => t.ref))
+  const openRows = items.filter((r) => dash.activeRefs.has(r.ref) && !top.has(r.ref))
   const inactiveRows = items.filter((r) => dash.inactiveRefs.has(r.ref))
   const editingCtx = user.personId ? { people: ctx.people, endpoints: ctx.endpoints } : null
   const scoped = narrow.label && scope ? { label: narrow.label, clear: '/blockers', param: scope } : null
+  // The same edit button the list rows have, for each of the top five.
+  const edits: Record<string, React.ReactNode> = {}
+  if (editingCtx) {
+    for (const r of items) {
+      if (top.has(r.ref)) edits[r.ref] = <EditEntryButton kind="blocker" id={r.id} ctx={editingCtx} label={r.title} />
+    }
+  }
 
   return (
     <div className="stack">
@@ -179,12 +190,12 @@ export default async function BlockersPage({
       </div>
 
       <div className="imp-tiles">
-        <HealthTile rag={dash.health.rag} reasons={dash.health.reasons} noun="blockers" />
-        <TopItems items={dash.top} noun="blockers" />
+        <HealthTile rag={dash.health.rag} facts={dash.health.facts} noun="blockers" />
+        <TopItems items={dash.top} noun="blockers" edits={edits} />
       </div>
 
       <section className="tile imp-section">
-        <p className="ptitle">Open blockers</p>
+        <p className="ptitle">Additional blockers</p>
         <RegisterList
           kind="blocker"
           rows={openRows}

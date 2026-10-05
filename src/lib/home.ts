@@ -14,6 +14,7 @@
  * stale the first time somebody moves an initiative.
  */
 import { isInactive } from './item-activity'
+import { loadItems } from './items'
 import { citedPoints, dedupePoints, type CitedPoint } from './cited-points'
 import { cache } from 'react'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
@@ -74,6 +75,10 @@ export interface Signal {
   kind: 'blocker' | 'decision' | 'action'
   /** Yaara's one line covering all of `items`, or the single item's own text. */
   summary: string
+  /** The dashboard for this kind, narrowed to this card, reachable without expanding the row. */
+  href: string
+  /** Open, active items of this kind on the card, Critical or not. */
+  open: number
   items: Array<{
     id: string
     text: string
@@ -245,6 +250,8 @@ export const getHomeCards = cache(async (
     db.select().from(people),
     db.select().from(dependencies),
   ])
+  // Importance bands, ranked across each whole kind, for "Critical only".
+  const bandOf = new Map((await loadItems()).map((i) => [i.id, i]))
 
   const personName = new Map(peeps.map((p) => [p.id, p.name]))
 
@@ -503,53 +510,73 @@ export const getHomeCards = cache(async (
        */
       const from = formatScope(level, r.id)
 
+      /*
+       * Critical only (Scott, 5 October 2026). Each row is the count and the
+       * state of the Critical items of its kind on this card; the list of
+       * everything is one click away on its dashboard, through the arrow at
+       * the end of the row, without expanding it. A kind with open items but
+       * nothing Critical still gets its row, saying so, so the way through is
+       * always there.
+       */
       const signals: Signal[] = []
+      const age = (at: Date | null | undefined) => (at ? Math.max(0, Math.round((now - at.getTime()) / DAY)) : null)
+      const critical = <T extends { id: string }>(rows: T[]) => rows.filter((x) => bandOf.get(x.id)?.band === 'critical')
+      const stateOf = (id: string) => {
+        const i = bandOf.get(id)
+        if (!i) return ''
+        const opened = age(i.createdAt)
+        const touched = age(i.lastActivityAt)
+        return `open ${opened}d · updated ${touched === 0 ? 'today' : `${touched}d ago`}`
+      }
+      const say = (n: number, one: string, many: string, open: number) =>
+        n === 0 ? `No critical ${many} · ${open} open` : `${n} critical ${n === 1 ? one : many} · ${open} open`
+
       if (blockers.length) {
+        const top = critical(blockers)
         signals.push({
           kind: 'blocker',
-          summary:
-            blockers.length === 1
-              ? blockers[0]!.title
-              : `${blockers.length} blockers, oldest open ${Math.max(
-                  ...blockers.map((b) => Math.round((now - (b.raisedAt?.getTime() ?? now)) / DAY)),
-                )} days`,
-          items: blockers.slice(0, 6).map((b) => ({
+          summary: say(top.length, 'blocker', 'blockers', blockers.length),
+          href: `/blockers?scope=${from}`,
+          open: blockers.length,
+          items: top.map((b) => ({
             id: b.id,
             text: b.title,
-            when: b.raisedAt ? `${Math.round((now - b.raisedAt.getTime()) / DAY)}d` : '',
-            who: b.raisedByText ?? null,
+            when: stateOf(b.id),
+            who: bandOf.get(b.id)?.ownerName ?? 'No owner',
             href: `/blockers?scope=${from}`,
             where: whereDecision(b),
           })),
         })
       }
       if (decisionsOpen.length) {
+        const top = critical(decisionsOpen)
         signals.push({
           kind: 'decision',
-          summary: decisionsOpen.length === 1 ? decisionsOpen[0]!.title : `${decisionsOpen.length} open decisions`,
-          items: decisionsOpen.slice(0, 6).map((d) => ({
+          summary: say(top.length, 'decision', 'decisions', decisionsOpen.length),
+          href: `/decisions?scope=${from}`,
+          open: decisionsOpen.length,
+          items: top.map((d) => ({
             id: d.id,
             text: d.title,
-            when: d.raisedAt ? d.raisedAt.toISOString().slice(0, 10) : '',
-            who: null,
+            when: stateOf(d.id),
+            who: bandOf.get(d.id)?.ownerName ?? 'No owner',
             href: `/decisions?scope=${from}`,
             where: whereDecision(d),
           })),
         })
       }
       if (myActions.length) {
-        const soon = myActions.filter((a) => a.dueDate && a.dueDate.getTime() - now < 7 * DAY).length
+        const top = critical(myActions)
         signals.push({
           kind: 'action',
-          summary:
-            myActions.length === 1
-              ? myActions[0]!.text
-              : `${myActions.length} open actions${soon ? `, ${soon} due this week` : ''}`,
-          items: myActions.slice(0, 6).map((a) => ({
+          summary: say(top.length, 'action', 'actions', myActions.length),
+          href: `/actions?scope=${from}`,
+          open: myActions.length,
+          items: top.map((a) => ({
             id: a.id,
             text: a.text,
-            when: a.dueDate ? a.dueDate.toISOString().slice(0, 10) : '—',
-            who: a.ownerId ? (personName.get(a.ownerId) ?? null) : a.ownerName,
+            when: stateOf(a.id),
+            who: a.ownerId ? (personName.get(a.ownerId) ?? null) : (a.ownerName ?? 'No owner'),
             href: `/actions?scope=${from}`,
             where: whereAction(a.id),
           })),

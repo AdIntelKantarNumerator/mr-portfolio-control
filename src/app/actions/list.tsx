@@ -287,6 +287,22 @@ function RowControls({
   )
 }
 
+/**
+ * The list's edit dialog on its own, for the dashboard's top five, which
+ * should be editable where they are rather than only further down.
+ */
+export function ActionEditButton({ row, people }: { row: ActionRowView; people: Named[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" className="row-edit" onClick={() => setOpen(true)} title="Edit owner and date" aria-label={`Edit ${row.ref ?? 'this action'}`}>
+        ✎
+      </button>
+      {open && <EditDialog row={row} people={people} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
 /** Owner and date, the two things Yaara cannot read off notes that name neither. */
 function EditDialog({
   row,

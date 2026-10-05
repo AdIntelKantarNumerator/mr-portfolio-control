@@ -11,7 +11,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { BAND_LABEL, FACTORS, isFactor, type Band } from '@/lib/importance'
-import type { Rag } from '@/lib/item-activity'
+import { HEALTH_WINDOW_DAYS, INACTIVE_DAYS, type HealthInput, type Rag } from '@/lib/item-activity'
 import { adjustItem, loadItemHistory, withdrawInactive, type HistoryEntry } from '@/app/items-actions'
 
 /** One item as the dashboard needs it: plain data, safe to send to the browser. */
@@ -229,7 +229,13 @@ export function AdjustButtons({ item }: { item: Pick<ItemInfo, 'ref' | 'score'> 
 
 const RAG_WORD: Record<Rag, string> = { green: 'Closing well', yellow: 'Slow', red: 'Stalling' }
 
-export function HealthTile({ rag, reasons, noun }: { rag: Rag; reasons: string[]; noun: string }) {
+/**
+ * Larger, and each number coloured for what it means (Scott, 5 October
+ * 2026): closed in green, opened in amber, how many are moving in blue, an
+ * important item left a week in red.
+ */
+export function HealthTile({ rag, facts, noun }: { rag: Rag; facts: HealthInput; noun: string }) {
+  const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
   return (
     <section className={`tile imp-health imp-health-${rag}`}>
       <p className="ptitle">How fast {noun} are closing</p>
@@ -237,16 +243,46 @@ export function HealthTile({ rag, reasons, noun }: { rag: Rag; reasons: string[]
         <span className="imp-dot" aria-hidden="true" />
         <b>{RAG_WORD[rag]}</b>
       </div>
-      <ul>
-        {reasons.map((r) => (
-          <li key={r}>{r}</li>
-        ))}
+      <ul className="imp-facts">
+        <li>
+          <b className="hf-good">{facts.closed} closed</b> and <b className="hf-new">{facts.opened} opened</b> in the last{' '}
+          {HEALTH_WINDOW_DAYS} days.
+        </li>
+        <li>
+          {facts.totalOpen === 0 ? (
+            'Nothing open.'
+          ) : (
+            <>
+              <b className="hf-move">
+                {facts.activeOpen} of {facts.totalOpen}
+              </b>{' '}
+              open {plural(facts.totalOpen, 'item', 'items')} updated in the last {INACTIVE_DAYS} days.
+            </>
+          )}
+        </li>
+        {facts.criticalStale ? (
+          <li>
+            <b className="hf-bad">
+              {facts.criticalStale} high-importance {plural(facts.criticalStale, 'item', 'items')}
+            </b>{' '}
+            untouched for {INACTIVE_DAYS}+ days.
+          </li>
+        ) : null}
       </ul>
     </section>
   )
 }
 
-export function TopItems({ items, noun }: { items: ItemInfo[]; noun: string }) {
+export function TopItems({
+  items,
+  noun,
+  edits,
+}: {
+  items: ItemInfo[]
+  noun: string
+  /** ref → the same edit button the list rows have, built by the page. */
+  edits?: Record<string, React.ReactNode>
+}) {
   return (
     <section className="tile imp-top">
       <p className="ptitle">The {Math.min(5, items.length) || 5} most important open {noun}</p>
@@ -255,6 +291,7 @@ export function TopItems({ items, noun }: { items: ItemInfo[]; noun: string }) {
           <span>Importance</span>
           <span />
           <span>Owner</span>
+          <span />
           <span />
         </div>
       ) : null}
@@ -274,6 +311,7 @@ export function TopItems({ items, noun }: { items: ItemInfo[]; noun: string }) {
                 <WhyButton item={i} />
                 <HistoryButton item={i} />
               </span>
+              <span className="imp-edit">{edits?.[i.ref] ?? null}</span>
             </li>
           ))}
         </ol>

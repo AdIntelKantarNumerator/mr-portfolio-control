@@ -362,26 +362,38 @@ export function ObjectiveCard({
         </div>
 
         <div className="panel signals">
-          <p className="ptitle">Signals — tap to expand</p>
+          <p className="ptitle">Critical signals</p>
           {card.signals.length === 0 ? (
             <p className="empty">
               No blockers, decisions or actions recorded. Consistent with the silence, not evidence of health.
             </p>
           ) : (
             card.signals.map((s, i) => (
-              <div key={s.kind}>
-                <button className="sig-row" aria-expanded={open === i} onClick={() => setOpen(open === i ? null : i)}>
+              <div key={s.kind} className="sig-line">
+                <button
+                  className="sig-row"
+                  aria-expanded={open === i}
+                  disabled={s.items.length === 0}
+                  onClick={() => setOpen(open === i ? null : i)}
+                  title={s.items.length ? 'Show the Critical items' : 'Nothing Critical'}
+                >
                   <span className="sw" style={{ background: SIGNAL[s.kind].color }} />
                   <span className="tx">
                     {s.summary}
                     <em>{SIGNAL[s.kind].label}</em>
                   </span>
-                  <span className="ct">{s.items.length}</span>
-                  <span className="cv">
-                    <Chevron open={open === i} />
-                  </span>
+                  <span className={`ct${s.items.length ? ' ct-crit' : ''}`}>{s.items.length}</span>
+                  {s.items.length ? (
+                    <span className="cv">
+                      <Chevron open={open === i} />
+                    </span>
+                  ) : null}
                 </button>
-                {open === i && (
+                {/* Straight to the dashboard for this card, without expanding. */}
+                <a className="sig-go" href={s.href} title={`Open ${SIGNAL[s.kind].label.toLowerCase()} for this`} aria-label={`Open ${SIGNAL[s.kind].label} for ${card.name}`}>
+                  ›
+                </a>
+                {open === i && s.items.length > 0 && (
                   <div className="kids">
                     {s.items.map((it) => (
                       <a key={it.id} href={it.href ?? '#'}>

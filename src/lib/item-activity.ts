@@ -51,7 +51,7 @@ export interface HealthInput {
 
 export type Rag = 'green' | 'yellow' | 'red'
 
-export function closureHealth(h: HealthInput): { rag: Rag; reasons: string[] } {
+export function closureHealth(h: HealthInput): { rag: Rag; reasons: string[]; facts: HealthInput } {
   const reasons: string[] = []
   const activeShare = h.totalOpen === 0 ? 1 : h.activeOpen / h.totalOpen
   const window = `the last ${HEALTH_WINDOW_DAYS} days`
@@ -66,7 +66,9 @@ export function closureHealth(h: HealthInput): { rag: Rag; reasons: string[] } {
     reasons.push(`${h.criticalStale} high-importance item${h.criticalStale === 1 ? '' : 's'} (score 60+) untouched for ${INACTIVE_DAYS}+ days.`)
   }
 
-  if (h.criticalStale > 0 || (h.opened >= 3 && h.opened > 2 * h.closed)) return { rag: 'red', reasons }
-  if (h.closed >= h.opened && activeShare >= 0.5) return { rag: 'green', reasons }
-  return { rag: 'yellow', reasons }
+  // The numbers too, so the tile can colour each one rather than print
+  // sentences (Scott, 5 October 2026).
+  if (h.criticalStale > 0 || (h.opened >= 3 && h.opened > 2 * h.closed)) return { rag: 'red', reasons, facts: h }
+  if (h.closed >= h.opened && activeShare >= 0.5) return { rag: 'green', reasons, facts: h }
+  return { rag: 'yellow', reasons, facts: h }
 }

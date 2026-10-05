@@ -8,7 +8,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { initiatives, objectives, projects } from '@/db/schema'
 import { byImportance, inScope, loadItems, scopeIds, type Item } from './items'
-import { closureHealth, HEALTH_WINDOW_DAYS, type Rag } from './item-activity'
+import { closureHealth, HEALTH_WINDOW_DAYS, type HealthInput, type Rag } from './item-activity'
 import { parseScope } from './hierarchy'
 import type { ItemKind } from './importance'
 import type { ItemInfo } from '@/components/items/parts'
@@ -17,7 +17,7 @@ export interface Dashboard {
   /** The piece of work it is narrowed to, by name, or null for everything. */
   scopeName: string | null
   scope: string | null
-  health: { rag: Rag; reasons: string[] }
+  health: { rag: Rag; reasons: string[]; facts: HealthInput }
   top: ItemInfo[]
   /** ref → what the lists need about each open item. */
   info: Record<string, ItemInfo>

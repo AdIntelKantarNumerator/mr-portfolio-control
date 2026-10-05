@@ -532,6 +532,14 @@ table.dtable thead th {
 .sig-row .tx em { font-style: normal; color: var(--muted); font-size: 12px; display: block; margin-top: 1px; }
 .sig-row .ct { font-size: 11px; font-weight: 800; background: var(--surface-2); border-radius: 99px; padding: 2px 7px; flex: none; }
 .sig-row .cv { flex: none; color: var(--muted); display: grid; }
+/* The row and its arrow straight to the dashboard (objective-card.tsx). */
+.sig-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.sig-line > .kids { grid-column: 1 / -1; }
+.sig-row:disabled { cursor: default; }
+.sig-row:disabled:hover { background: transparent; }
+.sig-row .ct.ct-crit { background: color-mix(in srgb, var(--c3) 16%, var(--surface)); color: var(--c3); }
+.sig-go { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; font-size: 18px; line-height: 1; color: var(--muted); text-decoration: none; border: 1px solid transparent; }
+.sig-go:hover { color: var(--brand); border-color: var(--line-2); background: var(--surface); }
 .kids { padding: 2px 8px 8px 25px; display: grid; gap: 2px; }
 .kids a { display: flex; gap: 8px; font-size: 12.5px; color: var(--muted); padding: 4px 6px; border-radius: 6px; text-decoration: none; }
 .kids a:hover { background: var(--surface-2); color: var(--ink); }
@@ -1854,10 +1862,17 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .imp-health-green .imp-dot { background: var(--c5); } .imp-health-green { border-top: 4px solid var(--c5); }
 .imp-health-yellow .imp-dot { background: var(--c2); } .imp-health-yellow { border-top: 4px solid var(--c2); }
 .imp-health-red .imp-dot { background: var(--c3); } .imp-health-red { border-top: 4px solid var(--c3); }
-.imp-health ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--muted); display: grid; gap: 4px; }
+.imp-health ul { margin: 0; padding-left: 18px; font-size: 15px; line-height: 1.4; color: var(--ink); display: grid; gap: 7px; }
+.imp-facts b { font-weight: 750; }
+.hf-good { color: var(--c5); }
+.hf-new { color: color-mix(in srgb, var(--c2) 85%, var(--ink)); }
+.hf-move { color: var(--c1); }
+.hf-bad { color: var(--c3); }
+.imp-edit { display: grid; place-items: center; }
+.imp-edit .row-edit, .imp-edit button { font-size: 15px; }
 .imp-top { border-top: 4px solid var(--brand); background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 6%, var(--surface)), var(--surface) 60%); }
 .imp-top ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.imp-row { display: grid; grid-template-columns: 74px minmax(0, 1fr) 150px auto; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); }
+.imp-row { display: grid; grid-template-columns: 74px minmax(0, 1fr) 150px auto 34px; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); }
 .imp-row.imp-head { border: 0; background: none; padding: 0 12px 2px; font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
 @media (max-width: 700px) { .imp-row { grid-template-columns: 70px minmax(0, 1fr); } .imp-owner, .imp-head { display: none; } .imp-tools { grid-column: 1 / -1; } }
 .imp-ref { font-weight: 700; color: var(--muted); margin-right: 2px; }
