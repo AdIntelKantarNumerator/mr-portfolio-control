@@ -1497,6 +1497,10 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rowgrip:active { cursor: grabbing; }
 /* Room for the grip, so it does not sit on top of the coloured edge. */
 .ilist:has(.rowgrip) { padding-left: 16px; }
+/* The loose-initiatives row sits after the list, not in it, so it missed the
+   gutter the drag grips get and stuck out to the left of every card above it
+   whenever the sort was Custom (Scott, 5 October 2026). */
+.ilist:has(.rowgrip) ~ .orphan-row { margin-left: 16px; }
 
 /* ---- Workflow Assessment ------------------------------------------------ */
 /* Every class here is prefixed wa- so none can collide with a Tailwind
