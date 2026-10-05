@@ -19,7 +19,8 @@
  */
 import { TIER_PLURAL } from '@/lib/home-types'
 import { useActionState, useState } from 'react'
-import { RecordTable, type Column } from '@/components/records/table'
+import { RecordTable, type Column, type SortOption } from '@/components/records/table'
+import { AdjustButtons, BandChip, HistoryButton, WhyButton, type ItemInfo } from '@/components/items/parts'
 import { SourceHover } from '@/components/records/source-hover'
 import type { Provenance } from '@/lib/provenance'
 import { AssignCell } from '@/components/records/assign'
@@ -137,6 +138,9 @@ export function RegisterList({
   closed,
   editing,
   scope,
+  info,
+  variant = closed ? 'closed' : 'open',
+  extraAction,
 }: {
   kind: RegisterKind
   rows: BlockerRow[]
@@ -149,6 +153,16 @@ export function RegisterList({
   editing: EditContext | null
   /** Set when a card linked here, narrowing the list to one piece of work. */
   scope: { label: string; clear: string; param: string } | null
+  /**
+   * Importance and activity per ref, for the dashboards (lib/items-dashboard).
+   * With it the list gains an importance column, an updates link, a "Sort by"
+   * menu and pages of ten.
+   */
+  info?: Record<string, ItemInfo>
+  /** open: the main list. inactive: no update for seven days. closed: resolved and dropped. */
+  variant?: 'open' | 'inactive' | 'closed'
+  /** Replaces the usual buttons: "Withdraw all" on the inactive list. */
+  extraAction?: React.ReactNode
 }) {
   const [adding, setAdding] = useState(false)
   const w = WORDS[kind]
@@ -161,7 +175,7 @@ export function RegisterList({
     {
       key: 'at',
       label: 'Against',
-      filter: 'select',
+      filter: scope ? undefined : 'select',
       sort: { kind: 'text', by: (r) => r.entity?.name },
       value: (r) => r.entity?.name ?? 'Unknown',
       cell: (r) => (
@@ -176,7 +190,7 @@ export function RegisterList({
     {
       key: 'level',
       label: 'Level',
-      filter: 'select',
+      filter: scope ? undefined : 'select',
       // Widest first, matching the hierarchy rather than the alphabet.
       sort: { kind: 'number', by: (r) => TIER_RANK.indexOf(r.level ?? '') + 1 || null },
       value: (r) => (r.level ? r.level[0]!.toUpperCase() + r.level.slice(1) : 'Unknown'),
@@ -227,6 +241,44 @@ export function RegisterList({
     },
   ]
 
+  // Importance and updates, on the dashboards.
+  if (info) {
+    columns.splice(1, 0, {
+      key: 'importance',
+      label: 'Importance',
+      filter: 'select',
+      sort: { kind: 'number', by: (r) => info[r.ref]?.score ?? null },
+      value: (r) => (info[r.ref]?.band ? info[r.ref]!.band!.replace(/^./, (c) => c.toUpperCase()) : 'Unscored'),
+      cell: (r) => {
+        const i = info[r.ref]
+        if (!i) return <BandChip band={null} score={null} />
+        return (
+          <span className="imp-cell">
+            <BandChip band={i.band} score={i.score} />
+            <AdjustButtons item={i} />
+            <WhyButton item={i} />
+          </span>
+        )
+      },
+    })
+    columns.push({
+      key: 'updates',
+      label: 'Updates',
+      value: () => '',
+      cell: (r) => (info[r.ref] ? <HistoryButton item={info[r.ref]!} /> : null),
+    })
+  }
+
+  // Importance first by default; or by ref, or newest first.
+  const refNumber = (r: BlockerRow) => Number(r.ref.replace(/\D/g, '')) || 0
+  const sortOptions: SortOption<BlockerRow>[] | undefined = info
+    ? [
+        { key: 'importance', label: 'Importance', compare: (a, b) => (info[b.ref]?.score ?? -1) - (info[a.ref]?.score ?? -1) || refNumber(a) - refNumber(b) },
+        { key: 'ref', label: 'Ref', compare: (a, b) => refNumber(a) - refNumber(b) },
+        { key: 'date', label: 'Date raised', compare: (a, b) => (b.raisedAt ?? '').localeCompare(a.raisedAt ?? '') },
+      ]
+    : undefined
+
   // Last, and unfilterable: it is a control, not a fact about the row.
   if (editing) {
     columns.push({
@@ -244,8 +296,13 @@ export function RegisterList({
         rows={rows}
         columns={columns}
         getId={(r) => r.id}
-        empty={closed ? w.emptyClosed : w.emptyOpen}
+        empty={variant === 'closed' ? w.emptyClosed : variant === 'inactive' ? 'Nothing has gone a week without an update.' : w.emptyOpen}
+        sortOptions={sortOptions}
+        pageSize={info ? 10 : undefined}
         action={
+          variant === 'inactive' ? (
+            extraAction
+          ) : (
           <span className="rt-actions">
             {scope ? (
               <span className="rt-scope">
@@ -262,6 +319,7 @@ export function RegisterList({
               {w.add}
             </button>
           </span>
+          )
         }
       />
 

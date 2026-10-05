@@ -12,6 +12,8 @@
  * has to introduce itself every visit is charging for a sentence its reader
  * needed once.
  */
+import { dashboardFor } from '@/lib/items-dashboard'
+import { HealthTile, TopItems, WithdrawAll } from '@/components/items/parts'
 import { asc, desc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { actionItemLinks, actionItems, objectives, people, initiatives, projects } from '@/db/schema'
@@ -136,24 +138,68 @@ export default async function ActionsPage({
   const rank = (i: ActionRowView) => (i.overdue ? 0 : !i.owner ? 1 : i.due ? 2 : 3)
   items.sort((a, b) => rank(a) - rank(b) || (a.due ?? '9999').localeCompare(b.due ?? '9999'))
 
+  const list = (rows: ActionRowView[], extra?: Partial<React.ComponentProps<typeof ActionsList>>) => (
+    <ActionsList
+      rows={rows}
+      people={folk}
+      objectives={groups}
+      initiatives={projs}
+      projects={streams}
+      closed={closed}
+      scope={narrow.label && scope ? { label: narrow.label, clear: '/actions', param: scope } : null}
+      {...extra}
+    />
+  )
+
+  // Done and dropped keep the plain list behind "Show closed and dropped".
+  if (closed) {
+    return (
+      <div className="stack">
+        <div className="titlerow">
+          <div>
+            <Kicker>Work in progress</Kicker>
+            <h1>Action items</h1>
+          </div>
+        </div>
+        {list(items)}
+      </div>
+    )
+  }
+
+  // The dashboard (Scott, 5 October 2026): closure health and the top five,
+  // then the open items, then the ones nobody has touched for a week.
+  const dash = await dashboardFor('action', scope)
+  const openRows = items.filter((r) => r.ref && dash.activeRefs.has(r.ref))
+  const inactiveRows = items.filter((r) => r.ref && dash.inactiveRefs.has(r.ref))
+
   return (
     <div className="stack">
       <div className="titlerow">
         <div>
           <Kicker>Work in progress</Kicker>
-          <h1>Action items</h1>
+          <h1>{dash.scopeName ? `Action items: ${dash.scopeName}` : 'Action items'}</h1>
         </div>
       </div>
 
-      <ActionsList
-        rows={items}
-        people={folk}
-        objectives={groups}
-        initiatives={projs}
-        projects={streams}
-        closed={closed}
-        scope={narrow.label && scope ? { label: narrow.label, clear: '/actions', param: scope } : null}
-      />
+      <div className="imp-tiles">
+        <HealthTile rag={dash.health.rag} reasons={dash.health.reasons} noun="action items" />
+        <TopItems items={dash.top} noun="action items" />
+      </div>
+
+      <section className="tile">
+        <p className="ptitle">Open action items</p>
+        {list(openRows, { info: dash.info, variant: 'open' })}
+      </section>
+
+      <section className="tile">
+        <p className="ptitle">Inactive action items</p>
+        <p className="rt-foot">No update for seven days. Not counted on the home page, and nobody is reminded about them.</p>
+        {list(inactiveRows, {
+          info: dash.info,
+          variant: 'inactive',
+          extraAction: <WithdrawAll kind="action" scope={dash.scope} count={inactiveRows.length} noun="action items" />,
+        })}
+      </section>
     </div>
   )
 }

@@ -80,3 +80,9 @@ test('yellow: in between, and the reasons say why', () => {
   assert.match(h.reasons[0]!, /3 closed and 5 opened/)
   assert.match(h.reasons[1]!, /2 of 10 open items updated/)
 })
+
+test('a click on "less important" always shows, even on an item scored far over 100', () => {
+  const top = scoreOf('blocker', ['blocks_project', 'key_deliverable', 'needs_decision'], 3)
+  assert.equal(top, 100)
+  assert.equal(scoreOf('blocker', ['blocks_project', 'key_deliverable', 'needs_decision'], 3, -10), 90)
+})

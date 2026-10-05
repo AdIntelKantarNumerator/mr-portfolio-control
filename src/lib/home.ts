@@ -13,6 +13,7 @@
  * count is a second answer to a question the tables already answer, and it goes
  * stale the first time somebody moves an initiative.
  */
+import { isInactive } from './item-activity'
 import { citedPoints, dedupePoints, type CitedPoint } from './cited-points'
 import { cache } from 'react'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
@@ -465,11 +466,23 @@ export const getHomeCards = cache(async (
           )
         : parse<Array<{ source: string; title: string; url: string | null }>>(ob?.evidence ?? null, [])
 
-      const openDecs = decs.filter((d) => allIds.has(d.entityId ?? '') && isOpenEntry(d.status))
+      /*
+       * Open and ACTIVE only (Scott, 5 October 2026): an item with no update
+       * for seven days is "inactive" and is counted on its dashboard's
+       * Inactive list, not here. Highest importance first, so the few shown
+       * in the card's popover are the ones that matter. Decisions used to be
+       * counted whatever their status, capped at four, as "N decisions
+       * recorded"; they are now the open ones, like the others.
+       */
+      const moving = (at: Date) => !isInactive(at, new Date(now))
+      const byScore = <T extends { importanceScore: number | null }>(a: T, b: T) => (b.importanceScore ?? -1) - (a.importanceScore ?? -1)
+      const openDecs = decs
+        .filter((d) => allIds.has(d.entityId ?? '') && isOpenEntry(d.status) && moving(d.lastActivityAt))
+        .sort(byScore)
       const blockers = openDecs.filter((d) => d.kind === 'blocker')
-      const decisionsOpen = decs.filter((d) => allIds.has(d.entityId ?? '') && d.kind === 'decision').slice(0, 4)
+      const decisionsOpen = openDecs.filter((d) => d.kind === 'decision')
       const myActionIds = new Set(links.filter((l) => allIds.has(l.entityId)).map((l) => l.actionItemId))
-      const myActions = acts.filter((a) => myActionIds.has(a.id))
+      const myActions = acts.filter((a) => myActionIds.has(a.id) && moving(a.lastActivityAt)).sort(byScore)
 
       // Rolled-up activity is the sum of the children's: an objective whose
       // five initiatives each had a busy week is a busy objective, and taking
@@ -513,8 +526,8 @@ export const getHomeCards = cache(async (
       if (decisionsOpen.length) {
         signals.push({
           kind: 'decision',
-          summary: decisionsOpen.length === 1 ? decisionsOpen[0]!.title : `${decisionsOpen.length} decisions recorded`,
-          items: decisionsOpen.map((d) => ({
+          summary: decisionsOpen.length === 1 ? decisionsOpen[0]!.title : `${decisionsOpen.length} open decisions`,
+          items: decisionsOpen.slice(0, 6).map((d) => ({
             id: d.id,
             text: d.title,
             when: d.raisedAt ? d.raisedAt.toISOString().slice(0, 10) : '',

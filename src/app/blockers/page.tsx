@@ -21,6 +21,8 @@ import { isOpenEntry } from '@/lib/domain'
 import { provenanceOfEntry, type Mention } from '@/lib/provenance'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { RegisterList, type BlockerRow, type Named } from '@/components/records/register-list'
+import { dashboardFor } from '@/lib/items-dashboard'
+import { HealthTile, TopItems, WithdrawAll } from '@/components/items/parts'
 
 export const metadata = { title: 'Blockers' }
 export const dynamic = 'force-dynamic'
@@ -134,26 +136,88 @@ export default async function BlockersPage({
   const rank = (r: BlockerRow) => (r.status === 'open' ? 0 : r.status === 'watch' ? 1 : 2)
   items.sort((a, b) => rank(a) - rank(b) || (a.raisedAt ?? '9999').localeCompare(b.raisedAt ?? '9999'))
 
+  // The dashboard (Scott, 5 October 2026): closure health and the top five
+  // at the top, then the open blockers, then the ones nobody has touched for a
+  // week. Resolved and dropped keep the plain list behind "Show resolved".
+  if (closed) {
+    return (
+      <div className="stack">
+        <div className="titlerow">
+          <div>
+            <Kicker>Work in progress</Kicker>
+            <h1>Blockers</h1>
+          </div>
+        </div>
+        <RegisterList
+          kind="blocker"
+          rows={items}
+          objectives={inits}
+          initiatives={projs}
+          projects={wss}
+          people={folk}
+          closed={closed}
+          editing={user.personId ? { people: ctx.people, endpoints: ctx.endpoints } : null}
+          scope={narrow.label && scope ? { label: narrow.label, clear: '/blockers', param: scope } : null}
+        />
+      </div>
+    )
+  }
+
+  const dash = await dashboardFor('blocker', scope)
+  const openRows = items.filter((r) => dash.activeRefs.has(r.ref))
+  const inactiveRows = items.filter((r) => dash.inactiveRefs.has(r.ref))
+  const editingCtx = user.personId ? { people: ctx.people, endpoints: ctx.endpoints } : null
+  const scoped = narrow.label && scope ? { label: narrow.label, clear: '/blockers', param: scope } : null
+
   return (
     <div className="stack">
       <div className="titlerow">
         <div>
           <Kicker>Work in progress</Kicker>
-          <h1>Blockers</h1>
+          <h1>{dash.scopeName ? `Blockers: ${dash.scopeName}` : 'Blockers'}</h1>
         </div>
       </div>
 
-      <RegisterList
-        kind="blocker"
-        rows={items}
-        objectives={inits}
-        initiatives={projs}
-        projects={wss}
-        people={folk}
-        closed={closed}
-        editing={user.personId ? { people: ctx.people, endpoints: ctx.endpoints } : null}
-        scope={narrow.label && scope ? { label: narrow.label, clear: '/blockers', param: scope } : null}
-      />
+      <div className="imp-tiles">
+        <HealthTile rag={dash.health.rag} reasons={dash.health.reasons} noun="blockers" />
+        <TopItems items={dash.top} noun="blockers" />
+      </div>
+
+      <section className="tile">
+        <p className="ptitle">Open blockers</p>
+        <RegisterList
+          kind="blocker"
+          rows={openRows}
+          objectives={inits}
+          initiatives={projs}
+          projects={wss}
+          people={folk}
+          closed={false}
+          editing={editingCtx}
+          scope={scoped}
+          info={dash.info}
+          variant="open"
+        />
+      </section>
+
+      <section className="tile">
+        <p className="ptitle">Inactive blockers</p>
+        <p className="rt-foot">No update for seven days. Not counted on the home page, and nobody is reminded about them.</p>
+        <RegisterList
+          kind="blocker"
+          rows={inactiveRows}
+          objectives={inits}
+          initiatives={projs}
+          projects={wss}
+          people={folk}
+          closed={false}
+          editing={editingCtx}
+          scope={scoped}
+          info={dash.info}
+          variant="inactive"
+          extraAction={<WithdrawAll kind="blocker" scope={dash.scope} count={inactiveRows.length} noun="blockers" />}
+        />
+      </section>
     </div>
   )
 }

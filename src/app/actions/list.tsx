@@ -24,7 +24,8 @@
 import { TIER_LABEL } from '@/lib/home-types'
 import { useActionState, useState } from 'react'
 import Link from 'next/link'
-import { RecordTable, type Column } from '@/components/records/table'
+import { RecordTable, type Column, type SortOption } from '@/components/records/table'
+import { AdjustButtons, BandChip, HistoryButton, WhyButton, type ItemInfo } from '@/components/items/parts'
 import { SourceHover } from '@/components/records/source-hover'
 import type { Provenance } from '@/lib/provenance'
 import { AssignCell } from '@/components/records/assign'
@@ -61,6 +62,9 @@ export function ActionsList({
   projects,
   closed,
   scope,
+  info,
+  variant = closed ? 'closed' : 'open',
+  extraAction,
 }: {
   rows: ActionRowView[]
   people: Named[]
@@ -70,6 +74,12 @@ export function ActionsList({
   closed: boolean
   /** Set when a home card linked here for one piece of work. */
   scope: { label: string; clear: string; param: string } | null
+  /** Importance and activity per ref, for the dashboard (lib/items-dashboard). */
+  info?: Record<string, ItemInfo>
+  /** open: the main list. inactive: no update for seven days. closed: done and dropped. */
+  variant?: 'open' | 'inactive' | 'closed'
+  /** Replaces the usual buttons: "Withdraw all" on the inactive list. */
+  extraAction?: React.ReactNode
 }) {
   const [editing, setEditing] = useState<ActionRowView | null>(null)
 
@@ -90,7 +100,7 @@ export function ActionsList({
     {
       key: 'objective',
       label: TIER_LABEL.objective,
-      filter: 'select',
+      filter: scope ? undefined : 'select',
       // On the name, so the rows nobody placed go to the bottom in both
       // directions rather than sorting under U for "Unknown".
       sort: { kind: 'text', by: (r) => r.objective?.name },
@@ -100,7 +110,7 @@ export function ActionsList({
     {
       key: 'initiative',
       label: 'Initiative',
-      filter: 'select',
+      filter: scope ? undefined : 'select',
       // On the name, so the rows nobody placed go to the bottom in both
       // directions rather than sorting under U for "Unknown".
       sort: { kind: 'text', by: (r) => r.initiative?.name },
@@ -110,7 +120,7 @@ export function ActionsList({
     {
       key: 'project',
       label: 'Project',
-      filter: 'select',
+      filter: scope ? undefined : 'select',
       // On the name, so the rows nobody placed go to the bottom in both
       // directions rather than sorting under U for "Unknown".
       sort: { kind: 'text', by: (r) => r.project?.name },
@@ -170,18 +180,63 @@ export function ActionsList({
     },
   ]
 
+  // Importance and updates, on the dashboard.
+  if (info) {
+    const infoOf = (r: ActionRowView) => (r.ref ? info[r.ref] : undefined)
+    columns.unshift({
+      key: 'importance',
+      label: 'Importance',
+      filter: 'select',
+      sort: { kind: 'number', by: (r) => infoOf(r)?.score ?? null },
+      value: (r) => (infoOf(r)?.band ? infoOf(r)!.band!.replace(/^./, (c) => c.toUpperCase()) : 'Unscored'),
+      cell: (r) => {
+        const i = infoOf(r)
+        if (!i) return <BandChip band={null} score={null} />
+        return (
+          <span className="imp-cell">
+            <BandChip band={i.band} score={i.score} />
+            <AdjustButtons item={i} />
+            <WhyButton item={i} />
+          </span>
+        )
+      },
+    })
+    columns.splice(columns.length - 1, 0, {
+      key: 'updates',
+      label: 'Updates',
+      value: () => '',
+      cell: (r) => (infoOf(r) ? <HistoryButton item={infoOf(r)!} /> : null),
+    })
+  }
+  const scoreAt = (r: ActionRowView) => (r.ref ? info?.[r.ref]?.score : null) ?? -1
+  const refNumber = (r: ActionRowView) => Number((r.ref ?? '').replace(/\D/g, '')) || 0
+  const sortOptions: SortOption<ActionRowView>[] | undefined = info
+    ? [
+        { key: 'importance', label: 'Importance', compare: (a, b) => scoreAt(b) - scoreAt(a) || refNumber(a) - refNumber(b) },
+        { key: 'ref', label: 'Ref', compare: (a, b) => refNumber(a) - refNumber(b) },
+        { key: 'date', label: 'Date raised', compare: (a, b) => ((b.ref && info[b.ref]?.createdAt) || '').localeCompare((a.ref && info[a.ref]?.createdAt) || '') },
+      ]
+    : undefined
+
   return (
     <>
       <RecordTable
         rows={rows}
         columns={columns}
         getId={(r) => r.id}
+        sortOptions={sortOptions}
+        pageSize={info ? 10 : undefined}
         empty={
-          closed
+          variant === 'inactive'
+            ? 'Nothing has gone a week without an update.'
+            : closed
             ? 'Nothing has been closed or dropped yet.'
             : 'Nothing outstanding. Yaara writes these out of the meeting notes she reads — if a meeting produced commitments and none are here, check whether she has the document.'
         }
         action={
+          variant === 'inactive' ? (
+            extraAction
+          ) : (
           <span className="rt-actions">
             {scope ? (
               <span className="rt-scope">
@@ -195,6 +250,7 @@ export function ActionsList({
               {closed ? 'Show open' : 'Show closed and dropped'}
             </Link>
           </span>
+          )
         }
       />
 

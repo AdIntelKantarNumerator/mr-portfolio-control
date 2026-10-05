@@ -112,8 +112,11 @@ export function scoreOf(kind: ItemKind, factors: readonly string[], mentions: nu
   const rest = keys
     .filter((k) => k !== 'blocks_project' && k !== 'unblocks_project')
     .reduce((sum, k) => sum + FACTORS[k].weight, 0)
-  const raw = BASE[kind] + blocking + rest + mentionsBonus(mentions) + adjust
-  return Math.max(0, Math.min(100, Math.round(raw)))
+  // Her part is capped first, then the person's adjustment applied: capped
+  // last, an item far over 100 swallowed a click on "less important" and
+  // nothing visibly changed.
+  const hers = Math.max(0, Math.min(100, BASE[kind] + blocking + rest + mentionsBonus(mentions)))
+  return Math.max(0, Math.min(100, Math.round(hers + adjust)))
 }
 
 export type Band = 'critical' | 'high' | 'medium' | 'low'

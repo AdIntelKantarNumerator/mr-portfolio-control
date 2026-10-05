@@ -36,6 +36,13 @@
  * heading.
  */
 import { useMemo, useState } from 'react'
+
+/** A named order for the "Sort by" menu. The first is the default. */
+export interface SortOption<T> {
+  key: string
+  label: string
+  compare: (a: T, b: T) => number
+}
 import { nextOrder, sortRows, type Order, type SortKind, type SortValue } from '@/lib/record-sort'
 
 export interface Column<T> {
@@ -68,6 +75,8 @@ export function RecordTable<T>({
   empty,
   action,
   footNote,
+  sortOptions,
+  pageSize,
 }: {
   rows: T[]
   columns: Column<T>[]
@@ -77,9 +86,18 @@ export function RecordTable<T>({
   action?: React.ReactNode
   /** One line under the table, when the list needs a caveat. */
   footNote?: React.ReactNode
+  /**
+   * A "Sort by" menu, for the work-in-progress dashboards (importance, ref,
+   * date). A clicked heading still wins while it is set.
+   */
+  sortOptions?: SortOption<T>[]
+  /** Rows per page; unset shows them all, as every list did before. */
+  pageSize?: number
 }) {
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [order, setOrder] = useState<Order | null>(null)
+  const [sortKey, setSortKey] = useState(sortOptions?.[0]?.key ?? '')
+  const [page, setPage] = useState(0)
 
   const options = useMemo(() => {
     const out: Record<string, string[]> = {}
@@ -114,16 +132,28 @@ export function RecordTable<T>({
    * which each page has thought about. See lib/record-sort.ts.
    */
   const ordered = useMemo(() => {
-    if (!order) return shown
+    if (!order) {
+      const named = sortOptions?.find((o) => o.key === sortKey)
+      return named ? [...shown].sort(named.compare) : shown
+    }
     const col = columns.find((c) => c.key === order.key)
     if (!col?.sort) return shown
     const kind = typeof col.sort === 'string' ? col.sort : col.sort.kind
     const by = typeof col.sort === 'string' ? col.value : col.sort.by
     return sortRows(shown, by, kind, order.dir)
-  }, [shown, columns, order])
+  }, [shown, columns, order, sortOptions, sortKey])
 
   const filtering = Object.values(filters).some(Boolean)
-  const set = (key: string, value: string) => setFilters((f) => ({ ...f, [key]: value }))
+  const set = (key: string, value: string) => {
+    setFilters((f) => ({ ...f, [key]: value }))
+    setPage(0)
+  }
+
+  // Paged after filtering and ordering, so page 1 is always the first of
+  // what the reader asked for.
+  const pages = pageSize ? Math.max(1, Math.ceil(ordered.length / pageSize)) : 1
+  const at = Math.min(page, pages - 1)
+  const visible = pageSize ? ordered.slice(at * pageSize, at * pageSize + pageSize) : ordered
 
   return (
     <>
@@ -154,6 +184,26 @@ export function RecordTable<T>({
               </label>
             ),
           )}
+
+        {sortOptions && sortOptions.length > 1 ? (
+          <label className="rt-f">
+            <span>Sort by</span>
+            <select
+              value={sortKey}
+              onChange={(e) => {
+                setSortKey(e.target.value)
+                setOrder(null)
+                setPage(0)
+              }}
+            >
+              {sortOptions.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
         {filtering && (
           <button type="button" className="rt-clear" onClick={() => setFilters({})}>
@@ -212,7 +262,7 @@ export function RecordTable<T>({
               </tr>
             </thead>
             <tbody>
-              {ordered.map((row) => (
+              {visible.map((row) => (
                 <tr key={getId(row)}>
                   {columns.map((c) => (
                     <td key={c.key} className={c.className}>
@@ -225,6 +275,20 @@ export function RecordTable<T>({
           </table>
         </div>
       )}
+
+      {pageSize && pages > 1 ? (
+        <nav className="rt-pages" aria-label="Pages">
+          <button type="button" onClick={() => setPage(at - 1)} disabled={at === 0}>
+            ‹ Previous
+          </button>
+          <span>
+            Page {at + 1} of {pages}
+          </span>
+          <button type="button" onClick={() => setPage(at + 1)} disabled={at >= pages - 1}>
+            Next ›
+          </button>
+        </nav>
+      ) : null}
 
       {footNote ? <p className="rt-foot">{footNote}</p> : null}
     </>
