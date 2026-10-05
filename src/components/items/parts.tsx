@@ -29,7 +29,11 @@ export interface ItemInfo {
   reasons: Array<{ factor: string; why: string; quote: string | null; source: string | null; url: string | null }>
   adjust: number
   mentions: number
+  /** When it was raised or entered (its raised date, else when it was recorded). */
   createdAt: string
+  /** Where it was first raised, with a link when there is one. */
+  source: { title: string; url: string | null } | null
+  raisedBy: string | null
   lastActivityAt: string
   inactive: boolean
 }
@@ -72,6 +76,26 @@ export function WhyButton({ item }: { item: ItemInfo }) {
       {open ? (
         <Modal title={`${item.ref}: why it is ${item.band ? BAND_LABEL[item.band] : 'unscored'}`} onClose={() => setOpen(false)}>
           <p className="lead">{item.title}</p>
+          {/* Where it came from and when (Scott, 5 October 2026). */}
+          <p className="imp-origin">
+            Raised <b>{new Date(item.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</b>
+            {item.raisedBy ? <> by {item.raisedBy}</> : null}
+            {item.source ? (
+              <>
+                {' '}in{' '}
+                {item.source.url ? (
+                  <a href={item.source.url} target="_blank" rel="noreferrer">
+                    {item.source.title}
+                  </a>
+                ) : (
+                  <b>{item.source.title}</b>
+                )}
+              </>
+            ) : (
+              <> · source not recorded</>
+            )}
+            .
+          </p>
           <p className="imp-meta">
             {item.owner ? <>Owner: <b>{item.owner}</b></> : 'No owner'}
             {item.places.length ? <> · {item.places.join(', ')}</> : null} · open {days(item.createdAt)} day
@@ -201,6 +225,20 @@ export function HistoryButton({ item }: { item: Pick<ItemInfo, 'ref' | 'title' |
   )
 }
 
+/**
+ * The controls a row carries, the same in the top five and in the lists
+ * below: more or less important, why, and its updates.
+ */
+export function ItemTools({ item }: { item: ItemInfo }) {
+  return (
+    <span className="imp-tools">
+      <AdjustButtons item={item} />
+      <WhyButton item={item} />
+      <HistoryButton item={item} />
+    </span>
+  )
+}
+
 /** More or less important, one step at a time. A person's change, kept apart from Yaara's score. */
 export function AdjustButtons({ item }: { item: Pick<ItemInfo, 'ref' | 'score'> }) {
   const router = useRouter()
@@ -306,11 +344,7 @@ export function TopItems({
                 <span className="imp-ref">{i.ref}</span> {i.title}
               </span>
               <span className={`imp-owner${i.owner ? '' : ' imp-noowner'}`}>{i.owner ?? 'No owner'}</span>
-              <span className="imp-tools">
-                <AdjustButtons item={i} />
-                <WhyButton item={i} />
-                <HistoryButton item={i} />
-              </span>
+              <ItemTools item={i} />
               <span className="imp-edit">{edits?.[i.ref] ?? null}</span>
             </li>
           ))}

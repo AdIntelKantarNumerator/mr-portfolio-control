@@ -25,6 +25,7 @@ import {
   objectives,
   people,
   projects,
+  sourceDocuments,
 } from '@/db/schema'
 import { logChange } from './portfolio'
 import { matchPerson } from './register'
@@ -61,8 +62,11 @@ export interface Item {
   mentions: number
   nudgedAt: Date | null
   mergedInto: string | null
+  /** Where it was first raised: the meeting, document or channel, and a link when there is one. */
   sourceTitle: string | null
   sourceUrl: string | null
+  /** Who raised it, when that was recorded. */
+  raisedBy: string | null
   href: string
 }
 
@@ -77,12 +81,14 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
   const kinds = new Set(opts.kinds ?? ['blocker', 'decision', 'action'])
   const now = opts.now ?? new Date()
 
-  const [folk, objs, inits, projs] = await Promise.all([
+  const [folk, objs, inits, projs, docs] = await Promise.all([
     db.select({ id: people.id, name: people.name }).from(people),
     db.select({ id: objectives.id, name: objectives.name, ownerId: objectives.ownerId }).from(objectives),
     db.select({ id: initiatives.id, name: initiatives.name, ownerId: initiatives.ownerId, objectiveId: initiatives.objectiveId }).from(initiatives),
     db.select({ id: projects.id, name: projects.name, leadId: projects.leadId, initiativeId: projects.initiativeId }).from(projects),
+    db.select({ id: sourceDocuments.id, title: sourceDocuments.title, url: sourceDocuments.url }).from(sourceDocuments),
   ])
+  const docOf = new Map(docs.map((d) => [d.id, d]))
   const nameOf = new Map(folk.map((p) => [p.id, p.name]))
   const place = new Map<string, { level: Tier; name: string; ownerId: string | null; parent: string | null }>()
   for (const o of objs) place.set(o.id, { level: 'objective', name: o.name, ownerId: o.ownerId, parent: null })
@@ -136,8 +142,9 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         mentions: r.mentions,
         nudgedAt: r.nudgedAt,
         mergedInto: r.mergedInto,
-        sourceTitle: r.raisedAtMeeting,
-        sourceUrl: null,
+        sourceTitle: (r.raisedDocumentId && docOf.get(r.raisedDocumentId)?.title) || r.raisedAtMeeting,
+        sourceUrl: (r.raisedDocumentId && docOf.get(r.raisedDocumentId)?.url) || null,
+        raisedBy: (r.raisedById && nameOf.get(r.raisedById)) || r.raisedByText || null,
         href: `/${kind === 'blocker' ? 'blockers' : 'decisions'}#${r.ref}`,
       })
     }
@@ -185,6 +192,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         mergedInto: r.mergedInto,
         sourceTitle: r.sourceTitle,
         sourceUrl: r.sourceUrl,
+        raisedBy: null,
         href: `/actions#${r.ref ?? r.id}`,
       })
     }

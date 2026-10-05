@@ -43,6 +43,8 @@ export function toInfo(i: Item): ItemInfo {
     adjust: i.adjust,
     mentions: i.mentions,
     createdAt: i.createdAt.toISOString(),
+    source: i.sourceTitle || i.sourceUrl ? { title: i.sourceTitle ?? 'the source', url: i.sourceUrl } : null,
+    raisedBy: i.raisedBy,
     lastActivityAt: i.lastActivityAt.toISOString(),
     inactive: i.inactive,
   }

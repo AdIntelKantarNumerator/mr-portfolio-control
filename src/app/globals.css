@@ -1869,7 +1869,13 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .hf-move { color: var(--c1); }
 .hf-bad { color: var(--c3); }
 .imp-edit { display: grid; place-items: center; }
-.imp-edit .row-edit, .imp-edit button { font-size: 15px; }
+.rt-tools { white-space: nowrap; }
+.imp-origin { font-size: 13.5px; margin: -4px 0 8px; }
+.imp-origin a { color: var(--brand); }
+/* Always visible here: .row-edit is transparent until its table cell is
+   hovered, and the top five are not a table, so it never appeared. */
+.imp-edit .row-edit, .imp-edit button { font-size: 15px; opacity: .75; margin: 0; }
+.imp-edit .row-edit:hover, .imp-edit button:hover { opacity: 1; }
 .imp-top { border-top: 4px solid var(--brand); background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 6%, var(--surface)), var(--surface) 60%); }
 .imp-top ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .imp-row { display: grid; grid-template-columns: 74px minmax(0, 1fr) 150px auto 34px; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); }

@@ -25,7 +25,7 @@ import { TIER_LABEL } from '@/lib/home-types'
 import { useActionState, useState } from 'react'
 import Link from 'next/link'
 import { RecordTable, type Column, type SortOption } from '@/components/records/table'
-import { AdjustButtons, BandChip, HistoryButton, WhyButton, type ItemInfo } from '@/components/items/parts'
+import { BandChip, ItemTools, type ItemInfo } from '@/components/items/parts'
 import { SourceHover } from '@/components/records/source-hover'
 import type { Provenance } from '@/lib/provenance'
 import { AssignCell } from '@/components/records/assign'
@@ -191,21 +191,16 @@ export function ActionsList({
       value: (r) => (infoOf(r)?.band ? infoOf(r)!.band!.replace(/^./, (c) => c.toUpperCase()) : 'Unscored'),
       cell: (r) => {
         const i = infoOf(r)
-        if (!i) return <BandChip band={null} score={null} />
-        return (
-          <span className="imp-cell">
-            <BandChip band={i.band} score={i.score} />
-            <AdjustButtons item={i} />
-            <WhyButton item={i} />
-          </span>
-        )
+        return <BandChip band={i?.band ?? null} score={i?.score ?? null} />
       },
     })
+    // The same controls as the top five, in the same order (Scott, 5 October 2026).
     columns.splice(columns.length - 1, 0, {
-      key: 'updates',
-      label: 'Updates',
+      key: 'tools',
+      label: '',
+      className: 'rt-tools',
       value: () => '',
-      cell: (r) => (infoOf(r) ? <HistoryButton item={infoOf(r)!} /> : null),
+      cell: (r) => (infoOf(r) ? <ItemTools item={infoOf(r)!} /> : null),
     })
   }
   const scoreAt = (r: ActionRowView) => (r.ref ? info?.[r.ref]?.score : null) ?? -1
