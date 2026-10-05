@@ -101,6 +101,13 @@ export function requestBody(config: OpenRouterConfig, system: string, user: stri
       // This line is the requirement: nothing outside the list, ever.
       allow_fallbacks: false,
       data_collection: 'deny',
+      // Zero data retention, enforced rather than assumed (5 October 2026).
+      // data_collection only excludes providers that TRAIN on prompts; one that
+      // keeps them, for abuse scanning say, still qualified. All three pinned
+      // providers are on OpenRouter's zero-retention list for this model today;
+      // this makes OpenRouter refuse any endpoint that is not, so a provider
+      // changing its policy fails loudly instead of quietly keeping our data.
+      zdr: true,
     },
   }
 }

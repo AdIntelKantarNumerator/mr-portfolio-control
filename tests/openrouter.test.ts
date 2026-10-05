@@ -49,6 +49,8 @@ test('every request is pinned', async (t) => {
   })
   await t.test('providers that retain or train on requests are excluded', () => {
     assert.equal(body.provider.data_collection, 'deny')
+    // Retention, not only training: only zero-data-retention endpoints.
+    assert.equal((body.provider as { zdr?: unknown }).zdr, true)
   })
   await t.test('reasoning is off by default, so the budget goes to the answer', () => {
     assert.deepEqual((body as { reasoning?: unknown }).reasoning, { effort: 'none', exclude: true })
