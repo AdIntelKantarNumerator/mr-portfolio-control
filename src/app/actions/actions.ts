@@ -15,7 +15,7 @@
 import { revalidatePath } from 'next/cache'
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { actionItemLinks, actionItems, objectives, people, initiatives, projects } from '@/db/schema'
+import { actionItemEvents, actionItemLinks, actionItems, objectives, people, initiatives, projects } from '@/db/schema'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
 
@@ -56,8 +56,17 @@ export async function setActionStatus(_prev: ActionState, formData: FormData): P
       status,
       completedAt: status === 'done' ? new Date() : null,
       updatedAt: new Date(),
+      lastActivityAt: new Date(),
     })
     .where(eq(actionItems.id, id))
+  // On the item's own history too, so its popup shows who closed it.
+  await db.insert(actionItemEvents).values({
+    actionItemId: id,
+    kind: status === 'done' ? 'done' : status === 'dropped' ? 'dropped' : 'reopened',
+    actor: who,
+    note: note || null,
+    recordedBy: who,
+  })
 
   const [link] = await db.select().from(actionItemLinks).where(eq(actionItemLinks.actionItemId, id)).limit(1)
 
@@ -125,7 +134,7 @@ export async function claimAction(_prev: ActionState, formData: FormData): Promi
 
   if (changes.length === 0) return { ok: true, stamp: Date.now(), message: 'Nothing changed.' }
 
-  await db.update(actionItems).set(patch).where(eq(actionItems.id, id))
+  await db.update(actionItems).set({ ...patch, lastActivityAt: new Date() }).where(eq(actionItems.id, id))
 
   const who = await actorName()
   const [link] = await db.select().from(actionItemLinks).where(eq(actionItemLinks.actionItemId, id)).limit(1)

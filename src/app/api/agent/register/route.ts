@@ -262,6 +262,10 @@ export async function POST(req: Request) {
         body: text || existing.body,
         history: raw.history ? String(raw.history).slice(0, 4000) : existing.history,
         updatedAt: new Date(),
+        // Read about again: activity, and one more place it came up (which
+        // is what makes it rank higher; lib/importance.ts).
+        lastActivityAt: new Date(),
+        mentions: existing.mentions + 1,
       }
 
       // An owner that was unknown and is now named is the single most useful

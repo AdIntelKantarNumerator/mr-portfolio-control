@@ -420,6 +420,8 @@ export async function editRegisterEntry(input: {
     await db
       .update(decisions)
       .set({
+        // A person editing it is activity (lib/item-activity.ts).
+        lastActivityAt: new Date(),
         title: next.title,
         body: next.body,
         status: next.status,

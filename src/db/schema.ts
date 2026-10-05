@@ -441,6 +441,27 @@ export const decisions = pgTable(
     leadVisible: boolean('lead_visible').notNull().default(true),
     entityType: text('entity_type'),
     entityId: text('entity_id'),
+    // Following it through (migration 0027, lib/importance.ts, lib/item-activity.ts).
+    /** JSON array of the factor keys Yaara tagged it with. */
+    importanceFactors: text('importance_factors'),
+    /** JSON [{factor, why, quote, source, url}]: the "why is this important" popup. */
+    importanceReasons: text('importance_reasons'),
+    /** 0-100, from the factors, the mentions and the adjustment. Null until scored. */
+    importanceScore: integer('importance_score'),
+    /** What people added or took away by hand, kept apart so a re-score does not undo it. */
+    importanceAdjust: integer('importance_adjust').notNull().default(0),
+    /** How many places it has been raised or referred to. */
+    mentions: integer('mentions').notNull().default(1),
+    /**
+     * The last real update: evidence, a reply, a status change, an edit, a
+     * score change. Not a nudge, and not the first automatic score. Open and
+     * untouched for seven days is "inactive".
+     */
+    lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).notNull().defaultNow(),
+    /** When its owner was last reminded. Not activity. */
+    nudgedAt: timestamp('nudged_at', { withTimezone: true }),
+    /** The ref of the item this was a duplicate of, when it was merged. */
+    mergedInto: text('merged_into'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -530,10 +551,57 @@ export const actionItems = pgTable(
     raisedAt: timestamp('raised_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     authoredBy: text('authored_by'),
+    // Following it through (migration 0027, lib/importance.ts, lib/item-activity.ts).
+    /** JSON array of the factor keys Yaara tagged it with. */
+    importanceFactors: text('importance_factors'),
+    /** JSON [{factor, why, quote, source, url}]: the "why is this important" popup. */
+    importanceReasons: text('importance_reasons'),
+    /** 0-100, from the factors, the mentions and the adjustment. Null until scored. */
+    importanceScore: integer('importance_score'),
+    /** What people added or took away by hand, kept apart so a re-score does not undo it. */
+    importanceAdjust: integer('importance_adjust').notNull().default(0),
+    /** How many places it has been raised or referred to. */
+    mentions: integer('mentions').notNull().default(1),
+    /**
+     * The last real update: evidence, a reply, a status change, an edit, a
+     * score change. Not a nudge, and not the first automatic score. Open and
+     * untouched for seven days is "inactive".
+     */
+    lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).notNull().defaultNow(),
+    /** When its owner was last reminded. Not activity. */
+    nudgedAt: timestamp('nudged_at', { withTimezone: true }),
+    /** The ref of the item this was a duplicate of, when it was merged. */
+    mergedInto: text('merged_into'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [index('action_items_status_idx').on(t.status, t.dueDate)],
+)
+
+/**
+ * An action item's history: raised, updated, done, merged, re-owned,
+ * re-scored, nudged. Blockers and decisions have had decision_events all
+ * along; action items had only Activity, so "what has happened on this" had no
+ * answer on the item itself (migration 0027).
+ */
+export const actionItemEvents = pgTable(
+  'action_item_events',
+  {
+    id: id(),
+    actionItemId: text('action_item_id')
+      .notNull()
+      .references(() => actionItems.id, { onDelete: 'cascade' }),
+    /** raised | updated | done | dropped | reopened | merged | owner | importance | nudged */
+    kind: text('kind').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    actor: text('actor'),
+    note: text('note'),
+    sourceTitle: text('source_title'),
+    sourceUrl: text('source_url'),
+    recordedBy: text('recorded_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('action_item_events_item_idx').on(t.actionItemId)],
 )
 
 /**

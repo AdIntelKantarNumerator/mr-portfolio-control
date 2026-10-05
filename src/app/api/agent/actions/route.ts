@@ -38,9 +38,9 @@
  * reopens: closing an action item is a person's call, made on the page.
  */
 import { readTier, vocabularyOf } from '@/lib/tier-aliases'
-import { desc, eq } from 'drizzle-orm'
+import { desc, eq, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { actionItems, actionItemLinks, objectives, initiatives, people, projects } from '@/db/schema'
+import { actionItemEvents, actionItems, actionItemLinks, objectives, initiatives, people, projects } from '@/db/schema'
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
 import { logChange } from '@/lib/portfolio'
 import { nextRef } from '@/lib/util'
@@ -237,6 +237,21 @@ export async function POST(req: Request) {
       if (fresh.length) {
         await db.insert(actionItemLinks).values(fresh.map((w) => ({ actionItemId: already.id, ...w })))
       }
+      // Said again somewhere else: that is activity, and one more mention
+      // (lib/importance.ts). Owner and date stay as they are.
+      await db
+        .update(actionItems)
+        .set({ lastActivityAt: new Date(), mentions: sql`${actionItems.mentions} + 1` })
+        .where(eq(actionItems.id, already.id))
+      await db.insert(actionItemEvents).values({
+        actionItemId: already.id,
+        kind: 'updated',
+        actor: agent,
+        note: 'Came up again.',
+        sourceTitle,
+        sourceUrl,
+        recordedBy: agent,
+      })
       skipped.push(`${already.ref ?? already.id}: already recorded${fresh.length ? `, ${fresh.length} link(s) added` : ''}`)
       continue
     }
@@ -267,6 +282,14 @@ export async function POST(req: Request) {
       .returning({ id: actionItems.id })
 
     await db.insert(actionItemLinks).values(wanted.map((w) => ({ actionItemId: row.id, ...w })))
+    await db.insert(actionItemEvents).values({
+      actionItemId: row.id,
+      kind: 'raised',
+      actor: ownerAsked || null,
+      sourceTitle,
+      sourceUrl,
+      recordedBy: agent,
+    })
     seen.set(print, { id: row.id, ref })
     written.push(ref)
 
@@ -332,8 +355,16 @@ export async function PATCH(req: Request) {
       status,
       completedAt: status === 'done' ? new Date() : null,
       updatedAt: new Date(),
+      lastActivityAt: new Date(),
     })
     .where(eq(actionItems.id, row.id))
+  await db.insert(actionItemEvents).values({
+    actionItemId: row.id,
+    kind: status === 'done' ? 'done' : 'reopened',
+    actor: agent,
+    note: body.note ? String(body.note).slice(0, 1000) : null,
+    recordedBy: agent,
+  })
 
   const [firstLink] = await db
     .select()

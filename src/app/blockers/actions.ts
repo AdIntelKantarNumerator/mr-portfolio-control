@@ -17,7 +17,7 @@
 import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { decisions, objectives, initiatives, projects } from '@/db/schema'
+import { decisionEvents, decisions, objectives, initiatives, projects } from '@/db/schema'
 import { actorName } from '@/lib/auth/current-user'
 import { logChange } from '@/lib/portfolio'
 
@@ -114,13 +114,23 @@ export async function setBlockerStatus(id: string, status: string): Promise<Bloc
   if (row.status === status) return { ok: true, stamp: Date.now(), message: 'Already there.' }
 
   const closing = status === 'decided' || status === 'dropped'
+  const who = await actorName()
   await db
     .update(decisions)
-    .set({ status, resolvedAt: closing ? new Date() : null })
+    .set({ status, resolvedAt: closing ? new Date() : null, lastActivityAt: new Date() })
     .where(eq(decisions.id, id))
+  // On the item's own history too, so its popup shows who changed it.
+  await db.insert(decisionEvents).values({
+    decisionId: id,
+    kind: status === 'decided' ? 'resolved' : status === 'dropped' ? 'dropped' : closing ? 'updated' : 'reopened',
+    occurredAt: new Date(),
+    actor: who,
+    note: `${row.status} → ${status}`,
+    recordedBy: who,
+  })
 
   await logChange({
-    actor: await actorName(),
+    actor: who,
     kind: 'change',
     summary: `${row.ref}: ${row.status} → ${status}`,
     detail: row.title,
@@ -148,7 +158,7 @@ export async function fileBlockerAt(id: string, level: string, entityId: string)
 
   await db
     .update(decisions)
-    .set({ entityType: entityId ? level : null, entityId: entityId || null })
+    .set({ entityType: entityId ? level : null, entityId: entityId || null, lastActivityAt: new Date() })
     .where(eq(decisions.id, id))
 
   await logChange({
