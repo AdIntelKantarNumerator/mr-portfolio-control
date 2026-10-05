@@ -47,7 +47,9 @@ async function main() {
   await applyItemUpdate({ ref: blocker!.ref, action: 'score', actor: 'Yaara', factors: ['blocks_project', 'key_deliverable'], reasons: [{ factor: 'blocks_project', why: 'Nothing ships without it', quote: 'we cannot launch until legal signs' }] })
   items = await mine()
   const b = items.find((i) => i.ref === blocker!.ref)!
-  check('scored Critical from its factors', b.band === 'critical', `${b.score}`)
+  // Critical-worthy by score, but inactive (untouched for ten days), so High:
+  // nothing inactive is Critical (Scott, 5 October 2026).
+  check('scored from its factors, and inactive so never Critical', (b.score ?? 0) >= 60 && b.band === 'high', `${b.score} ${b.band}`)
   check('the first score does not count as activity', b.inactive)
   check('the reasons are kept for the popup', b.reasons[0]?.quote === 'we cannot launch until legal signs')
 

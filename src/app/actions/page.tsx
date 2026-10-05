@@ -186,12 +186,12 @@ export default async function ActionsPage({
         <TopItems items={dash.top} noun="action items" />
       </div>
 
-      <section className="tile">
+      <section className="tile imp-section">
         <p className="ptitle">Open action items</p>
         {list(openRows, { info: dash.info, variant: 'open' })}
       </section>
 
-      <section className="tile">
+      <section className="tile imp-section">
         <p className="ptitle">Inactive action items</p>
         <p className="rt-foot">No update for seven days. Not counted on the home page, and nobody is reminded about them.</p>
         {list(inactiveRows, {

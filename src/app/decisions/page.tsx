@@ -179,7 +179,7 @@ export default async function DecisionsPage({
         <TopItems items={dash.top} noun="decisions" />
       </div>
 
-      <section className="tile">
+      <section className="tile imp-section">
         <p className="ptitle">Open decisions</p>
         <RegisterList
           kind="decision"
@@ -196,7 +196,7 @@ export default async function DecisionsPage({
         />
       </section>
 
-      <section className="tile">
+      <section className="tile imp-section">
         <p className="ptitle">Inactive decisions</p>
         <p className="rt-foot">No update for seven days. Not counted on the home page, and nobody is reminded about them.</p>
         <RegisterList

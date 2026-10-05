@@ -23,6 +23,8 @@ export interface ItemInfo {
   places: string[]
   score: number | null
   band: Band | null
+  /** Why it has that band: its rank among open items of its kind, or why it cannot be Critical. */
+  bandNote: string | null
   factors: string[]
   reasons: Array<{ factor: string; why: string; quote: string | null; source: string | null; url: string | null }>
   adjust: number
@@ -70,6 +72,12 @@ export function WhyButton({ item }: { item: ItemInfo }) {
       {open ? (
         <Modal title={`${item.ref}: why it is ${item.band ? BAND_LABEL[item.band] : 'unscored'}`} onClose={() => setOpen(false)}>
           <p className="lead">{item.title}</p>
+          <p className="imp-meta">
+            {item.owner ? <>Owner: <b>{item.owner}</b></> : 'No owner'}
+            {item.places.length ? <> · {item.places.join(', ')}</> : null} · open {days(item.createdAt)} day
+            {days(item.createdAt) === 1 ? '' : 's'} · last update {days(item.lastActivityAt)} day{days(item.lastActivityAt) === 1 ? '' : 's'} ago
+          </p>
+          {item.bandNote ? <p className="imp-meta">{item.bandNote}</p> : null}
           {item.score == null ? (
             <p>Not scored yet. Yaara scores new items on her next hourly pass.</p>
           ) : (
@@ -242,6 +250,14 @@ export function TopItems({ items, noun }: { items: ItemInfo[]; noun: string }) {
   return (
     <section className="tile imp-top">
       <p className="ptitle">The {Math.min(5, items.length) || 5} most important open {noun}</p>
+      {items.length ? (
+        <div className="imp-row imp-head" aria-hidden="true">
+          <span>Importance</span>
+          <span />
+          <span>Owner</span>
+          <span />
+        </div>
+      ) : null}
       {items.length === 0 ? (
         <p className="rt-empty">Nothing open.</p>
       ) : (
@@ -250,12 +266,9 @@ export function TopItems({ items, noun }: { items: ItemInfo[]; noun: string }) {
             <li key={i.ref} className={`imp-row imp-row-${i.band ?? 'none'}`}>
               <BandChip band={i.band} score={i.score} />
               <span className="imp-text">
-                <b>{i.ref}</b> {i.title}
-                <span className="imp-sub">
-                  {i.owner ?? 'No owner'}
-                  {i.places.length ? ` · ${i.places.join(', ')}` : ''} · open {days(i.createdAt)}d
-                </span>
+                <span className="imp-ref">{i.ref}</span> {i.title}
               </span>
+              <span className={`imp-owner${i.owner ? '' : ' imp-noowner'}`}>{i.owner ?? 'No owner'}</span>
               <span className="imp-tools">
                 <AdjustButtons item={i} />
                 <WhyButton item={i} />

@@ -304,7 +304,7 @@ export function RegisterList({
             extraAction
           ) : (
           <span className="rt-actions">
-            {scope ? (
+            {scope && !info ? (
               <span className="rt-scope">
                 {scope.label}
                 <a href={scope.clear} title="Show everything">

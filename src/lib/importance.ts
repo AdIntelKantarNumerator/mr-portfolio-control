@@ -41,22 +41,22 @@ export interface Factor {
 
 export const FACTORS = {
   blocks_project: {
-    weight: 35,
+    weight: 30,
     label: 'Blocks a project',
     means: 'While this is open, a project cannot move forward on something it needs.',
   },
   unblocks_project: {
-    weight: 35,
+    weight: 30,
     label: 'Unblocks a project',
     means: 'Doing this is what releases a blocked project.',
   },
   key_deliverable: {
-    weight: 20,
+    weight: 15,
     label: 'Key deliverable',
     means: "It is part of the project's main deliverable, not a side aspect.",
   },
   needs_decision: {
-    weight: 20,
+    weight: 15,
     label: 'Needs a decision',
     means: 'It cannot move until somebody decides something.',
   },
@@ -89,7 +89,7 @@ export function isFactor(v: string): v is FactorKey {
 }
 
 /** Where each kind starts, before any factor. A blocker is something in the way by definition. */
-export const BASE: Record<ItemKind, number> = { blocker: 40, decision: 35, action: 25 }
+export const BASE: Record<ItemKind, number> = { blocker: 35, decision: 30, action: 20 }
 
 /** One click of "more important" or "less important". */
 export const ADJUST_STEP = 10
@@ -101,7 +101,7 @@ export const ADJUST_STEP = 10
  */
 export function mentionsBonus(mentions: number): number {
   const m = Math.max(1, Math.floor(mentions || 1))
-  return m === 1 ? -5 : Math.min(20, (m - 1) * 7)
+  return m === 1 ? -5 : Math.min(15, (m - 1) * 5)
 }
 
 export function scoreOf(kind: ItemKind, factors: readonly string[], mentions: number, adjust = 0): number {
@@ -120,6 +120,94 @@ export function scoreOf(kind: ItemKind, factors: readonly string[], mentions: nu
 }
 
 export type Band = 'critical' | 'high' | 'medium' | 'low'
+
+/*
+ * BANDS ARE A DISTRIBUTION (Scott, 5 October 2026)
+ *
+ * The first scoring made 77 of 317 items Critical: a quarter of everything,
+ * which is the same as nothing. Absolute thresholds cannot hold a shape -
+ * tags drift, and a project that records its blockers carefully would be all
+ * red. So the band is where an item ranks among the OPEN, ACTIVE items of its
+ * own kind (blockers among blockers):
+ *
+ *   Critical  the top 10%, and only with a score of 60 or more
+ *   High      the next 20% (to 30%), and 45 or more
+ *   Medium    the next 30% (to 60%), and 25 or more
+ *   Low       the rest
+ *
+ * The floors stop a weak item being called Critical just because everything
+ * else is weaker. An inactive item - nobody has touched it for a week - is
+ * never Critical, whatever its score: if it mattered that much, somebody
+ * would be moving it. It is banded on its score alone, at most High.
+ */
+export const BAND_SHARE: Array<{ band: Band; upTo: number; floor: number }> = [
+  { band: 'critical', upTo: 0.1, floor: 60 },
+  { band: 'high', upTo: 0.3, floor: 45 },
+  { band: 'medium', upTo: 0.6, floor: 25 },
+]
+
+/** On its score alone: for an item outside the ranking (inactive), or as a fallback. */
+export function absoluteBand(score: number): Band {
+  if (score >= 60) return 'critical'
+  if (score >= 45) return 'high'
+  if (score >= 25) return 'medium'
+  return 'low'
+}
+
+const DOWN: Record<Band, Band> = { critical: 'high', high: 'medium', medium: 'low', low: 'low' }
+
+export interface Bandable {
+  kind: ItemKind
+  score: number | null
+  open: boolean
+  inactive: boolean
+  mentions: number
+  lastActivityAt: Date
+}
+
+/**
+ * Band every item, ranking the open active ones of each kind against each
+ * other. Returns a band and a sentence saying why, per item, in input order.
+ */
+export function assignBands<T extends Bandable>(items: readonly T[]): Array<{ band: Band | null; note: string | null }> {
+  const out: Array<{ band: Band | null; note: string | null }> = items.map(() => ({ band: null, note: null }))
+  const NOUN: Record<ItemKind, string> = { blocker: 'blockers', decision: 'decisions', action: 'action items' }
+
+  for (const kind of ['blocker', 'decision', 'action'] as const) {
+    const ranked = items
+      .map((item, i) => ({ item, i }))
+      .filter(({ item }) => item.kind === kind && item.open && !item.inactive && item.score != null)
+      .sort(
+        (a, b) =>
+          b.item.score! - a.item.score! ||
+          b.item.mentions - a.item.mentions ||
+          b.item.lastActivityAt.getTime() - a.item.lastActivityAt.getTime(),
+      )
+    const n = ranked.length
+    ranked.forEach(({ item, i }, rank) => {
+      // Where the item's rank starts, as a share: the first of ten is at 0,
+      // the second at 0.1. So of ten: one Critical, two High, three Medium.
+      const at = rank / n
+      const slot = BAND_SHARE.find((b) => at < b.upTo)
+      let band: Band = slot ? slot.band : 'low'
+      // Below the floor for its slot: down a band until it clears one.
+      while (band !== 'low' && item.score! < BAND_SHARE.find((b) => b.band === band)!.floor) band = DOWN[band]
+      out[i] = {
+        band,
+        note: `Number ${rank + 1} of ${n} open ${NOUN[kind]} by importance (score ${item.score}).`,
+      }
+    })
+
+    for (const [i, item] of items.entries()) {
+      if (item.kind !== kind || item.score == null || out[i]!.band) continue
+      const abs = absoluteBand(item.score)
+      out[i] = item.inactive && item.open
+        ? { band: abs === 'critical' ? 'high' : abs, note: `Score ${item.score}. Inactive (no update for a week), so never Critical.` }
+        : { band: abs, note: `Score ${item.score}.` }
+    }
+  }
+  return out
+}
 
 export function bandOf(score: number | null | undefined): Band | null {
   if (score == null) return null

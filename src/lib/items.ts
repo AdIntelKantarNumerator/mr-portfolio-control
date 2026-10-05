@@ -28,7 +28,7 @@ import {
 } from '@/db/schema'
 import { logChange } from './portfolio'
 import { matchPerson } from './register'
-import { ADJUST_STEP, bandOf, isFactor, parseFactors, parseReasons, scoreOf, type Band, type FactorKey, type ItemKind, type Reason } from './importance'
+import { ADJUST_STEP, assignBands, isFactor, parseFactors, parseReasons, scoreOf, type Band, type FactorKey, type ItemKind, type Reason } from './importance'
 import { isInactive } from './item-activity'
 import { idsAtOrBelow, type Tier } from './hierarchy'
 
@@ -53,6 +53,8 @@ export interface Item {
   dueDate: Date | null
   score: number | null
   band: Band | null
+  /** Why it has that band: its rank among open items of its kind, or why it cannot be Critical. */
+  bandNote: string | null
   factors: FactorKey[]
   reasons: Reason[]
   adjust: number
@@ -125,8 +127,9 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         lastActivityAt: r.lastActivityAt,
         closedAt: r.resolvedAt,
         dueDate: null,
-        score: r.importanceScore,
-        band: bandOf(r.importanceScore),
+        score: liveScore(kind, r),
+        band: null,
+        bandNote: null,
         factors: parseFactors(r.importanceFactors),
         reasons: parseReasons(r.importanceReasons),
         adjust: r.importanceAdjust,
@@ -171,8 +174,9 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         lastActivityAt: r.lastActivityAt,
         closedAt: r.completedAt,
         dueDate: r.dueDate,
-        score: r.importanceScore,
-        band: bandOf(r.importanceScore),
+        score: liveScore('action', r),
+        band: null,
+        bandNote: null,
         factors: parseFactors(r.importanceFactors),
         reasons: parseReasons(r.importanceReasons),
         adjust: r.importanceAdjust,
@@ -186,7 +190,28 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
     }
   }
 
+  // Bands are a distribution across each whole kind, so they are assigned
+  // here, over everything loaded, before any page narrows the list.
+  const bands = assignBands(out)
+  for (const [i, item] of out.entries()) {
+    item.band = bands[i]!.band
+    item.bandNote = bands[i]!.note
+  }
   return out
+}
+
+/**
+ * The score from the stored factors, mentions and adjustment, computed as it
+ * is read, so a change to the weights (lib/importance.ts) applies at once
+ * rather than when each item is next re-scored. Null until Yaara has tagged
+ * it. The stored column is kept for sorting in SQL.
+ */
+function liveScore(
+  kind: ItemKind,
+  r: { importanceFactors: string | null; importanceScore: number | null; mentions: number; importanceAdjust: number },
+): number | null {
+  if (r.importanceFactors == null) return r.importanceScore
+  return scoreOf(kind, parseFactors(r.importanceFactors), r.mentions, r.importanceAdjust)
 }
 
 /** Items sitting on any of these ids. */
@@ -229,6 +254,12 @@ export interface ItemUpdate {
   reasons?: Reason[] | null
   /** For adjust: +1 more important, -1 less. */
   delta?: number | null
+  /**
+   * For score: a recalibration, not news about the item - every item re-tagged
+   * under new rules. Recorded, but not activity, so it does not wake every
+   * inactive item at once.
+   */
+  quiet?: boolean
   occurredAt?: Date | null
 }
 
@@ -385,7 +416,7 @@ export async function applyItemUpdate(u: ItemUpdate): Promise<UpdateResult> {
       const firstTime = before == null
       // The first score is bookkeeping, not news about the item; a change
       // after that is activity (Scott: a score change counts as an update).
-      const changed = !firstTime && before !== score
+      const changed = !firstTime && !u.quiet && before !== score
       await patchRow(found, {
         importanceFactors: JSON.stringify(factors),
         importanceReasons: JSON.stringify(reasons),

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bandOf, mentionsBonus, parseFactors, scoreOf } from '../src/lib/importance'
+import { assignBands, bandOf, mentionsBonus, parseFactors, scoreOf } from '../src/lib/importance'
 import { closureHealth, isInactive } from '../src/lib/item-activity'
 
 // ------------------------------------------------------------ importance (Scott's rules, 5 October 2026)
@@ -27,7 +27,7 @@ test('a blocker needing a decision is very important; a single bug, or a small p
 test('raised in more places ranks higher; raised once ranks a little lower', () => {
   assert.equal(mentionsBonus(1), -5)
   assert.ok(scoreOf('action', [], 3) > scoreOf('action', [], 1))
-  assert.equal(mentionsBonus(50), 20, 'capped, so repetition does not swamp what it is')
+  assert.equal(mentionsBonus(50), 15, 'capped, so repetition does not swamp what it is')
 })
 
 test('blocking and unblocking are one importance seen from two ends, not two', () => {
@@ -67,7 +67,7 @@ test('red: more than twice as many opened as closed, or a Critical item left a w
   assert.equal(closureHealth({ opened: 9, closed: 2, activeOpen: 9, totalOpen: 9, criticalStale: 0 }).rag, 'red')
   const stale = closureHealth({ opened: 1, closed: 5, activeOpen: 5, totalOpen: 6, criticalStale: 1 })
   assert.equal(stale.rag, 'red')
-  assert.match(stale.reasons.join(' '), /Critical item untouched/)
+  assert.match(stale.reasons.join(' '), /high-importance item \(score 60\+\) untouched/)
 })
 
 test('a quiet project with two new items is not turned red by them', () => {
@@ -85,4 +85,43 @@ test('a click on "less important" always shows, even on an item scored far over 
   const top = scoreOf('blocker', ['blocks_project', 'key_deliverable', 'needs_decision'], 3)
   assert.equal(top, 100)
   assert.equal(scoreOf('blocker', ['blocks_project', 'key_deliverable', 'needs_decision'], 3, -10), 90)
+})
+
+// ------------------------------------------------------------ bands are a distribution (Scott, 5 October 2026)
+
+const at = new Date('2026-10-05T12:00:00Z')
+const pop = (n: number, over: Partial<{ inactive: boolean; kind: 'blocker' | 'action' }> = {}) =>
+  Array.from({ length: n }, (_, i) => ({ kind: over.kind ?? ('blocker' as const), score: 95 - i, open: true, inactive: over.inactive ?? false, mentions: 1, lastActivityAt: at }))
+
+test('the reported case: a quarter of everything Critical becomes a tenth', () => {
+  // Every one of these scores would have been Critical on thresholds alone.
+  const bands = assignBands(pop(40)).map((b) => b.band)
+  const count = (b: string) => bands.filter((x) => x === b).length
+  assert.equal(count('critical'), 4)
+  assert.equal(count('high'), 8)
+  assert.equal(count('medium'), 12)
+  assert.equal(count('low'), 16)
+})
+
+test('of ten: one Critical, two High, three Medium, four Low; of three: Critical, Medium, Low', () => {
+  assert.deepEqual(assignBands(pop(10)).map((b) => b.band), ['critical', 'high', 'high', 'medium', 'medium', 'medium', 'low', 'low', 'low', 'low'])
+  assert.deepEqual(assignBands(pop(3)).map((b) => b.band), ['critical', 'medium', 'low'])
+})
+
+test('a weak item is not Critical just because everything else is weaker', () => {
+  const weak = [{ kind: 'action' as const, score: 30, open: true, inactive: false, mentions: 1, lastActivityAt: at }]
+  assert.equal(assignBands(weak)[0]!.band, 'medium')
+})
+
+test('nothing inactive is Critical, however high its score', () => {
+  const [b] = assignBands(pop(1, { inactive: true }))
+  assert.equal(b!.band, 'high')
+  assert.match(b!.note ?? '', /never Critical/)
+})
+
+test('each kind is ranked against its own kind only', () => {
+  const mixed = [...pop(10), ...pop(10, { kind: 'action' })]
+  const bands = assignBands(mixed)
+  assert.equal(bands.filter((b, i) => b.band === 'critical' && mixed[i]!.kind === 'blocker').length, 1)
+  assert.equal(bands.filter((b, i) => b.band === 'critical' && mixed[i]!.kind === 'action').length, 1)
 })

@@ -118,6 +118,7 @@ export async function POST(req: Request) {
           }))
         : null,
       delta: typeof u.delta === 'number' ? u.delta : null,
+      quiet: u.quiet === true,
     }
     try {
       results.push(await applyItemUpdate(update))

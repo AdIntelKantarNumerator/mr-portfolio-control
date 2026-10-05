@@ -36,6 +36,8 @@ export function toInfo(i: Item): ItemInfo {
     places: i.places.map((p) => p.name),
     score: i.score,
     band: i.band,
+    bandNote: i.bandNote,
+
     factors: i.factors,
     reasons: i.reasons.map((r) => ({ factor: r.factor, why: r.why, quote: r.quote ?? null, source: r.source ?? null, url: r.url ?? null })),
     adjust: i.adjust,
@@ -68,7 +70,9 @@ export async function dashboardFor(kind: ItemKind, scopeParam: string | null | u
     closed: items.filter((i) => !i.open && SETTLED.has(i.status) && i.closedAt && i.closedAt >= cutoff).length,
     activeOpen: active.length,
     totalOpen: open.length,
-    criticalStale: open.filter((i) => i.inactive && i.band === 'critical').length,
+    // Inactive items are never banded Critical (lib/importance.ts), so this
+    // counts by score: an item important enough to be Critical, left a week.
+    criticalStale: open.filter((i) => i.inactive && (i.score ?? 0) >= 60).length,
   })
 
   const info: Record<string, ItemInfo> = {}

@@ -45,7 +45,7 @@ export interface HealthInput {
   activeOpen: number
   /** All open items, active or not. */
   totalOpen: number
-  /** Open Critical items with no update for INACTIVE_DAYS. */
+  /** Open items scored 60+ (Critical-worthy) with no update for INACTIVE_DAYS. */
   criticalStale: number
 }
 
@@ -63,7 +63,7 @@ export function closureHealth(h: HealthInput): { rag: Rag; reasons: string[] } {
       : `${h.activeOpen} of ${h.totalOpen} open item${h.totalOpen === 1 ? '' : 's'} updated in the last ${INACTIVE_DAYS} days.`,
   )
   if (h.criticalStale) {
-    reasons.push(`${h.criticalStale} Critical item${h.criticalStale === 1 ? '' : 's'} untouched for ${INACTIVE_DAYS}+ days.`)
+    reasons.push(`${h.criticalStale} high-importance item${h.criticalStale === 1 ? '' : 's'} (score 60+) untouched for ${INACTIVE_DAYS}+ days.`)
   }
 
   if (h.criticalStale > 0 || (h.opened >= 3 && h.opened > 2 * h.closed)) return { rag: 'red', reasons }

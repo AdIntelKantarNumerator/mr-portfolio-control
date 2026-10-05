@@ -183,7 +183,7 @@ export default async function BlockersPage({
         <TopItems items={dash.top} noun="blockers" />
       </div>
 
-      <section className="tile">
+      <section className="tile imp-section">
         <p className="ptitle">Open blockers</p>
         <RegisterList
           kind="blocker"
@@ -200,7 +200,7 @@ export default async function BlockersPage({
         />
       </section>
 
-      <section className="tile">
+      <section className="tile imp-section">
         <p className="ptitle">Inactive blockers</p>
         <p className="rt-foot">No update for seven days. Not counted on the home page, and nobody is reminded about them.</p>
         <RegisterList
