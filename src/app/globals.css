@@ -1882,6 +1882,10 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .hf-bad { color: var(--c3); }
 .imp-edit { display: grid; place-items: center; }
 .rt-tools { white-space: nowrap; }
+/* The "All" list's include switches (components/items/parts.tsx useAllListSwitches). */
+.rt-switches { display: inline-flex; gap: 14px; align-items: center; align-self: end; padding-bottom: 7px; }
+.rt-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink); cursor: pointer; white-space: nowrap; }
+.rt-switch input { width: 15px; height: 15px; accent-color: var(--brand); cursor: pointer; }
 .imp-origin { font-size: 13.5px; margin: -4px 0 8px; }
 .imp-origin a { color: var(--brand); }
 /* Always visible here: .row-edit is transparent until its table cell is

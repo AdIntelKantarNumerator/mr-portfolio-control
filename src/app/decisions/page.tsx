@@ -164,8 +164,10 @@ export default async function DecisionsPage({
   // The top five are shown once, in their tile; the list is everything else
   // that is open (Scott, 5 October 2026).
   const top = new Set(dash.top.map((t) => t.ref))
-  const openRows = items.filter((r) => dash.activeRefs.has(r.ref) && !top.has(r.ref))
-  const inactiveRows = items.filter((r) => dash.inactiveRefs.has(r.ref))
+  // Everything open, active and inactive, top five included: the list's own
+  // switches decide which of those to show (Scott, 6 October 2026).
+  const openRows = items.filter((r) => dash.activeRefs.has(r.ref) || dash.inactiveRefs.has(r.ref))
+  const inactiveCount = items.filter((r) => dash.inactiveRefs.has(r.ref)).length
   const editingCtx = user.personId ? { people: ctx.people, endpoints: ctx.endpoints } : null
   const scoped = narrow.label && scope ? { label: narrow.label, clear: '/decisions', param: scope } : null
   // The same edit button the list rows have, for each of the top five.
@@ -191,7 +193,7 @@ export default async function DecisionsPage({
       </div>
 
       <section className="tile imp-section">
-        <p className="ptitle">Additional decisions</p>
+        <p className="ptitle">All decisions</p>
         <RegisterList
           kind="decision"
           rows={openRows}
@@ -204,27 +206,11 @@ export default async function DecisionsPage({
           scope={scoped}
           info={dash.info}
           variant="open"
+          topRefs={dash.top.map((t) => t.ref)}
+          withdraw={<WithdrawAll kind="decision" scope={dash.scope} count={inactiveCount} noun="inactive decisions" />}
         />
       </section>
 
-      <section className="tile imp-section">
-        <p className="ptitle">Inactive decisions</p>
-        <p className="rt-foot">No update for seven days. Not counted on the home page, and nobody is reminded about them.</p>
-        <RegisterList
-          kind="decision"
-          rows={inactiveRows}
-          objectives={inits}
-          initiatives={projs}
-          projects={wss}
-          people={folk}
-          closed={false}
-          editing={editingCtx}
-          scope={scoped}
-          info={dash.info}
-          variant="inactive"
-          extraAction={<WithdrawAll kind="decision" scope={dash.scope} count={inactiveRows.length} noun="decisions" />}
-        />
-      </section>
     </div>
   )
 }

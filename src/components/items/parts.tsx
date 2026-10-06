@@ -8,11 +8,88 @@
  * Shared by Blockers, Decisions and Action items, which are the same
  * dashboard over different items (lib/items.ts).
  */
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { BAND_LABEL, FACTORS, isFactor, type Band } from '@/lib/importance'
 import { HEALTH_WINDOW_DAYS, INACTIVE_DAYS, type HealthInput, type Rag } from '@/lib/item-activity'
 import { adjustItem, loadItemHistory, withdrawInactive, type HistoryEntry } from '@/app/items-actions'
+
+/**
+ * A yes/no that remembers itself in this browser (Scott, 6 October 2026: the
+ * "All" list's include switches keep your last setting). Read through
+ * useSyncExternalStore so the server renders the default and the browser
+ * shows the remembered value without a mismatch. Storage that is blocked or
+ * missing just means the default, every time.
+ */
+const PREF_EVENT = 'mrpc-pref'
+function readPref(key: string, fallback: boolean): boolean {
+  try {
+    const v = window.localStorage.getItem(key)
+    return v === null ? fallback : v === '1'
+  } catch {
+    return fallback
+  }
+}
+export function usePref(key: string, fallback: boolean): [boolean, (v: boolean) => void] {
+  const value = useSyncExternalStore(
+    (notify) => {
+      window.addEventListener('storage', notify)
+      window.addEventListener(PREF_EVENT, notify)
+      return () => {
+        window.removeEventListener('storage', notify)
+        window.removeEventListener(PREF_EVENT, notify)
+      }
+    },
+    () => readPref(key, fallback),
+    () => fallback,
+  )
+  const set = (v: boolean) => {
+    try {
+      window.localStorage.setItem(key, v ? '1' : '0')
+    } catch {
+      // Not remembered, but still applied below for this visit.
+    }
+    window.dispatchEvent(new Event(PREF_EVENT))
+  }
+  return [value, set]
+}
+
+/**
+ * The "All" list's two switches: include inactive items, include the top
+ * five. Both off by default and remembered. Changing any other filter turns
+ * the top five on for that view - a filtered list should be everything that
+ * matches - without changing the remembered setting.
+ */
+export function useAllListSwitches() {
+  const [inactive, setInactive] = usePref('wip.includeInactive', false)
+  const [topSaved, setTopSaved] = usePref('wip.includeTop', false)
+  const [topByFilter, setTopByFilter] = useState(false)
+  const top = topSaved || topByFilter
+  return {
+    inactive,
+    top,
+    onFilterChange: () => setTopByFilter(true),
+    controls: (
+      <span className="rt-switches">
+        <label className="rt-switch">
+          <input type="checkbox" checked={inactive} onChange={(e) => setInactive(e.target.checked)} />
+          Include inactive
+        </label>
+        <label className="rt-switch">
+          <input
+            type="checkbox"
+            checked={top}
+            onChange={(e) => {
+              setTopByFilter(false)
+              setTopSaved(e.target.checked)
+            }}
+          />
+          Include top 5
+        </label>
+      </span>
+    ),
+  }
+}
 
 /** One item as the dashboard needs it: plain data, safe to send to the browser. */
 export interface ItemInfo {

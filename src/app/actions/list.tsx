@@ -25,7 +25,7 @@ import { TIER_LABEL } from '@/lib/home-types'
 import { useActionState, useState } from 'react'
 import Link from 'next/link'
 import { RecordTable, type Column, type SortOption } from '@/components/records/table'
-import { BandChip, ItemTools, type ItemInfo } from '@/components/items/parts'
+import { BandChip, ItemTools, useAllListSwitches, type ItemInfo } from '@/components/items/parts'
 import { SourceHover } from '@/components/records/source-hover'
 import type { Provenance } from '@/lib/provenance'
 import { AssignCell } from '@/components/records/assign'
@@ -65,6 +65,8 @@ export function ActionsList({
   info,
   variant = closed ? 'closed' : 'open',
   extraAction,
+  topRefs,
+  withdraw,
 }: {
   rows: ActionRowView[]
   people: Named[]
@@ -80,7 +82,19 @@ export function ActionsList({
   variant?: 'open' | 'inactive' | 'closed'
   /** Replaces the usual buttons: "Withdraw all" on the inactive list. */
   extraAction?: React.ReactNode
+  /** The top five's refs, for the "All" list's "Include top 5" switch. */
+  topRefs?: string[]
+  /** "Withdraw all inactive", shown while inactive items are included. */
+  withdraw?: React.ReactNode
 }) {
+  // The "All" list (Scott, 6 October 2026): everything open, with switches to
+  // include inactive items and the top five, both off by default and
+  // remembered. A rule of hooks: called always, applied only on a dashboard.
+  const switches = useAllListSwitches()
+  const top = new Set(topRefs ?? [])
+  const visible = info
+    ? rows.filter((r) => !r.ref || ((switches.inactive || !info[r.ref]?.inactive) && (switches.top || !top.has(r.ref))))
+    : rows
   const [editing, setEditing] = useState<ActionRowView | null>(null)
 
   const level = (
@@ -216,7 +230,9 @@ export function ActionsList({
   return (
     <>
       <RecordTable
-        rows={rows}
+        rows={visible}
+        controls={info ? switches.controls : undefined}
+        onFilterChange={info ? switches.onFilterChange : undefined}
         columns={columns}
         getId={(r) => r.id}
         sortOptions={sortOptions}
@@ -241,6 +257,7 @@ export function ActionsList({
                 </a>
               </span>
             ) : null}
+            {info && switches.inactive ? withdraw : null}
             <Link className="rt-add" href={toggleHref(closed, scope?.param)}>
               {closed ? 'Show open' : 'Show closed and dropped'}
             </Link>

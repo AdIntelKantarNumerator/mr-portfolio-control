@@ -77,6 +77,8 @@ export function RecordTable<T>({
   footNote,
   sortOptions,
   pageSize,
+  controls,
+  onFilterChange,
 }: {
   rows: T[]
   columns: Column<T>[]
@@ -93,6 +95,10 @@ export function RecordTable<T>({
   sortOptions?: SortOption<T>[]
   /** Rows per page; unset shows them all, as every list did before. */
   pageSize?: number
+  /** More controls for the filter bar: the dashboards' include/exclude switches. */
+  controls?: React.ReactNode
+  /** Told whenever a filter changes, so a page can widen what the filter runs over. */
+  onFilterChange?: () => void
 }) {
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [order, setOrder] = useState<Order | null>(null)
@@ -147,6 +153,7 @@ export function RecordTable<T>({
   const set = (key: string, value: string) => {
     setFilters((f) => ({ ...f, [key]: value }))
     setPage(0)
+    onFilterChange?.()
   }
 
   // Paged after filtering and ordering, so page 1 is always the first of
@@ -204,6 +211,8 @@ export function RecordTable<T>({
             </select>
           </label>
         ) : null}
+
+        {controls}
 
         {filtering && (
           <button type="button" className="rt-clear" onClick={() => setFilters({})}>

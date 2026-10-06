@@ -20,7 +20,7 @@
 import { TIER_PLURAL } from '@/lib/home-types'
 import { useActionState, useState } from 'react'
 import { RecordTable, type Column, type SortOption } from '@/components/records/table'
-import { BandChip, ItemTools, type ItemInfo } from '@/components/items/parts'
+import { BandChip, ItemTools, useAllListSwitches, type ItemInfo } from '@/components/items/parts'
 import { SourceHover } from '@/components/records/source-hover'
 import type { Provenance } from '@/lib/provenance'
 import { AssignCell } from '@/components/records/assign'
@@ -141,6 +141,8 @@ export function RegisterList({
   info,
   variant = closed ? 'closed' : 'open',
   extraAction,
+  topRefs,
+  withdraw,
 }: {
   kind: RegisterKind
   rows: BlockerRow[]
@@ -163,7 +165,19 @@ export function RegisterList({
   variant?: 'open' | 'inactive' | 'closed'
   /** Replaces the usual buttons: "Withdraw all" on the inactive list. */
   extraAction?: React.ReactNode
+  /** The top five's refs, for the "All" list's "Include top 5" switch. */
+  topRefs?: string[]
+  /** "Withdraw all inactive", shown while inactive items are included. */
+  withdraw?: React.ReactNode
 }) {
+  // The "All" list (Scott, 6 October 2026): everything open, with switches to
+  // include inactive items and the top five, both off by default and
+  // remembered. A rule of hooks: called always, applied only on a dashboard.
+  const switches = useAllListSwitches()
+  const top = new Set(topRefs ?? [])
+  const visible = info
+    ? rows.filter((r) => (switches.inactive || !info[r.ref]?.inactive) && (switches.top || !top.has(r.ref)))
+    : rows
   const [adding, setAdding] = useState(false)
   const w = WORDS[kind]
 
@@ -288,7 +302,9 @@ export function RegisterList({
   return (
     <>
       <RecordTable
-        rows={rows}
+        rows={visible}
+        controls={info ? switches.controls : undefined}
+        onFilterChange={info ? switches.onFilterChange : undefined}
         columns={columns}
         getId={(r) => r.id}
         empty={variant === 'closed' ? w.emptyClosed : variant === 'inactive' ? 'Nothing has gone a week without an update.' : w.emptyOpen}
@@ -307,6 +323,7 @@ export function RegisterList({
                 </a>
               </span>
             ) : null}
+            {info && switches.inactive ? withdraw : null}
             <a className="rt-clear" href={toggleHref(w.href, closed, scope?.param)}>
               {closed ? w.showOpen : w.showClosed}
             </a>
