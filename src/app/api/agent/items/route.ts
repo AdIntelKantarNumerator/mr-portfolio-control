@@ -3,6 +3,8 @@
  *
  *   GET  /api/agent/items?scope=project:<id>&status=open|all&active=1&unscored=1&owner=<name>&kind=blocker,action
  *        → { items: [...] }  open by default; the newest 400
+ *   GET  /api/agent/items?ref=A269
+ *        → { items: [one], history: [...] }  open or closed, however old, with every event
  *   POST /api/agent/items  { updates: [{ ref, action, note?, source?, duplicateOf?, owner?, factors?, reasons?, delta? }], agent? }
  *        → { results: [{ ref, ok, error?, status?, score? }] }
  *
@@ -22,7 +24,7 @@
  * actions: resolve | drop | reopen | progress | duplicate | owner | score | adjust | nudged
  */
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
-import { applyItemUpdate, inScope, itemPath, loadItems, scopeIds, type ItemAction, type ItemUpdate } from '@/lib/items'
+import { applyItemUpdate, inScope, itemHistory, itemPath, loadItems, scopeIds, type ItemAction, type ItemUpdate } from '@/lib/items'
 import { parseScope } from '@/lib/hierarchy'
 import type { ItemKind } from '@/lib/importance'
 
@@ -37,8 +39,16 @@ export async function GET(req: Request) {
   const q = new URL(req.url).searchParams
 
   const kinds = (q.get('kind') ?? '').split(',').map((k) => k.trim()).filter((k): k is ItemKind => KINDS.has(k as ItemKind))
-  const all = q.get('status') === 'all'
-  let items = await loadItems({ kinds: kinds.length ? kinds : undefined, closedSince: all ? new Date(Date.now() - 30 * 86_400_000) : null })
+  const ref = q.get('ref')?.trim().toUpperCase()
+  // One item by ref, open or closed, however old: "where did A269 come
+  // from?" (7 October 2026). She could list items but not look one up, so she
+  // answered that she had no idea, with the meeting notes on record.
+  const all = q.get('status') === 'all' || Boolean(ref)
+  let items = await loadItems({
+    kinds: kinds.length ? kinds : undefined,
+    closedSince: ref ? new Date(0) : all ? new Date(Date.now() - 30 * 86_400_000) : null,
+  })
+  if (ref) items = items.filter((i) => i.ref.toUpperCase() === ref)
 
   const scope = parseScope(q.get('scope'))
   if (scope) items = inScope(items, await scopeIds(scope.level, scope.id))
@@ -49,7 +59,9 @@ export async function GET(req: Request) {
   if (owner) items = items.filter((i) => (i.ownerName ?? '').toLowerCase().includes(owner))
 
   items.sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime())
+  const history = ref && items[0] ? (await itemHistory(items[0].ref)).map((e) => ({ ...e, at: e.at.toISOString() })) : undefined
   return Response.json({
+    ...(history ? { history } : {}),
     items: items.slice(0, 400).map((i) => ({
       ref: i.ref,
       kind: i.kind,
@@ -74,6 +86,7 @@ export async function GET(req: Request) {
       // Where it was raised, when there is a link, and the page showing just
       // this item: both go in the morning reminders.
       sourceUrl: i.sourceUrl,
+      raisedBy: i.raisedBy,
       path: itemPath(i),
     })),
   })
