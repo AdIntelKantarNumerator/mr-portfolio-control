@@ -143,6 +143,7 @@ export function RegisterList({
   extraAction,
   topRefs,
   withdraw,
+  focus,
 }: {
   kind: RegisterKind
   rows: BlockerRow[]
@@ -169,6 +170,8 @@ export function RegisterList({
   topRefs?: string[]
   /** "Withdraw all inactive", shown while inactive items are included. */
   withdraw?: React.ReactNode
+  /** Show only this ref (?focus=), for a link to one item. */
+  focus?: string
 }) {
   // The "All" list (Scott, 6 October 2026): everything open, with switches to
   // include inactive items and the top five, both off by default and
@@ -178,6 +181,17 @@ export function RegisterList({
   const visible = info
     ? rows.filter((r) => (switches.inactive || !info[r.ref]?.inactive) && (switches.top || !top.has(r.ref)))
     : rows
+  // A link to one item (?focus=B12, from a morning reminder) shows just that
+  // item, whatever the switches say, with a way back to everything.
+  const focused = focus ? rows.filter((r) => (r.ref ?? '').toUpperCase() === focus.toUpperCase()) : null
+  const shownRows = focused ?? visible
+  const allHref = scope ? `${WORDS[kind].href}?scope=${encodeURIComponent(scope.param)}` : WORDS[kind].href
+  const focusNote = focus ? (
+    <p className="rt-focus">
+      {focused && focused.length ? <>Showing <b>{focus.toUpperCase()}</b> only.</> : <><b>{focus.toUpperCase()}</b> is not open any more, or is not on this page.</>}{' '}
+      <a href={allHref}>Show all ›</a>
+    </p>
+  ) : null
   const [adding, setAdding] = useState(false)
   const w = WORDS[kind]
 
@@ -301,8 +315,9 @@ export function RegisterList({
 
   return (
     <>
+      {focusNote}
       <RecordTable
-        rows={visible}
+        rows={shownRows}
         controls={info ? switches.controls : undefined}
         onFilterChange={info ? switches.onFilterChange : undefined}
         columns={columns}

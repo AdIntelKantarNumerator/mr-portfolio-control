@@ -145,7 +145,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         sourceTitle: (r.raisedDocumentId && docOf.get(r.raisedDocumentId)?.title) || r.raisedAtMeeting,
         sourceUrl: (r.raisedDocumentId && docOf.get(r.raisedDocumentId)?.url) || null,
         raisedBy: (r.raisedById && nameOf.get(r.raisedById)) || r.raisedByText || null,
-        href: `/${kind === 'blocker' ? 'blockers' : 'decisions'}#${r.ref}`,
+        href: '',
       })
     }
   }
@@ -193,10 +193,12 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         sourceTitle: r.sourceTitle,
         sourceUrl: r.sourceUrl,
         raisedBy: null,
-        href: `/actions#${r.ref ?? r.id}`,
+        href: '',
       })
     }
   }
+
+  for (const item of out) item.href = itemPath(item)
 
   // Bands are a distribution across each whole kind, so they are assigned
   // here, over everything loaded, before any page narrows the list.
@@ -220,6 +222,23 @@ function liveScore(
 ): number | null {
   if (r.importanceFactors == null) return r.importanceScore
   return scoreOf(kind, parseFactors(r.importanceFactors), r.mentions, r.importanceAdjust)
+}
+
+/**
+ * The page that shows just this item: its dashboard, narrowed to the most
+ * specific work it sits on, focused on it (Scott, 7 October 2026: the morning
+ * reminders link each item back to the portfolio). Focused, because a plain
+ * link to the list could land with the item on page three, or hidden by the
+ * list's include switches.
+ */
+export function itemPath(item: Pick<Item, 'kind' | 'ref' | 'places'>): string {
+  const page = item.kind === 'blocker' ? 'blockers' : item.kind === 'decision' ? 'decisions' : 'actions'
+  const order = { project: 0, initiative: 1, objective: 2 } as const
+  const place = [...item.places].sort((a, b) => order[a.level] - order[b.level])[0]
+  const params = new URLSearchParams()
+  if (place) params.set('scope', `${place.level}:${place.id}`)
+  params.set('focus', item.ref)
+  return `/${page}?${params.toString()}`
 }
 
 /** Items sitting on any of these ids. */

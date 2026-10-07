@@ -543,7 +543,8 @@ export const getHomeCards = cache(async (
             text: b.title,
             when: stateOf(b.id),
             who: bandOf.get(b.id)?.ownerName ?? 'No owner',
-            href: `/blockers?scope=${from}`,
+            // Straight to this item, not the list it is somewhere in.
+            href: `/blockers?scope=${from}&focus=${encodeURIComponent(b.ref)}`,
             where: whereDecision(b),
           })),
         })
@@ -560,7 +561,7 @@ export const getHomeCards = cache(async (
             text: d.title,
             when: stateOf(d.id),
             who: bandOf.get(d.id)?.ownerName ?? 'No owner',
-            href: `/decisions?scope=${from}`,
+            href: `/decisions?scope=${from}&focus=${encodeURIComponent(d.ref)}`,
             where: whereDecision(d),
           })),
         })
@@ -577,7 +578,7 @@ export const getHomeCards = cache(async (
             text: a.text,
             when: stateOf(a.id),
             who: a.ownerId ? (personName.get(a.ownerId) ?? null) : (a.ownerName ?? 'No owner'),
-            href: `/actions?scope=${from}`,
+            href: a.ref ? `/actions?scope=${from}&focus=${encodeURIComponent(a.ref)}` : `/actions?scope=${from}`,
             where: whereAction(a.id),
           })),
         })

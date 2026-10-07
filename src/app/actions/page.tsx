@@ -28,9 +28,9 @@ export const dynamic = 'force-dynamic'
 export default async function ActionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ show?: string; scope?: string }>
+  searchParams: Promise<{ show?: string; scope?: string; focus?: string }>
 }) {
-  const { show, scope } = await searchParams
+  const { show, scope, focus } = await searchParams
   const closed = show === 'closed'
 
   const [rows, links, folk, groups, projs, streams] = await Promise.all([
@@ -196,6 +196,7 @@ export default async function ActionsPage({
         {list(openRows, {
           info: dash.info,
           variant: 'open',
+          focus,
           topRefs: [...top],
           withdraw: <WithdrawAll kind="action" scope={dash.scope} count={inactiveCount} noun="inactive action items" />,
         })}

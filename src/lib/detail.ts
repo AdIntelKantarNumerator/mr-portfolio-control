@@ -337,7 +337,7 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
       tone: DEC_TONE[d.status] ?? 'var(--c3)',
       toneLabel: d.status,
       detail: [d.ref, d.ownerText ? `owner ${d.ownerText}` : null, d.body].filter(Boolean).join(' · ') || undefined,
-      href: `/decisions?ref=${d.ref}`,
+      href: `/blockers?scope=${level}:${id}&focus=${encodeURIComponent(d.ref)}`,
     }))
 
   const decisions: TileItem[] = regs
@@ -349,7 +349,7 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
       tone: DEC_TONE[d.status] ?? 'var(--line-2)',
       toneLabel: d.status,
       detail: [d.ref, d.body, d.nextAction ? `next: ${d.nextAction}` : null].filter(Boolean).join(' · ') || undefined,
-      href: `/decisions?ref=${d.ref}`,
+      href: `/decisions?scope=${level}:${id}&focus=${encodeURIComponent(d.ref)}`,
     }))
 
   // --- action items --------------------------------------------------------
@@ -368,7 +368,7 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
     tone: a.dueDate && a.dueDate.getTime() < Date.now() ? 'var(--c3)' : 'var(--c5)',
     toneLabel: a.dueDate && a.dueDate.getTime() < Date.now() ? 'overdue' : 'open',
     detail: [a.ownerId ? personName.get(a.ownerId) : a.ownerName, a.sourceTitle].filter(Boolean).join(' · ') || undefined,
-    href: '/actions',
+    href: a.ref ? `/actions?scope=${level}:${id}&focus=${encodeURIComponent(a.ref)}` : `/actions?scope=${level}:${id}`,
   }))
 
   // --- dependencies --------------------------------------------------------

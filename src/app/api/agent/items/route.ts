@@ -22,7 +22,7 @@
  * actions: resolve | drop | reopen | progress | duplicate | owner | score | adjust | nudged
  */
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
-import { applyItemUpdate, inScope, loadItems, scopeIds, type ItemAction, type ItemUpdate } from '@/lib/items'
+import { applyItemUpdate, inScope, itemPath, loadItems, scopeIds, type ItemAction, type ItemUpdate } from '@/lib/items'
 import { parseScope } from '@/lib/hierarchy'
 import type { ItemKind } from '@/lib/importance'
 
@@ -71,6 +71,10 @@ export async function GET(req: Request) {
       mentions: i.mentions,
       nudgedAt: i.nudgedAt?.toISOString() ?? null,
       source: i.sourceTitle,
+      // Where it was raised, when there is a link, and the page showing just
+      // this item: both go in the morning reminders.
+      sourceUrl: i.sourceUrl,
+      path: itemPath(i),
     })),
   })
 }

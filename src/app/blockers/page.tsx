@@ -31,9 +31,9 @@ export const dynamic = 'force-dynamic'
 export default async function BlockersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ show?: string; scope?: string }>
+  searchParams: Promise<{ show?: string; scope?: string; focus?: string }>
 }) {
-  const { show, scope } = await searchParams
+  const { show, scope, focus } = await searchParams
   const closed = show === 'closed'
 
   const [rows, inits, projs, wss, folk, ctx, user] = await Promise.all([
@@ -210,6 +210,7 @@ export default async function BlockersPage({
           scope={scoped}
           info={dash.info}
           variant="open"
+          focus={focus}
           topRefs={dash.top.map((t) => t.ref)}
           withdraw={<WithdrawAll kind="blocker" scope={dash.scope} count={inactiveCount} noun="inactive blockers" />}
         />
