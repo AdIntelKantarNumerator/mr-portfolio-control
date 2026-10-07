@@ -23,6 +23,7 @@ import {
   actionItemLinks,
   actionItems,
   agentObservations,
+  assessments,
   decisions,
   objectives,
   milestones,
@@ -36,7 +37,7 @@ import { lateDependencies } from './dependency-risk'
 import { activitySeries } from './activity-series'
 import { blockedAtOrBelow } from './blocked'
 import { byTargetDate } from './milestone-order'
-import { cardHealth, type Reason } from './card-health'
+import { assessedHealth, cardHealth, type Reason } from './card-health'
 import { formatScope } from './hierarchy'
 
 // The vocabulary lives in home-types.ts, which imports nothing, so client
@@ -238,7 +239,7 @@ export const getHomeCards = cache(async (
   // by four hours" is not a thing anybody means.
   const startOfToday = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate())
 
-  const [inits, projs, wss, ms, obs, decs, acts, links, peeps, deps] = await Promise.all([
+  const [inits, projs, wss, ms, obs, decs, acts, links, peeps, deps, rags] = await Promise.all([
     db.select().from(objectives),
     db.select().from(initiatives),
     db.select().from(projects),
@@ -249,7 +250,17 @@ export const getHomeCards = cache(async (
     db.select().from(actionItemLinks),
     db.select().from(people),
     db.select().from(dependencies),
+    // The current assessment of each thing, which the card's state follows
+    // (lib/card-health.ts assessedHealth) - the same row the detail page's
+    // Health tile shows.
+    db
+      .select({ entityId: assessments.entityId, rag: assessments.rag })
+      .from(assessments)
+      .where(eq(assessments.current, true))
+      .orderBy(desc(assessments.asOf)),
   ])
+  const ragOf = new Map<string, string>()
+  for (const a of rags) if (!ragOf.has(a.entityId)) ragOf.set(a.entityId, a.rag)
   // Importance bands, ranked across each whole kind, for "Critical only".
   const bandOf = new Map((await loadItems()).map((i) => [i.id, i]))
 
@@ -654,7 +665,7 @@ export const getHomeCards = cache(async (
       // read the room yesterday and found nothing happening for a month.
       const lastSeen = lastEvent > 0 ? lastEvent : (source?.generatedAt.getTime() ?? 0)
 
-      const assessed = cardHealth({
+      const assessed = assessedHealth(ragOf.get(r.id), cardHealth({
         blockers: blockers.length,
         oldestBlockerDays: blockers.length
           ? Math.max(...blockers.map((b) => Math.round((now - (b.raisedAt?.getTime() ?? now)) / DAY)))
@@ -664,7 +675,7 @@ export const getHomeCards = cache(async (
         troubledChildren: troubled,
         totalChildren: below.length,
         daysSinceActivity: lastSeen > 0 ? Math.round((now - lastSeen) / DAY) : null,
-      })
+      }))
 
       const beneath =
         level === 'objective'

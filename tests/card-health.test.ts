@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { cardHealth, type HealthFacts } from '../src/lib/card-health'
+import { assessedHealth, cardHealth, HEALTH_LABEL, type HealthFacts } from '../src/lib/card-health'
 
 const facts = (over: Partial<HealthFacts> = {}): HealthFacts => ({
   blockers: 0,
@@ -118,4 +118,23 @@ test('the reasons run worst first', () => {
 test('the summary is the reasons, in order', () => {
   const h = cardHealth(facts({ blockers: 1, oldestBlockerDays: 3, overdueMilestones: 1 }))
   assert.equal(h.summary, '1 blocker, oldest open 3 days · 1 milestone overdue')
+})
+
+test('the reported case: the home card says what the Health tile says, not "Blocked"', () => {
+  // Scott, 7 October 2026: an objective read "Blocked" on the home page and
+  // "At risk" in its Health tile. Its blockers made the facts crit; the
+  // assessment, which weighs them, was amber. The card now follows the
+  // assessment, and the blockers are still the first reason given.
+  const h = assessedHealth('amber', cardHealth(facts({ blockers: 14, oldestBlockerDays: 9 })))
+  assert.equal(h.health, 'warn')
+  assert.equal(HEALTH_LABEL[h.health], 'At risk')
+  assert.equal(h.reasons[0].text, '14 blockers, oldest open 9 days')
+  assert.equal(HEALTH_LABEL[assessedHealth('red', cardHealth(facts())).health], 'In trouble', 'the same words as the tile')
+  assert.equal(assessedHealth('green', cardHealth(facts({ blockers: 2 }))).health, 'good')
+})
+
+test('nothing assessed, or assessed as unknown: the facts decide, as before', () => {
+  assert.equal(assessedHealth(null, cardHealth(facts({ blockers: 2 }))).health, 'crit')
+  assert.equal(assessedHealth('unknown', cardHealth(facts({ overdueMilestones: 1 }))).health, 'warn')
+  assert.equal(assessedHealth(undefined, cardHealth(facts({ daysSinceActivity: null }))).health, 'quiet')
 })

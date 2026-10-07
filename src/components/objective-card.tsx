@@ -31,7 +31,7 @@ import { useReassess } from './reassess-button'
 const STATUS = {
   good: { label: 'On track', tone: 'good' },
   warn: { label: 'At risk', tone: 'warn' },
-  crit: { label: 'Blocked', tone: 'crit' },
+  crit: { label: 'In trouble', tone: 'crit' },
   quiet: { label: 'No signal', tone: 'quiet' },
 } as const
 

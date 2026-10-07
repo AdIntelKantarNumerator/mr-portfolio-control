@@ -154,9 +154,37 @@ function weeks(days: number): string {
   return w < 9 ? plural(w, 'week') : plural(Math.floor(days / 30), 'month')
 }
 
-/** What to call each state on screen. */
+/**
+ * The card's state: the assessment when there is one, the facts when not.
+ *
+ * WHY THE ASSESSMENT WINS (Scott, 7 October 2026)
+ *
+ * The home card said "Blocked" and the detail page's Health tile, one click
+ * away, said "At risk" - for every objective on the board. The card worked
+ * its state out from the facts, and any open blocker anywhere beneath made it
+ * crit; once the follow-up work began filing blockers in earnest, every
+ * objective had one. The Health tile shows the assessment Yaara or a person
+ * made, which weighs those same blockers against everything else. Two
+ * answers to one question, a click apart, is the thing to fix, and the
+ * assessment is the considered one.
+ *
+ * So the assessment sets the state and the facts stay as its reasons: "At
+ * risk - 14 blockers, oldest open 9 days". Work nobody has assessed, or
+ * assessed as unknown, keeps the state the facts give it.
+ */
+export function assessedHealth(rag: string | null | undefined, facts: CardHealth): CardHealth {
+  const fromRag: Health | null = rag === 'red' ? 'crit' : rag === 'amber' ? 'warn' : rag === 'green' ? 'good' : null
+  return fromRag ? { ...facts, health: fromRag } : facts
+}
+
+/**
+ * What to call each state on screen. The same words as the detail page's
+ * Health tile (components/detail/health-tile.tsx), since the state is now
+ * usually that tile's assessment: red is "In trouble", not "Blocked", which a
+ * red assessment need not be.
+ */
 export const HEALTH_LABEL: Record<Health, string> = {
-  crit: 'Blocked',
+  crit: 'In trouble',
   warn: 'At risk',
   good: 'On track',
   quiet: 'No signal',

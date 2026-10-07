@@ -32,7 +32,8 @@ const SORT_LABEL: Record<Sort, string> = {
 const HEALTH_LABEL: Record<HealthFilter, string> = {
   all: 'All',
   good: 'On track',
-  crit: 'Blocked',
+  // At risk or in trouble: both, since the filter is for work worth a look.
+  crit: 'Needs attention',
 }
 
 export function HomeBoard({
@@ -134,7 +135,7 @@ export function HomeBoard({
               states. */}
           {prefs.health !== 'all' ? (
             <>
-              <h2>Nothing is {HEALTH_LABEL[prefs.health].toLowerCase()}</h2>
+              <h2>{prefs.health === 'good' ? 'Nothing is on track' : 'Nothing needs attention'}</h2>
               <p>
                 No {LABEL[level].many.toLowerCase().replace('active ', '')} match that filter. Set Health back to
                 All to see the rest.
