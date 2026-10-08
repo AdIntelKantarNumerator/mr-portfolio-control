@@ -285,6 +285,13 @@ export interface ItemUpdate {
    * For score: a recalibration, not news about the item - every item re-tagged
    * under new rules. Recorded, but not activity, so it does not wake every
    * inactive item at once.
+   *
+   * For owner, the same: a re-assignment by rule rather than by anyone saying
+   * so (Scott, 8 October 2026 - items given to "the team" now go to whoever
+   * owns the meeting invite, and the ones already filed were re-assigned in
+   * one sweep). Recorded as an owner event; the item's last activity stays
+   * where it was, so an inactive item is not woken into a reminder by
+   * bookkeeping.
    */
   quiet?: boolean
   occurredAt?: Date | null
@@ -429,8 +436,9 @@ export async function applyItemUpdate(u: ItemUpdate): Promise<UpdateResult> {
       if (!asked) return { ref: u.ref, ok: false, error: 'Who should own it?' }
       const roster = await db.select({ id: people.id, name: people.name }).from(people)
       const personId = matchPerson(asked, roster)
-      if (found.kind === 'action') await patchRow(found, { ownerId: personId, ownerName: personId ? null : asked, lastActivityAt: now })
-      else await patchRow(found, { ownerId: personId, ownerText: personId ? null : asked, lastActivityAt: now })
+      const touched = u.quiet ? {} : { lastActivityAt: now }
+      if (found.kind === 'action') await patchRow(found, { ownerId: personId, ownerName: personId ? null : asked, ...touched })
+      else await patchRow(found, { ownerId: personId, ownerText: personId ? null : asked, ...touched })
       await addEvent(found, 'owner', u, `Owner: ${asked}${note ? `. ${note}` : ''}`)
       await log(`${asked} now owns ${name}`)
       return { ref: u.ref, ok: true, status: found.row.status }

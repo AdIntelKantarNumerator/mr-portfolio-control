@@ -81,6 +81,13 @@ async function main() {
   const [after] = await db.select({ at: actionItems.lastActivityAt, n: actionItems.nudgedAt }).from(actionItems).where(eq(actionItems.id, a1!.id))
   check('a reminder sets nudged_at and leaves last activity alone', Boolean(after!.n) && after!.at.getTime() === before!.at.getTime())
 
+  // An owner set by rule rather than by anyone saying so (the meeting-invite
+  // rules, 8 October 2026) is recorded, but is not activity.
+  await applyItemUpdate({ ref: a1!.ref!, action: 'owner', owner: 'Godfrey Ndu', actor: 'Yaara', quiet: true, note: 'By the meeting rules.' })
+  const [quietly] = await db.select({ at: actionItems.lastActivityAt, name: actionItems.ownerName }).from(actionItems).where(eq(actionItems.id, a1!.id))
+  check('a quiet owner change re-owns it and leaves last activity alone', quietly!.name === 'Godfrey Ndu' && quietly!.at.getTime() === before!.at.getTime())
+  await applyItemUpdate({ ref: a1!.ref!, action: 'owner', owner: who, actor: 'Scott Bernberg' })
+
   // Resolve, and the history tells the story newest first.
   await applyItemUpdate({ ref: a1!.ref!, action: 'resolve', actor: 'Priya Shah', note: 'Signed today.' })
   await applyItemUpdate({ ref: blocker!.ref, action: 'resolve', actor: 'Yaara', note: 'Legal signed.', source: { title: 'Slack #legal', url: 'https://x' } })
