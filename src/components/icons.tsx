@@ -176,6 +176,15 @@ export const IconConversations = (p: IconProps) => (
   </Glyph>
 )
 
+/** Meeting series — a calendar page, with the sessions as a row of marks. */
+export const IconSeries = (p: IconProps) => (
+  <Glyph {...p}>
+    <rect x="2.2" y="3" width="11.6" height="10.6" rx="1.4" />
+    <path d="M2.2 6.2h11.6M5.2 1.8v2.4M10.8 1.8v2.4" />
+    <path d="M4.8 9.4h.01M8 9.4h.01M11.2 9.4h.01" strokeWidth="2" />
+  </Glyph>
+)
+
 /** Templates — a page with a repeated shape. */
 export const IconTemplates = (p: IconProps) => (
   <Glyph {...p}>

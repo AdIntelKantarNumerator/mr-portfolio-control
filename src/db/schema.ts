@@ -2015,3 +2015,49 @@ export const reassessRequests = pgTable(
     index('reassess_requests_entity_idx').on(t.entityType, t.entityId),
   ],
 )
+
+// ---------------------------------------------------------------------------
+// Meeting series: recurring meetings followed from one session to the next.
+// See drizzle/0029_meeting_series.sql and src/lib/series.ts.
+// ---------------------------------------------------------------------------
+
+export const meetingSeries = pgTable('meeting_series', {
+  id: id(),
+  name: text('name').notNull(),
+  /** open | closed */
+  status: text('status').notNull().default('open'),
+  createdBy: text('created_by'),
+  closedBy: text('closed_by'),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+})
+
+export const meetingSeriesMeetings = pgTable(
+  'meeting_series_meetings',
+  {
+    id: id(),
+    seriesId: text('series_id')
+      .notNull()
+      .references(() => meetingSeries.id, { onDelete: 'cascade' }),
+    /** The meeting's name without its date: "Keystone SoS". */
+    meeting: text('meeting').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('meeting_series_meetings_uq').on(t.seriesId, t.meeting)],
+)
+
+export const meetingSeriesChecks = pgTable(
+  'meeting_series_checks',
+  {
+    id: id(),
+    seriesId: text('series_id')
+      .notNull()
+      .references(() => meetingSeries.id, { onDelete: 'cascade' }),
+    ref: text('ref').notNull(),
+    text: text('text').notNull(),
+    writtenBy: text('written_by'),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('meeting_series_checks_uq').on(t.seriesId, t.ref)],
+)

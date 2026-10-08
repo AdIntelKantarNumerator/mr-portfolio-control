@@ -38,6 +38,7 @@ import {
   IconInitiatives,
   IconReadiness,
   IconRegister,
+  IconSeries,
   IconTemplates,
   IconTimeline,
   IconProjects,
@@ -90,6 +91,7 @@ export const NAV: NavSection[] = [
         icon: IconConversations,
         hint: 'What keeps coming up and has no owner yet',
       },
+      { href: '/series', label: 'Meeting series', icon: IconSeries, hint: 'Recurring meetings, followed session to session' },
     ],
   },
   {

@@ -127,7 +127,7 @@ export function BandChip({ band, score }: { band: Band | null; score: number | n
   )
 }
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="modal-scrim" role="presentation" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal imp-modal" role="dialog" aria-modal="true" aria-label={title}>

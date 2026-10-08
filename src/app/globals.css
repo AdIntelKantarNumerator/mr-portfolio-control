@@ -1919,3 +1919,54 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rt-pages button { border: 1px solid var(--line-2); background: var(--surface); border-radius: 7px; padding: 4px 10px; cursor: pointer; color: var(--ink); }
 .rt-pages button:disabled { opacity: .4; cursor: default; }
 .imp-withdraw { background: color-mix(in srgb, var(--c3) 10%, var(--surface)); }
+
+/* Meeting series (src/app/series). */
+.ser-new { margin-left: auto; align-self: center; }
+.ser-row { grid-template-columns: 64px minmax(0, 1fr); border-left-color: var(--c1); }
+.ser-row.ser-closed { border-left-color: var(--line-2); opacity: .7; }
+.ser-open { display: grid; justify-items: center; line-height: 1.05; }
+.ser-open b { font-size: 26px; font-weight: 800; color: var(--c1); }
+.ser-open span { font-size: 11px; color: var(--muted); }
+.ser-name { font-size: 18px; }
+.ser-close { margin-left: auto; font-size: 12.5px; }
+.ser-next { color: var(--c1); font-weight: 700; }
+.ser-mtgs { color: var(--muted); }
+.ser-when { display: flex; gap: 14px; align-items: baseline; margin-top: 4px; font-size: 15px; color: var(--muted); }
+.ser-when b { color: var(--c1); font-size: 17px; }
+.ser-tools { display: flex; gap: 8px; align-self: flex-start; }
+.ser-mtg-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ser-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.ser-stat { background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--line-2); border-radius: 11px; padding: 12px 14px; display: grid; gap: 2px; }
+.ser-stat b { font-size: 30px; font-weight: 800; line-height: 1; }
+.ser-stat span { font-size: 12.5px; color: var(--muted); }
+.ser-sec { border-left: 3px solid var(--line-2); }
+.ser-sec .tile-head h2 { font-size: 18px; }
+.ser-n { font-size: 13px; font-weight: 750; color: var(--muted); }
+.ser-table { overflow-x: auto; }
+.ser-table table.dtable { font-size: 13px; }
+.ser-table table.dtable td { vertical-align: middle; }
+.ser-item { display: flex; align-items: baseline; gap: 8px; color: var(--ink); text-decoration: none; }
+.ser-item:hover .ser-title { text-decoration: underline; }
+.ser-kind { flex: none; font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; border-radius: 5px; padding: 1px 6px; }
+.ser-blocker { color: var(--crit); background: color-mix(in srgb, var(--crit) 13%, transparent); }
+.ser-decision { color: #7c3aed; background: color-mix(in srgb, #7c3aed 13%, transparent); }
+.ser-action { color: var(--c1); background: color-mix(in srgb, var(--c1) 13%, transparent); }
+.ser-ref { flex: none; font-size: 12px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ser-title { font-size: 14px; font-weight: 600; }
+.ser-owner { white-space: nowrap; }
+.ser-where { margin-top: 3px; font-size: 11.5px; color: var(--muted); }
+.ser-where a { color: var(--brand-2); }
+.ser-checkh { color: var(--c1); }
+.ser-check { font-weight: 650; white-space: nowrap; }
+.ser-alert { color: var(--crit); }
+.ser-form { display: grid; gap: 10px; }
+.ser-form .ser-find { width: 100%; font: inherit; font-size: 13.5px; padding: 7px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.ser-pick { list-style: none; margin: 0; padding: 0; max-height: 42vh; overflow: auto; border: 1px solid var(--line); border-radius: 9px; }
+.ser-pick li + li { border-top: 1px solid var(--line); }
+.ser-pick label { display: flex; align-items: center; gap: 9px; padding: 7px 10px; font-size: 13.5px; cursor: pointer; }
+.ser-pick label.on { background: color-mix(in srgb, var(--c1) 8%, transparent); font-weight: 650; }
+.ser-pick em { margin-left: auto; font-style: normal; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.ser-none { padding: 10px; font-size: 13px; color: var(--muted); }
+.ser-actions { display: flex; align-items: center; gap: 10px; }
+.ser-actions .btn { margin-left: auto; }
+.ser-count { font-size: 12.5px; color: var(--muted); }

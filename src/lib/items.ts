@@ -116,7 +116,10 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
       const kind = r.kind === 'blocker' ? 'blocker' : 'decision'
       if (!kinds.has(kind)) continue
       const open = !REGISTER_CLOSED.has(r.status)
-      if (!open && !(opts.closedSince && r.resolvedAt && r.resolvedAt >= opts.closedSince)) continue
+      // A decision recorded as already decided has no resolved date of its
+      // own: it was settled where it was raised, so that is when it closed.
+      const closedAt = open ? null : (r.resolvedAt ?? r.raisedAt ?? null)
+      if (!open && !(opts.closedSince && closedAt && closedAt >= opts.closedSince)) continue
       const at = r.entityId ? place.get(r.entityId) : undefined
       out.push({
         kind,
@@ -132,7 +135,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         placeOwner: ownerAbove(r.entityId),
         createdAt: r.raisedAt ?? r.createdAt,
         lastActivityAt: r.lastActivityAt,
-        closedAt: r.resolvedAt,
+        closedAt,
         dueDate: null,
         score: liveScore(kind, r),
         band: null,
