@@ -22,7 +22,7 @@ import { useActionState, useState } from 'react'
 import type { HomeCard } from '@/lib/home'
 import type { MixGroup } from '@/lib/home-types'
 import { LocalTime } from './local-time'
-import { railLabels } from '@/lib/rail-labels'
+import { markTitle, railLabels } from '@/lib/rail-labels'
 import { SourceIcon, sourceLabel } from './source-icon'
 import { HealthPanel } from './health-state'
 import { saveVerdict, restoreVerdict, type VerdictState } from '@/app/verdict-actions'
@@ -314,6 +314,7 @@ export function ObjectiveCard({
                         {card.rail.map((m) => (
                           <li key={m.id}>
                             {m.name} — {m.status.replace('_', ' ')}
+                            {m.from ? <span className="muted"> · {m.from}</span> : null}
                           </li>
                         ))}
                       </ul>
@@ -339,7 +340,7 @@ export function ObjectiveCard({
                     <span
                       className="dot"
                       key={m.id}
-                      title={m.on ? `${m.name} — ${m.on}` : m.name}
+                      title={markTitle(m)}
                       style={{ left: `${m.at}%`, color: MS_COLOR[m.status] }}
                     >
                       <i style={{ background: MS_COLOR[m.status] }} />

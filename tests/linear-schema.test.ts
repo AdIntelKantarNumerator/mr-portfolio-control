@@ -186,7 +186,7 @@ test('the probe asks for four types, not the whole schema', () => {
   // before writing anything — and the page-shrink cannot help, because a
   // schema probe has no page size to shrink.
   const q = probeQuery()
-  assert.equal((q.match(/__type\(name:/g) ?? []).length, 4)
+  assert.equal((q.match(/__type\(name:/g) ?? []).length, 5)
   assert.ok(!/types\s*\{/.test(q), 'it must not ask for every type in the schema')
 })
 
@@ -194,7 +194,7 @@ test('every type the sync asks about is in the probe', () => {
   // The two lists drifting apart is silent: a type left out of the probe has
   // no capabilities, so every optional field on it is quietly dropped and the
   // sync carries on writing nulls.
-  for (const t of ['Team', 'User', 'Initiative', 'Project']) {
+  for (const t of ['Team', 'User', 'Initiative', 'Project', 'ProjectMilestone']) {
     assert.ok(PROBE_TYPES.includes(t as (typeof PROBE_TYPES)[number]), `${t} is missing from PROBE_TYPES`)
   }
 })

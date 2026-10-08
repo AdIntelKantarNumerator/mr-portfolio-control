@@ -29,6 +29,18 @@ export interface RailMark {
   at: number
   /** The date, for the hover. */
   on?: string | null
+  /** The work it is recorded on - "Project: Creative Central" - for the hover. */
+  from?: string | null
+}
+
+/**
+ * One milestone, as its hover says it: name, date, and the work it comes
+ * from. The last because an objective's rail mixes the milestones of every
+ * initiative and project beneath it, and "Rollout - 2026-10-15" alone does
+ * not say whose rollout (Scott, 8 October 2026).
+ */
+export function markTitle(m: Pick<RailMark, 'name' | 'on' | 'from'>): string {
+  return `${m.on ? `${m.name} — ${m.on}` : m.name}${m.from ? ` · ${m.from}` : ''}`
 }
 
 export type RailAnchor = 'left' | 'center' | 'right'
@@ -78,7 +90,7 @@ export function railLabels(marks: readonly RailMark[]): RailLabel[] {
 
     const first = c[0].name
     const text = width < MIN_WIDTH ? '' : c.length > 1 ? `${first} +${c.length - 1} more` : first
-    const title = c.map((m) => (m.on ? `${m.name} — ${m.on}` : m.name)).join('\n')
+    const title = c.map(markTitle).join('\n')
 
     return { key: c.map((m) => m.id).join('+'), text, title, at, anchor, width: Math.max(0, width) }
   })

@@ -103,7 +103,8 @@ async function handle(payload: LinearWebhook) {
     await logChange({
       actor: 'linear-webhook',
       kind: 'sync',
-      summary: `${type} removed in Linear — archived here`,
+      // A milestone is deleted here too; a project or initiative is kept as canceled.
+      summary: `${type} removed in Linear — ${type === 'ProjectMilestone' ? 'deleted' : 'archived'} here`,
     })
     return
   }

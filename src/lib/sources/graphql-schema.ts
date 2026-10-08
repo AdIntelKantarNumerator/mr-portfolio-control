@@ -179,12 +179,12 @@ export function shrinkPage(pageSize: number, message: string): number | null {
  * the run dies before writing anything, and the adaptive page-shrink cannot
  * help because a schema probe has no page size to shrink.
  *
- * Four types are all that is ever asked about, so four types are all it asks
- * for. A name this list gets wrong comes back null and that type simply has
+ * Five types are all that is ever asked about, so five types are all it asks
+ * for (ProjectMilestone joined on 8 October 2026, for a milestone's status). A name this list gets wrong comes back null and that type simply has
  * no capabilities — the same outcome as a type the schema does not have,
  * which is the behaviour the callers already handle.
  */
-export const PROBE_TYPES = ['Team', 'User', 'Initiative', 'Project'] as const
+export const PROBE_TYPES = ['Team', 'User', 'Initiative', 'Project', 'ProjectMilestone'] as const
 
 /** One `__type` block per type, aliased so the response can be put back together. */
 export function probeQuery(types: readonly string[] = PROBE_TYPES): string {

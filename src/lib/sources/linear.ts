@@ -13,10 +13,11 @@
  * a hard-coded selection set fails the whole sync on one unknown field. Probing
  * costs one extra request per run and degrades to "we synced what exists".
  */
-import { and, eq } from 'drizzle-orm'
+import { and, eq, or } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { mergeFromSource } from '@/lib/milestones'
 import {
+  dependencies,
   initiatives,
   milestones,
   people,
@@ -41,6 +42,8 @@ import {
   mapInitiativeStatus,
   mapPriority,
   mapProjectStatus,
+  milestoneStatusFrom,
+  syncedMilestoneStatus,
   normaliseProgress,
   parseLinearDate as date,
 } from './linear-map'
@@ -187,12 +190,12 @@ export {
 // ---------------------------------------------------------------------------
 
 interface Counters {
-  [entity: string]: { created: number; updated: number; skipped: number }
+  [entity: string]: { created: number; updated: number; skipped: number; removed?: number }
 }
 
-function bump(c: Counters, entity: string, kind: 'created' | 'updated' | 'skipped') {
+function bump(c: Counters, entity: string, kind: 'created' | 'updated' | 'skipped' | 'removed') {
   c[entity] ??= { created: 0, updated: 0, skipped: 0 }
-  c[entity][kind] += 1
+  c[entity][kind] = (c[entity][kind] ?? 0) + 1
 }
 
 /** Find the local id previously mapped to a Linear id, if any. */
@@ -531,8 +534,13 @@ export async function syncLinear(opts: SyncOptions = {}): Promise<SyncResult> {
       // nothing looks at.
       caps.has('Project', 'teams') ? 'teams(first: 1) { nodes { id } }' : '',
       caps.has('Project', 'initiatives') ? 'initiatives(first: 1) { nodes { id } }' : '',
+      // A hundred, not twenty-five: anything past the page never arrived, and
+      // now that a milestone missing from this list is removed here, a page
+      // that did not hold them all must be known to be one (hasNextPage).
       caps.has('Project', 'projectMilestones')
-        ? 'projectMilestones(first: 25) { nodes { id name description targetDate sortOrder } }'
+        ? `projectMilestones(first: 100) { nodes { id name description targetDate sortOrder${
+            caps.has('ProjectMilestone', 'status') ? ' status' : ''
+          } } pageInfo { hasNextPage } }`
         : '',
     ].filter(Boolean)
 
@@ -592,7 +600,7 @@ export async function syncLinear(opts: SyncOptions = {}): Promise<SyncResult> {
 
 function summarise(c: Counters): string {
   const parts = Object.entries(c).map(
-    ([k, v]) => `${k}: +${v.created}/~${v.updated}${v.skipped ? `/skip ${v.skipped}` : ''}`,
+    ([k, v]) => `${k}: +${v.created}/~${v.updated}${v.removed ? `/-${v.removed}` : ''}${v.skipped ? `/skip ${v.skipped}` : ''}`,
   )
   return parts.length ? `Linear sync — ${parts.join(', ')}` : 'Linear sync — no changes'
 }
@@ -696,14 +704,82 @@ export async function upsertInitiative(n: Record<string, unknown>, counters: Cou
     raw: n,
   })
 
-  const msNodes = (n.projectMilestones as { nodes?: Record<string, unknown>[] } | undefined)?.nodes
+  const msConn = n.projectMilestones as
+    | { nodes?: Record<string, unknown>[]; pageInfo?: { hasNextPage?: boolean } }
+    | undefined
+  const msNodes = msConn?.nodes
   if (msNodes) {
     for (const m of msNodes) {
       await upsertMilestone(m, entityId, counters)
     }
+    // Every milestone Linear has for this project is in that list, so one
+    // from Linear that is not has been deleted or archived there. Only when
+    // the list is whole: a page with more behind it says nothing about what
+    // is not on it.
+    if (!msConn?.pageInfo?.hasNextPage) {
+      await removeMilestonesGoneFromLinear(entityId, new Set(msNodes.map((m) => m.id as string)), counters)
+    }
   }
 
   return entityId
+}
+
+/**
+ * Milestones this project got from Linear that Linear no longer has.
+ *
+ * WHY (Scott, 8 October 2026: "Deleted in linear should mean deleted
+ * outright")
+ *
+ * The sync only ever added and updated. Eleven milestones deleted in Linear,
+ * and four archived there, were still on the board, because nothing removed a
+ * milestone that stopped arriving. A Linear project's milestones come in whole
+ * on every run, so a milestone from Linear that is not among them is gone. Only
+ * ones that came from Linear: a milestone added here, or from the program-review
+ * deck, has no Linear id and is never touched.
+ */
+async function removeMilestonesGoneFromLinear(projectId: string, present: ReadonlySet<string>, counters: Counters) {
+  const linked = await db
+    .select({ externalId: sourceRecords.externalId, id: milestones.id, name: milestones.name })
+    .from(sourceRecords)
+    .innerJoin(milestones, eq(milestones.id, sourceRecords.entityId))
+    .where(
+      and(
+        eq(sourceRecords.system, 'linear'),
+        eq(sourceRecords.entityType, 'milestone'),
+        eq(milestones.level, 'project'),
+        eq(milestones.entityId, projectId),
+      ),
+    )
+  for (const m of linked.filter((l) => !present.has(l.externalId))) {
+    await removeLinearMilestone(m.id, m.externalId)
+    bump(counters, 'milestones', 'removed')
+    await logChange({
+      actor: 'linear-sync',
+      kind: 'sync',
+      summary: `Milestone removed - ${m.name}: deleted or archived in Linear`,
+      entityType: 'milestone',
+      entityId: m.id,
+    })
+  }
+}
+
+/**
+ * Delete a milestone that came from Linear, with what pointed at it: its Linear
+ * link, so a later sync does not think it still exists here, and any
+ * dependency on it, which would otherwise point at nothing. Its status items
+ * and calendar bands go with it (ON DELETE CASCADE).
+ */
+export async function removeLinearMilestone(milestoneId: string, externalId: string) {
+  await db
+    .delete(dependencies)
+    .where(
+      or(
+        and(eq(dependencies.fromType, 'milestone'), eq(dependencies.fromId, milestoneId)),
+        and(eq(dependencies.toType, 'milestone'), eq(dependencies.toId, milestoneId)),
+      ),
+    )
+  await db.delete(milestones).where(eq(milestones.id, milestoneId))
+  await db.delete(sourceRecords).where(and(eq(sourceRecords.system, 'linear'), eq(sourceRecords.externalId, externalId)))
 }
 
 export async function upsertMilestone(
@@ -729,11 +805,22 @@ export async function upsertMilestone(
     // sync that writes the whole row every run reverts a person's edit at
     // the next sync, and they conclude the app does not save.
     const [row] = await db
-      .select({ editedFields: milestones.editedFields })
+      .select({ editedFields: milestones.editedFields, status: milestones.status })
       .from(milestones)
       .where(eq(milestones.id, existing.entityId))
       .limit(1)
-    const allowed = mergeFromSource(values, row?.editedFields)
+    // Done and overdue in Linear, as complete and at risk here; and back to
+    // planning when Linear stops saying either. What Linear said last time is
+    // in the source record (see syncedMilestoneStatus).
+    const [before] = await db
+      .select({ raw: sourceRecords.raw })
+      .from(sourceRecords)
+      .where(and(eq(sourceRecords.system, 'linear'), eq(sourceRecords.externalId, externalId)))
+      .limit(1)
+    // Only when Linear said: a payload without the field (a webhook, a
+    // workspace whose schema lacks it) is silence, not "no longer done".
+    const status = 'status' in n ? syncedMilestoneStatus(n.status, previousStatus(before?.raw), row?.status ?? null) : undefined
+    const allowed = mergeFromSource({ ...values, ...(status ? { status } : {}) }, row?.editedFields)
     entityId = existing.entityId
     if (Object.keys(allowed).length > 0) {
       await db.update(milestones).set(allowed).where(eq(milestones.id, entityId))
@@ -742,7 +829,11 @@ export async function upsertMilestone(
       bump(counters, 'milestones', 'skipped')
     }
   } else {
-    const [created] = await db.insert(milestones).values(values).returning({ id: milestones.id })
+    const status = milestoneStatusFrom(n.status)
+    const [created] = await db
+      .insert(milestones)
+      .values({ ...values, ...(status ? { status } : {}) })
+      .returning({ id: milestones.id })
     entityId = created.id
     bump(counters, 'milestones', 'created')
   }
@@ -751,12 +842,25 @@ export async function upsertMilestone(
   return entityId
 }
 
+/** A milestone's status as Linear last reported it, from the stored payload. */
+function previousStatus(raw: string | null | undefined): unknown {
+  if (!raw) return null
+  try {
+    return (JSON.parse(raw) as { status?: unknown }).status ?? null
+  } catch {
+    return null
+  }
+}
+
 /** Deletion from Linear archives locally rather than dropping rows, so that
- *  assessments, decisions and dependencies attached to the record survive. */
+ *  assessments, decisions and dependencies attached to the record survive.
+ *  Except a milestone, which is deleted outright (Scott, 8 October 2026). */
 export async function archiveByExternalId(externalId: string) {
   const existing = await localIdFor(externalId)
   if (!existing) return
-  if (existing.entityType === 'project') {
+  if (existing.entityType === 'milestone') {
+    await removeLinearMilestone(existing.entityId, externalId)
+  } else if (existing.entityType === 'project') {
     await db.update(projects).set({ status: 'canceled' }).where(eq(projects.id, existing.entityId))
   } else if (existing.entityType === 'initiative') {
     await db

@@ -90,6 +90,41 @@ export function normaliseProgress(raw: unknown): number {
   return Math.min(1, Math.max(0, n > 1 ? n / 100 : n))
 }
 
+/**
+ * A Linear milestone's status as this app's milestone status, when Linear's
+ * says something this one can: done is complete, overdue is at risk. Its
+ * other two - next and unstarted - say where the milestone sits in the queue,
+ * not how it is going, so they map to nothing.
+ */
+export function milestoneStatusFrom(linear: unknown): 'complete' | 'at_risk' | null {
+  return linear === 'done' ? 'complete' : linear === 'overdue' ? 'at_risk' : null
+}
+
+/**
+ * What the sync should set a milestone's status to, or undefined to leave it.
+ *
+ * WHY (Scott, 8 October 2026)
+ *
+ * The sync never read a milestone's status at all: 35 milestones done in
+ * Linear read "planning" here. Now done and overdue come across. And when
+ * Linear stops saying either - a done milestone reopened, an overdue one
+ * whose date moved - the status the sync set goes back to planning. Only one
+ * the sync set: a status that matches nothing Linear said before was put
+ * there by the program-review deck or by somebody, and is theirs. (A status
+ * corrected on the milestone editor is protected separately, by
+ * mergeFromSource.)
+ */
+export function syncedMilestoneStatus(
+  linearNow: unknown,
+  linearBefore: unknown,
+  current: string | null,
+): string | undefined {
+  const now = milestoneStatusFrom(linearNow)
+  if (now) return now
+  const before = milestoneStatusFrom(linearBefore)
+  return before && current === before ? 'planning' : undefined
+}
+
 export function parseLinearDate(v?: string | null): Date | null {
   if (!v) return null
   const d = new Date(v)

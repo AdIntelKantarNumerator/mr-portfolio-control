@@ -107,6 +107,8 @@ export interface MilestoneMark {
   at: number
   /** The date itself, for the hover. Null when nobody set one. */
   on: string | null
+  /** The work it is recorded on, for the hover: "Project: Creative Central". */
+  from: string | null
 }
 
 /** Where today falls on the rail, 0–100, or null when it is off either end. */
@@ -374,6 +376,20 @@ export const getHomeCards = cache(async (
         ? projs.map((p) => ({ id: p.id, name: p.name, ownerId: p.ownerId, startDate: p.startDate, status: p.status, rank: p.sortOrder }))
         : wss.map((w) => ({ id: w.id, name: w.name, ownerId: w.leadId, startDate: w.startDate, status: w.status, rank: w.sortOrder }))
 
+  // The work a milestone is recorded on, by tier and name, for the rail's
+  // hover. An objective's rail carries the milestones of everything beneath
+  // it, and a name alone does not say whose (Scott, 8 October 2026).
+  const tierNames: Record<string, Map<string, string>> = {
+    objective: new Map(inits.map((x) => [x.id, x.name])),
+    initiative: new Map(projs.map((x) => [x.id, x.name])),
+    project: new Map(wss.map((x) => [x.id, x.name])),
+  }
+  const TIER_WORD: Record<string, string> = { objective: 'Objective', initiative: 'Initiative', project: 'Project' }
+  const workOf = (lv: string, id: string): string | null => {
+    const name = tierNames[lv]?.get(id)
+    return name ? `${TIER_WORD[lv] ?? lv}: ${name}` : null
+  }
+
   const cards: HomeCard[] = rows
     .filter((r) => !ENDED.has(r.status))
     .map((r) => {
@@ -422,6 +438,7 @@ export const getHomeCards = cache(async (
         status: m.status,
         at: place(m.targetDate!.getTime()),
         on: m.targetDate!.toISOString().slice(0, 10),
+        from: workOf(m.level, m.entityId),
       }))
       const railToday: RailToday = rail.length ? place(now) : null
 
