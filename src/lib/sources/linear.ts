@@ -358,13 +358,15 @@ export interface SyncResult {
  * The run is then reported as `partial` rather than `success`, so a
  * half-imported portfolio never looks like a complete one.
  */
-async function attempt(label: string, warnings: string[], fn: () => Promise<unknown>) {
+async function attempt(label: string, warnings: string[], fn: () => Promise<unknown>): Promise<boolean> {
   try {
     await fn()
+    return true
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     if (warnings.length < 25) warnings.push(`${label}: ${message.split('\n')[0]}`)
     else if (warnings.length === 25) warnings.push('(further errors suppressed)')
+    return false
   }
 }
 
@@ -544,6 +546,11 @@ export async function syncLinear(opts: SyncOptions = {}): Promise<SyncResult> {
         : '',
     ].filter(Boolean)
 
+    // A full run sees every project Linear lists, so it can also see which
+    // milestones no project listed (sweepMilestones). An incremental one sees
+    // only what moved and can say nothing of the rest.
+    const sweep: MilestoneSweep | null = opts.since ? null : { seen: new Set(), partial: new Set(), whole: true, projects: 0 }
+
     // Incremental runs ask Linear for only what moved. A full backfill omits
     // the filter entirely rather than passing a very old date, because the
     // unfiltered query is the one Linear's own caching is tuned for.
@@ -558,11 +565,15 @@ export async function syncLinear(opts: SyncOptions = {}): Promise<SyncResult> {
         : {},
     )) {
       for (const n of nodes) {
-        await attempt(`project ${String(n.name ?? n.id)}`, warnings, () =>
-          upsertInitiative(n, counters),
+        const ok = await attempt(`project ${String(n.name ?? n.id)}`, warnings, () =>
+          upsertInitiative(n, counters, sweep ?? undefined),
         )
+        if (!ok && sweep) sweep.whole = false
       }
     }
+
+    // After a full run, whatever Linear milestone nothing in it mentioned.
+    if (sweep) await sweepMilestones(sweep, counters, warnings)
 
     await db
       .update(syncRuns)
@@ -650,7 +661,7 @@ export async function upsertObjective(n: Record<string, unknown>, counters: Coun
   return entityId
 }
 
-export async function upsertInitiative(n: Record<string, unknown>, counters: Counters = {}) {
+export async function upsertInitiative(n: Record<string, unknown>, counters: Counters = {}, sweep?: MilestoneSweep) {
   const externalId = n.id as string
   const existing = await localIdFor(externalId)
 
@@ -708,6 +719,12 @@ export async function upsertInitiative(n: Record<string, unknown>, counters: Cou
     | { nodes?: Record<string, unknown>[]; pageInfo?: { hasNextPage?: boolean } }
     | undefined
   const msNodes = msConn?.nodes
+  if (sweep) {
+    sweep.projects += 1
+    if (!msNodes) sweep.whole = false
+    else if (msConn?.pageInfo?.hasNextPage) sweep.partial.add(entityId)
+    for (const m of msNodes ?? []) sweep.seen.add(m.id as string)
+  }
   if (msNodes) {
     for (const m of msNodes) {
       await upsertMilestone(m, entityId, counters)
@@ -757,6 +774,61 @@ async function removeMilestonesGoneFromLinear(projectId: string, present: Readon
       actor: 'linear-sync',
       kind: 'sync',
       summary: `Milestone removed - ${m.name}: deleted or archived in Linear`,
+      entityType: 'milestone',
+      entityId: m.id,
+    })
+  }
+}
+
+/** What a full run saw of Linear's milestones, for sweepMilestones. */
+interface MilestoneSweep {
+  /** Every Linear milestone id any project listed. */
+  seen: Set<string>
+  /** Projects here whose milestone list did not come back whole. */
+  partial: Set<string>
+  /** False when a project failed, or came back without its milestones. */
+  whole: boolean
+  projects: number
+}
+
+/**
+ * Linear milestones that no project listed in a full run, wherever they were.
+ *
+ * WHY THIS AS WELL AS removeMilestonesGoneFromLinear
+ *
+ * That one compares a project's milestones with the project's own list, so it
+ * can only see projects Linear still returns. An archived Linear project is
+ * not returned at all, and its archived milestones stayed here (8 October
+ * 2026: four, under Data Strategy and the GPC Classification Engine). A full
+ * run has seen every milestone Linear lists anywhere; any other milestone that
+ * came from Linear is deleted or archived there.
+ *
+ * Guarded, because it reasons from absence: only after a run in which every
+ * project came back whole, never on a project whose list was cut short, and
+ * never more than a quarter of them at once - an empty answer from Linear
+ * must not read as "everything was deleted". Past that it removes nothing and
+ * says so in the run's warnings.
+ */
+async function sweepMilestones(sweep: MilestoneSweep, counters: Counters, warnings: string[]) {
+  if (!sweep.whole || sweep.projects === 0 || sweep.seen.size === 0) return
+  const linked = await db
+    .select({ externalId: sourceRecords.externalId, id: milestones.id, name: milestones.name, projectId: milestones.entityId })
+    .from(sourceRecords)
+    .innerJoin(milestones, eq(milestones.id, sourceRecords.entityId))
+    .where(and(eq(sourceRecords.system, 'linear'), eq(sourceRecords.entityType, 'milestone')))
+  const gone = linked.filter((l) => !sweep.seen.has(l.externalId) && !sweep.partial.has(l.projectId))
+  if (!gone.length) return
+  if (gone.length > linked.length / 4) {
+    warnings.push(`${gone.length} of ${linked.length} milestones from Linear were not in this run; too many to be deletions, so none were removed`)
+    return
+  }
+  for (const m of gone) {
+    await removeLinearMilestone(m.id, m.externalId)
+    bump(counters, 'milestones', 'removed')
+    await logChange({
+      actor: 'linear-sync',
+      kind: 'sync',
+      summary: `Milestone removed - ${m.name}: no longer in Linear (deleted, or archived with its project)`,
       entityType: 'milestone',
       entityId: m.id,
     })
