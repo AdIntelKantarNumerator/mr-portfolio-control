@@ -591,7 +591,7 @@ export const actionItemEvents = pgTable(
     actionItemId: text('action_item_id')
       .notNull()
       .references(() => actionItems.id, { onDelete: 'cascade' }),
-    /** raised | updated | done | dropped | reopened | merged | owner | importance | nudged */
+    /** raised | updated | changed | done | dropped | reopened | merged | owner | importance | nudged */
     kind: text('kind').notNull(),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
     actor: text('actor'),
@@ -599,6 +599,8 @@ export const actionItemEvents = pgTable(
     sourceTitle: text('source_title'),
     sourceUrl: text('source_url'),
     recordedBy: text('recorded_by'),
+    /** JSON [{field, from, to}]: what this entry changed. See lib/item-changes.ts. */
+    changes: text('changes'),
     createdAt: createdAt(),
   },
   (t) => [index('action_item_events_item_idx').on(t.actionItemId)],
@@ -857,7 +859,7 @@ export const decisionEvents = pgTable(
     decisionId: text('decision_id')
       .notNull()
       .references(() => decisions.id, { onDelete: 'cascade' }),
-    /** raised | discussed | updated | resolved | reopened */
+    /** raised | discussed | updated | changed | resolved | reopened */
     kind: text('kind').notNull(),
     /** When it was said, not when it was recorded. */
     occurredAt: timestamp('occurred_at', { withTimezone: true }),
@@ -870,6 +872,8 @@ export const decisionEvents = pgTable(
     /** What was said, in a sentence or two. The citation for everything above. */
     note: text('note'),
     recordedBy: text('recorded_by'),
+    /** JSON [{field, from, to}]: what this entry changed. See lib/item-changes.ts. */
+    changes: text('changes'),
     createdAt: createdAt(),
   },
   (t) => [index('decision_events_decision_idx').on(t.decisionId)],

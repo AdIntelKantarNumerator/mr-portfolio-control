@@ -13,6 +13,7 @@ import { useRouter } from 'next/navigation'
 import { BAND_LABEL, FACTORS, isFactor, type Band } from '@/lib/importance'
 import { HEALTH_WINDOW_DAYS, INACTIVE_DAYS, type HealthInput, type Rag } from '@/lib/item-activity'
 import { adjustItem, loadItemHistory, withdrawInactive, type HistoryEntry } from '@/app/items-actions'
+import { describeChange } from '@/lib/item-changes'
 
 /**
  * A yes/no that remembers itself in this browser (Scott, 6 October 2026: the
@@ -239,6 +240,7 @@ const EVENT_WORD: Record<string, string> = {
   raised: 'Raised',
   discussed: 'Discussed',
   updated: 'Update',
+  changed: 'Changed',
   resolved: 'Resolved',
   done: 'Done',
   dropped: 'Withdrawn',
@@ -277,9 +279,19 @@ export function HistoryButton({ item }: { item: Pick<ItemInfo, 'ref' | 'title' |
             <ol className="imp-history">
               {rows.map((r, i) => (
                 <li key={i}>
-                  <span className="imp-when">{new Date(r.at).toLocaleDateString()}</span>{' '}
+                  {/* When to the minute: two meetings on one day are two different places it changed. */}
+                  <span className="imp-when">
+                    {new Date(r.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                  </span>{' '}
                   <b>{EVENT_WORD[r.kind] ?? r.kind}</b>
                   {r.actor ? <> · {r.actor}</> : null}
+                  {r.changes.length ? (
+                    <ul className="imp-changes">
+                      {r.changes.map((c, j) => (
+                        <li key={j}>{describeChange(c)}</li>
+                      ))}
+                    </ul>
+                  ) : null}
                   {r.note ? <div>{r.note}</div> : null}
                   {r.source ? (
                     <div className="imp-src">

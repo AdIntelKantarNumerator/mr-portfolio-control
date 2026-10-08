@@ -45,6 +45,7 @@ import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
 import { logChange } from '@/lib/portfolio'
 import { nextRef } from '@/lib/util'
 import { closest, exact } from '@/lib/match-name'
+import { diffChanges, encodeChanges } from '@/lib/item-changes'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -59,6 +60,19 @@ interface IncomingLink {
 }
 
 interface IncomingItem {
+  /**
+   * An item already on record that this is the same commitment as. Set by
+   * the caller, who was shown the open items; checked here, never trusted.
+   */
+  ref?: string | null
+  /**
+   * What the document did to it: mentioned it again, changed it (a new
+   * owner, date or scope), or said it was done. Only a change may rewrite the
+   * text, owner or date.
+   */
+  event?: 'mentioned' | 'changed' | 'done' | null
+  /** What was said about it, in a sentence. Becomes the history entry's note. */
+  note?: string | null
   text?: string
   owner?: string | null
   dueDate?: string | null
@@ -174,8 +188,10 @@ export async function POST(req: Request) {
   const refs = existing.map((a) => a.ref ?? '').filter(Boolean)
 
   const written: string[] = []
+  const updated: string[] = []
   const skipped: string[] = []
   const dropped: string[] = []
+  const notes: string[] = []
 
   for (const raw of incoming) {
     const text = String(raw.text ?? '').trim()
@@ -226,6 +242,84 @@ export async function POST(req: Request) {
       continue
     }
 
+    // A continuation: the caller says this is an item already on record.
+    //
+    // Before 8 October 2026 the only test was the wording, so Ashley's
+    // running doc, read three times as it grew, filed the same competitor
+    // follow-up three times in three phrasings, and a meeting that changed a
+    // commitment's owner or date could only add a new item beside the old one.
+    const askedRef = String(raw.ref ?? '').trim().toUpperCase()
+    const continued = askedRef ? existing.find((a) => (a.ref ?? '').toUpperCase() === askedRef) : undefined
+    if (askedRef && !continued) notes.push(`${askedRef} does not exist, so "${text.slice(0, 50)}" was recorded as new.`)
+    if (continued) {
+      const changing = raw.event === 'changed'
+      const finishing = raw.event === 'done' && continued.status === 'open'
+      const ownerAsked = raw.owner ? String(raw.owner).trim() : ''
+      const person = ownerAsked ? exact(ownerAsked, folk) : null
+      const nameOf = (id: string | null) => (id ? (folk.find((p) => p.id === id)?.name ?? null) : null)
+      const due = asDate(raw.dueDate)
+
+      const patch: Partial<typeof actionItems.$inferInsert> = { lastActivityAt: new Date() }
+      if (changing) {
+        patch.text = text
+        if (ownerAsked) {
+          patch.ownerId = person?.id ?? null
+          patch.ownerName = person ? null : ownerAsked
+        }
+        if (due) patch.dueDate = due
+      }
+      if (finishing) {
+        patch.status = 'done'
+        patch.completedAt = new Date()
+      }
+
+      const changes = diffChanges(
+        {
+          text: continued.text,
+          owner: nameOf(continued.ownerId) ?? continued.ownerName,
+          dueDate: continued.dueDate?.toISOString().slice(0, 10) ?? null,
+          status: continued.status,
+        },
+        {
+          text: patch.text,
+          owner: changing && ownerAsked ? (person?.name ?? ownerAsked) : undefined,
+          dueDate: patch.dueDate ? (patch.dueDate as Date).toISOString().slice(0, 10) : undefined,
+          status: patch.status,
+        },
+        ['text', 'owner', 'dueDate', 'status'],
+      )
+
+      // One more place it came up (lib/importance.ts), whatever else changed.
+      await db
+        .update(actionItems)
+        .set({ ...patch, mentions: sql`${actionItems.mentions} + 1` })
+        .where(eq(actionItems.id, continued.id))
+      const have = await db.select().from(actionItemLinks).where(eq(actionItemLinks.actionItemId, continued.id))
+      const fresh = wanted.filter((w) => !have.some((h) => h.level === w.level && h.entityId === w.entityId))
+      if (fresh.length) await db.insert(actionItemLinks).values(fresh.map((w) => ({ actionItemId: continued.id, ...w })))
+
+      const said = raw.note ? String(raw.note).trim().slice(0, 1000) : ''
+      await db.insert(actionItemEvents).values({
+        actionItemId: continued.id,
+        kind: finishing ? 'done' : changes.length ? 'changed' : 'updated',
+        // When it was said, not when it was recorded: the history answers
+        // "when did this change", and a document read an hour after the
+        // meeting would otherwise put the change in the wrong place.
+        occurredAt: asDate(raw.raisedAt) ?? new Date(),
+        actor: ownerAsked || null,
+        // What was said, when the caller says it. "Came up again" only when
+        // it does not, because a history of that line answers nothing.
+        note: said || 'Came up again.',
+        sourceTitle,
+        sourceUrl,
+        recordedBy: agent,
+        changes: encodeChanges(changes),
+      })
+      seen.set(fingerprint(patch.text ?? continued.text), { id: continued.id, ref: continued.ref })
+      updated.push(continued.ref ?? continued.id)
+      continue
+    }
+
     const print = fingerprint(text)
     const already = seen.get(print)
     if (already) {
@@ -247,7 +341,7 @@ export async function POST(req: Request) {
         actionItemId: already.id,
         kind: 'updated',
         actor: agent,
-        note: 'Came up again.',
+        note: (raw.note ? String(raw.note).trim().slice(0, 1000) : '') || 'Came up again.',
         sourceTitle,
         sourceUrl,
         recordedBy: agent,
@@ -307,7 +401,7 @@ export async function POST(req: Request) {
     })
   }
 
-  return Response.json({ written, skipped, dropped })
+  return Response.json({ written, updated, skipped, dropped, notes })
 }
 
 /**

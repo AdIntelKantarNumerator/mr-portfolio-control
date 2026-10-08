@@ -194,6 +194,9 @@ export const DECISION_EVENT_KIND = [
   'raised',
   'discussed',
   'updated',
+  // The meeting changed it: a different decision, a new owner or date, a
+  // blocker that turned into something else. Carries `changes`.
+  'changed',
   'resolved',
   'reopened',
 ] as const

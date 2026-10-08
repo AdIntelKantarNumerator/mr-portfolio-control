@@ -10,6 +10,7 @@
 import { revalidatePath } from 'next/cache'
 import { editor } from '@/lib/auth/editor'
 import { applyItemUpdate, inactiveRefs, itemHistory, scopeIds } from '@/lib/items'
+import type { ItemChange } from '@/lib/item-changes'
 import { parseScope } from '@/lib/hierarchy'
 import type { ItemKind } from '@/lib/importance'
 
@@ -39,6 +40,8 @@ export interface HistoryEntry {
   note: string | null
   source: string | null
   url: string | null
+  /** What this entry changed, from and to. Empty for a mention. */
+  changes: ItemChange[]
 }
 
 export async function loadItemHistory(ref: string): Promise<HistoryEntry[]> {

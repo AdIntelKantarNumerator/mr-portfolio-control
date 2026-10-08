@@ -13,6 +13,7 @@
  * The rules are elsewhere and pure: importance.ts (the score), item-activity.ts
  * (inactive, health).
  */
+import { decodeChanges, type ItemChange } from '@/lib/item-changes'
 import { desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import {
@@ -490,15 +491,17 @@ async function rescore(found: Found) {
 }
 
 /** An item's history, newest first, for the popup. */
-export async function itemHistory(ref: string): Promise<Array<{ kind: string; at: Date; actor: string | null; note: string | null; source: string | null; url: string | null }>> {
+export async function itemHistory(ref: string): Promise<Array<{ kind: string; at: Date; actor: string | null; note: string | null; source: string | null; url: string | null; changes: ItemChange[] }>> {
   const found = await findByRef(ref)
   if (!found) return []
+  // Each entry says what changed (from and to), where (the meeting or
+  // document, linked) and when. See lib/item-changes.ts.
   if (found.kind === 'action') {
     const rows = await db.select().from(actionItemEvents).where(eq(actionItemEvents.actionItemId, found.row.id)).orderBy(desc(actionItemEvents.occurredAt))
-    return rows.map((r) => ({ kind: r.kind, at: r.occurredAt, actor: r.actor, note: r.note, source: r.sourceTitle, url: r.sourceUrl }))
+    return rows.map((r) => ({ kind: r.kind, at: r.occurredAt, actor: r.actor, note: r.note, source: r.sourceTitle, url: r.sourceUrl, changes: decodeChanges(r.changes) }))
   }
   const rows = await db.select().from(decisionEvents).where(eq(decisionEvents.decisionId, found.row.id)).orderBy(desc(decisionEvents.occurredAt))
-  return rows.map((r) => ({ kind: r.kind, at: r.occurredAt ?? r.createdAt, actor: r.actor, note: r.note, source: r.meeting, url: r.url }))
+  return rows.map((r) => ({ kind: r.kind, at: r.occurredAt ?? r.createdAt, actor: r.actor, note: r.note, source: r.meeting, url: r.url, changes: decodeChanges(r.changes) }))
 }
 
 /** Every open item of one kind in scope that has gone inactive: the "withdraw all" set. */

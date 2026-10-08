@@ -54,6 +54,7 @@ import {
 } from '@/lib/domain'
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
 import { matchPerson, nextRef } from '@/lib/register'
+import { diffChanges, encodeChanges } from '@/lib/item-changes'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -255,10 +256,20 @@ export async function POST(req: Request) {
     const resolving = eventKind === 'resolved'
 
     if (existing) {
+      // A meeting that CHANGED the entry, as opposed to one that mentioned it
+      // again: a decision reversed or reworded, a blocker that became
+      // something else, a new owner. Only then may the title and owner move.
+      // On an ordinary mention they stay put, because renaming a live item on
+      // every mention is how a register stops being recognisable to the
+      // people in it.
+      const changing = eventKind === 'changed'
+      const nameOf = (id: string | null) => (id ? (roster.find((p) => p.id === id)?.name ?? null) : null)
+      const askedStatus = STATUSES.has(String(raw.status)) ? String(raw.status) : undefined
+
       const patch: Partial<typeof decisions.$inferInsert> = {
         // The body and the story so far are what a later meeting actually
-        // changes. The title stays put: renaming a live item on every mention
-        // is how a register stops being recognisable to the people in it.
+        // changes. The old body is kept in the history entry's changes, so
+        // replacing it here no longer loses what it said.
         body: text || existing.body,
         history: raw.history ? String(raw.history).slice(0, 4000) : existing.history,
         updatedAt: new Date(),
@@ -267,10 +278,12 @@ export async function POST(req: Request) {
         lastActivityAt: new Date(),
         mentions: existing.mentions + 1,
       }
+      if (changing && title) patch.title = title.slice(0, 300)
 
       // An owner that was unknown and is now named is the single most useful
-      // update this can make. One that is already set is left alone.
-      if (!existing.ownerId && !existing.ownerText && raw.owner) {
+      // update this can make. One that is already set is left alone, unless
+      // the meeting changed it.
+      if (raw.owner && (changing || (!existing.ownerId && !existing.ownerText))) {
         patch.ownerId = ownerId
         patch.ownerText = ownerId ? null : String(raw.owner).slice(0, 200)
       }
@@ -280,6 +293,7 @@ export async function POST(req: Request) {
       }
       if (raw.nextAction) patch.nextAction = String(raw.nextAction).slice(0, 500)
       if (raw.dueBy) patch.dueBy = String(raw.dueBy).slice(0, 120)
+      if (changing && raw.contested === true) patch.contested = true
 
       if (resolving) {
         patch.status = RESOLVED_STATUS
@@ -287,14 +301,42 @@ export async function POST(req: Request) {
         patch.resolvedAtMeeting = document.title
         patch.resolvedDocumentId = document.id
         resolved.push(existing.ref)
-      } else if (STATUSES.has(String(raw.status))) {
-        patch.status = String(raw.status)
+      } else if (askedStatus) {
+        patch.status = askedStatus
+        // Reopened: no longer resolved, so it no longer says where it was.
+        if (askedStatus !== RESOLVED_STATUS && existing.status === RESOLVED_STATUS) {
+          patch.resolvedAt = null
+          patch.resolvedAtMeeting = null
+          patch.resolvedDocumentId = null
+        }
       }
+
+      const changes = diffChanges(
+        {
+          title: existing.title,
+          body: existing.body,
+          status: existing.status,
+          owner: nameOf(existing.ownerId) ?? existing.ownerText,
+          dueBy: existing.dueBy,
+          nextAction: existing.nextAction,
+        },
+        {
+          title: patch.title,
+          body: patch.body,
+          status: patch.status,
+          owner: 'ownerId' in patch ? (nameOf(patch.ownerId ?? null) ?? patch.ownerText) : undefined,
+          dueBy: patch.dueBy,
+          nextAction: patch.nextAction,
+        },
+        ['title', 'status', 'owner', 'dueBy', 'nextAction', 'body'],
+      )
 
       await db.update(decisions).set(patch).where(eq(decisions.id, existing.id))
       await db.insert(decisionEvents).values({
         decisionId: existing.id,
-        kind: eventKind,
+        // Called a change only when something did change; a "changed" that
+        // matched what was already recorded is a mention.
+        kind: changing && changes.length === 0 ? 'discussed' : eventKind,
         occurredAt: eventAt,
         meeting: document.title,
         documentId: document.id,
@@ -302,6 +344,7 @@ export async function POST(req: Request) {
         actor: event.actor ? String(event.actor).slice(0, 200) : null,
         note: note.slice(0, 1000),
         recordedBy: agent,
+        changes: encodeChanges(changes),
       })
       if (!resolving) updated.push(existing.ref)
       continue
