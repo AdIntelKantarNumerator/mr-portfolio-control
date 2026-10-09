@@ -32,6 +32,16 @@ export function isInactive(lastActivityAt: Date, now: Date = new Date()): boolea
   return now.getTime() - lastActivityAt.getTime() > INACTIVE_DAYS * DAY
 }
 
+/**
+ * When an item was last live, counting the end of a hold (9 October 2026).
+ * An item held until December has had no update for weeks by then; without
+ * this it would come off hold already "inactive", and inactive items are not
+ * reminded about, so the reminder the hold promised would never come.
+ */
+export function activityWithHold(lastActivityAt: Date, heldUntil: Date | null | undefined, now: Date = new Date()): Date {
+  return heldUntil && heldUntil <= now && heldUntil > lastActivityAt ? heldUntil : lastActivityAt
+}
+
 export function daysSince(at: Date, now: Date = new Date()): number {
   return Math.max(0, Math.floor((now.getTime() - at.getTime()) / DAY))
 }

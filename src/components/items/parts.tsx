@@ -116,6 +116,8 @@ export interface ItemInfo {
   raisedBy: string | null
   lastActivityAt: string
   inactive: boolean
+  /** On hold until this day (YYYY-MM-DD): no reminders before it. */
+  heldUntil?: string | null
 }
 
 const days = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000))
@@ -251,6 +253,7 @@ const EVENT_WORD: Record<string, string> = {
   owner: 'Owner',
   importance: 'Importance',
   nudged: 'Reminder sent',
+  held: 'On hold',
 }
 
 /** Every update on an item, newest first: evidence, replies, status changes, edits. */
@@ -323,6 +326,11 @@ export function HistoryButton({ item }: { item: Pick<ItemInfo, 'ref' | 'title' |
 export function ItemTools({ item }: { item: ItemInfo }) {
   return (
     <span className="imp-tools">
+      {item.heldUntil && item.heldUntil > new Date().toISOString().slice(0, 10) ? (
+        <span className="imp-held" title="No reminders until then">
+          On hold · {new Date(`${item.heldUntil}T12:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+        </span>
+      ) : null}
       <AdjustButtons item={item} />
       <WhyButton item={item} />
       <HistoryButton item={item} />

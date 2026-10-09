@@ -462,6 +462,8 @@ export const decisions = pgTable(
     nudgedAt: timestamp('nudged_at', { withTimezone: true }),
     /** The ref of the item this was a duplicate of, when it was merged. */
     mergedInto: text('merged_into'),
+    /** On hold: nobody is reminded about it before this day. See drizzle/0030_item_hold.sql. */
+    heldUntil: timestamp('held_until', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -572,6 +574,8 @@ export const actionItems = pgTable(
     nudgedAt: timestamp('nudged_at', { withTimezone: true }),
     /** The ref of the item this was a duplicate of, when it was merged. */
     mergedInto: text('merged_into'),
+    /** On hold: nobody is reminded about it before this day. See drizzle/0030_item_hold.sql. */
+    heldUntil: timestamp('held_until', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

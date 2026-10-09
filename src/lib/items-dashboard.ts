@@ -47,6 +47,7 @@ export function toInfo(i: Item): ItemInfo {
     raisedBy: i.raisedBy,
     lastActivityAt: i.lastActivityAt.toISOString(),
     inactive: i.inactive,
+    heldUntil: i.heldUntil ? i.heldUntil.toISOString().slice(0, 10) : null,
   }
 }
 

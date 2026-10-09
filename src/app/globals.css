@@ -1973,3 +1973,6 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 
 /* A decision's bullet: a check, in the bullet's colour, where other rows have a dot. */
 .tile-list i.chk, .hbullets i.chk, .sig-row .sw.chk { width: auto; height: auto; background: none; border-radius: 0; font-style: normal; font-weight: 900; font-size: 13px; line-height: 1; transform: none; }
+
+/* On hold until a date: no reminders before it. */
+.imp-held { font-size: 11px; font-weight: 750; color: var(--muted); background: var(--surface-2); border-radius: 99px; padding: 1px 8px; white-space: nowrap; }

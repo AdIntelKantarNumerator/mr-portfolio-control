@@ -31,7 +31,7 @@ import {
 import { logChange } from './portfolio'
 import { matchPerson } from './register'
 import { ADJUST_STEP, assignBands, isFactor, parseFactors, parseReasons, scoreOf, type Band, type FactorKey, type ItemKind, type Reason } from './importance'
-import { isInactive } from './item-activity'
+import { activityWithHold, isInactive } from './item-activity'
 import { isDecisionOnRecord, isRecentDecision } from './decision-recency'
 import { idsAtOrBelow, type Tier } from './hierarchy'
 
@@ -64,6 +64,8 @@ export interface Item {
   mentions: number
   nudgedAt: Date | null
   mergedInto: string | null
+  /** On hold until this day: open, but nobody is reminded about it before then. */
+  heldUntil: Date | null
   /** Where it was first raised: the meeting, document or channel, and a link when there is one. */
   sourceTitle: string | null
   sourceUrl: string | null
@@ -134,7 +136,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         body: r.body,
         status: r.status,
         open,
-        inactive: open && (isDecision ? !isRecentDecision(r, now) : isInactive(r.lastActivityAt, now)),
+        inactive: open && (isDecision ? !isRecentDecision(r, now) : isInactive(activityWithHold(r.lastActivityAt, r.heldUntil, now), now)),
         ownerName: (r.ownerId && nameOf.get(r.ownerId)) || r.ownerText || null,
         places: at && r.entityId ? [{ level: at.level, id: r.entityId, name: at.name }] : [],
         placeOwner: ownerAbove(r.entityId),
@@ -151,6 +153,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         mentions: r.mentions,
         nudgedAt: r.nudgedAt,
         mergedInto: r.mergedInto,
+        heldUntil: r.heldUntil ?? null,
         sourceTitle: (r.raisedDocumentId && docOf.get(r.raisedDocumentId)?.title) || r.raisedAtMeeting,
         sourceUrl: (r.raisedDocumentId && docOf.get(r.raisedDocumentId)?.url) || null,
         raisedBy: (r.raisedById && nameOf.get(r.raisedById)) || r.raisedByText || null,
@@ -182,7 +185,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         body: null,
         status: r.status,
         open,
-        inactive: open && isInactive(r.lastActivityAt, now),
+        inactive: open && isInactive(activityWithHold(r.lastActivityAt, r.heldUntil, now), now),
         ownerName: (r.ownerId && nameOf.get(r.ownerId)) || r.ownerName || null,
         places,
         placeOwner: ownerAbove(nearest?.id),
@@ -199,6 +202,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         mentions: r.mentions,
         nudgedAt: r.nudgedAt,
         mergedInto: r.mergedInto,
+        heldUntil: r.heldUntil ?? null,
         sourceTitle: r.sourceTitle,
         sourceUrl: r.sourceUrl,
         raisedBy: null,
@@ -279,6 +283,7 @@ export type ItemAction =
   | 'score' // Yaara's factors
   | 'adjust' // a person's +/- (delta)
   | 'nudged' // its owner was reminded; not activity
+  | 'hold' // on hold until a date ("until"), or released when there is none
 
 export interface ItemUpdate {
   ref: string
@@ -307,6 +312,8 @@ export interface ItemUpdate {
    */
   quiet?: boolean
   occurredAt?: Date | null
+  /** For hold: the day reminders start again, YYYY-MM-DD; null releases the hold. */
+  until?: string | null
 }
 
 export interface UpdateResult {
@@ -482,6 +489,19 @@ export async function applyItemUpdate(u: ItemUpdate): Promise<UpdateResult> {
       await addEvent(found, 'importance', u, `${delta > 0 ? 'More' : 'Less'} important, by hand: now ${score}${note ? `. ${note}` : ''}`)
       await log(`Marked ${name} ${delta > 0 ? 'more' : 'less'} important (${score})`)
       return { ref: u.ref, ok: true, status: found.row.status, score }
+    }
+    case 'hold': {
+      // On hold: still open, not reminded about until the day (Scott,
+      // 9 October 2026 - "A35 won't be addressed until December"). Recorded
+      // as a person's decision about the item, so it is activity.
+      const day = u.until && /^\d{4}-\d{2}-\d{2}$/.test(u.until) ? u.until : null
+      if (u.until && !day) return { ref: u.ref, ok: false, error: `"${u.until}" is not a date (YYYY-MM-DD).` }
+      if (day && day <= now.toISOString().slice(0, 10)) return { ref: u.ref, ok: false, error: `${day} is not in the future.` }
+      await patchRow(found, { heldUntil: day ? new Date(`${day}T00:00:00Z`) : null, lastActivityAt: now })
+      const said = day ? `On hold until ${day}` : 'Hold released'
+      await addEvent(found, 'held', u, note ? `${said}. ${note}` : said)
+      await log(day ? `${u.ref} on hold until ${day}` : `${u.ref} hold released`)
+      return { ref: u.ref, ok: true, status: found.row.status }
     }
     case 'nudged': {
       // A reminder is not an update: last_activity_at is left alone.
