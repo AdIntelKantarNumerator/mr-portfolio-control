@@ -611,8 +611,17 @@ if (-not $NoSyncSchedule) {
 
   # Created disabled until there is a Linear key to sync with, so it does not
   # spend the next month failing every hour against an app that cannot answer.
-  $linearKey = Get-ExistingSetting 'LINEAR_API_KEY'
-  $state = if ($linearKey) { 'Enabled' } else { 'Disabled' }
+  # Read with retries, and never switch an enabled sync off on a failed read:
+  # on 9 October one empty answer, while the app was restarting, disabled a
+  # sync that had been running every hour.
+  $linearKey = $null
+  foreach ($try in 1..3) {
+    $linearKey = Get-ExistingSetting 'LINEAR_API_KEY'
+    if ($linearKey) { break }
+    Start-Sleep -Seconds 10
+  }
+  $current = (& az resource show -g $ResourceGroup -n $logicApp --resource-type Microsoft.Logic/workflows --query properties.state -o tsv 2>$null | Out-String).Trim()
+  $state = if ($linearKey -or $current -eq 'Enabled') { 'Enabled' } else { 'Disabled' }
 
   $providerState = (& az provider show -n Microsoft.Logic --query registrationState -o tsv 2>$null | Out-String).Trim()
   if ($LASTEXITCODE -eq 0 -and $providerState -and $providerState -ne 'Registered') {
