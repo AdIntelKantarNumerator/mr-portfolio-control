@@ -366,7 +366,7 @@ export function ObjectiveCard({
           <p className="ptitle">Critical signals</p>
           {card.signals.length === 0 ? (
             <p className="empty">
-              No blockers, decisions or actions recorded. Consistent with the silence, not evidence of health.
+              No blockers, actions or decisions recorded. Consistent with the silence, not evidence of health.
             </p>
           ) : (
             card.signals.map((s, i) => (
@@ -378,7 +378,13 @@ export function ObjectiveCard({
                   onClick={() => setOpen(open === i ? null : i)}
                   title={s.items.length ? 'Show the Critical items' : 'Nothing Critical'}
                 >
-                  <span className="sw" style={{ background: SIGNAL[s.kind].color }} />
+                  {s.kind === 'decision' ? (
+                    <span className="sw chk" style={{ color: SIGNAL[s.kind].color }} aria-hidden="true">
+                      ✓
+                    </span>
+                  ) : (
+                    <span className="sw" style={{ background: SIGNAL[s.kind].color }} />
+                  )}
                   <span className="tx">
                     {s.summary}
                     <em>{SIGNAL[s.kind].label}</em>

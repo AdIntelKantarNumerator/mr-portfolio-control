@@ -104,3 +104,11 @@ test('a long change is clipped to stay scannable', () => {
   assert.ok(line.length < 100)
   assert.match(line, /…" → "short"/)
 })
+
+test('decisions go in their own section, only when made or changed at the last session or since', () => {
+  const decided = { ...base, kind: 'decision' as const, ref: 'D14', status: 'decided', open: true, createdAt: new Date('2026-10-08T13:00:00Z'), source: 'Working Sessions: Insights Studio with GPC - 2026/10/08 08:29 EDT' }
+  assert.equal(bucketOf(decided, since), 'decided')
+  assert.equal(bucketOf({ ...decided, createdAt: new Date('2026-10-07T13:40:00Z'), source: base.source }, since), null, 'an older decision nobody revisited')
+  assert.equal(bucketOf({ ...decided, status: 'dropped' }, since), null)
+  assert.equal(derivedCheck(decided, 'decided', '2026-10-08'), null, 'nothing to check on a decision')
+})

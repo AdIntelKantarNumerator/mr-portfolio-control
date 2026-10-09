@@ -60,7 +60,13 @@ export interface SeriesView extends SeriesSummary {
   sections: Record<Bucket, SeriesRow[]>
 }
 
-const today = () => new Date().toISOString().slice(0, 10)
+/**
+ * Today where the sessions happen. The working sessions are on Eastern time,
+ * and a UTC date flips to tomorrow at 8 pm there - which made Thursday
+ * evening's "next session" Monday instead of Friday.
+ */
+const SESSION_TZ = 'America/New_York'
+const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: SESSION_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 
 /** Every title any record says it came from: meetings read, items raised, history entries. */
 async function allTitles(): Promise<{ docs: string[]; events: Array<{ itemId: string; e: SeriesEvent }> }> {
@@ -163,12 +169,12 @@ export async function seriesView(id: string): Promise<SeriesView | null> {
   ])
   const written = new Map(checks.map((c) => [c.ref.toUpperCase(), c.text]))
 
-  const sections: Record<Bucket, SeriesRow[]> = { new: [], resolved: [], changed: [], quiet: [] }
+  const sections: Record<Bucket, SeriesRow[]> = { new: [], resolved: [], changed: [], quiet: [], decided: [] }
   const members = membersOf(s.meetings, items, titles.events)
   for (const item of members) {
     const bucket = bucketOf(item, lastDay)
     if (!bucket) continue
-    const ch = bucket === 'changed' || bucket === 'resolved' ? latestChange(item, lastDay) : null
+    const ch = bucket === 'changed' || bucket === 'resolved' || bucket === 'decided' ? latestChange(item, lastDay) : null
     const own = written.get(item.ref.toUpperCase())
     sections[bucket].push({
       kind: item.kind,
@@ -178,7 +184,7 @@ export async function seriesView(id: string): Promise<SeriesView | null> {
       owner: item.owner,
       due: item.dueDate ? item.dueDate.toISOString().slice(0, 10) : null,
       change: changeLine(ch),
-      where: ch?.source ? baseMeetingName(ch.source) : null,
+      where: ch?.source ? baseMeetingName(ch.source) : bucket === 'decided' && item.source ? baseMeetingName(item.source) : null,
       whereUrl: ch?.url ?? null,
       check: own ?? derivedCheck(item, bucket, now),
       checkWritten: Boolean(own),

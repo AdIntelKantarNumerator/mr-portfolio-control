@@ -113,7 +113,7 @@ export interface SeriesItem {
   events: SeriesEvent[]
 }
 
-export type Bucket = 'new' | 'resolved' | 'changed' | 'quiet'
+export type Bucket = 'new' | 'resolved' | 'changed' | 'quiet' | 'decided'
 
 /**
  * Kinds of history entry that are a meeting saying something new about the
@@ -140,6 +140,13 @@ export function isSince(at: Date, source: string | null | undefined, lastDay: st
  */
 export function bucketOf(item: SeriesItem, lastDay: string): Bucket | null {
   if (item.mergedInto) return null
+  // A decision is a record of what was decided, in a section of its own: made
+  // or changed at the last session or since (Scott, 8 October 2026).
+  if (item.kind === 'decision') {
+    if (item.status === 'dropped') return null
+    const fresh = isSince(item.createdAt, item.source, lastDay) || item.events.some((e) => SAID.has(e.kind) && isSince(e.at, e.source, lastDay))
+    return fresh ? 'decided' : null
+  }
   if (isSince(item.createdAt, item.source, lastDay)) return 'new'
   if (!item.open) return item.closedAt && item.closedAt.toISOString().slice(0, 10) >= lastDay ? 'resolved' : null
   return item.events.some((e) => SAID.has(e.kind) && isSince(e.at, e.source, lastDay)) ? 'changed' : 'quiet'
@@ -168,7 +175,7 @@ export function changeLine(e: SeriesEvent | null): string | null {
  * Short on purpose: it is a column, not a paragraph.
  */
 export function derivedCheck(item: SeriesItem, bucket: Bucket, today: string): string | null {
-  if (bucket === 'resolved' || !item.open) return null
+  if (bucket === 'resolved' || bucket === 'decided' || !item.open) return null
   const due = item.dueDate ? toDay(item.dueDate) : null
   if (due && due < today) return `Overdue since ${shortDay(due)}`
   if (!item.owner || /^(the group|the team|nobody|unassigned)$/i.test(item.owner.trim())) return 'Needs an owner'

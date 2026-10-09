@@ -1,5 +1,10 @@
 /**
- * Decisions: what is outstanding, and who owes the answer.
+ * Decisions: what was decided (Scott, 8 October 2026).
+ *
+ * A decision is a record, not work in progress: nothing is owed on it once it
+ * is made, so there is no status, no closure health and no top five. Every
+ * decision from the last sixty days is listed, newest first; older ones are
+ * inactive and appear behind "Show inactive" (lib/decision-recency.ts).
  *
  * The same page as Blockers, because they are the same table and the same
  * shape - see components/records/register-list.tsx. Decisions had no page at
@@ -7,19 +12,17 @@
  * page of whatever they were filed against, and the home board's links to
  * them 404'd.
  */
-import { asc, desc, eq, inArray } from 'drizzle-orm'
+import { asc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { decisionEvents, decisions, objectives, people, initiatives, sourceDocuments, projects } from '@/db/schema'
 import { Kicker } from '@/components/ui'
 import { addContext } from '@/lib/add-context'
 import { scopeFilter } from '@/lib/scope-filter'
-import { isOpenEntry } from '@/lib/domain'
+import { decidedAt, isDecisionOnRecord } from '@/lib/decision-recency'
 import { provenanceOfEntry, type Mention } from '@/lib/provenance'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { RegisterList, type BlockerRow, type Named } from '@/components/records/register-list'
-import { EditEntryButton } from '@/components/records/edit-entry'
 import { dashboardFor } from '@/lib/items-dashboard'
-import { HealthTile, TopItems, WithdrawAll } from '@/components/items/parts'
 
 export const metadata = { title: 'Decisions' }
 export const dynamic = 'force-dynamic'
@@ -27,20 +30,12 @@ export const dynamic = 'force-dynamic'
 export default async function DecisionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ show?: string; scope?: string; focus?: string }>
+  searchParams: Promise<{ scope?: string; focus?: string }>
 }) {
-  const { show, scope, focus } = await searchParams
-  const closed = show === 'closed'
+  const { scope, focus } = await searchParams
 
   const [rows, inits, projs, wss, folk, ctx, user] = await Promise.all([
-    closed
-      ? db
-          .select()
-          .from(decisions)
-          .where(eq(decisions.kind, 'decision'))
-          .orderBy(desc(decisions.resolvedAt))
-          .limit(300)
-      : db.select().from(decisions).where(eq(decisions.kind, 'decision')),
+    db.select().from(decisions).where(eq(decisions.kind, 'decision')),
     db.select({ id: objectives.id, name: objectives.name }).from(objectives).orderBy(asc(objectives.name)),
     db
       .select({ id: initiatives.id, name: initiatives.name, objectiveId: initiatives.objectiveId })
@@ -102,7 +97,8 @@ export default async function DecisionsPage({
 
   const items: BlockerRow[] = rows
     .filter((d) => narrow.covers(d.entityId))
-    .filter((d) => (closed ? !isOpenEntry(d.status) : isOpenEntry(d.status)))
+    // Withdrawn and merged-away decisions are not decisions.
+    .filter((d) => isDecisionOnRecord(d))
     .map((d) => ({
       id: d.id,
       ref: d.ref,
@@ -114,6 +110,7 @@ export default async function DecisionsPage({
       raisedBy: d.raisedById ? (nameOf.get(d.raisedById) ?? d.raisedByText) : d.raisedByText,
       dueBy: d.dueBy,
       raisedAt: d.raisedAt ? d.raisedAt.toISOString().slice(0, 10) : null,
+      decidedAt: decidedAt(d)?.toISOString().slice(0, 10) ?? null,
       level: d.entityType,
       entity: d.entityType && d.entityId ? (named.get(`${d.entityType}:${d.entityId}`) ?? null) : null,
       source: provenanceOfEntry({
@@ -128,55 +125,12 @@ export default async function DecisionsPage({
       }),
     }))
 
-  // Open before watching, then oldest first: a blocker's age is the thing
-  // that makes it worth looking at, and a list sorted by name buries it.
-  const rank = (r: BlockerRow) => (r.status === 'open' ? 0 : r.status === 'watch' ? 1 : 2)
-  items.sort((a, b) => rank(a) - rank(b) || (a.raisedAt ?? '9999').localeCompare(b.raisedAt ?? '9999'))
-
-  // The dashboard (Scott, 5 October 2026): closure health and the top five
-  // at the top, then the open decisions, then the ones nobody has touched for a
-  // week. Resolved and dropped keep the plain list behind "Show resolved".
-  if (closed) {
-    return (
-      <div className="stack">
-        <div className="titlerow">
-          <div>
-            <Kicker>Work in progress</Kicker>
-            <h1>Decisions</h1>
-          </div>
-        </div>
-        <RegisterList
-          kind="decision"
-          rows={items}
-          objectives={inits}
-          initiatives={projs}
-          projects={wss}
-          people={folk}
-          closed={closed}
-          editing={user.personId ? { people: ctx.people, endpoints: ctx.endpoints } : null}
-          scope={narrow.label && scope ? { label: narrow.label, clear: '/decisions', param: scope } : null}
-        />
-      </div>
-    )
-  }
+  // Newest first: the question this page answers is "what did we decide lately".
+  items.sort((a, b) => (b.decidedAt ?? '').localeCompare(a.decidedAt ?? ''))
 
   const dash = await dashboardFor('decision', scope)
-  // The top five are shown once, in their tile; the list is everything else
-  // that is open (Scott, 5 October 2026).
-  const top = new Set(dash.top.map((t) => t.ref))
-  // Everything open, active and inactive, top five included: the list's own
-  // switches decide which of those to show (Scott, 6 October 2026).
-  const openRows = items.filter((r) => dash.activeRefs.has(r.ref) || dash.inactiveRefs.has(r.ref))
-  const inactiveCount = items.filter((r) => dash.inactiveRefs.has(r.ref)).length
   const editingCtx = user.personId ? { people: ctx.people, endpoints: ctx.endpoints } : null
   const scoped = narrow.label && scope ? { label: narrow.label, clear: '/decisions', param: scope } : null
-  // The same edit button the list rows have, for each of the top five.
-  const edits: Record<string, React.ReactNode> = {}
-  if (editingCtx) {
-    for (const r of items) {
-      if (top.has(r.ref)) edits[r.ref] = <EditEntryButton kind="blocker" id={r.id} ctx={editingCtx} label={r.title} />
-    }
-  }
 
   return (
     <div className="stack">
@@ -187,16 +141,10 @@ export default async function DecisionsPage({
         </div>
       </div>
 
-      <div className="imp-tiles">
-        <HealthTile rag={dash.health.rag} facts={dash.health.facts} noun="decisions" />
-        <TopItems items={dash.top} noun="decisions" edits={edits} />
-      </div>
-
       <section className="tile imp-section">
-        <p className="ptitle">All decisions</p>
         <RegisterList
           kind="decision"
-          rows={openRows}
+          rows={items}
           objectives={inits}
           initiatives={projs}
           projects={wss}
@@ -207,11 +155,8 @@ export default async function DecisionsPage({
           info={dash.info}
           variant="open"
           focus={focus}
-          topRefs={dash.top.map((t) => t.ref)}
-          withdraw={<WithdrawAll kind="decision" scope={dash.scope} count={inactiveCount} noun="inactive decisions" />}
         />
       </section>
-
     </div>
   )
 }

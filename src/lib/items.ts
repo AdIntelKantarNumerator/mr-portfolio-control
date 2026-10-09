@@ -32,6 +32,7 @@ import { logChange } from './portfolio'
 import { matchPerson } from './register'
 import { ADJUST_STEP, assignBands, isFactor, parseFactors, parseReasons, scoreOf, type Band, type FactorKey, type ItemKind, type Reason } from './importance'
 import { isInactive } from './item-activity'
+import { isDecisionOnRecord, isRecentDecision } from './decision-recency'
 import { idsAtOrBelow, type Tier } from './hierarchy'
 
 export interface Item {
@@ -115,9 +116,13 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
     for (const r of rows) {
       const kind = r.kind === 'blocker' ? 'blocker' : 'decision'
       if (!kinds.has(kind)) continue
-      const open = !REGISTER_CLOSED.has(r.status)
-      // A decision recorded as already decided has no resolved date of its
-      // own: it was settled where it was raised, so that is when it closed.
+      // A decision is a record of what was decided, not work in progress
+      // (lib/decision-recency.ts): "open" is not withdrawn, and it goes
+      // inactive sixty days after it was made rather than after a quiet week.
+      const isDecision = kind === 'decision'
+      const open = isDecision ? isDecisionOnRecord(r) : !REGISTER_CLOSED.has(r.status)
+      // A register entry recorded as already settled has no resolved date of
+      // its own: it was settled where it was raised, so that is when it closed.
       const closedAt = open ? null : (r.resolvedAt ?? r.raisedAt ?? null)
       if (!open && !(opts.closedSince && closedAt && closedAt >= opts.closedSince)) continue
       const at = r.entityId ? place.get(r.entityId) : undefined
@@ -129,7 +134,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         body: r.body,
         status: r.status,
         open,
-        inactive: open && isInactive(r.lastActivityAt, now),
+        inactive: open && (isDecision ? !isRecentDecision(r, now) : isInactive(r.lastActivityAt, now)),
         ownerName: (r.ownerId && nameOf.get(r.ownerId)) || r.ownerText || null,
         places: at && r.entityId ? [{ level: at.level, id: r.entityId, name: at.name }] : [],
         placeOwner: ownerAbove(r.entityId),
@@ -235,13 +240,16 @@ function liveScore(
  * link to the list could land with the item on page three, or hidden by the
  * list's include switches.
  */
-export function itemPath(item: Pick<Item, 'kind' | 'ref' | 'places'>): string {
+export function itemPath(item: Pick<Item, 'kind' | 'ref' | 'places'> & { open?: boolean }): string {
   const page = item.kind === 'blocker' ? 'blockers' : item.kind === 'decision' ? 'decisions' : 'actions'
   const order = { project: 0, initiative: 1, objective: 2 } as const
   const place = [...item.places].sort((a, b) => order[a.level] - order[b.level])[0]
   const params = new URLSearchParams()
   if (place) params.set('scope', `${place.level}:${place.id}`)
   params.set('focus', item.ref)
+  // A closed item is only on its page's closed list; a link without this
+  // opened an empty page (A494 from the meeting series, 8 October 2026).
+  if (item.open === false) params.set('show', 'closed')
   return `/${page}?${params.toString()}`
 }
 

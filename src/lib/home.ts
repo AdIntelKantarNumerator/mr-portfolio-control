@@ -13,6 +13,7 @@
  * count is a second answer to a question the tables already answer, and it goes
  * stale the first time somebody moves an initiative.
  */
+import { decidedAt, isDecisionOnRecord, isRecentDecision } from './decision-recency'
 import { isInactive } from './item-activity'
 import { loadItems } from './items'
 import { citedPoints, dedupePoints, type CitedPoint } from './cited-points'
@@ -515,7 +516,11 @@ export const getHomeCards = cache(async (
         .filter((d) => allIds.has(d.entityId ?? '') && isOpenEntry(d.status) && moving(d.lastActivityAt))
         .sort(byScore)
       const blockers = openDecs.filter((d) => d.kind === 'blocker')
-      const decisionsOpen = openDecs.filter((d) => d.kind === 'decision')
+      // Decisions are a record, not work in progress (lib/decision-recency.ts):
+      // the ones made in the last sixty days, whatever their activity.
+      const decisionsRecent = decs
+        .filter((d) => d.kind === 'decision' && allIds.has(d.entityId ?? '') && isDecisionOnRecord(d) && isRecentDecision(d, now))
+        .sort(byScore)
       const myActionIds = new Set(links.filter((l) => allIds.has(l.entityId)).map((l) => l.actionItemId))
       const myActions = acts.filter((a) => myActionIds.has(a.id) && moving(a.lastActivityAt)).sort(byScore)
 
@@ -577,23 +582,6 @@ export const getHomeCards = cache(async (
           })),
         })
       }
-      if (decisionsOpen.length) {
-        const top = critical(decisionsOpen)
-        signals.push({
-          kind: 'decision',
-          summary: say(top.length, 'decision', 'decisions', decisionsOpen.length),
-          href: `/decisions?scope=${from}`,
-          open: decisionsOpen.length,
-          items: top.map((d) => ({
-            id: d.id,
-            text: d.title,
-            when: stateOf(d.id),
-            who: bandOf.get(d.id)?.ownerName ?? 'No owner',
-            href: `/decisions?scope=${from}&focus=${encodeURIComponent(d.ref)}`,
-            where: whereDecision(d),
-          })),
-        })
-      }
       if (myActions.length) {
         const top = critical(myActions)
         signals.push({
@@ -608,6 +596,26 @@ export const getHomeCards = cache(async (
             who: a.ownerId ? (personName.get(a.ownerId) ?? null) : (a.ownerName ?? 'No owner'),
             href: a.ref ? `/actions?scope=${from}&focus=${encodeURIComponent(a.ref)}` : `/actions?scope=${from}`,
             where: whereAction(a.id),
+          })),
+        })
+      }
+
+      // Below actions (Scott, 8 October 2026): what was decided reads after
+      // what is stuck and what is owed.
+      if (decisionsRecent.length) {
+        const top = critical(decisionsRecent)
+        signals.push({
+          kind: 'decision',
+          summary: `${top.length ? top.length : 'No'} critical ${top.length === 1 ? 'decision' : 'decisions'} · ${decisionsRecent.length} recent`,
+          href: `/decisions?scope=${from}`,
+          open: decisionsRecent.length,
+          items: top.map((d) => ({
+            id: d.id,
+            text: d.title,
+            when: decidedAt(d) ? `decided ${age(decidedAt(d))}d ago` : '',
+            who: bandOf.get(d.id)?.ownerName ?? null,
+            href: `/decisions?scope=${from}&focus=${encodeURIComponent(d.ref)}`,
+            where: whereDecision(d),
           })),
         })
       }

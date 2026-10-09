@@ -61,8 +61,8 @@ export function usePref(key: string, fallback: boolean): [boolean, (v: boolean) 
  * the top five on for that view - a filtered list should be everything that
  * matches - without changing the remembered setting.
  */
-export function useAllListSwitches() {
-  const [inactive, setInactive] = usePref('wip.includeInactive', false)
+export function useAllListSwitches(opts?: { label?: string; pref?: string; top?: boolean }) {
+  const [inactive, setInactive] = usePref(opts?.pref ?? 'wip.includeInactive', false)
   const [topSaved, setTopSaved] = usePref('wip.includeTop', false)
   const [topByFilter, setTopByFilter] = useState(false)
   const top = topSaved || topByFilter
@@ -74,8 +74,9 @@ export function useAllListSwitches() {
       <span className="rt-switches">
         <label className="rt-switch">
           <input type="checkbox" checked={inactive} onChange={(e) => setInactive(e.target.checked)} />
-          Include inactive
+          {opts?.label ?? 'Include inactive'}
         </label>
+        {opts?.top === false ? null : (
         <label className="rt-switch">
           <input
             type="checkbox"
@@ -87,6 +88,7 @@ export function useAllListSwitches() {
           />
           Include top 5
         </label>
+        )}
       </span>
     ),
   }

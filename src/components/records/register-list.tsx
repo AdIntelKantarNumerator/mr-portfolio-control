@@ -71,15 +71,15 @@ const WORDS: Record<RegisterKind, Words> = {
     add: 'Record a decision',
     adding: 'Recording…',
     added: 'Record',
-    body: 'What has to be decided',
-    titleLabel: 'What has to be decided',
-    bodyLabel: 'What the options are',
-    titlePlaceholder: 'Which identifier wins',
-    bodyPlaceholder: 'legacy id, or the new one',
-    emptyOpen: 'No decisions outstanding.',
-    emptyClosed: 'Nothing has been decided or dropped yet.',
-    showClosed: 'Show decided',
-    showOpen: 'Show outstanding',
+    body: 'Decision',
+    titleLabel: 'What was decided',
+    bodyLabel: 'Detail',
+    titlePlaceholder: 'Keep "Advertiser" for now',
+    bodyPlaceholder: 'stress-test the name with GTM',
+    emptyOpen: 'No decisions in the last 60 days.',
+    emptyClosed: 'No decisions yet.',
+    showClosed: 'Show inactive',
+    showOpen: 'Show recent',
   },
 }
 
@@ -99,6 +99,8 @@ export interface BlockerRow {
   raisedBy: string | null
   dueBy: string | null
   raisedAt: string | null
+  /** A decision's date: when it was made. */
+  decidedAt?: string | null
   level: string | null
   entity: Named | null
   /** Where this was raised, for the hover card. */
@@ -176,7 +178,10 @@ export function RegisterList({
   // The "All" list (Scott, 6 October 2026): everything open, with switches to
   // include inactive items and the top five, both off by default and
   // remembered. A rule of hooks: called always, applied only on a dashboard.
-  const switches = useAllListSwitches()
+  // Decisions go inactive after sixty days, not a quiet week, and have no
+  // top five (lib/decision-recency.ts).
+  const isDecision = kind === 'decision'
+  const switches = useAllListSwitches(isDecision ? { label: 'Show inactive', pref: 'decisions.showInactive', top: false } : undefined)
   const top = new Set(topRefs ?? [])
   const visible = info
     ? rows.filter((r) => (switches.inactive || !info[r.ref]?.inactive) && (switches.top || !top.has(r.ref)))
@@ -200,6 +205,9 @@ export function RegisterList({
 
   const columns: Column<BlockerRow>[] = [
     { key: 'ref', label: 'Ref', sort: 'text', value: (r) => r.ref, className: 'rt-due' },
+    ...(isDecision
+      ? [{ key: 'decided', label: 'Decided', sort: { kind: 'date' as const, by: (r: BlockerRow) => r.decidedAt ?? null }, value: (r: BlockerRow) => r.decidedAt ?? '', className: 'rt-due' }]
+      : []),
     {
       key: 'at',
       label: 'Against',
@@ -269,6 +277,14 @@ export function RegisterList({
     },
   ]
 
+  // A decision has no status and is not waiting on a date: it has been made.
+  if (isDecision) {
+    for (const key of ['status', 'dueBy']) {
+      const at = columns.findIndex((c) => c.key === key)
+      if (at >= 0) columns.splice(at, 1)
+    }
+  }
+
   // Importance and updates, on the dashboards.
   if (info) {
     columns.splice(1, 0, {
@@ -294,7 +310,13 @@ export function RegisterList({
 
   // Importance first by default; or by ref, or newest first.
   const refNumber = (r: BlockerRow) => Number(r.ref.replace(/\D/g, '')) || 0
-  const sortOptions: SortOption<BlockerRow>[] | undefined = info
+  const sortOptions: SortOption<BlockerRow>[] | undefined = isDecision
+    ? [
+        { key: 'decided', label: 'Newest', compare: (a, b) => (b.decidedAt ?? '').localeCompare(a.decidedAt ?? '') || refNumber(b) - refNumber(a) },
+        { key: 'importance', label: 'Importance', compare: (a, b) => ((info?.[b.ref]?.score ?? -1) - (info?.[a.ref]?.score ?? -1)) || refNumber(a) - refNumber(b) },
+        { key: 'ref', label: 'Ref', compare: (a, b) => refNumber(a) - refNumber(b) },
+      ]
+    : info
     ? [
         { key: 'importance', label: 'Importance', compare: (a, b) => (info[b.ref]?.score ?? -1) - (info[a.ref]?.score ?? -1) || refNumber(a) - refNumber(b) },
         { key: 'ref', label: 'Ref', compare: (a, b) => refNumber(a) - refNumber(b) },
@@ -339,9 +361,11 @@ export function RegisterList({
               </span>
             ) : null}
             {info && switches.inactive ? withdraw : null}
-            <a className="rt-clear" href={toggleHref(w.href, closed, scope?.param)}>
-              {closed ? w.showOpen : w.showClosed}
-            </a>
+            {isDecision ? null : (
+              <a className="rt-clear" href={toggleHref(w.href, closed, scope?.param)}>
+                {closed ? w.showOpen : w.showClosed}
+              </a>
+            )}
             <button type="button" className="rt-add" onClick={() => setAdding(true)}>
               {w.add}
             </button>

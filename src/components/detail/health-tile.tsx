@@ -114,7 +114,13 @@ function Bullets({ items }: { items: UpdateBullet[] }) {
         const k = KIND[b.kind] ?? { tone: 'var(--line-2)', label: b.kind }
         return (
           <li key={b.id} title={[k.label, b.detail].filter(Boolean).join(' · ')}>
-            <i style={{ background: k.tone }} aria-hidden="true" />
+            {b.kind === 'decision_made' ? (
+              <i className="chk" style={{ color: k.tone }} aria-hidden="true">
+                ✓
+              </i>
+            ) : (
+              <i style={{ background: k.tone }} aria-hidden="true" />
+            )}
             <span>{b.text}</span>
           </li>
         )

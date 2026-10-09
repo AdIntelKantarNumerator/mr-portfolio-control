@@ -21,6 +21,7 @@
  * blank on an objective in serious trouble. So each tier shows its own plus
  * everything beneath it, which is the same rule the milestone panel uses.
  */
+import { decidedAt, isDecisionOnRecord, isRecentDecision } from './decision-recency'
 import { cache } from 'react'
 import { and, eq, inArray, isNull, desc } from 'drizzle-orm'
 import { db } from '@/db/client'
@@ -340,14 +341,18 @@ export const getDetail = cache(async (level: Level, id: string): Promise<DetailD
       href: `/blockers?scope=${level}:${id}&focus=${encodeURIComponent(d.ref)}`,
     }))
 
+  // A record of what was decided, newest first; the last sixty days in
+  // colour, older ones grey (lib/decision-recency.ts).
   const decisions: TileItem[] = regs
-    .filter((d) => d.kind === 'decision')
+    .filter((d) => d.kind === 'decision' && isDecisionOnRecord(d))
+    .sort((a, b) => (decidedAt(b)?.getTime() ?? 0) - (decidedAt(a)?.getTime() ?? 0))
     .map((d) => ({
       id: d.id,
       text: d.title,
-      meta: shortDate(d.raisedAt),
-      tone: DEC_TONE[d.status] ?? 'var(--line-2)',
-      toneLabel: d.status,
+      meta: shortDate(decidedAt(d)),
+      mark: 'check' as const,
+      tone: isRecentDecision(d) ? 'var(--c4)' : 'var(--muted)',
+      toneLabel: isRecentDecision(d) ? 'decided' : 'decided · inactive',
       detail: [d.ref, d.body, d.nextAction ? `next: ${d.nextAction}` : null].filter(Boolean).join(' · ') || undefined,
       href: `/decisions?scope=${level}:${id}&focus=${encodeURIComponent(d.ref)}`,
     }))

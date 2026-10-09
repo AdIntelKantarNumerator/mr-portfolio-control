@@ -69,6 +69,8 @@ export interface TileItem {
   tone?: string
   /** What the bullet means, for the hover: "blocker", "decision made". */
   toneLabel?: string
+  /** A check in place of the dot: a decision, which is done by being made. */
+  mark?: 'check'
   /** Everything a reader might want to check, on hover. Sources go here. */
   detail?: string
   href?: string
@@ -188,7 +190,13 @@ export function ListTile({
             const tip = [it.toneLabel, it.detail].filter(Boolean).join(' · ')
             return (
               <li key={it.id} title={tip || undefined}>
-                <i style={{ background: it.tone ?? 'var(--line-2)' }} aria-hidden="true" />
+                {it.mark === 'check' ? (
+                  <i className="chk" style={{ color: it.tone ?? 'var(--c4)' }} aria-hidden="true">
+                    ✓
+                  </i>
+                ) : (
+                  <i style={{ background: it.tone ?? 'var(--line-2)' }} aria-hidden="true" />
+                )}
                 <span className="t">
                   {it.href ? <Link href={it.href}>{it.text}</Link> : it.text}
                   {it.meta ? <em>{it.meta}</em> : null}

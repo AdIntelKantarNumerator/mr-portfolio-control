@@ -1970,3 +1970,6 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .ser-actions { display: flex; align-items: center; gap: 10px; }
 .ser-actions .btn { margin-left: auto; }
 .ser-count { font-size: 12.5px; color: var(--muted); }
+
+/* A decision's bullet: a check, in the bullet's colour, where other rows have a dot. */
+.tile-list i.chk, .hbullets i.chk, .sig-row .sw.chk { width: auto; height: auto; background: none; border-radius: 0; font-style: normal; font-weight: 900; font-size: 13px; line-height: 1; transform: none; }

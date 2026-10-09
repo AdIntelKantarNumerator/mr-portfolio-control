@@ -21,9 +21,10 @@ const KIND = { blocker: 'Blocker', decision: 'Decision', action: 'Action' } as c
 
 const SECTIONS: Array<{ key: Bucket; title: (last: string) => string; tone: string }> = [
   { key: 'new', title: (last) => `From the last session · ${last}`, tone: 'var(--c1)' },
-  { key: 'changed', title: () => 'Changed since', tone: 'var(--warn)' },
-  { key: 'quiet', title: () => 'Not discussed since', tone: 'var(--crit)' },
-  { key: 'resolved', title: () => 'Resolved since', tone: 'var(--good)' },
+  { key: 'changed', title: () => 'Changed', tone: 'var(--warn)' },
+  { key: 'quiet', title: () => 'Not Discussed', tone: 'var(--crit)' },
+  { key: 'resolved', title: () => 'Resolved', tone: 'var(--good)' },
+  { key: 'decided', title: () => 'Decisions', tone: 'var(--c4)' },
 ]
 
 export default async function SeriesDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -40,8 +41,9 @@ export default async function SeriesDetailPage({ params }: { params: Promise<{ i
   const stats: Array<{ n: number; label: string; tone: string }> = [
     { n: view.sections.new.length, label: 'New last session', tone: 'var(--c1)' },
     { n: view.sections.changed.length, label: 'Changed', tone: 'var(--warn)' },
-    { n: view.sections.quiet.length, label: 'Not discussed', tone: 'var(--crit)' },
+    { n: view.sections.quiet.length, label: 'Not Discussed', tone: 'var(--crit)' },
     { n: view.sections.resolved.length, label: 'Resolved', tone: 'var(--good)' },
+    { n: view.sections.decided.length, label: 'Decisions', tone: 'var(--c4)' },
     { n: unowned, label: 'Need an owner', tone: 'var(--muted)' },
   ]
 
@@ -102,16 +104,17 @@ export default async function SeriesDetailPage({ params }: { params: Promise<{ i
 }
 
 function Rows({ rows, bucket, next }: { rows: SeriesRow[]; bucket: Bucket; next: string | null }) {
-  const showChange = bucket === 'changed' || bucket === 'resolved'
-  const showCheck = bucket !== 'resolved'
+  const showChange = bucket === 'changed' || bucket === 'resolved' || bucket === 'decided'
+  const showCheck = bucket !== 'resolved' && bucket !== 'decided'
+  const showOwner = bucket !== 'decided'
   return (
     <div className="ser-table">
       <table className="dtable">
         <thead>
           <tr>
             <th>Item</th>
-            <th className="ser-owner">Owner</th>
-            {showChange ? <th>{bucket === 'resolved' ? 'How' : 'What changed'}</th> : null}
+            {showOwner ? <th className="ser-owner">Owner</th> : null}
+            {showChange ? <th>{bucket === 'resolved' ? 'How' : bucket === 'decided' ? 'Where' : 'What changed'}</th> : null}
             {showCheck ? <th className="ser-checkh">Next check{next ? ` · ${next}` : ''}</th> : null}
           </tr>
         </thead>
@@ -125,10 +128,10 @@ function Rows({ rows, bucket, next }: { rows: SeriesRow[]; bucket: Bucket; next:
                   <span className="ser-title">{r.title}</span>
                 </Link>
               </td>
-              <td className="ser-owner">{r.owner ?? '—'}</td>
+              {showOwner ? <td className="ser-owner">{r.owner ?? '—'}</td> : null}
               {showChange ? (
                 <td>
-                  {r.change ?? '—'}
+                  {bucket === 'decided' ? null : (r.change ?? '—')}
                   {r.where ? (
                     <div className="ser-where">
                       {r.whereUrl ? (
