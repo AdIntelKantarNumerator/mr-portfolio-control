@@ -1,7 +1,17 @@
 /**
  * Meeting series, read from the database. The rules are in ./series.ts.
+ *
+ * WHY THE QUERIES ARE NARROW (9 October 2026)
+ *
+ * The first version read every history entry and every document title on
+ * record, three times per page view (the page, its title, and the meeting
+ * picker), and filtered them in memory; the series page took seconds. Now
+ * the database returns only the rows whose meeting starts with one of the
+ * series' names - a prefix, checked exactly afterwards by inSeries - and then
+ * the history of just the items those rows name. The picker reads distinct
+ * titles, and only when Edit is opened.
  */
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, ilike, inArray, or, type AnyColumn } from 'drizzle-orm'
 import { db } from '@/db/client'
 import {
   actionItemEvents,
@@ -68,35 +78,39 @@ export interface SeriesView extends SeriesSummary {
 const SESSION_TZ = 'America/New_York'
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: SESSION_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 
-/** Every title any record says it came from: meetings read, items raised, history entries. */
-async function allTitles(): Promise<{ docs: string[]; events: Array<{ itemId: string; e: SeriesEvent }> }> {
-  const [docs, dEvents, aEvents] = await Promise.all([
-    db.select({ title: sourceDocuments.title }).from(sourceDocuments),
-    db.select().from(decisionEvents),
-    db.select().from(actionItemEvents),
-  ])
-  return {
-    docs: docs.map((d) => d.title),
-    events: [
-      ...dEvents.map((r) => ({
-        itemId: r.decisionId,
-        e: { kind: r.kind, at: r.occurredAt ?? r.createdAt, source: r.meeting, url: r.url, note: r.note, changes: decodeChanges(r.changes) },
-      })),
-      ...aEvents.map((r) => ({
-        itemId: r.actionItemId,
-        e: { kind: r.kind, at: r.occurredAt, source: r.sourceTitle, url: r.sourceUrl, note: r.note, changes: decodeChanges(r.changes) },
-      })),
-    ],
-  }
-}
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, (m) => `\\${m}`)
+const startsWithAny = (col: AnyColumn, names: readonly string[]) => or(...names.map((n) => ilike(col, `${escapeLike(n)}%`)))
 
-function sessionDays(names: string[], titles: readonly (string | null)[]): string[] {
+/** What a series' meetings touched: their session days, and the items they raised or spoke about, each with its whole history. */
+async function footprint(names: string[]): Promise<{ days: string[]; ids: Set<string>; history: Map<string, SeriesEvent[]> }> {
+  if (!names.length) return { days: [], ids: new Set(), history: new Map() }
+  const [docs, dEv, aEv, dRaised, aRaised] = await Promise.all([
+    db.select({ t: sourceDocuments.title }).from(sourceDocuments).where(startsWithAny(sourceDocuments.title, names)),
+    db.select({ id: decisionEvents.decisionId, t: decisionEvents.meeting }).from(decisionEvents).where(startsWithAny(decisionEvents.meeting, names)),
+    db.select({ id: actionItemEvents.actionItemId, t: actionItemEvents.sourceTitle }).from(actionItemEvents).where(startsWithAny(actionItemEvents.sourceTitle, names)),
+    db.select({ id: decisions.id, t: decisions.raisedAtMeeting }).from(decisions).where(startsWithAny(decisions.raisedAtMeeting, names)),
+    db.select({ id: actionItems.id, t: actionItems.sourceTitle }).from(actionItems).where(startsWithAny(actionItems.sourceTitle, names)),
+  ])
+  const mine = <T extends { t: string | null }>(rows: T[]) => rows.filter((r) => inSeries(r.t, names))
+  const decisionIds = [...new Set([...mine(dEv), ...mine(dRaised)].map((r) => r.id))]
+  const actionIds = [...new Set([...mine(aEv), ...mine(aRaised)].map((r) => r.id))]
+
   const days = new Set<string>()
-  for (const t of titles) if (t && inSeries(t, names)) {
-    const d = sessionDay(t)
+  for (const r of [...mine(docs), ...mine(dEv), ...mine(aEv)]) {
+    const d = sessionDay(r.t!)
     if (d) days.add(d)
   }
-  return [...days].sort()
+
+  const [dHist, aHist] = await Promise.all([
+    decisionIds.length ? db.select().from(decisionEvents).where(inArray(decisionEvents.decisionId, decisionIds)) : [],
+    actionIds.length ? db.select().from(actionItemEvents).where(inArray(actionItemEvents.actionItemId, actionIds)) : [],
+  ])
+  const history = new Map<string, SeriesEvent[]>()
+  const add = (id: string, e: SeriesEvent) => history.set(id, [...(history.get(id) ?? []), e])
+  for (const r of dHist) add(r.decisionId, { kind: r.kind, at: r.occurredAt ?? r.createdAt, source: r.meeting, url: r.url, note: r.note, changes: decodeChanges(r.changes) })
+  for (const r of aHist) add(r.actionItemId, { kind: r.kind, at: r.occurredAt, source: r.sourceTitle, url: r.sourceUrl, note: r.note, changes: decodeChanges(r.changes) })
+
+  return { days: [...days].sort(), ids: new Set([...decisionIds, ...actionIds]), history }
 }
 
 async function seriesRows() {
@@ -105,6 +119,12 @@ async function seriesRows() {
     db.select().from(meetingSeriesMeetings),
   ])
   return series.map((s) => ({ ...s, meetings: members.filter((m) => m.seriesId === s.id).map((m) => m.meeting).sort() }))
+}
+
+/** A series' name alone, for the page title. */
+export async function seriesName(id: string): Promise<string | null> {
+  const [row] = await db.select({ name: meetingSeries.name }).from(meetingSeries).where(eq(meetingSeries.id, id)).limit(1)
+  return row?.name ?? null
 }
 
 function toSeriesItem(i: Item, events: SeriesEvent[]): SeriesItem {
@@ -125,30 +145,31 @@ function toSeriesItem(i: Item, events: SeriesEvent[]): SeriesItem {
   }
 }
 
-/** The items a series' meetings raised or spoke about, with their history. */
-function membersOf(names: string[], items: Item[], events: Array<{ itemId: string; e: SeriesEvent }>): SeriesItem[] {
-  const byItem = new Map<string, SeriesEvent[]>()
-  for (const { itemId, e } of events) byItem.set(itemId, [...(byItem.get(itemId) ?? []), e])
-  return items
-    .filter((i) => inSeries(i.sourceTitle, names) || (byItem.get(i.id) ?? []).some((e) => inSeries(e.source, names)))
-    .map((i) => toSeriesItem(i, byItem.get(i.id) ?? []))
+function membersOf(items: Item[], fp: { ids: Set<string>; history: Map<string, SeriesEvent[]> }): SeriesItem[] {
+  return items.filter((i) => fp.ids.has(i.id)).map((i) => toSeriesItem(i, fp.history.get(i.id) ?? []))
 }
 
+/** Open work: decisions are a record, not something open (lib/decision-recency.ts). */
+const openWork = (items: SeriesItem[]) => items.filter((i) => i.open && !i.mergedInto && i.kind !== 'decision').length
+
 export async function listSeries(): Promise<SeriesSummary[]> {
-  const [rows, titles, items] = await Promise.all([seriesRows(), allTitles(), loadItems()])
+  const [rows, items] = await Promise.all([seriesRows(), loadItems()])
   const now = today()
-  return rows.map((s) => {
-    const days = sessionDays(s.meetings, [...titles.docs, ...titles.events.map((x) => x.e.source)]).filter((d) => d <= now)
-    return {
-      id: s.id,
-      name: s.name,
-      status: s.status,
-      meetings: s.meetings,
-      lastSession: days.at(-1) ?? null,
-      nextSession: s.status === 'open' ? nextSession(days, now) : null,
-      open: membersOf(s.meetings, items, titles.events).filter((i) => i.open && !i.mergedInto).length,
-    }
-  })
+  return Promise.all(
+    rows.map(async (s) => {
+      const fp = await footprint(s.meetings)
+      const days = fp.days.filter((d) => d <= now)
+      return {
+        id: s.id,
+        name: s.name,
+        status: s.status,
+        meetings: s.meetings,
+        lastSession: days.at(-1) ?? null,
+        nextSession: s.status === 'open' ? nextSession(days, now) : null,
+        open: openWork(membersOf(items, fp)),
+      }
+    }),
+  )
 }
 
 export async function seriesView(id: string): Promise<SeriesView | null> {
@@ -157,8 +178,8 @@ export async function seriesView(id: string): Promise<SeriesView | null> {
   if (!s) return null
 
   const now = today()
-  const titles = await allTitles()
-  const days = sessionDays(s.meetings, [...titles.docs, ...titles.events.map((x) => x.e.source)]).filter((d) => d <= now)
+  const fp = await footprint(s.meetings)
+  const days = fp.days.filter((d) => d <= now)
   const last = days.at(-1) ?? null
   const lastDay = last ?? now
   const since = new Date(`${lastDay}T00:00:00Z`)
@@ -170,7 +191,7 @@ export async function seriesView(id: string): Promise<SeriesView | null> {
   const written = new Map(checks.map((c) => [c.ref.toUpperCase(), c.text]))
 
   const sections: Record<Bucket, SeriesRow[]> = { new: [], resolved: [], changed: [], quiet: [], decided: [] }
-  const members = membersOf(s.meetings, items, titles.events)
+  const members = membersOf(items, fp)
   for (const item of members) {
     const bucket = bucketOf(item, lastDay)
     if (!bucket) continue
@@ -200,21 +221,22 @@ export async function seriesView(id: string): Promise<SeriesView | null> {
     meetings: s.meetings,
     lastSession: last,
     nextSession: s.status === 'open' ? nextSession(days, now) : null,
-    open: members.filter((i) => i.open && !i.mergedInto).length,
+    open: openWork(members),
     sections,
   }
 }
 
-/** Every meeting name on record, for the picker: name, how many sessions, the latest. */
+/** Every meeting name on record, for the picker: name, how many sessions, the latest. Distinct titles only. */
 export async function knownMeetings(): Promise<Array<{ name: string; sessions: number; last: string | null }>> {
-  const [titles, dRaised, aRaised] = await Promise.all([
-    allTitles(),
-    db.select({ t: decisions.raisedAtMeeting }).from(decisions),
-    db.select({ t: actionItems.sourceTitle }).from(actionItems),
+  const lists = await Promise.all([
+    db.selectDistinct({ t: sourceDocuments.title }).from(sourceDocuments),
+    db.selectDistinct({ t: decisionEvents.meeting }).from(decisionEvents),
+    db.selectDistinct({ t: actionItemEvents.sourceTitle }).from(actionItemEvents),
+    db.selectDistinct({ t: decisions.raisedAtMeeting }).from(decisions),
+    db.selectDistinct({ t: actionItems.sourceTitle }).from(actionItems),
   ])
-  const all = [...titles.docs, ...titles.events.map((x) => x.e.source), ...dRaised.map((r) => r.t), ...aRaised.map((r) => r.t)]
   const seen = new Map<string, { name: string; days: Set<string> }>()
-  for (const t of all) {
+  for (const { t } of lists.flat()) {
     if (!t) continue
     const name = baseMeetingName(t)
     if (!name || /^slack\b/i.test(name)) continue

@@ -11,6 +11,7 @@ import { meetingSeries, meetingSeriesMeetings } from '@/db/schema'
 import { editor } from '@/lib/auth/editor'
 import { logChange } from '@/lib/portfolio'
 import { baseMeetingName } from '@/lib/series'
+import { knownMeetings } from '@/lib/series-data'
 
 export interface SeriesState {
   ok?: boolean
@@ -65,6 +66,11 @@ export async function saveSeries(input: { id?: string; name: string; meetings: s
   })
   refresh(id)
   return { ok: true, id }
+}
+
+/** The meeting picker's choices, fetched when the dialog opens rather than with every page. */
+export async function meetingChoices(): Promise<Array<{ name: string; sessions: number; last: string | null }>> {
+  return knownMeetings()
 }
 
 export async function setSeriesClosed(input: { id: string; closed: boolean }): Promise<SeriesState> {

@@ -71,7 +71,9 @@ export function nextSession(days: readonly string[], today: string): string | nu
     while (next.getUTCDay() === 0 || next.getUTCDay() === 6) next = new Date(next.getTime() + DAY)
   }
   step()
-  while (toDay(next) <= today) step()
+  // Today counts until a session for today is on record: on Friday morning
+  // the next session is Friday, not Monday.
+  while (toDay(next) < today) step()
   return toDay(next)
 }
 

@@ -3,14 +3,12 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { setSeriesClosed } from '../actions'
-import { SeriesEditor, type KnownMeeting } from '../editor'
+import { SeriesEditor } from '../editor'
 
 export function SeriesTools({
   series,
-  known,
 }: {
   series: { id: string; name: string; meetings: string[]; status: string }
-  known: KnownMeeting[]
 }) {
   const router = useRouter()
   const [editing, setEditing] = useState(false)
@@ -32,7 +30,7 @@ export function SeriesTools({
       <button type="button" className="btn" onClick={toggle} disabled={busy}>
         {busy ? '…' : open ? 'Close' : 'Reopen'}
       </button>
-      {editing ? <SeriesEditor series={series} known={known} onClose={() => setEditing(false)} /> : null}
+      {editing ? <SeriesEditor series={series} onClose={() => setEditing(false)} /> : null}
     </div>
   )
 }

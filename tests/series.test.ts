@@ -112,3 +112,7 @@ test('decisions go in their own section, only when made or changed at the last s
   assert.equal(bucketOf({ ...decided, status: 'dropped' }, since), null)
   assert.equal(derivedCheck(decided, 'decided', '2026-10-08'), null, 'nothing to check on a decision')
 })
+
+test('on the day of a session, before it is on record, the next session is today', () => {
+  assert.equal(nextSession(['2026-10-06', '2026-10-07', '2026-10-08'], '2026-10-09'), '2026-10-09')
+})

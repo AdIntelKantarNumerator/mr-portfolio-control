@@ -4,11 +4,11 @@
  * New or edit: a name, and the meetings that make up the series, picked from
  * every meeting name on record. Selected ones stay at the top.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Modal } from '@/components/items/parts'
 import { shortDay } from '@/lib/series'
-import { saveSeries } from './actions'
+import { meetingChoices, saveSeries } from './actions'
 
 export interface KnownMeeting {
   name: string
@@ -18,14 +18,23 @@ export interface KnownMeeting {
 
 export function SeriesEditor({
   series,
-  known,
   onClose,
 }: {
   series?: { id: string; name: string; meetings: string[] }
-  known: KnownMeeting[]
   onClose: () => void
 }) {
   const router = useRouter()
+  // Fetched when the dialog opens: the page itself never needs the list.
+  const [known, setKnown] = useState<KnownMeeting[] | null>(null)
+  useEffect(() => {
+    let live = true
+    meetingChoices()
+      .then((k) => live && setKnown(k))
+      .catch(() => live && setKnown([]))
+    return () => {
+      live = false
+    }
+  }, [])
   const [name, setName] = useState(series?.name ?? '')
   const [picked, setPicked] = useState<Set<string>>(new Set(series?.meetings ?? []))
   const [find, setFind] = useState('')
@@ -35,7 +44,7 @@ export function SeriesEditor({
   const options = useMemo(() => {
     // A meeting already in the series but no longer on record still shows,
     // so it can be removed.
-    const all = new Map(known.map((k) => [k.name, k]))
+    const all = new Map((known ?? []).map((k) => [k.name, k]))
     for (const m of picked) if (!all.has(m)) all.set(m, { name: m, sessions: 0, last: null })
     const q = find.trim().toLowerCase()
     return [...all.values()]
@@ -84,7 +93,7 @@ export function SeriesEditor({
               </label>
             </li>
           ))}
-          {options.length === 0 ? <li className="ser-none">No meeting matches</li> : null}
+          {known === null ? <li className="ser-none">Loading…</li> : options.length === 0 ? <li className="ser-none">No meeting matches</li> : null}
         </ul>
         <div className="ser-actions">
           {error ? (

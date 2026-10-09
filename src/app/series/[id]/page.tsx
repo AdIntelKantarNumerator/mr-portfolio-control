@@ -5,7 +5,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { Kicker } from '@/components/ui'
-import { knownMeetings, seriesView, type SeriesRow } from '@/lib/series-data'
+import { seriesName, seriesView, type SeriesRow } from '@/lib/series-data'
 import { shortDay, type Bucket } from '@/lib/series'
 import { SeriesTools } from './tools'
 
@@ -13,8 +13,7 @@ export const dynamic = 'force-dynamic'
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const view = await seriesView(id)
-  return { title: view?.name ?? 'Meeting series' }
+  return { title: (await seriesName(id)) ?? 'Meeting series' }
 }
 
 const KIND = { blocker: 'Blocker', decision: 'Decision', action: 'Action' } as const
@@ -29,7 +28,7 @@ const SECTIONS: Array<{ key: Bucket; title: (last: string) => string; tone: stri
 
 export default async function SeriesDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const [view, known] = await Promise.all([seriesView(id), knownMeetings()])
+  const view = await seriesView(id)
   if (!view) notFound()
 
   const last = shortDay(view.lastSession)
@@ -60,7 +59,7 @@ export default async function SeriesDetailPage({ params }: { params: Promise<{ i
             {next ? <b>Next {next}</b> : <span className="status quiet">Closed</span>}
           </div>
         </div>
-        <SeriesTools series={{ id: view.id, name: view.name, meetings: view.meetings, status: view.status }} known={known} />
+        <SeriesTools series={{ id: view.id, name: view.name, meetings: view.meetings, status: view.status }} />
       </div>
 
       <div className="ser-mtg-chips">

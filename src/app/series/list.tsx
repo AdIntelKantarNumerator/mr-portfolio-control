@@ -7,9 +7,9 @@ import { useRouter } from 'next/navigation'
 import type { SeriesSummary } from '@/lib/series-data'
 import { shortDay } from '@/lib/series'
 import { setSeriesClosed } from './actions'
-import { SeriesEditor, type KnownMeeting } from './editor'
+import { SeriesEditor } from './editor'
 
-export function SeriesList({ rows, known }: { rows: SeriesSummary[]; known: KnownMeeting[] }) {
+export function SeriesList({ rows }: { rows: SeriesSummary[] }) {
   const router = useRouter()
   const [find, setFind] = useState('')
   const [showClosed, setShowClosed] = useState(false)
@@ -93,7 +93,7 @@ export function SeriesList({ rows, known }: { rows: SeriesSummary[]; known: Know
         </div>
       )}
 
-      {adding ? <SeriesEditor known={known} onClose={() => setAdding(false)} /> : null}
+      {adding ? <SeriesEditor onClose={() => setAdding(false)} /> : null}
     </>
   )
 }
