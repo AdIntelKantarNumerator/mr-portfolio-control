@@ -19,7 +19,23 @@ export function machineCallerAuthorised(req: Request): boolean {
 
   // Constant-time-ish: compare full strings rather than prefix-matching, so a
   // partially correct token is no more informative than a wrong one.
-  return header === `Bearer ${token}`
+  if (header === `Bearer ${token}`) return true
+
+  // Yaara's own token (9 October 2026). SYNC_TOKEN was one key held by the
+  // scheduled sync, the deploy script, Yaara's cluster and a laptop; a leak
+  // from any of them opened every machine route. Yaara now has her own, good
+  // for the agent API only - all she calls - so either can be rotated or
+  // revoked without touching the other.
+  const yaara = process.env.YAARA_SYNC_TOKEN?.trim()
+  return Boolean(yaara && header === `Bearer ${yaara}` && agentPath(req))
+}
+
+function agentPath(req: Request): boolean {
+  try {
+    return new URL(req.url).pathname.startsWith('/api/agent/')
+  } catch {
+    return false
+  }
 }
 
 export function unauthorised() {

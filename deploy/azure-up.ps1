@@ -444,41 +444,15 @@ if ($exists) {
   Note 'Created.'
 }
 
-Step 'Allowing this machine through the database firewall'
-# Needed to run the migrations from here. Delete the rule afterwards if you
-# would rather the database were reachable only from Azure.
-$myIp = $MyIp
-if (-not $myIp) {
-  try {
-    $myIp = (Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -TimeoutSec 15).ip
-  } catch {
-    Note 'Could not look up this machine public IP address. Pass it with -MyIp to add the rule.'
-  }
-}
-if ($myIp) {
-  # Which flag names the server here differs by CLI version: -n in some, -s in
-  # others. Try both rather than guess.
-  $ruleOutput = & az postgres flexible-server firewall-rule create `
-    -g $ResourceGroup -s $PgServer --rule-name 'admin-laptop' `
-    --start-ip-address $myIp --end-ip-address $myIp -o none 2>&1
-  if ($LASTEXITCODE -ne 0 -and (($ruleOutput | Out-String) -match 'unrecognized arguments|not recognized')) {
-    $ruleOutput = & az postgres flexible-server firewall-rule create `
-      -g $ResourceGroup -n $PgServer --rule-name 'admin-laptop' `
-      --start-ip-address $myIp --end-ip-address $myIp -o none 2>&1
-  }
-  if ($LASTEXITCODE -eq 0) {
-    Note "Allowed $myIp"
-  } else {
-    # Say what went wrong. A swallowed reason here means finding out only when
-    # the migrations time out twenty minutes later.
-    Note "Could not add a firewall rule for $myIp. Azure said:"
-    foreach ($line in (($ruleOutput | Out-String) -split "`r?`n")) {
-      if ($line.Trim()) { Note "  $($line.Trim())" }
-    }
-    Note 'Add it under the database > Networking blade, or re-run this command by hand, before the migrations.'
-  }
-} else {
-  Note 'Add your IP under the database Networking blade before running the migrations.'
+Step 'Allowing this machine in'
+# The database, the key vaults and the cluster API are closed to the internet
+# except for the web apps and the machine that deploys (9 October 2026), and
+# this machine's address changes. allow-my-ip.ps1 adds the current one.
+try {
+  & (Join-Path $PSScriptRoot 'allow-my-ip.ps1') -ResourceGroup $ResourceGroup -PgServer $PgServer -MyIp $MyIp
+} catch {
+  Note "Could not update the allow-lists: $($_.Exception.Message)"
+  Note 'Run .\deploy\allow-my-ip.ps1 by hand before anything that needs the database or a vault.'
 }
 
 # ---------------------------------------------------------------------------
@@ -490,8 +464,16 @@ if (Test-Az appservice plan show -g $ResourceGroup -n $plan -o none) {
 }
 
 $acrServer   = (Invoke-Az acr show -n $Registry --query loginServer -o tsv | Out-String).Trim()
-$acrUser     = (Invoke-Az acr credential show -n $Registry --query username -o tsv | Out-String).Trim()
-$acrPassword = (Invoke-Az acr credential show -n $Registry --query 'passwords[0].value' -o tsv | Out-String).Trim()
+# Pull-only credentials (9 October 2026). The registry's admin account is off:
+# its password could push a replacement image, and it sat in the app settings.
+# A token with the built-in pull scope can only read. Its password is renewed
+# on every deploy and written straight to the app below, so nothing keeps it.
+$pullToken = 'webapp-pull'
+if (-not (Test-Az acr token show -n $pullToken -r $Registry -o none)) {
+  Invoke-Az acr token create -n $pullToken -r $Registry --scope-map _repositories_pull --no-passwords -o none | Out-Null
+}
+$acrUser     = $pullToken
+$acrPassword = (Invoke-Az acr token credential generate -n $pullToken -r $Registry --password1 --query 'passwords[0].value' -o tsv | Out-String).Trim()
 $imageRef    = "$acrServer/$image`:$ImageTag"
 
 Step "Web app $App"
@@ -535,6 +517,12 @@ else { $authSecret = New-Secret 64; Note 'Generated a new AUTH_SECRET.' }
 $syncToken = Get-ExistingSetting 'SYNC_TOKEN'
 if ($syncToken) { Note 'Reusing the existing SYNC_TOKEN.' }
 else { $syncToken = New-Secret 48; Note 'Generated a new SYNC_TOKEN.' }
+# The scheduled sync sends the token itself, so when the app holds only a Key
+# Vault reference to it, read the value from the vault for the sync alone.
+$syncTokenValue = $syncToken
+if ($syncToken -match 'SecretUri=([^)]+)\)') {
+  $syncTokenValue = (Invoke-Az keyvault secret show --id $Matches[1] --query value -o tsv | Out-String).Trim()
+}
 
 $googleId     = Get-ExistingSetting 'GOOGLE_CLIENT_ID'
 $googleSecret = Get-ExistingSetting 'GOOGLE_CLIENT_SECRET'
@@ -572,17 +560,29 @@ $appUrl = "https://$App.azurewebsites.net"
 
 # ---------------------------------------------------------------------------
 Step 'Application settings'
-Invoke-Az webapp config appsettings set -g $ResourceGroup -n $App --settings `
-  'WEBSITES_PORT=3000' `
-  'WEBSITES_CONTAINER_START_TIME_LIMIT=600' `
-  "DATABASE_URL=$databaseUrl" `
-  'DATABASE_SSL=require' `
-  "APP_URL=$appUrl" `
-  "AUTH_SECRET=$authSecret" `
-  "AUTH_ALLOWED_DOMAINS=$AllowedDomains" `
-  "GOOGLE_CLIENT_ID=$googleId" `
-  "GOOGLE_CLIENT_SECRET=$googleSecret" `
-  "SYNC_TOKEN=$syncToken" -o none | Out-Null
+# A setting that is already a Key Vault reference is left exactly as it is
+# (9 October 2026): the app reads those secrets from kv-mr-portfolio-web, and
+# re-sending the reference through az would also break - az runs via cmd.exe
+# on Windows, which cannot take the parentheses in one on a command line.
+$appSettings = [ordered]@{
+  WEBSITES_PORT                       = '3000'
+  WEBSITES_CONTAINER_START_TIME_LIMIT = '600'
+  DATABASE_URL                        = $databaseUrl
+  DATABASE_SSL                        = 'require'
+  APP_URL                             = $appUrl
+  AUTH_SECRET                         = $authSecret
+  AUTH_ALLOWED_DOMAINS                = $AllowedDomains
+  GOOGLE_CLIENT_ID                    = $googleId
+  GOOGLE_CLIENT_SECRET                = $googleSecret
+  SYNC_TOKEN                          = $syncToken
+}
+$settingArgs = @()
+foreach ($k in $appSettings.Keys) {
+  $v = [string]$appSettings[$k]
+  if ($v.StartsWith('@Microsoft.KeyVault')) { Note "$k stays in Key Vault"; continue }
+  $settingArgs += "$k=$v"
+}
+Invoke-Az webapp config appsettings set -g $ResourceGroup -n $App --settings @settingArgs -o none | Out-Null
 
 Step 'Hardening'
 Invoke-Az webapp update -g $ResourceGroup -n $App --https-only true -o none | Out-Null
@@ -625,7 +625,7 @@ if (-not $NoSyncSchedule) {
     -g $ResourceGroup --name 'pcr-sync-schedule' `
     --template-file $template `
     --parameters "name=$logicApp" "location=$Location" `
-    "syncUrl=$appUrl/api/sync/linear" "syncToken=$syncToken" `
+    "syncUrl=$appUrl/api/sync/linear" "syncToken=$syncTokenValue" `
     "intervalHours=$SyncIntervalHours" "state=$state" -o none 2>&1
 
   if ($LASTEXITCODE -eq 0) {
