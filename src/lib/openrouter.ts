@@ -28,7 +28,13 @@
  * policy decision, not something this file settles.
  */
 
-export const US_PROVIDERS = ['Together', 'Fireworks', 'DeepInfra', 'Baseten', 'Lambda', 'CoreWeave', 'SambaNova'] as const
+export const US_PROVIDERS = [
+  'Together', 'Fireworks', 'DeepInfra', 'Baseten', 'Lambda', 'CoreWeave', 'SambaNova',
+  // Region-pinned endpoints, for the advanced slot (12 October 2026): the
+  // region is in the slug itself, so these are a stronger guarantee than a
+  // provider name. Both are on OpenRouter's zero-retention list.
+  'amazon-bedrock/us-east-1', 'azure/us',
+] as const
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
 export const DEFAULT_OPENROUTER_MODEL = 'deepseek/deepseek-chat-v3.1'
@@ -55,9 +61,30 @@ export class ResidencyError extends Error {}
  * a key is set but the providers are missing or not verified: a request that
  * would be routed by price is refused, never sent.
  */
-export function readOpenRouterConfig(env: Record<string, string | undefined> = process.env): OpenRouterConfig | null {
+/**
+ * Which model a caller wants (12 October 2026). "standard" is the everyday
+ * model (OPENROUTER_MODEL, DeepSeek). "advanced" is a stronger one for work
+ * where judgment matters more than cost - today only the meeting series'
+ * agenda - configured separately (OPENROUTER_ADVANCED_MODEL and
+ * OPENROUTER_ADVANCED_PROVIDERS) so moving another feature to it later is a
+ * change at that feature's call, and nothing else moves with it.
+ */
+export type ModelTier = 'standard' | 'advanced'
+
+export function readOpenRouterConfig(env: Record<string, string | undefined> = process.env, tier: ModelTier = 'standard'): OpenRouterConfig | null {
   const apiKey = env.OPENROUTER_API_KEY?.trim()
   if (!apiKey) return null
+  if (tier === 'advanced') {
+    // Not configured: the advanced work runs on the standard model rather than not at all.
+    if (!env.OPENROUTER_ADVANCED_MODEL?.trim()) return readOpenRouterConfig(env, 'standard')
+    const advanced = readOpenRouterConfig(
+      { ...env, OPENROUTER_MODEL: env.OPENROUTER_ADVANCED_MODEL, OPENROUTER_PROVIDERS: env.OPENROUTER_ADVANCED_PROVIDERS ?? '' },
+      'standard',
+    )
+    // The advanced models think before answering by default, and that is the
+    // point of them: OPENROUTER_ADVANCED_REASONING=none turns it off.
+    return advanced && { ...advanced, reasoning: (env.OPENROUTER_ADVANCED_REASONING ?? '').trim().toLowerCase() !== 'none' }
+  }
   const providers = (env.OPENROUTER_PROVIDERS ?? '')
     .split(',')
     .map((p) => p.trim())

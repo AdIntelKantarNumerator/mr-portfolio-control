@@ -218,6 +218,13 @@
       "when": 1791566035886,
       "tag": "0030_item_hold",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791842664218,
+      "tag": "0031_series_summaries",
+      "breakpoints": true
     }
   ]
 }

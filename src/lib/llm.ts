@@ -21,7 +21,7 @@
  * matching Yaara's own order.
  */
 
-import { callOpenRouter, DEFAULT_OPENROUTER_MODEL, readOpenRouterConfig, type OpenRouterConfig } from './openrouter'
+import { callOpenRouter, DEFAULT_OPENROUTER_MODEL, readOpenRouterConfig, type ModelTier, type OpenRouterConfig } from './openrouter'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5'
@@ -114,6 +114,8 @@ function transportDetail(err: unknown): string {
 interface CallOptions {
   maxTokens: number
   timeoutMs: number
+  /** Which OpenRouter model: the everyday one, or the advanced one (lib/openrouter.ts). */
+  tier?: ModelTier
 }
 
 async function callAzure(system: string, user: string, o: CallOptions): Promise<string> {
@@ -231,7 +233,7 @@ export async function completeJson(
   if (config.provider === 'openrouter') {
     let or: OpenRouterConfig | null
     try {
-      or = readOpenRouterConfig()
+      or = readOpenRouterConfig(process.env, options.tier ?? 'standard')
     } catch (err) {
       // A residency failure is a configuration error, reported like any other
       // model failure, so callers fall back rather than send the request.

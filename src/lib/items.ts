@@ -66,6 +66,8 @@ export interface Item {
   mergedInto: string | null
   /** On hold until this day: open, but nobody is reminded about it before then. */
   heldUntil: Date | null
+  /** Yaara thinks it is finished but was not sure enough to close it; a person accepts or dismisses. */
+  suggestedDone: { at: Date; note: string | null; source: string | null; url: string | null } | null
   /** Where it was first raised: the meeting, document or channel, and a link when there is one. */
   sourceTitle: string | null
   sourceUrl: string | null
@@ -154,6 +156,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         nudgedAt: r.nudgedAt,
         mergedInto: r.mergedInto,
         heldUntil: r.heldUntil ?? null,
+        suggestedDone: r.suggestedDoneAt ? { at: r.suggestedDoneAt, note: r.suggestedDoneNote, source: r.suggestedDoneSource, url: r.suggestedDoneUrl } : null,
         sourceTitle: (r.raisedDocumentId && docOf.get(r.raisedDocumentId)?.title) || r.raisedAtMeeting,
         sourceUrl: (r.raisedDocumentId && docOf.get(r.raisedDocumentId)?.url) || null,
         raisedBy: (r.raisedById && nameOf.get(r.raisedById)) || r.raisedByText || null,
@@ -203,6 +206,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         nudgedAt: r.nudgedAt,
         mergedInto: r.mergedInto,
         heldUntil: r.heldUntil ?? null,
+        suggestedDone: r.suggestedDoneAt ? { at: r.suggestedDoneAt, note: r.suggestedDoneNote, source: r.suggestedDoneSource, url: r.suggestedDoneUrl } : null,
         sourceTitle: r.sourceTitle,
         sourceUrl: r.sourceUrl,
         raisedBy: null,
@@ -284,6 +288,8 @@ export type ItemAction =
   | 'adjust' // a person's +/- (delta)
   | 'nudged' // its owner was reminded; not activity
   | 'hold' // on hold until a date ("until"), or released when there is none
+  | 'suggest_done' // Yaara thinks it is finished; note and source say why. A person accepts (resolve) or dismisses
+  | 'dismiss_suggestion' // a person says it is not finished after all
 
 export interface ItemUpdate {
   ref: string
@@ -369,6 +375,9 @@ async function addEvent(found: Found, kind: string, u: ItemUpdate, note: string 
   }
 }
 
+/** Clears a "looks done" suggestion: on closing, reopening or dismissing it. */
+const NO_SUGGESTION = { suggestedDoneAt: null, suggestedDoneNote: null, suggestedDoneSource: null, suggestedDoneUrl: null }
+
 async function patchRow(found: Found, patch: Record<string, unknown>) {
   if (found.kind === 'action') await db.update(actionItems).set(patch).where(eq(actionItems.id, found.row.id))
   else await db.update(decisions).set(patch).where(eq(decisions.id, found.row.id))
@@ -399,10 +408,10 @@ export async function applyItemUpdate(u: ItemUpdate): Promise<UpdateResult> {
     case 'resolve': {
       if (!isOpen(found)) return { ref: u.ref, ok: true, status: found.row.status }
       if (found.kind === 'action') {
-        await patchRow(found, { status: 'done', completedAt: now, lastActivityAt: now })
+        await patchRow(found, { status: 'done', completedAt: now, lastActivityAt: now, ...NO_SUGGESTION })
         await addEvent(found, 'done', u, note)
       } else {
-        await patchRow(found, { status: 'decided', resolvedAt: now, resolvedAtMeeting: u.source?.title ?? null, lastActivityAt: now })
+        await patchRow(found, { status: 'decided', resolvedAt: now, resolvedAtMeeting: u.source?.title ?? null, lastActivityAt: now, ...NO_SUGGESTION })
         await addEvent(found, 'resolved', u, note)
       }
       await log(`${found.kind === 'action' ? 'Done' : 'Resolved'}: ${name}`)
@@ -410,8 +419,8 @@ export async function applyItemUpdate(u: ItemUpdate): Promise<UpdateResult> {
     }
     case 'drop': {
       if (!isOpen(found)) return { ref: u.ref, ok: true, status: found.row.status }
-      if (found.kind === 'action') await patchRow(found, { status: 'dropped', completedAt: now, lastActivityAt: now })
-      else await patchRow(found, { status: 'dropped', resolvedAt: now, lastActivityAt: now })
+      if (found.kind === 'action') await patchRow(found, { status: 'dropped', completedAt: now, lastActivityAt: now, ...NO_SUGGESTION })
+      else await patchRow(found, { status: 'dropped', resolvedAt: now, lastActivityAt: now, ...NO_SUGGESTION })
       await addEvent(found, 'dropped', u, note)
       await log(`Withdrawn: ${name}`)
       return { ref: u.ref, ok: true, status: 'dropped' }
@@ -489,6 +498,26 @@ export async function applyItemUpdate(u: ItemUpdate): Promise<UpdateResult> {
       await addEvent(found, 'importance', u, `${delta > 0 ? 'More' : 'Less'} important, by hand: now ${score}${note ? `. ${note}` : ''}`)
       await log(`Marked ${name} ${delta > 0 ? 'more' : 'less'} important (${score})`)
       return { ref: u.ref, ok: true, status: found.row.status, score }
+    }
+    case 'suggest_done': {
+      // A suggestion, not a change: the item stays open and nobody's activity
+      // clock moves. Shown on the series page's cleanup view for a person to
+      // accept or dismiss (12 October 2026).
+      if (!isOpen(found)) return { ref: u.ref, ok: true, status: found.row.status }
+      if (!note) return { ref: u.ref, ok: false, error: 'A suggestion needs a note saying what shows it is done.' }
+      await patchRow(found, {
+        suggestedDoneAt: now,
+        suggestedDoneNote: note.slice(0, 1000),
+        suggestedDoneSource: u.source?.title?.slice(0, 300) ?? null,
+        suggestedDoneUrl: u.source?.url?.slice(0, 500) ?? null,
+      })
+      await addEvent(found, 'suggested', u, `Looks done: ${note}`)
+      return { ref: u.ref, ok: true, status: found.row.status }
+    }
+    case 'dismiss_suggestion': {
+      await patchRow(found, NO_SUGGESTION)
+      await addEvent(found, 'suggestion_dismissed', u, note ?? 'Not done after all.')
+      return { ref: u.ref, ok: true, status: found.row.status }
     }
     case 'hold': {
       // On hold: still open, not reminded about until the day (Scott,

@@ -35,7 +35,7 @@ test('residency is refused rather than assumed', async (t) => {
     assert.equal(c.model, DEFAULT_OPENROUTER_MODEL)
   })
   await t.test('the list matches Yaara\'s, which is the same rule in the other repository', () => {
-    assert.deepEqual([...US_PROVIDERS], ['Together', 'Fireworks', 'DeepInfra', 'Baseten', 'Lambda', 'CoreWeave', 'SambaNova'])
+    assert.deepEqual([...US_PROVIDERS], ['Together', 'Fireworks', 'DeepInfra', 'Baseten', 'Lambda', 'CoreWeave', 'SambaNova', 'amazon-bedrock/us-east-1', 'azure/us'])
   })
 })
 
@@ -106,4 +106,15 @@ test('which provider answers', async (t) => {
       else process.env[k] = saved[k]
     }
   }
+})
+
+test('the advanced model is configured on its own, and falls back to the standard one', () => {
+  const env = { OPENROUTER_API_KEY: 'k', OPENROUTER_PROVIDERS: 'DeepInfra', OPENROUTER_MODEL: 'deepseek/deepseek-chat-v3.1' }
+  assert.equal(readOpenRouterConfig(env, 'advanced')!.model, 'deepseek/deepseek-chat-v3.1', 'not configured: the standard model')
+  const adv = readOpenRouterConfig({ ...env, OPENROUTER_ADVANCED_MODEL: 'anthropic/claude-haiku-5.5', OPENROUTER_ADVANCED_PROVIDERS: 'amazon-bedrock/us-east-1' }, 'advanced')!
+  assert.equal(adv.model, 'anthropic/claude-haiku-5.5')
+  assert.deepEqual(adv.providers, ['amazon-bedrock/us-east-1'])
+  assert.equal(adv.reasoning, true, 'advanced models think by default')
+  assert.equal(readOpenRouterConfig({ ...env, OPENROUTER_ADVANCED_MODEL: 'x' }, 'standard')!.model, 'deepseek/deepseek-chat-v3.1', 'the standard slot is untouched')
+  assert.throws(() => readOpenRouterConfig({ ...env, OPENROUTER_ADVANCED_MODEL: 'x', OPENROUTER_ADVANCED_PROVIDERS: 'Anthropic' }, 'advanced'), ResidencyError)
 })

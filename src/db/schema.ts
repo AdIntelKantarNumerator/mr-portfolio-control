@@ -464,6 +464,11 @@ export const decisions = pgTable(
     mergedInto: text('merged_into'),
     /** On hold: nobody is reminded about it before this day. See drizzle/0030_item_hold.sql. */
     heldUntil: timestamp('held_until', { withTimezone: true }),
+    /** Yaara thinks it is finished but was not sure enough to close it. See drizzle/0031. */
+    suggestedDoneAt: timestamp('suggested_done_at', { withTimezone: true }),
+    suggestedDoneNote: text('suggested_done_note'),
+    suggestedDoneSource: text('suggested_done_source'),
+    suggestedDoneUrl: text('suggested_done_url'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -576,6 +581,11 @@ export const actionItems = pgTable(
     mergedInto: text('merged_into'),
     /** On hold: nobody is reminded about it before this day. See drizzle/0030_item_hold.sql. */
     heldUntil: timestamp('held_until', { withTimezone: true }),
+    /** Yaara thinks it is finished but was not sure enough to close it. See drizzle/0031. */
+    suggestedDoneAt: timestamp('suggested_done_at', { withTimezone: true }),
+    suggestedDoneNote: text('suggested_done_note'),
+    suggestedDoneSource: text('suggested_done_source'),
+    suggestedDoneUrl: text('suggested_done_url'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -2030,6 +2040,10 @@ export const meetingSeries = pgTable('meeting_series', {
   name: text('name').notNull(),
   /** open | closed */
   status: text('status').notNull().default('open'),
+  /** What the series is for, in the chair's words. The agenda is judged against it. */
+  goals: text('goals'),
+  /** Where summaries and agendas are posted, if anywhere ("#channel" or a channel id). */
+  slackChannel: text('slack_channel'),
   createdBy: text('created_by'),
   closedBy: text('closed_by'),
   closedAt: timestamp('closed_at', { withTimezone: true }),
@@ -2064,4 +2078,56 @@ export const meetingSeriesChecks = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [uniqueIndex('meeting_series_checks_uq').on(t.seriesId, t.ref)],
+)
+
+/** One session's summary, written by Yaara from its notes. See drizzle/0031_series_summaries.sql. */
+export const seriesSummaries = pgTable(
+  'series_summaries',
+  {
+    id: id(),
+    seriesId: text('series_id')
+      .notNull()
+      .references(() => meetingSeries.id, { onDelete: 'cascade' }),
+    /** The meeting's name without its date. */
+    meeting: text('meeting').notNull(),
+    /** YYYY-MM-DD, from the document title. */
+    sessionDay: text('session_day').notNull(),
+    documentExternalId: text('document_external_id').notNull(),
+    documentTitle: text('document_title'),
+    documentUrl: text('document_url'),
+    /** The document's revision when summarised. */
+    revision: text('revision'),
+    markdown: text('markdown').notNull(),
+    model: text('model'),
+    generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
+    /** A person's version. Shown instead of Yaara's, and never overwritten by her. */
+    editedMarkdown: text('edited_markdown'),
+    editedBy: text('edited_by'),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+    /** The notes changed after a person edited the summary: theirs is kept, and this says so. */
+    notesChangedAt: timestamp('notes_changed_at', { withTimezone: true }),
+    postedAt: timestamp('posted_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('series_summaries_doc_uq').on(t.seriesId, t.documentExternalId), index('series_summaries_day_idx').on(t.seriesId, t.sessionDay)],
+)
+
+/** A proposed agenda for one session date. */
+export const seriesAgendas = pgTable(
+  'series_agendas',
+  {
+    id: id(),
+    seriesId: text('series_id')
+      .notNull()
+      .references(() => meetingSeries.id, { onDelete: 'cascade' }),
+    forDay: text('for_day').notNull(),
+    /** JSON: see lib/series-agenda.ts. */
+    content: text('content').notNull(),
+    /** What it was built from; a different fingerprint means it is out of date. */
+    fingerprint: text('fingerprint'),
+    model: text('model'),
+    generatedBy: text('generated_by'),
+    generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
+    postedAt: timestamp('posted_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('series_agendas_day_uq').on(t.seriesId, t.forDay)],
 )

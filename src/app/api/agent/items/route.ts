@@ -31,7 +31,7 @@ import type { ItemKind } from '@/lib/importance'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const ACTIONS = new Set<ItemAction>(['resolve', 'drop', 'reopen', 'progress', 'duplicate', 'owner', 'score', 'adjust', 'nudged', 'hold'])
+const ACTIONS = new Set<ItemAction>(['resolve', 'drop', 'reopen', 'progress', 'duplicate', 'owner', 'score', 'adjust', 'nudged', 'hold', 'suggest_done', 'dismiss_suggestion'])
 const KINDS = new Set<ItemKind>(['blocker', 'decision', 'action'])
 
 export async function GET(req: Request) {
@@ -78,6 +78,7 @@ export async function GET(req: Request) {
       closedAt: i.closedAt?.toISOString() ?? null,
       dueDate: i.dueDate?.toISOString() ?? null,
       heldUntil: i.heldUntil ? i.heldUntil.toISOString().slice(0, 10) : null,
+      suggestedDone: i.suggestedDone ? { at: i.suggestedDone.at.toISOString(), note: i.suggestedDone.note, source: i.suggestedDone.source, url: i.suggestedDone.url } : null,
       score: i.score,
       band: i.band,
       factors: i.factors,

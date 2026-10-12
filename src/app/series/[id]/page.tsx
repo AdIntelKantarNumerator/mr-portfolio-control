@@ -1,13 +1,21 @@
 /**
- * One meeting series: what its last session produced, and what has happened
- * since to everything that came before it, with the thing to check next time.
+ * One meeting series, summary first (12 October 2026).
+ *
+ * The page opens on the most recent session's summary, as written by Yaara
+ * from its notes; earlier sessions are one click back. "Proposed agenda" sets
+ * out what the next session should spend its time on. The items themselves
+ * are folded into a strip of counts and open only when asked, grouped by
+ * topic, with the buttons to close what is finished.
  */
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { Kicker } from '@/components/ui'
-import { seriesName, seriesView, type SeriesRow } from '@/lib/series-data'
-import { shortDay, type Bucket } from '@/lib/series'
+import { seriesName, seriesView } from '@/lib/series-data'
+import { getSummary, listSummaries } from '@/lib/series-summaries'
+import { linkRefs, shortDay } from '@/lib/series'
 import { SeriesTools } from './tools'
+import { SessionView } from './session'
+import { SeriesDetail } from './detail'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,141 +24,61 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return { title: (await seriesName(id)) ?? 'Meeting series' }
 }
 
-const KIND = { blocker: 'Blocker', decision: 'Decision', action: 'Action' } as const
-
-const SECTIONS: Array<{ key: Bucket; title: (last: string) => string; tone: string }> = [
-  { key: 'new', title: (last) => `From the last session · ${last}`, tone: 'var(--c1)' },
-  { key: 'changed', title: () => 'Changed', tone: 'var(--warn)' },
-  { key: 'quiet', title: () => 'Not Discussed', tone: 'var(--crit)' },
-  { key: 'resolved', title: () => 'Resolved', tone: 'var(--good)' },
-  { key: 'decided', title: () => 'Decisions', tone: 'var(--c4)' },
-]
-
-export default async function SeriesDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function SeriesDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ s?: string }>
+}) {
   const { id } = await params
-  const view = await seriesView(id)
+  const { s } = await searchParams
+  const [view, sessions, summary] = await Promise.all([seriesView(id), listSummaries(id), getSummary(id, s)])
   if (!view) notFound()
 
-  const last = shortDay(view.lastSession)
   const next = view.nextSession ? shortDay(view.nextSession) : null
-  const unowned = Object.values(view.sections)
-    .flat()
-    .filter((r) => r.check === 'Needs an owner').length
-
-  const stats: Array<{ n: number; label: string; tone: string }> = [
-    { n: view.sections.new.length, label: 'New last session', tone: 'var(--c1)' },
-    { n: view.sections.changed.length, label: 'Changed', tone: 'var(--warn)' },
-    { n: view.sections.quiet.length, label: 'Not Discussed', tone: 'var(--crit)' },
-    { n: view.sections.resolved.length, label: 'Resolved', tone: 'var(--good)' },
-    { n: view.sections.decided.length, label: 'Decisions', tone: 'var(--c4)' },
-    { n: unowned, label: 'Need an owner', tone: 'var(--muted)' },
-  ]
+  const hrefs = new Map(Object.entries(view.refHrefs))
+  const rows = Object.entries(view.sections).flatMap(([bucket, list]) => list.map((r) => ({ ...r, bucket })))
 
   return (
     <div className="stack">
-      <div className="titlerow">
+      <div className="titlerow ser-head">
         <div>
           <Kicker>
             <Link href="/series">Meeting series</Link>
           </Kicker>
           <h1>{view.name}</h1>
           <div className="ser-when">
-            <span>Last {last}</span>
-            {next ? <b>Next {next}</b> : <span className="status quiet">Closed</span>}
+            {view.lastSession ? <span>Last {shortDay(view.lastSession)}</span> : null}
+            {next ? <b>Next {next}</b> : view.status !== 'open' ? <span className="status quiet">Closed</span> : null}
           </div>
         </div>
-        <SeriesTools series={{ id: view.id, name: view.name, meetings: view.meetings, status: view.status }} />
+        <SeriesTools
+          series={{ id: view.id, name: view.name, meetings: view.meetings, status: view.status, goals: view.goals ?? '', slackChannel: view.slackChannel ?? '' }}
+          next={next}
+        />
       </div>
 
-      <div className="ser-mtg-chips">
-        {view.meetings.map((m) => (
-          <span key={m} className="chip tone-slate">
-            {m}
-          </span>
-        ))}
-      </div>
+      {view.goals ? <p className="ser-goals">{view.goals}</p> : null}
 
-      <div className="ser-stats">
-        {stats.map((s) => (
-          <div key={s.label} className="ser-stat" style={{ borderTopColor: s.tone }}>
-            <b style={{ color: s.tone }}>{s.n}</b>
-            <span>{s.label}</span>
-          </div>
-        ))}
-      </div>
+      <SessionView
+        seriesId={view.id}
+        sessions={sessions.map((x) => ({ id: x.id, label: `${shortDay(x.sessionDay)} · ${x.meeting}` }))}
+        summary={
+          summary && {
+            id: summary.id,
+            label: `${shortDay(summary.sessionDay)} · ${summary.meeting}`,
+            markdown: linkRefs(summary.markdown, hrefs),
+            raw: summary.markdown,
+            edited: summary.edited,
+            editedBy: summary.editedBy,
+            notesChanged: Boolean(summary.notesChangedAt),
+            documentUrl: summary.documentUrl,
+          }
+        }
+      />
 
-      {SECTIONS.map((sec) => {
-        const rows = view.sections[sec.key]
-        if (!rows.length) return null
-        return (
-          <section key={sec.key} className="tile ser-sec" style={{ borderLeftColor: sec.tone }}>
-            <div className="tile-head">
-              <h2>{sec.title(last)}</h2>
-              <span className="ser-n">{rows.length}</span>
-            </div>
-            <Rows rows={rows} bucket={sec.key} next={next} />
-          </section>
-        )
-      })}
-
-      {Object.values(view.sections).every((r) => r.length === 0) ? (
-        <div className="blank">
-          <h2>Nothing on record from these meetings yet</h2>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function Rows({ rows, bucket, next }: { rows: SeriesRow[]; bucket: Bucket; next: string | null }) {
-  const showChange = bucket === 'changed' || bucket === 'resolved' || bucket === 'decided'
-  const showCheck = bucket !== 'resolved' && bucket !== 'decided'
-  const showOwner = bucket !== 'decided'
-  return (
-    <div className="ser-table">
-      <table className="dtable">
-        <thead>
-          <tr>
-            <th>Item</th>
-            {showOwner ? <th className="ser-owner">Owner</th> : null}
-            {showChange ? <th>{bucket === 'resolved' ? 'How' : bucket === 'decided' ? 'Where' : 'What changed'}</th> : null}
-            {showCheck ? <th className="ser-checkh">Next check{next ? ` · ${next}` : ''}</th> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.ref}>
-              <td>
-                <Link href={r.href} className="ser-item">
-                  <span className={`ser-kind ser-${r.kind}`}>{KIND[r.kind]}</span>
-                  <span className="ser-ref">{r.ref}</span>
-                  <span className="ser-title">{r.title}</span>
-                </Link>
-              </td>
-              {showOwner ? <td className="ser-owner">{r.owner ?? '—'}</td> : null}
-              {showChange ? (
-                <td>
-                  {bucket === 'decided' ? null : (r.change ?? '—')}
-                  {r.where ? (
-                    <div className="ser-where">
-                      {r.whereUrl ? (
-                        <a href={r.whereUrl} target="_blank" rel="noreferrer">
-                          {r.where}
-                        </a>
-                      ) : (
-                        r.where
-                      )}
-                    </div>
-                  ) : null}
-                </td>
-              ) : null}
-              {showCheck ? (
-                <td className={`ser-check${r.check === 'Needs an owner' || r.check?.startsWith('Overdue') ? ' ser-alert' : ''}`}>{r.check ?? '—'}</td>
-              ) : null}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <SeriesDetail seriesId={view.id} seriesName={view.name} rows={rows} />
     </div>
   )
 }

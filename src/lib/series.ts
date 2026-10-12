@@ -113,6 +113,10 @@ export interface SeriesItem {
   /** Where it was first raised. */
   source: string | null
   events: SeriesEvent[]
+  /** The work it sits on, the most specific first: its topic on the series page. */
+  place?: string | null
+  heldUntil?: Date | null
+  suggestedDone?: { note: string | null; source: string | null; url: string | null } | null
 }
 
 export type Bucket = 'new' | 'resolved' | 'changed' | 'quiet' | 'decided'
@@ -186,4 +190,41 @@ export function derivedCheck(item: SeriesItem, bucket: Bucket, today: string): s
   if (item.kind === 'decision' && item.status === 'open') return 'Decided?'
   if (item.kind === 'blocker') return 'Still blocked?'
   return 'Progress?'
+}
+
+// ------------------------------------------------------------- staleness
+
+/** The day something was last said about an item: its session's date when the source has one. */
+function dayOf(at: Date, source: string | null | undefined): string {
+  return (source ? sessionDay(source) : null) ?? at.toISOString().slice(0, 10)
+}
+
+/**
+ * How many of the series' sessions have gone by since anyone said anything
+ * about an item (12 October 2026). An item quiet for three sessions is shown
+ * in red: it is either done and nobody closed it, or stuck and nobody owns it.
+ */
+export function quietSessions(item: Pick<SeriesItem, 'createdAt' | 'source' | 'events'>, sessionDays: readonly string[]): number {
+  let last = dayOf(item.createdAt, item.source)
+  for (const e of item.events) {
+    if (!SAID.has(e.kind)) continue
+    const d = dayOf(e.at, e.source)
+    if (d > last) last = d
+  }
+  return sessionDays.filter((d) => d > last).length
+}
+
+/** Quiet for this many sessions or more: shown in red. */
+export const QUIET_ALERT = 3
+
+/**
+ * Item refs in a summary turned into links to the items (A525, B99, D14), so
+ * a summary is a way into the record and not a copy of it. Only refs the
+ * caller knows; anything else is left as text.
+ */
+export function linkRefs(markdown: string, hrefs: ReadonlyMap<string, string>): string {
+  return markdown.replace(/(^|[^\w\[/])([ABD]\d{1,5})(?![\w\]])/g, (whole, lead: string, ref: string) => {
+    const href = hrefs.get(ref.toUpperCase())
+    return href ? `${lead}[${ref}](${href})` : whole
+  })
 }

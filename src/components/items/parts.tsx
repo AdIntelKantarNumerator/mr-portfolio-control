@@ -254,6 +254,8 @@ const EVENT_WORD: Record<string, string> = {
   importance: 'Importance',
   nudged: 'Reminder sent',
   held: 'On hold',
+  suggested: 'Looks done',
+  suggestion_dismissed: 'Not done',
 }
 
 /** Every update on an item, newest first: evidence, replies, status changes, edits. */

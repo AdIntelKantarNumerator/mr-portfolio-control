@@ -33,6 +33,7 @@ import {
   inSeries,
   latestChange,
   nextSession,
+  quietSessions,
   sessionDay,
   type Bucket,
   type SeriesEvent,
@@ -42,6 +43,8 @@ import {
 export interface SeriesSummary {
   id: string
   name: string
+  goals?: string | null
+  slackChannel?: string | null
   status: string
   meetings: string[]
   lastSession: string | null
@@ -64,10 +67,19 @@ export interface SeriesRow {
   check: string | null
   /** Written by a person or Yaara, rather than derived. */
   checkWritten: boolean
+  /** Its topic: the work it sits on. */
+  place: string | null
+  open: boolean
+  /** Sessions gone by since anyone mentioned it. */
+  quiet: number
+  heldUntil: string | null
+  suggested: { note: string | null; source: string | null; url: string | null } | null
 }
 
 export interface SeriesView extends SeriesSummary {
   sections: Record<Bucket, SeriesRow[]>
+  /** Every member item's link by ref, for turning refs in a summary into links. */
+  refHrefs: Record<string, string>
 }
 
 /**
@@ -142,6 +154,9 @@ function toSeriesItem(i: Item, events: SeriesEvent[]): SeriesItem {
     mergedInto: i.mergedInto,
     source: i.sourceTitle,
     events,
+    place: [...i.places].sort((a, b) => ({ project: 0, initiative: 1, objective: 2 })[a.level] - ({ project: 0, initiative: 1, objective: 2 })[b.level])[0]?.name ?? null,
+    heldUntil: i.heldUntil,
+    suggestedDone: i.suggestedDone ? { note: i.suggestedDone.note, source: i.suggestedDone.source, url: i.suggestedDone.url } : null,
   }
 }
 
@@ -162,6 +177,8 @@ export async function listSeries(): Promise<SeriesSummary[]> {
       return {
         id: s.id,
         name: s.name,
+        goals: s.goals,
+        slackChannel: s.slackChannel,
         status: s.status,
         meetings: s.meetings,
         lastSession: days.at(-1) ?? null,
@@ -172,28 +189,45 @@ export async function listSeries(): Promise<SeriesSummary[]> {
   )
 }
 
-export async function seriesView(id: string): Promise<SeriesView | null> {
+/**
+ * Everything known about one series at this moment: its sessions, its items
+ * with their history and section. Shared by the page and the agenda, so the
+ * two can never disagree about what is open.
+ */
+export async function seriesContext(id: string) {
   const rows = await seriesRows()
   const s = rows.find((r) => r.id === id)
   if (!s) return null
-
   const now = today()
   const fp = await footprint(s.meetings)
   const days = fp.days.filter((d) => d <= now)
   const last = days.at(-1) ?? null
   const lastDay = last ?? now
   const since = new Date(`${lastDay}T00:00:00Z`)
-
   const [items, checks] = await Promise.all([
     loadItems({ closedSince: since }),
     db.select().from(meetingSeriesChecks).where(eq(meetingSeriesChecks.seriesId, id)),
   ])
-  const written = new Map(checks.map((c) => [c.ref.toUpperCase(), c.text]))
+  const members = membersOf(items, fp)
+  return {
+    series: s,
+    now,
+    days,
+    last,
+    lastDay,
+    next: s.status === 'open' ? nextSession(days, now) : null,
+    members: members.map((item) => ({ item, bucket: bucketOf(item, lastDay), quiet: quietSessions(item, days) })),
+    written: new Map(checks.map((c) => [c.ref.toUpperCase(), c.text])),
+  }
+}
+
+export async function seriesView(id: string): Promise<SeriesView | null> {
+  const ctx = await seriesContext(id)
+  if (!ctx) return null
+  const { series: s, now, lastDay, members, written } = ctx
 
   const sections: Record<Bucket, SeriesRow[]> = { new: [], resolved: [], changed: [], quiet: [], decided: [] }
-  const members = membersOf(items, fp)
-  for (const item of members) {
-    const bucket = bucketOf(item, lastDay)
+  for (const { item, bucket, quiet } of members) {
     if (!bucket) continue
     const ch = bucket === 'changed' || bucket === 'resolved' || bucket === 'decided' ? latestChange(item, lastDay) : null
     const own = written.get(item.ref.toUpperCase())
@@ -209,6 +243,11 @@ export async function seriesView(id: string): Promise<SeriesView | null> {
       whereUrl: ch?.url ?? null,
       check: own ?? derivedCheck(item, bucket, now),
       checkWritten: Boolean(own),
+      place: item.place ?? null,
+      open: item.open,
+      quiet,
+      heldUntil: item.heldUntil ? item.heldUntil.toISOString().slice(0, 10) : null,
+      suggested: item.suggestedDone ?? null,
     })
   }
   const order = { blocker: 0, decision: 1, action: 2 } as const
@@ -217,12 +256,15 @@ export async function seriesView(id: string): Promise<SeriesView | null> {
   return {
     id: s.id,
     name: s.name,
+    goals: s.goals,
+    slackChannel: s.slackChannel,
     status: s.status,
     meetings: s.meetings,
-    lastSession: last,
-    nextSession: s.status === 'open' ? nextSession(days, now) : null,
-    open: openWork(members),
+    lastSession: ctx.last,
+    nextSession: ctx.next,
+    open: openWork(members.map((m) => m.item)),
     sections,
+    refHrefs: Object.fromEntries(members.map(({ item }) => [item.ref.toUpperCase(), item.href])),
   }
 }
 

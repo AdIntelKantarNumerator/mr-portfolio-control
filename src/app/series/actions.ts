@@ -12,6 +12,10 @@ import { editor } from '@/lib/auth/editor'
 import { logChange } from '@/lib/portfolio'
 import { baseMeetingName } from '@/lib/series'
 import { knownMeetings } from '@/lib/series-data'
+import { editSummary } from '@/lib/series-summaries'
+import { generateAgenda, savedAgenda, type SavedAgenda } from '@/lib/series-agenda'
+import type { Agenda } from '@/lib/series-agenda-core'
+import { applyItemUpdate } from '@/lib/items'
 
 export interface SeriesState {
   ok?: boolean
@@ -28,12 +32,23 @@ function clean(meetings: readonly string[]): string[] {
   return [...out.values()]
 }
 
+/** Goals and Slack channel, when the form sent them. */
+function extras(input: { goals?: string; slackChannel?: string }) {
+  const out: { goals?: string | null; slackChannel?: string | null } = {}
+  if (input.goals !== undefined) out.goals = input.goals.trim().slice(0, 4000) || null
+  if (input.slackChannel !== undefined) {
+    const c = input.slackChannel.trim().replace(/\s+/g, '')
+    out.slackChannel = c ? (c.startsWith('#') || /^[CG][A-Z0-9]{6,}$/.test(c) ? c : `#${c}`).slice(0, 100) : null
+  }
+  return out
+}
+
 function refresh(id?: string) {
   revalidatePath('/series')
   if (id) revalidatePath(`/series/${id}`)
 }
 
-export async function saveSeries(input: { id?: string; name: string; meetings: string[] }): Promise<SeriesState> {
+export async function saveSeries(input: { id?: string; name: string; meetings: string[]; goals?: string; slackChannel?: string }): Promise<SeriesState> {
   const who = await editor()
   if (!who.ok) return { error: who.error }
   const name = input.name.trim().slice(0, 200)
@@ -45,12 +60,12 @@ export async function saveSeries(input: { id?: string; name: string; meetings: s
   if (id) {
     const [found] = await db.select().from(meetingSeries).where(eq(meetingSeries.id, id)).limit(1)
     if (!found) return { error: 'That series no longer exists.' }
-    await db.update(meetingSeries).set({ name }).where(eq(meetingSeries.id, id))
+    await db.update(meetingSeries).set({ name, ...extras(input) }).where(eq(meetingSeries.id, id))
     await db
       .delete(meetingSeriesMeetings)
       .where(and(eq(meetingSeriesMeetings.seriesId, id), notInArray(meetingSeriesMeetings.meeting, meetings)))
   } else {
-    const [row] = await db.insert(meetingSeries).values({ name, createdBy: who.name }).returning({ id: meetingSeries.id })
+    const [row] = await db.insert(meetingSeries).values({ name, createdBy: who.name, ...extras(input) }).returning({ id: meetingSeries.id })
     id = row!.id
   }
   await db
@@ -85,4 +100,77 @@ export async function setSeriesClosed(input: { id: string; closed: boolean }): P
   await logChange({ actor: who.name, kind: 'change', summary: `${input.closed ? 'Closed' : 'Reopened'} meeting series "${found.name}"` })
   refresh(input.id)
   return { ok: true, id: input.id }
+}
+
+// ------------------------------------------------- summaries, agenda, cleanup
+
+/** A person's edit of a session summary. Empty text puts Yaara's back. */
+export async function saveSummaryEdit(input: { seriesId: string; summaryId: string; markdown: string }): Promise<SeriesState> {
+  const who = await editor()
+  if (!who.ok) return { error: who.error }
+  const ok = await editSummary(input.seriesId, input.summaryId, input.markdown, who.name)
+  if (!ok) return { error: 'That summary no longer exists.' }
+  await logChange({ actor: who.name, kind: 'change', summary: input.markdown.trim() ? 'Edited a session summary' : 'Put back Yaara\'s session summary' })
+  refresh(input.seriesId)
+  return { ok: true }
+}
+
+export interface AgendaResult {
+  error?: string
+  saved?: { forDay: string; agenda: Agenda; generatedAt: string; generatedBy: string | null; model: string | null; current: boolean } | null
+}
+
+const asResult = (a: SavedAgenda | null): AgendaResult => ({ saved: a && { ...a, generatedAt: a.generatedAt.toISOString() } })
+
+/** The saved agenda for the next session, without writing a new one. */
+export async function loadAgenda(seriesId: string): Promise<AgendaResult> {
+  try {
+    return asResult(await savedAgenda(seriesId))
+  } catch (err) {
+    return { error: (err as Error).message }
+  }
+}
+
+/** Write the agenda for the next session now. Takes up to a minute. */
+export async function writeAgenda(seriesId: string): Promise<AgendaResult> {
+  const who = await editor()
+  if (!who.ok) return { error: who.error }
+  try {
+    return asResult(await generateAgenda(seriesId, who.name))
+  } catch (err) {
+    return { error: (err as Error).message }
+  }
+}
+
+export type CleanupAction = 'done' | 'still-open' | 'withdraw' | 'dismiss'
+
+/**
+ * The cleanup buttons on the series page (12 October 2026). Each is the same
+ * change the item's own page makes, recorded as the person's, with the series
+ * as where it was said.
+ */
+export async function cleanUp(input: { seriesId: string; seriesName: string; refs: string[]; action: CleanupAction }): Promise<SeriesState & { done?: number }> {
+  const who = await editor()
+  if (!who.ok) return { error: who.error }
+  const source = { title: `Meeting series: ${input.seriesName}`, url: null }
+  let done = 0
+  const errors: string[] = []
+  for (const ref of input.refs.slice(0, 100)) {
+    const r = await applyItemUpdate({
+      ref,
+      actor: who.name,
+      source,
+      ...(input.action === 'done'
+        ? { action: 'resolve', note: 'Done (series cleanup).' }
+        : input.action === 'withdraw'
+          ? { action: 'drop', note: 'Withdrawn (series cleanup).' }
+          : input.action === 'dismiss'
+            ? { action: 'dismiss_suggestion', note: 'Not done (series cleanup).' }
+            : { action: 'progress', note: 'Still open (confirmed in series cleanup).' }),
+    })
+    if (r.ok) done++
+    else errors.push(`${ref}: ${r.error}`)
+  }
+  refresh(input.seriesId)
+  return errors.length ? { error: errors.join('; '), done } : { ok: true, done }
 }

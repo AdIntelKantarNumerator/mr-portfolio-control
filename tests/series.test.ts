@@ -116,3 +116,14 @@ test('decisions go in their own section, only when made or changed at the last s
 test('on the day of a session, before it is on record, the next session is today', () => {
   assert.equal(nextSession(['2026-10-06', '2026-10-07', '2026-10-08'], '2026-10-09'), '2026-10-09')
 })
+
+test('sessions gone by since an item was last mentioned', async () => {
+  const { quietSessions } = await import('../src/lib/series')
+  const days = ['2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-12']
+  const item = { createdAt: new Date('2026-10-06T14:00:00Z'), source: 'Working Sessions: Insights Studio with GPC - 2026/10/06 08:30 EDT', events: [] }
+  assert.equal(quietSessions(item, days), 4)
+  const mentioned = { ...item, events: [{ kind: 'discussed', at: new Date('2026-10-09T15:00:00Z'), source: 'Keystone SoS - 2026/10/09 10:30 EDT', url: null, note: null, changes: [] }] }
+  assert.equal(quietSessions(mentioned, days), 1)
+  const nudged = { ...item, events: [{ kind: 'nudged', at: new Date('2026-10-12T12:30:00Z'), source: null, url: null, note: null, changes: [] }] }
+  assert.equal(quietSessions(nudged, days), 4, 'a reminder is not a mention')
+})
