@@ -63,7 +63,10 @@ export function SessionView({ seriesId, sessions, summary }: { seriesId: string;
             </>
           ) : null}
         </span>
-        <button type="button" className="btn ser-sedit" onClick={() => setEditing(true)}>
+        <a className="btn ser-sedit" href={`/series/${encodeURIComponent(seriesId)}/export?s=${encodeURIComponent(summary.id)}`} title="Word document: this summary and the next agenda">
+          Export
+        </a>
+        <button type="button" className="btn" onClick={() => setEditing(true)}>
           Edit
         </button>
       </div>

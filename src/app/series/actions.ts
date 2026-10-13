@@ -32,14 +32,10 @@ function clean(meetings: readonly string[]): string[] {
   return [...out.values()]
 }
 
-/** Goals and Slack channel, when the form sent them. */
-function extras(input: { goals?: string; slackChannel?: string }) {
-  const out: { goals?: string | null; slackChannel?: string | null } = {}
+/** Goals, when the form sent them. */
+function extras(input: { goals?: string }) {
+  const out: { goals?: string | null } = {}
   if (input.goals !== undefined) out.goals = input.goals.trim().slice(0, 4000) || null
-  if (input.slackChannel !== undefined) {
-    const c = input.slackChannel.trim().replace(/\s+/g, '')
-    out.slackChannel = c ? (c.startsWith('#') || /^[CG][A-Z0-9]{6,}$/.test(c) ? c : `#${c}`).slice(0, 100) : null
-  }
   return out
 }
 
@@ -48,7 +44,7 @@ function refresh(id?: string) {
   if (id) revalidatePath(`/series/${id}`)
 }
 
-export async function saveSeries(input: { id?: string; name: string; meetings: string[]; goals?: string; slackChannel?: string }): Promise<SeriesState> {
+export async function saveSeries(input: { id?: string; name: string; meetings: string[]; goals?: string }): Promise<SeriesState> {
   const who = await editor()
   if (!who.ok) return { error: who.error }
   const name = input.name.trim().slice(0, 200)

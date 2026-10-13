@@ -54,7 +54,7 @@ export default async function SeriesDetailPage({
           </div>
         </div>
         <SeriesTools
-          series={{ id: view.id, name: view.name, meetings: view.meetings, status: view.status, goals: view.goals ?? '', slackChannel: view.slackChannel ?? '' }}
+          series={{ id: view.id, name: view.name, meetings: view.meetings, status: view.status, goals: view.goals ?? '' }}
           next={next}
         />
       </div>

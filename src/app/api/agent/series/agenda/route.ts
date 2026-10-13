@@ -3,6 +3,8 @@
  *
  *   POST /api/agent/series/agenda { seriesId }         the current agenda, written now if missing or out of date
  *   PATCH /api/agent/series/agenda { seriesId, forDay, posted: true }
+ *   GET /api/agent/series/agenda?seriesId=…   the saved agenda or null, never written here
+ *     (13 October 2026: for a chat answer, which should not wait on a model)
  *
  * Protected by SYNC_TOKEN (or Yaara's own token). Writing one calls the
  * advanced model and can take a minute.
@@ -16,6 +18,13 @@ import { generateAgenda, savedAgenda } from '@/lib/series-agenda'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 240
+
+export async function GET(req: Request) {
+  if (!machineCallerAuthorised(req)) return unauthorised()
+  const seriesId = new URL(req.url).searchParams.get('seriesId') ?? ''
+  if (!seriesId) return Response.json({ error: 'Send ?seriesId=.' }, { status: 400 })
+  return Response.json({ saved: await savedAgenda(seriesId) })
+}
 
 export async function POST(req: Request) {
   if (!machineCallerAuthorised(req)) return unauthorised()

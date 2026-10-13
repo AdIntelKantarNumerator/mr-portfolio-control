@@ -14,7 +14,6 @@ interface Series {
   meetings: string[]
   status: string
   goals: string
-  slackChannel: string
 }
 
 export function SeriesTools({ series, next }: { series: Series; next: string | null }) {

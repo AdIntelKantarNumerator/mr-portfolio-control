@@ -5,6 +5,10 @@
  *     { seriesId, meeting, sessionDay, document: { externalId, title, url, revision }, markdown, model }
  *     -> { id, outcome: created | updated | kept-edit }
  *   PATCH /api/agent/series/summaries { id, posted: true }   she posted it to Slack
+ *   GET /api/agent/series/summaries?seriesId=…[&id=…]
+ *     -> { summary: { id, meeting, sessionDay, markdown, edited } | null, sessions: [{ id, meeting, sessionDay }] }
+ *     The latest session's summary (as shown, a person's edit included), for
+ *     answering "how is that meeting going" (13 October 2026).
  *
  * Protected by SYNC_TOKEN (or Yaara's own token). A person's edit of a summary
  * is never overwritten: her new text is kept underneath it (lib/series-summaries).
@@ -13,10 +17,22 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { meetingSeries, seriesSummaries } from '@/db/schema'
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
-import { upsertSummary } from '@/lib/series-summaries'
+import { getSummary, listSummaries, upsertSummary } from '@/lib/series-summaries'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+export async function GET(req: Request) {
+  if (!machineCallerAuthorised(req)) return unauthorised()
+  const q = new URL(req.url).searchParams
+  const seriesId = q.get('seriesId') ?? ''
+  if (!seriesId) return Response.json({ error: 'Send ?seriesId=.' }, { status: 400 })
+  const [summary, sessions] = await Promise.all([getSummary(seriesId, q.get('id')), listSummaries(seriesId)])
+  return Response.json({
+    summary: summary && { id: summary.id, meeting: summary.meeting, sessionDay: summary.sessionDay, markdown: summary.markdown, edited: summary.edited },
+    sessions: sessions.map((s) => ({ id: s.id, meeting: s.meeting, sessionDay: s.sessionDay })),
+  })
+}
 
 export async function POST(req: Request) {
   if (!machineCallerAuthorised(req)) return unauthorised()

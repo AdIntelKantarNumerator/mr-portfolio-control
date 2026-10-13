@@ -20,7 +20,7 @@ export function SeriesEditor({
   series,
   onClose,
 }: {
-  series?: { id: string; name: string; meetings: string[]; goals?: string; slackChannel?: string }
+  series?: { id: string; name: string; meetings: string[]; goals?: string }
   onClose: () => void
 }) {
   const router = useRouter()
@@ -37,7 +37,6 @@ export function SeriesEditor({
   }, [])
   const [name, setName] = useState(series?.name ?? '')
   const [goals, setGoals] = useState(series?.goals ?? '')
-  const [channel, setChannel] = useState(series?.slackChannel ?? '')
   const [picked, setPicked] = useState<Set<string>>(new Set(series?.meetings ?? []))
   const [find, setFind] = useState('')
   const [busy, setBusy] = useState(false)
@@ -64,7 +63,7 @@ export function SeriesEditor({
   async function save() {
     setBusy(true)
     setError(null)
-    const res = await saveSeries({ id: series?.id, name, meetings: [...picked], goals, slackChannel: channel }).catch(() => ({ error: 'That could not be saved.' }) as const)
+    const res = await saveSeries({ id: series?.id, name, meetings: [...picked], goals }).catch(() => ({ error: 'That could not be saved.' }) as const)
     setBusy(false)
     if ('error' in res && res.error) return setError(res.error)
     onClose()
@@ -84,13 +83,6 @@ export function SeriesEditor({
           placeholder="Goals: what this series is for"
           aria-label="Goals"
           rows={3}
-        />
-        <input
-          id="series-channel"
-          value={channel}
-          onChange={(e) => setChannel(e.target.value)}
-          placeholder="Slack channel for summaries and agendas (optional)"
-          aria-label="Slack channel"
         />
         <input
           id="series-find"
