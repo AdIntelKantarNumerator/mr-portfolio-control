@@ -241,11 +241,79 @@ export function PublishFromClaude() {
   )
 }
 
-function PublishDialog({ onClose }: { onClose: () => void }) {
-  const [state, setState] = useState<TokenState | null>(null)
+/** The shared Drive folder Yaara watches (yaara/src/collect/docs-drop.ts). */
+const DRIVE_FOLDER = { name: 'Portfolio Control — Process Documentation', id: '1Ty6Kc6d1Qy1KXWelWirHPX-2IkujmK10' }
+
+function CopyButton({ text, label, primary }: { text: string; label: string; primary?: boolean }) {
   const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      className={primary ? 'btn btn-primary' : 'btn'}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text)
+          setCopied(true)
+        } catch {
+          setCopied(false)
+        }
+      }}
+    >
+      {copied ? 'Copied' : label}
+    </button>
+  )
+}
+
+function PublishDialog({ onClose }: { onClose: () => void }) {
+  const [tab, setTab] = useState<'drive' | 'token'>('drive')
   // Only ever rendered in the browser, after a click: the address is there.
   const [origin] = useState(() => (typeof window === 'undefined' ? '' : window.location.origin))
+  // Cowork cannot reach this site (its network allowlist blocks it) but its
+  // Google Drive connector can save a file, and Yaara brings it here.
+  const drive = [
+    `Help me publish documents to Process Documentation on MR Portfolio Control. Use the Google Drive connector for everything - never a browser, and never ask me for a token.`,
+    ``,
+    `1. Find the documents I could publish: the artifacts in this conversation, and any .html or .md files in my working folder or outputs. List them by name, numbered.`,
+    `2. List the folders already there: the subfolders, two levels deep, of the Drive folder "${DRIVE_FOLDER.name}" (folder id ${DRIVE_FOLDER.id}).`,
+    `3. Ask me which documents to publish and the folder for each, e.g. "1 and 3 to Release Management/Hotfixes". A new folder is fine.`,
+    `4. Repeat the plan back in one short list and wait for my OK.`,
+    `5. Save each one into its folder, finding each subfolder by name and creating any that is missing. Save the document's complete HTML as "<document name>.html" with contentMimeType text/html and disableConversionToGoogleType true (Markdown: "<name>.md", text/markdown). Same name in the same folder makes a new version - that is how to update one.`,
+    `6. Tell me what you saved where. Each appears at ${origin}/process-docs within two minutes.`,
+  ].join('\n')
+  return (
+    <Modal title="Publish from Claude" onClose={onClose}>
+      <div className="pd-form">
+        <div className="pd-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={tab === 'drive'} className={tab === 'drive' ? 'on' : ''} onClick={() => setTab('drive')}>
+            Cowork or claude.ai
+          </button>
+          <button type="button" role="tab" aria-selected={tab === 'token'} className={tab === 'token' ? 'on' : ''} onClick={() => setTab('token')}>
+            Claude Code
+          </button>
+        </div>
+        {tab === 'drive' ? (
+          <>
+            <p className="pd-lead">
+              Copy this, paste it into the Claude chat with your artifacts. Claude asks which ones, and where.
+            </p>
+            <pre className="pd-code">{drive}</pre>
+            <div className="pd-actions">
+              <a className="btn" href={`https://drive.google.com/drive/folders/${DRIVE_FOLDER.id}`} target="_blank" rel="noreferrer">
+                Open the Drive folder
+              </a>
+              <CopyButton text={drive} label="Copy for Claude" primary />
+            </div>
+          </>
+        ) : (
+          <TokenPanel origin={origin} />
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+function TokenPanel({ origin }: { origin: string }) {
+  const [state, setState] = useState<TokenState | null>(null)
   useEffect(() => {
     myUploadTokens()
       .then(setState)
@@ -262,52 +330,37 @@ function PublishDialog({ onClose }: { onClose: () => void }) {
       ].join('\n')
     : ''
   return (
-    <Modal title="Publish from Claude" onClose={onClose}>
-      <div className="pd-form">
-        <p className="pd-lead">Give Claude a token, and it can publish an artifact here directly, or a new version of one.</p>
-        {state?.error ? <p className="mr-said mr-bad">{state.error}</p> : null}
-        {state?.token ? (
-          <>
-            <p className="pd-warn">Copy this now: it is shown once. Paste it into your Claude chat or project instructions.</p>
-            <pre className="pd-code">{instructions}</pre>
-            <div className="pd-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(instructions)
-                    setCopied(true)
-                  } catch {
-                    setCopied(false)
-                  }
-                }}
-              >
-                {copied ? 'Copied' : 'Copy for Claude'}
-              </button>
-            </div>
-          </>
-        ) : (
+    <>
+      <p className="pd-lead">For Claude Code or a script that can reach this site: a token lets it publish here directly.</p>
+      {state?.error ? <p className="mr-said mr-bad">{state.error}</p> : null}
+      {state?.token ? (
+        <>
+          <p className="pd-warn">Copy this now: it is shown once.</p>
+          <pre className="pd-code">{instructions}</pre>
           <div className="pd-actions">
-            <button type="button" className="btn btn-primary" onClick={async () => setState(await newUploadToken('Claude'))}>
-              Make a token
-            </button>
+            <CopyButton text={instructions} label="Copy for Claude" primary />
           </div>
-        )}
-        {state?.tokens?.length ? (
-          <ul className="pd-tokens">
-            {state.tokens.map((t) => (
-              <li key={t.id}>
-                <span>{t.label ?? 'Token'} · made {t.createdAt.slice(0, 10)}</span>
-                <em>{t.lastUsedAt ? `last used ${t.lastUsedAt.slice(0, 10)}` : 'not used yet'}</em>
-                <button type="button" className="linkish" onClick={async () => setState({ ...(await revokeMyUploadToken(t.id)), token: state.token })}>
-                  Revoke
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
-    </Modal>
+        </>
+      ) : (
+        <div className="pd-actions">
+          <button type="button" className="btn btn-primary" onClick={async () => setState(await newUploadToken('Claude'))}>
+            Make a token
+          </button>
+        </div>
+      )}
+      {state?.tokens?.length ? (
+        <ul className="pd-tokens">
+          {state.tokens.map((t) => (
+            <li key={t.id}>
+              <span>{t.label ?? 'Token'} · made {t.createdAt.slice(0, 10)}</span>
+              <em>{t.lastUsedAt ? `last used ${t.lastUsedAt.slice(0, 10)}` : 'not used yet'}</em>
+              <button type="button" className="linkish" onClick={async () => setState({ ...(await revokeMyUploadToken(t.id)), token: state.token })}>
+                Revoke
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </>
   )
 }

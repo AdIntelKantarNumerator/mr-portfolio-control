@@ -211,27 +211,36 @@ export async function removeFolder(id: string): Promise<string | null> {
   return f.parentId
 }
 
+/** Where a version came from, when it was not uploaded on the site: see importFromDrive. */
+interface Source {
+  sourceRef?: string
+  driveFileId?: string
+}
+
 /** A new artifact in a folder, as version 1. */
-export async function addArtifact(folderId: string, file: { content: string; fileName?: string | null; name?: string | null }, by: string): Promise<{ id: string; version: number }> {
+export async function addArtifact(folderId: string, file: { content: string; fileName?: string | null; name?: string | null }, by: string, from: Source = {}): Promise<{ id: string; version: number }> {
   const [f] = await db.select({ id: docFolders.id }).from(docFolders).where(eq(docFolders.id, folderId)).limit(1)
   if (!f) throw new DocError('That folder no longer exists.')
   const up = checked(file)
   const [a] = await db
     .insert(docArtifacts)
-    .values({ folderId, name: up.name, version: 1, searchText: up.text, createdBy: by, updatedBy: by })
+    .values({ folderId, name: up.name, version: 1, searchText: up.text, createdBy: by, updatedBy: by, driveFileId: from.driveFileId ?? null })
     .returning({ id: docArtifacts.id })
-  await db.insert(docVersions).values({ artifactId: a!.id, version: 1, html: up.html, bytes: Buffer.byteLength(up.html), fileName: file.fileName ?? null, uploadedBy: by })
+  await db.insert(docVersions).values({ artifactId: a!.id, version: 1, html: up.html, bytes: Buffer.byteLength(up.html), fileName: file.fileName ?? null, uploadedBy: by, sourceRef: from.sourceRef ?? null })
   return { id: a!.id, version: 1 }
 }
 
 /** A new version over the top of an artifact; earlier versions are kept. */
-export async function replaceArtifact(id: string, file: { content: string; fileName?: string | null }, by: string): Promise<{ id: string; version: number }> {
+export async function replaceArtifact(id: string, file: { content: string; fileName?: string | null }, by: string, from: Source = {}): Promise<{ id: string; version: number }> {
   const [a] = await db.select().from(docArtifacts).where(eq(docArtifacts.id, id)).limit(1)
   if (!a) throw new DocError('That document no longer exists.')
   const up = checked({ ...file, name: a.name })
   const version = a.version + 1
-  await db.insert(docVersions).values({ artifactId: id, version, html: up.html, bytes: Buffer.byteLength(up.html), fileName: file.fileName ?? null, uploadedBy: by })
-  await db.update(docArtifacts).set({ version, searchText: up.text, updatedBy: by }).where(eq(docArtifacts.id, id))
+  await db.insert(docVersions).values({ artifactId: id, version, html: up.html, bytes: Buffer.byteLength(up.html), fileName: file.fileName ?? null, uploadedBy: by, sourceRef: from.sourceRef ?? null })
+  await db
+    .update(docArtifacts)
+    .set({ version, searchText: up.text, updatedBy: by, ...(from.driveFileId ? { driveFileId: from.driveFileId } : {}) })
+    .where(eq(docArtifacts.id, id))
   return { id, version }
 }
 
@@ -279,6 +288,43 @@ export async function artifactNamed(folderId: string, name: string): Promise<str
     .where(and(eq(docArtifacts.folderId, folderId), ilike(docArtifacts.name, name.trim().replace(/[\\%_]/g, (m) => `\\${m}`))))
     .limit(1)
   return a?.id ?? null
+}
+
+// ---------------------------------------------------------------- from Google Drive
+
+/** Where a file saved straight into the Drive folder's top level goes. */
+export const DRIVE_UNSORTED = 'Unsorted'
+
+/**
+ * One file from the shared Drive folder (Yaara reads it; see
+ * app/api/agent/docs/import). Each saved revision is imported once, by its
+ * sourceRef. A file seen before is a new version of the same document - in
+ * the folder it now sits in, under the name it has on the site - and a new
+ * file over a document of the same name in that folder is one too.
+ */
+export async function importFromDrive(file: {
+  sourceRef: string
+  driveFileId: string
+  folderPath: string
+  name: string
+  fileName: string
+  content: string
+  by: string
+}): Promise<{ id: string; version: number; outcome: 'added' | 'replaced' | 'already' }> {
+  const [seen] = await db
+    .select({ id: docVersions.artifactId, version: docVersions.version })
+    .from(docVersions)
+    .where(eq(docVersions.sourceRef, file.sourceRef))
+    .limit(1)
+  if (seen) return { ...seen, outcome: 'already' }
+
+  const folderId = await ensureFolderPath(folderPathParts(file.folderPath).length ? file.folderPath : DRIVE_UNSORTED, file.by)
+  const from = { sourceRef: file.sourceRef, driveFileId: file.driveFileId }
+  const [linked] = await db.select({ id: docArtifacts.id, folderId: docArtifacts.folderId }).from(docArtifacts).where(eq(docArtifacts.driveFileId, file.driveFileId)).limit(1)
+  if (linked && linked.folderId !== folderId) await db.update(docArtifacts).set({ folderId }).where(eq(docArtifacts.id, linked.id))
+  const existing = linked?.id ?? (await artifactNamed(folderId, file.name))
+  if (existing) return { ...(await replaceArtifact(existing, file, file.by, from)), outcome: 'replaced' }
+  return { ...(await addArtifact(folderId, file, file.by, from)), outcome: 'added' }
 }
 
 // ---------------------------------------------------------------- upload tokens

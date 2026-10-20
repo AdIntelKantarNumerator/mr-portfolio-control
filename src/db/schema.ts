@@ -2178,6 +2178,8 @@ export const docArtifacts = pgTable(
     version: integer('version').notNull().default(1),
     /** The newest version's readable text, for search. */
     searchText: text('search_text'),
+    /** The Google Drive file it was published from, when it came through Drive. */
+    driveFileId: text('drive_file_id'),
     createdBy: text('created_by'),
     updatedBy: text('updated_by'),
     createdAt: createdAt(),
@@ -2199,6 +2201,8 @@ export const docVersions = pgTable(
     bytes: integer('bytes').notNull(),
     fileName: text('file_name'),
     uploadedBy: text('uploaded_by'),
+    /** "drive:<file id>@<modified time>" for a version imported from Drive. */
+    sourceRef: text('source_ref'),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('doc_versions_uq').on(t.artifactId, t.version)],
