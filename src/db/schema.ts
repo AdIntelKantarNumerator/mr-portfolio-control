@@ -2131,3 +2131,90 @@ export const seriesAgendas = pgTable(
   },
   (t) => [uniqueIndex('series_agendas_day_uq').on(t.seriesId, t.forDay)],
 )
+
+// ---------------------------------------------------------------------------
+// Roles and Process Documentation. See drizzle/0032_roles_and_docs.sql.
+// ---------------------------------------------------------------------------
+
+export const siteUsers = pgTable('site_users', {
+  /** Sign-in email, lowercased. */
+  email: text('email').primaryKey(),
+  name: text('name'),
+  /** product | commercial. No row at all means commercial. */
+  role: text('role').notNull().default('commercial'),
+  isAdmin: boolean('is_admin').notNull().default(false),
+  canEditDocs: boolean('can_edit_docs').notNull().default(false),
+  /** Their Slack title, when the Slack pass found one. */
+  title: text('title'),
+  /** seed | slack | admin: where this person's access came from. */
+  source: text('source').notNull().default('admin'),
+  updatedBy: text('updated_by'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+})
+
+export const docFolders = pgTable(
+  'doc_folders',
+  {
+    id: id(),
+    parentId: text('parent_id'),
+    name: text('name').notNull(),
+    createdBy: text('created_by'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('doc_folders_parent_idx').on(t.parentId)],
+)
+
+export const docArtifacts = pgTable(
+  'doc_artifacts',
+  {
+    id: id(),
+    folderId: text('folder_id')
+      .notNull()
+      .references(() => docFolders.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** The newest version's number: what is shown. */
+    version: integer('version').notNull().default(1),
+    /** The newest version's readable text, for search. */
+    searchText: text('search_text'),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('doc_artifacts_folder_idx').on(t.folderId)],
+)
+
+export const docVersions = pgTable(
+  'doc_versions',
+  {
+    id: id(),
+    artifactId: text('artifact_id')
+      .notNull()
+      .references(() => docArtifacts.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    /** The page as uploaded, completed into a full document (lib/docs.ts). */
+    html: text('html').notNull(),
+    bytes: integer('bytes').notNull(),
+    fileName: text('file_name'),
+    uploadedBy: text('uploaded_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('doc_versions_uq').on(t.artifactId, t.version)],
+)
+
+export const docUploadTokens = pgTable(
+  'doc_upload_tokens',
+  {
+    id: id(),
+    email: text('email').notNull(),
+    /** sha256 of the token; the token itself is shown once and never stored. */
+    tokenHash: text('token_hash').notNull(),
+    label: text('label'),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('doc_upload_tokens_hash_uq').on(t.tokenHash)],
+)

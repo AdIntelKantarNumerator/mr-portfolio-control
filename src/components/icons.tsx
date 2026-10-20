@@ -185,6 +185,22 @@ export const IconSeries = (p: IconProps) => (
   </Glyph>
 )
 
+/** Process Documentation — a folder with a page in it. */
+export const IconProcessDocs = (p: IconProps) => (
+  <Glyph {...p}>
+    <path d="M2 4.2a1 1 0 0 1 1-1h3.2l1.4 1.5H13a1 1 0 0 1 1 1v6.9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" />
+    <path d="M5.6 8.3h4.8M5.6 10.5h3" />
+  </Glyph>
+)
+
+/** Admin — a shield. */
+export const IconAdmin = (p: IconProps) => (
+  <Glyph {...p}>
+    <path d="M8 1.8 13 3.7v3.7c0 3-2.1 5.6-5 6.8-2.9-1.2-5-3.8-5-6.8V3.7z" />
+    <path d="m5.8 8.1 1.6 1.6 2.9-3.1" />
+  </Glyph>
+)
+
 /** Templates — a page with a repeated shape. */
 export const IconTemplates = (p: IconProps) => (
   <Glyph {...p}>

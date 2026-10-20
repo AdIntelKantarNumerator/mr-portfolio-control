@@ -35,6 +35,8 @@ import {
   IconObjectives,
   IconIntake,
   IconPrioritization,
+  IconProcessDocs,
+  IconAdmin,
   IconInitiatives,
   IconReadiness,
   IconRegister,
@@ -106,6 +108,8 @@ export const NAV: NavSection[] = [
     id: 'reference',
     label: 'Reference',
     items: [
+      // First (Scott, 20 October 2026): the section Commercial colleagues see.
+      { href: '/process-docs', label: 'Process Documentation', icon: IconProcessDocs, hint: 'How we work: shared guides and references' },
       // People (contention) is out for now. The page is still there and still
       // answers a real question — who is committed to two things at once —
       // but nobody was opening it, and a reference section is the first place
@@ -124,6 +128,12 @@ export const NAV: NavSection[] = [
         hint: 'ClickHouse: what is loaded, and what every table and field means',
       },
     ],
+  },
+  {
+    // Admins only (lib/access-rules.ts): people's roles and permissions.
+    id: 'admin',
+    label: 'Admin',
+    items: [{ href: '/admin', label: 'Roles & access', icon: IconAdmin, hint: 'Who can see and edit what' }],
   },
   {
     // Last, and on its own. It is the log — you go to it when something has

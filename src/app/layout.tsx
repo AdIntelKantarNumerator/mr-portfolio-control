@@ -3,6 +3,8 @@ import './globals.css'
 import { Shell } from '@/components/shell'
 import { BRAND_NAME } from '@/lib/brand'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { currentAccess } from '@/lib/auth/access'
+import { navSectionsFor } from '@/lib/access-rules'
 
 export const metadata: Metadata = {
   title: { default: BRAND_NAME, template: `%s · ${BRAND_NAME}` },
@@ -22,6 +24,10 @@ if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser()
+  // What this person's role may see (lib/access-rules.ts). The proxy enforces
+  // it; this only keeps the nav to what they can open.
+  const access = await currentAccess()
+  const sections = [...navSectionsFor(access)].map((s) => s ?? 'top')
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -61,6 +67,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           }}
           // Open WebUI, for the panel's "Open Full Chat". Unset hides that button only.
           chatUrl={process.env.YAARA_CHAT_URL?.trim() || null}
+          sections={sections}
+          // Ask Yaara answers questions about the whole portfolio: product roles only.
+          yaara={access.role === 'product'}
         >
           {children}
         </Shell>

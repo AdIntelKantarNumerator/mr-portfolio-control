@@ -21,6 +21,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { jwtVerify } from 'jose'
 import { SESSION_COOKIE } from '@/lib/auth/config'
+import { canSee, landingFor, usesEmbeddedDb } from '@/lib/access-rules'
 
 /*
  * Exempt from the BROWSER session gate — not from authentication.
@@ -34,6 +35,8 @@ import { SESSION_COOKIE } from '@/lib/auth/config'
  *   /api/sync/*            SYNC_TOKEN bearer; refuses in production if unset
  *   /api/digest            SYNC_TOKEN bearer; refuses in production if unset
  *   /api/agent/*           SYNC_TOKEN bearer; the agent's read and write path
+ *   /api/docs/upload       a person's documentation upload token (lib/docs-tokens.ts),
+ *                          for publishing straight from Claude
  *   /api/yaara/*           the chat screen (Open WebUI) asking Yaara a question:
  *                          YAARA_CHAT_TOKEN bearer, and the person verified from
  *                          Open WebUI's signed user token (lib/yaara-chat.ts)
@@ -49,6 +52,7 @@ export const PUBLIC_PREFIXES = [
   '/api/digest',
   '/api/agent/',
   '/api/yaara/',
+  '/api/docs/upload',
   '/api/health',
 ]
 
@@ -82,13 +86,32 @@ export async function proxy(req: NextRequest) {
 
   const token = req.cookies.get(SESSION_COOKIE)?.value
   if (token) {
+    let email: string | null = null
     try {
-      await jwtVerify(token, new TextEncoder().encode(secret), {
+      const { payload } = await jwtVerify(token, new TextEncoder().encode(secret), {
         issuer: 'mr-portfolio-control',
       })
-      return NextResponse.next()
+      email = typeof payload.email === 'string' ? payload.email : null
     } catch {
       // Expired or tampered — fall through to the redirect.
+    }
+    if (email) {
+      // Roles (20 October 2026): Commercial sees the Reference section only,
+      // and the Admin section is for admins. Checked here, for every request,
+      // because in-app navigation and form actions all come through here too.
+      //
+      // Not on the embedded database of local development: the proxy runs in
+      // a module graph of its own, and importing the database client there
+      // opens PGlite's files a second time, which aborts (and once corrupted
+      // .data/pcr). So the database code is loaded only for real Postgres,
+      // and local development does not enforce roles.
+      if (usesEmbeddedDb()) return NextResponse.next()
+      const { accessFor } = await import('@/lib/auth/access')
+      const access = await accessFor(email)
+      if (canSee(access, pathname)) return NextResponse.next()
+      if (pathname.startsWith('/api/')) return NextResponse.json({ error: 'Not available to your role.' }, { status: 403 })
+      const base = process.env.APP_URL?.trim() || req.url
+      return NextResponse.redirect(new URL(landingFor(access), base))
     }
   }
 

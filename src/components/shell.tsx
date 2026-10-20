@@ -40,7 +40,20 @@ type Rail = (typeof RAIL)[number]
  * visit — and then occupied the top of every screen forever. What the app is
  * for belongs in the onboarding, not in the furniture.
  */
-export function Shell({ children, user, chatUrl = null }: { children: ReactNode; user: ShellUser; chatUrl?: string | null }) {
+export function Shell({
+  children,
+  user,
+  chatUrl = null,
+  sections,
+  yaara = true,
+}: {
+  children: ReactNode
+  user: ShellUser
+  chatUrl?: string | null
+  /** The nav section ids this person's role may see; 'top' for the ungrouped items. */
+  sections?: string[]
+  yaara?: boolean
+}) {
   const pathname = usePathname()
   const [theme, setTheme] = usePreference<Theme>('pcr:theme', THEMES, 'system')
   const [rail, setRail] = usePreference<Rail>('pcr:sidebar', RAIL, 'open')
@@ -111,7 +124,7 @@ export function Shell({ children, user, chatUrl = null }: { children: ReactNode;
         </div>
 
         <nav className="side-nav" aria-label="Main">
-          {NAV.map((section) => {
+          {NAV.filter((section) => !sections || sections.includes(section.id ?? 'top')).map((section) => {
             // A collapsed rail is icons only, so a section header with no
             // room for its label would be a stray line. The items stay.
             const open = !section.id || collapsed || here === section.id || !shut.has(section.id)
@@ -220,7 +233,7 @@ export function Shell({ children, user, chatUrl = null }: { children: ReactNode;
       </main>
 
       {/* In the shell, not the page, so it stays open across navigation. */}
-      <YaaraPanel chatUrl={chatUrl} />
+      {yaara ? <YaaraPanel chatUrl={chatUrl} /> : null}
     </div>
   )
 }

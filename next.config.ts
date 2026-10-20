@@ -15,6 +15,14 @@ const nextConfig: NextConfig = {
    * driver is unaffected either way.
    */
   serverExternalPackages: ["@electric-sql/pglite"],
+  /*
+   * Process Documentation uploads go through a server action, and a Claude
+   * artifact with embedded images can run to megabytes; the default limit is
+   * 1MB. 17mb is the 16MB an artifact may be, plus the form's own overhead.
+   */
+  experimental: {
+    serverActions: { bodySizeLimit: "17mb" },
+  },
 };
 
 export default nextConfig;

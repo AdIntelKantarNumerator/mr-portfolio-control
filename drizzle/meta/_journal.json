@@ -225,6 +225,13 @@
       "when": 1791842664218,
       "tag": "0031_series_summaries",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792523946317,
+      "tag": "0032_roles_and_docs",
+      "breakpoints": true
     }
   ]
 }
