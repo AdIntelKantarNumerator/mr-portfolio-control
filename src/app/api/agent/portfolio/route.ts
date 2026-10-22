@@ -5,8 +5,8 @@
  *
  * Protected by SYNC_TOKEN, the same as the other machine routes.
  *
- * Deliberately narrow: ids, names, status, the people involved, and the Linear
- * id where there is one. Not assessments, not decisions, not the intake
+ * Deliberately narrow: ids, names, status, the people involved, the Linear
+ * id where there is one and the health its lead set there. Not assessments, not decisions, not the intake
  * register. An agent needs enough to know what it is looking at and to attach
  * what it read to the right thing; handing it the whole portfolio would make
  * every future prompt-injection in a PR title that much more interesting.
@@ -52,6 +52,9 @@ export async function GET(req: Request) {
       name: p.name,
       externalId: externalOf.get(`initiative:${p.id}`) ?? null,
       status: p.status,
+      // Linear's own health (onTrack | atRisk | offTrack), as its lead last
+      // set it: context for her assessment, never the assessment itself.
+      linearHealth: p.sourceHealth ?? null,
       people: [nameOf.get(p.ownerId ?? ''), nameOf.get(p.sponsorId ?? '')].filter(Boolean) as string[],
       parent: p.objectiveId,
     })),
@@ -61,6 +64,7 @@ export async function GET(req: Request) {
       name: w.name,
       externalId: externalOf.get(`project:${w.id}`) ?? null,
       status: w.status,
+      linearHealth: w.sourceHealth ?? null,
       people: [nameOf.get(w.leadId ?? '')].filter(Boolean) as string[],
       parent: w.initiativeId,
     })),
