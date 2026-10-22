@@ -46,6 +46,7 @@ import { logChange } from '@/lib/portfolio'
 import { nextRef } from '@/lib/util'
 import { closest, exact } from '@/lib/match-name'
 import { diffChanges, encodeChanges } from '@/lib/item-changes'
+import { cleanAssignment, encodeAssignment } from '@/lib/assignment'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -78,6 +79,8 @@ interface IncomingItem {
   dueDate?: string | null
   raisedAt?: string | null
   links?: IncomingLink[]
+  /** {by, organizer, attendees}: lib/assignment.ts. */
+  assignment?: unknown
 }
 
 interface Incoming {
@@ -267,6 +270,9 @@ export async function POST(req: Request) {
           patch.ownerName = person ? null : ownerAsked
         }
         if (due) patch.dueDate = due
+        // A new owner was given it by someone: who, and who was there.
+        const given = cleanAssignment(raw.assignment)
+        if (ownerAsked && given) patch.assignment = encodeAssignment(given)
       }
       if (finishing) {
         patch.status = 'done'
@@ -367,6 +373,7 @@ export async function POST(req: Request) {
         ownerName: person ? null : ownerAsked || null,
         dueDate: asDate(raw.dueDate),
         raisedAt: asDate(raw.raisedAt) ?? new Date(),
+        assignment: encodeAssignment(cleanAssignment(raw.assignment)),
         status: 'open',
         sourceKind,
         sourceTitle,

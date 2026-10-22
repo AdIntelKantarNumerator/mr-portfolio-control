@@ -34,6 +34,7 @@ import { ADJUST_STEP, assignBands, isFactor, parseFactors, parseReasons, scoreOf
 import { activityWithHold, isInactive } from './item-activity'
 import { isDecisionOnRecord, isRecentDecision } from './decision-recency'
 import { idsAtOrBelow, type Tier } from './hierarchy'
+import { cleanAssignment, decodeAssignment, encodeAssignment, type Assignment } from './assignment'
 
 export interface Item {
   kind: ItemKind
@@ -73,6 +74,8 @@ export interface Item {
   sourceUrl: string | null
   /** Who raised it, when that was recorded. */
   raisedBy: string | null
+  /** Who gave it to its owner, and who was in the meeting. lib/assignment.ts. */
+  assignment: Assignment | null
   href: string
 }
 
@@ -160,6 +163,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         sourceTitle: (r.raisedDocumentId && docOf.get(r.raisedDocumentId)?.title) || r.raisedAtMeeting,
         sourceUrl: (r.raisedDocumentId && docOf.get(r.raisedDocumentId)?.url) || null,
         raisedBy: (r.raisedById && nameOf.get(r.raisedById)) || r.raisedByText || null,
+        assignment: decodeAssignment(r.assignment),
         href: '',
       })
     }
@@ -210,6 +214,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         sourceTitle: r.sourceTitle,
         sourceUrl: r.sourceUrl,
         raisedBy: null,
+        assignment: decodeAssignment(r.assignment),
         href: '',
       })
     }
@@ -290,6 +295,7 @@ export type ItemAction =
   | 'hold' // on hold until a date ("until"), or released when there is none
   | 'suggest_done' // Yaara thinks it is finished; note and source say why. A person accepts (resolve) or dismisses
   | 'dismiss_suggestion' // a person says it is not finished after all
+  | 'assignment' // who gave it to its owner, and who was in the meeting (lib/assignment.ts); bookkeeping, not activity
 
 export interface ItemUpdate {
   ref: string
@@ -320,6 +326,8 @@ export interface ItemUpdate {
   occurredAt?: Date | null
   /** For hold: the day reminders start again, YYYY-MM-DD; null releases the hold. */
   until?: string | null
+  /** For assignment: {by, organizer, attendees}. */
+  assignment?: unknown
 }
 
 export interface UpdateResult {
@@ -512,6 +520,15 @@ export async function applyItemUpdate(u: ItemUpdate): Promise<UpdateResult> {
         suggestedDoneUrl: u.source?.url?.slice(0, 500) ?? null,
       })
       await addEvent(found, 'suggested', u, `Looks done: ${note}`)
+      return { ref: u.ref, ok: true, status: found.row.status }
+    }
+    case 'assignment': {
+      // Bookkeeping about where the item came from, so no event, no log and
+      // no change to its last activity: filling it in for every open item
+      // must not wake them all into tomorrow's reminders.
+      const a = cleanAssignment(u.assignment)
+      if (!a) return { ref: u.ref, ok: false, error: 'Send assignment: {by, organizer, attendees}.' }
+      await patchRow(found, { assignment: encodeAssignment(a) })
       return { ref: u.ref, ok: true, status: found.row.status }
     }
     case 'dismiss_suggestion': {

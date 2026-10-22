@@ -239,6 +239,13 @@
       "when": 1792531323758,
       "tag": "0033_docs_from_drive",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792706181626,
+      "tag": "0034_item_assignment",
+      "breakpoints": true
     }
   ]
 }

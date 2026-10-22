@@ -55,6 +55,7 @@ import {
 import { machineCallerAuthorised, unauthorised } from '@/lib/machine-auth'
 import { matchPerson, nextRef } from '@/lib/register'
 import { diffChanges, encodeChanges } from '@/lib/item-changes'
+import { cleanAssignment, encodeAssignment } from '@/lib/assignment'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -92,6 +93,8 @@ interface IncomingEntry {
   contested?: boolean
   history?: string | null
   event?: IncomingEvent
+  /** {by, organizer, attendees}: lib/assignment.ts. */
+  assignment?: unknown
 }
 
 interface IncomingTheme {
@@ -286,6 +289,8 @@ export async function POST(req: Request) {
       if (raw.owner && (changing || (!existing.ownerId && !existing.ownerText))) {
         patch.ownerId = ownerId
         patch.ownerText = ownerId ? null : String(raw.owner).slice(0, 200)
+        const given = cleanAssignment(raw.assignment)
+        if (given) patch.assignment = encodeAssignment(given)
       }
       if (!existing.raisedById && !existing.raisedByText && raw.raisedBy) {
         patch.raisedById = raisedById
@@ -373,6 +378,7 @@ export async function POST(req: Request) {
         ownerText: ownerId ? null : raw.owner ? String(raw.owner).slice(0, 200) : null,
         raisedById,
         raisedByText: raisedById ? null : raw.raisedBy ? String(raw.raisedBy).slice(0, 200) : null,
+        assignment: encodeAssignment(cleanAssignment(raw.assignment)),
         dueBy: raw.dueBy ? String(raw.dueBy).slice(0, 120) : null,
         nextAction: raw.nextAction ? String(raw.nextAction).slice(0, 500) : null,
         evidence: document.url ?? document.title,

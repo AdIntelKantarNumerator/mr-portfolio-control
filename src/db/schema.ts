@@ -390,6 +390,8 @@ export const decisions = pgTable(
      */
     raisedById: text('raised_by_id').references(() => people.id, { onDelete: 'set null' }),
     raisedByText: text('raised_by_text'),
+    /** JSON {by, organizer, attendees}: who gave it to its owner, and who was there. lib/assignment.ts. */
+    assignment: text('assignment'),
     /** Free text on purpose: "Next Leads", "~7/10", "This week". */
     dueBy: text('due_by'),
     nextAction: text('next_action'),
@@ -586,6 +588,8 @@ export const actionItems = pgTable(
     suggestedDoneNote: text('suggested_done_note'),
     suggestedDoneSource: text('suggested_done_source'),
     suggestedDoneUrl: text('suggested_done_url'),
+    /** JSON {by, organizer, attendees}: who gave it to its owner, and who was there. lib/assignment.ts. */
+    assignment: text('assignment'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
