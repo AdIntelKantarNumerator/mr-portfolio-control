@@ -31,7 +31,7 @@ import type { ItemKind } from '@/lib/importance'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const ACTIONS = new Set<ItemAction>(['resolve', 'drop', 'reopen', 'progress', 'duplicate', 'owner', 'score', 'adjust', 'nudged', 'hold', 'suggest_done', 'dismiss_suggestion', 'assignment'])
+const ACTIONS = new Set<ItemAction>(['resolve', 'drop', 'reopen', 'progress', 'duplicate', 'owner', 'score', 'adjust', 'nudged', 'hold', 'suggest_done', 'dismiss_suggestion', 'assignment', 'delegate', 'delegation_sent', 'accept_delegation', 'decline_delegation', 'cancel_delegation'])
 const KINDS = new Set<ItemKind>(['blocker', 'decision', 'action'])
 
 export async function GET(req: Request) {
@@ -92,6 +92,8 @@ export async function GET(req: Request) {
       // Who gave it to its owner, and who was in the meeting: the reminders
       // say who assigned it when the owner was not there (lib/assignment.ts).
       assignment: i.assignment,
+      // Offered to someone who has not answered yet (lib/delegation.ts).
+      delegation: i.delegation,
       path: itemPath(i),
     })),
   })
@@ -142,6 +144,8 @@ export async function POST(req: Request) {
       delta: typeof u.delta === 'number' ? u.delta : null,
       until: typeof u.until === 'string' && u.until.trim() ? u.until.trim() : null,
       assignment: u.assignment,
+      toRef: typeof u.toRef === 'string' ? u.toRef.trim().slice(0, 80) : null,
+      byRef: typeof u.byRef === 'string' ? u.byRef.trim().slice(0, 80) : null,
       quiet: u.quiet === true,
     }
     try {

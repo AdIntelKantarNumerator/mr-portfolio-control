@@ -48,6 +48,7 @@ export function toInfo(i: Item): ItemInfo {
     lastActivityAt: i.lastActivityAt.toISOString(),
     inactive: i.inactive,
     heldUntil: i.heldUntil ? i.heldUntil.toISOString().slice(0, 10) : null,
+    delegatedTo: i.delegation?.to ?? null,
   }
 }
 

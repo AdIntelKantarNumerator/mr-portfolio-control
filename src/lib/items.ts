@@ -35,6 +35,7 @@ import { activityWithHold, isInactive } from './item-activity'
 import { isDecisionOnRecord, isRecentDecision } from './decision-recency'
 import { idsAtOrBelow, type Tier } from './hierarchy'
 import { cleanAssignment, decodeAssignment, encodeAssignment, type Assignment } from './assignment'
+import { decodeDelegation, encodeDelegation, newDelegation, type Delegation } from './delegation'
 
 export interface Item {
   kind: ItemKind
@@ -76,6 +77,8 @@ export interface Item {
   raisedBy: string | null
   /** Who gave it to its owner, and who was in the meeting. lib/assignment.ts. */
   assignment: Assignment | null
+  /** Offered to someone else, who has not yet accepted or declined. lib/delegation.ts. */
+  delegation: Delegation | null
   href: string
 }
 
@@ -164,6 +167,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         sourceUrl: (r.raisedDocumentId && docOf.get(r.raisedDocumentId)?.url) || null,
         raisedBy: (r.raisedById && nameOf.get(r.raisedById)) || r.raisedByText || null,
         assignment: decodeAssignment(r.assignment),
+        delegation: decodeDelegation(r.delegation),
         href: '',
       })
     }
@@ -215,6 +219,7 @@ export async function loadItems(opts: { kinds?: ItemKind[]; closedSince?: Date |
         sourceUrl: r.sourceUrl,
         raisedBy: null,
         assignment: decodeAssignment(r.assignment),
+        delegation: decodeDelegation(r.delegation),
         href: '',
       })
     }
@@ -296,6 +301,11 @@ export type ItemAction =
   | 'suggest_done' // Yaara thinks it is finished; note and source say why. A person accepts (resolve) or dismisses
   | 'dismiss_suggestion' // a person says it is not finished after all
   | 'assignment' // who gave it to its owner, and who was in the meeting (lib/assignment.ts); bookkeeping, not activity
+  | 'delegate' // offer it to "owner"; it moves only when they accept (lib/delegation.ts)
+  | 'delegation_sent' // the offer reached them; bookkeeping
+  | 'accept_delegation' // they said yes: now theirs
+  | 'decline_delegation' // they said no: it stays where it was
+  | 'cancel_delegation' // whoever offered it took the offer back
 
 export interface ItemUpdate {
   ref: string
@@ -328,6 +338,13 @@ export interface ItemUpdate {
   until?: string | null
   /** For assignment: {by, organizer, attendees}. */
   assignment?: unknown
+  /**
+   * For delegate: how to reach the person it is offered to ("slack:U123"),
+   * and the person offering it. For accept/decline: who is answering, which
+   * must be the person it was offered to when that is known.
+   */
+  toRef?: string | null
+  byRef?: string | null
 }
 
 export interface UpdateResult {
@@ -336,6 +353,10 @@ export interface UpdateResult {
   error?: string
   status?: string
   score?: number | null
+  /** For the delegation actions: the delegation as it was, so the caller can tell both people. */
+  delegation?: Delegation | null
+  /** The owner before an accepted delegation changed it. */
+  previousOwner?: string | null
 }
 
 interface Found {
@@ -385,6 +406,25 @@ async function addEvent(found: Found, kind: string, u: ItemUpdate, note: string 
 
 /** Clears a "looks done" suggestion: on closing, reopening or dismissing it. */
 const NO_SUGGESTION = { suggestedDoneAt: null, suggestedDoneNote: null, suggestedDoneSource: null, suggestedDoneUrl: null }
+
+/** Matched to someone in the directory when there is a match; kept as written when not. */
+async function setOwner(found: Found, asked: string, also: Record<string, unknown>) {
+  const roster = await db.select({ id: people.id, name: people.name }).from(people)
+  const personId = matchPerson(asked, roster)
+  if (found.kind === 'action') await patchRow(found, { ownerId: personId, ownerName: personId ? null : asked, ...also })
+  else await patchRow(found, { ownerId: personId, ownerText: personId ? null : asked, ...also })
+}
+
+/** Who owns it now, as a name. */
+async function ownerNameOf(found: Found): Promise<string | null> {
+  const id = found.row.ownerId
+  if (id) {
+    const [p] = await db.select({ name: people.name }).from(people).where(eq(people.id, id)).limit(1)
+    if (p) return p.name
+  }
+  const row = found.row as { ownerName?: string | null; ownerText?: string | null }
+  return row.ownerName ?? row.ownerText ?? null
+}
 
 async function patchRow(found: Found, patch: Record<string, unknown>) {
   if (found.kind === 'action') await db.update(actionItems).set(patch).where(eq(actionItems.id, found.row.id))
@@ -470,14 +510,53 @@ export async function applyItemUpdate(u: ItemUpdate): Promise<UpdateResult> {
     case 'owner': {
       const asked = u.owner?.trim()
       if (!asked) return { ref: u.ref, ok: false, error: 'Who should own it?' }
-      const roster = await db.select({ id: people.id, name: people.name }).from(people)
-      const personId = matchPerson(asked, roster)
-      const touched = u.quiet ? {} : { lastActivityAt: now }
-      if (found.kind === 'action') await patchRow(found, { ownerId: personId, ownerName: personId ? null : asked, ...touched })
-      else await patchRow(found, { ownerId: personId, ownerText: personId ? null : asked, ...touched })
+      await setOwner(found, asked, u.quiet ? {} : { lastActivityAt: now })
       await addEvent(found, 'owner', u, `Owner: ${asked}${note ? `. ${note}` : ''}`)
       await log(`${asked} now owns ${name}`)
       return { ref: u.ref, ok: true, status: found.row.status }
+    }
+    case 'delegate': {
+      // Asked, not done: the owner stays until they accept (Sadiya,
+      // 26 October 2026). A person's decision about the item, so activity.
+      if (!isOpen(found)) return { ref: u.ref, ok: false, error: `${u.ref} is closed; reopen it before delegating it.` }
+      const d = newDelegation({ to: u.owner, toRef: u.toRef, by: u.actor, byRef: u.byRef, note }, now)
+      if (typeof d === 'string') return { ref: u.ref, ok: false, error: d }
+      await patchRow(found, { delegation: encodeDelegation(d), lastActivityAt: now })
+      await addEvent(found, 'delegated', u, `Offered to ${d.to}; theirs if they accept${note ? `. ${note}` : ''}`)
+      await log(`${u.actor} offered ${name} to ${d.to}`)
+      return { ref: u.ref, ok: true, status: found.row.status, delegation: d }
+    }
+    case 'delegation_sent': {
+      const d = decodeDelegation(found.row.delegation)
+      if (!d) return { ref: u.ref, ok: false, error: `${u.ref} has no delegation waiting.` }
+      await patchRow(found, { delegation: encodeDelegation({ ...d, sentAt: now.toISOString() }) })
+      return { ref: u.ref, ok: true, status: found.row.status, delegation: d }
+    }
+    case 'accept_delegation':
+    case 'decline_delegation':
+    case 'cancel_delegation': {
+      const d = decodeDelegation(found.row.delegation)
+      if (!d) return { ref: u.ref, ok: false, error: `${u.ref} has no delegation waiting.` }
+      // Only the person it was offered to answers it, and only the person who
+      // offered it takes it back - when we know who they are.
+      if (u.action !== 'cancel_delegation' && d.toRef && u.toRef && d.toRef !== u.toRef) {
+        return { ref: u.ref, ok: false, error: `Only ${d.to} can answer the delegation of ${u.ref}.` }
+      }
+      if (u.action === 'cancel_delegation' && d.byRef && u.byRef && d.byRef !== u.byRef) {
+        return { ref: u.ref, ok: false, error: `Only ${d.by} can take back the delegation of ${u.ref}.` }
+      }
+      const previousOwner = await ownerNameOf(found)
+      if (u.action === 'accept_delegation') {
+        await setOwner(found, d.to, { delegation: null, lastActivityAt: now })
+        await addEvent(found, 'owner', u, `Owner: ${d.to}, who accepted it from ${d.by}${note ? `. ${note}` : ''}`)
+        await log(`${d.to} accepted ${name} from ${d.by}`)
+      } else {
+        await patchRow(found, { delegation: null, lastActivityAt: now })
+        const said = u.action === 'decline_delegation' ? `${d.to} declined it` : `${d.by} took back the offer to ${d.to}`
+        await addEvent(found, u.action === 'decline_delegation' ? 'delegation_declined' : 'delegation_cancelled', u, note ? `${said}: ${note}` : said)
+        await log(`${said} (${name})`)
+      }
+      return { ref: u.ref, ok: true, status: found.row.status, delegation: d, previousOwner }
     }
     case 'score': {
       const factors = [...new Set((u.factors ?? []).filter(isFactor))]

@@ -466,6 +466,8 @@ export const decisions = pgTable(
     mergedInto: text('merged_into'),
     /** On hold: nobody is reminded about it before this day. See drizzle/0030_item_hold.sql. */
     heldUntil: timestamp('held_until', { withTimezone: true }),
+    /** A delegation asked and not yet answered: JSON, lib/delegation.ts. See drizzle/0035. */
+    delegation: text('delegation'),
     /** Yaara thinks it is finished but was not sure enough to close it. See drizzle/0031. */
     suggestedDoneAt: timestamp('suggested_done_at', { withTimezone: true }),
     suggestedDoneNote: text('suggested_done_note'),
@@ -583,6 +585,8 @@ export const actionItems = pgTable(
     mergedInto: text('merged_into'),
     /** On hold: nobody is reminded about it before this day. See drizzle/0030_item_hold.sql. */
     heldUntil: timestamp('held_until', { withTimezone: true }),
+    /** A delegation asked and not yet answered: JSON, lib/delegation.ts. See drizzle/0035. */
+    delegation: text('delegation'),
     /** Yaara thinks it is finished but was not sure enough to close it. See drizzle/0031. */
     suggestedDoneAt: timestamp('suggested_done_at', { withTimezone: true }),
     suggestedDoneNote: text('suggested_done_note'),

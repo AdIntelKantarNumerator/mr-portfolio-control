@@ -118,6 +118,8 @@ export interface ItemInfo {
   inactive: boolean
   /** On hold until this day (YYYY-MM-DD): no reminders before it. */
   heldUntil?: string | null
+  /** Offered to this person, who has not answered yet. */
+  delegatedTo?: string | null
 }
 
 const days = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000))
@@ -331,6 +333,11 @@ export function ItemTools({ item }: { item: ItemInfo }) {
       {item.heldUntil && item.heldUntil > new Date().toISOString().slice(0, 10) ? (
         <span className="imp-held" title="No reminders until then">
           On hold · {new Date(`${item.heldUntil}T12:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+        </span>
+      ) : null}
+      {item.delegatedTo ? (
+        <span className="imp-held" title="Theirs once they accept">
+          Offered to {item.delegatedTo}
         </span>
       ) : null}
       <AdjustButtons item={item} />
