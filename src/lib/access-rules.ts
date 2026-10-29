@@ -42,7 +42,7 @@ export function normalise(row: { role?: string | null; isAdmin?: boolean | null;
 }
 
 /** The Reference section's pages, and the raw artifact pages they show. */
-export const REFERENCE_PATHS = ['/process-docs', '/docs-raw', '/templates', '/workflow', '/data-dictionary']
+export const REFERENCE_PATHS = ['/process-docs', '/docs-raw', '/templates', '/workflow', '/data-dictionary', '/taxonomy-comparison']
 
 /** The Admin section. */
 export const ADMIN_PATHS = ['/admin']

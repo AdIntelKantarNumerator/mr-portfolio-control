@@ -2230,3 +2230,65 @@ export const docUploadTokens = pgTable(
   },
   (t) => [uniqueIndex('doc_upload_tokens_hash_uq').on(t.tokenHash)],
 )
+
+// ---------------------------------------------------------------------------
+// Reference: Taxonomy Comparison (temporary, 29 October 2026)
+// ---------------------------------------------------------------------------
+//
+// Advertiser spend compared across VX1, VX2, GPC and MediaRadar Classic.
+// VX1, VX2 and GPC are read live from Databricks. Classic lives on the
+// production SQL Server, which the deployed app cannot reach (its network
+// group allows a fixed address list), so Classic is a snapshot loaded by
+// `npm run load:classic` from a machine that can — see scripts/load-classic.ts.
+
+/** Classic spend per top-level advertiser, media type and month. Replaced whole by each load. */
+export const classicSpend = pgTable(
+  'classic_spend',
+  {
+    advertiserId: integer('advertiser_id').notNull(),
+    advertiserName: text('advertiser_name').notNull(),
+    /** Digital | Social | Print | Linear TV — Classic tracks no CTV. */
+    mediaType: text('media_type').notNull(),
+    /** YYYY-MM */
+    month: text('month').notNull(),
+    spend: doublePrecision('spend').notNull(),
+    loadedAt: timestamp('loaded_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.advertiserId, t.mediaType, t.month] })],
+)
+
+/**
+ * Every name a Classic advertiser is known by in the snapshot — its own and its
+ * subsidiaries' and brands' — so a pasted brand name can find its parent.
+ */
+export const classicNames = pgTable(
+  'classic_names',
+  {
+    name: text('name').notNull(),
+    advertiserId: integer('advertiser_id').notNull(),
+    /** advertiser | company | brand */
+    level: text('level').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.name, t.advertiserId] })],
+)
+
+/** One comparison asked for, its progress while it runs, and its result. */
+export const taxonomyRuns = pgTable(
+  'taxonomy_runs',
+  {
+    id: id(),
+    /** JSON string[]: the advertiser names as pasted. */
+    input: text('input').notNull(),
+    askedBy: text('asked_by'),
+    /** running | done | failed */
+    status: text('status').notNull(),
+    /** JSON: the steps shown while it runs. */
+    progress: text('progress').notNull(),
+    /** JSON: the comparison, when done. */
+    result: text('result'),
+    error: text('error'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('taxonomy_runs_created_idx').on(t.createdAt)],
+)

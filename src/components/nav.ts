@@ -27,6 +27,7 @@ import type { ComponentType, SVGProps } from 'react'
 import {
   IconActions,
   IconActivity,
+  IconCompare,
   IconConversations,
   IconDecisions,
   IconDependencies,
@@ -126,6 +127,13 @@ export const NAV: NavSection[] = [
         label: 'Data Dictionary',
         icon: IconDictionary,
         hint: 'ClickHouse: what is loaded, and what every table and field means',
+      },
+      {
+        // Temporary (Scott, 29 October 2026): every role may open it.
+        href: '/taxonomy-comparison',
+        label: 'Taxonomy Comparison',
+        icon: IconCompare,
+        hint: 'Advertiser spend across VX1, VX2, GPC and Classic',
       },
     ],
   },

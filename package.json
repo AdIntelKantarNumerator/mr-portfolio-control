@@ -24,7 +24,8 @@
     "check:agent-writes": "tsx scripts/check-agent-writes.ts",
     "check:grouping": "tsx scripts/check-grouping.ts",
     "check:objective-lifecycle": "tsx scripts/check-objective-lifecycle.ts",
-    "check:discussions": "tsx scripts/check-discussion-resolve.ts"
+    "check:discussions": "tsx scripts/check-discussion-resolve.ts",
+    "load:classic": "tsx scripts/load-classic.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
@@ -40,6 +41,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/mssql": "^12.3.0",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
@@ -49,6 +51,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "jszip": "3.10.2",
+    "mssql": "^11.0.2",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5"

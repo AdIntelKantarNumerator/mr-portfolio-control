@@ -229,6 +229,13 @@ export const IconDictionary = (p: IconProps) => (
   </Glyph>
 )
 
+/** Taxonomy Comparison — four bars of unequal height, side by side. */
+export const IconCompare = (p: IconProps) => (
+  <Glyph {...p}>
+    <path d="M2.5 13.5V8M6.2 13.5V3.5M9.8 13.5V6M13.5 13.5V9.5" />
+  </Glyph>
+)
+
 /** The section disclosure caret. */
 export const IconCaret = ({ open = false, ...p }: IconProps & { open?: boolean }) => (
   <Glyph
