@@ -8,8 +8,8 @@
  * changes nothing.
  */
 import { editor } from '@/lib/auth/editor'
-import { parseAdvertisers } from '@/lib/taxonomy-rules'
-import { readRun, startRun, type RunView } from '@/lib/taxonomy-run'
+import { TAXONOMIES, parseAdvertisers, type Taxonomy } from '@/lib/taxonomy-rules'
+import { chooseEntity, readRun, startRun, type RunView } from '@/lib/taxonomy-run'
 
 export interface StartState {
   error?: string
@@ -28,4 +28,18 @@ export async function pollRun(id: string): Promise<RunView | null> {
   const who = await editor()
   if (!who.ok) return null
   return readRun(id)
+}
+
+/** Swap the entity one taxonomy is compared on, from the candidates the run found; '' for none. */
+export async function pickEntity(runId: string, input: string, taxonomy: string, candidateId: string): Promise<{ error?: string; run?: RunView | null }> {
+  const who = await editor()
+  if (!who.ok) return { error: who.error }
+  if (!(TAXONOMIES as readonly string[]).includes(taxonomy)) return { error: 'Unknown taxonomy.' }
+  try {
+    const out = await chooseEntity(runId, input, taxonomy as Taxonomy, candidateId || null, who.name)
+    if (out.error) return out
+  } catch (err) {
+    return { error: (err as Error).message }
+  }
+  return { run: await readRun(runId) }
 }

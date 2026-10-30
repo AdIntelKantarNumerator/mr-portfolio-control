@@ -20,7 +20,12 @@ export const TAXONOMY_LABEL: Record<Taxonomy, string> = {
   Classic: 'MediaRadar Classic',
 }
 
-export const MEDIA_TYPES = ['Digital', 'Social', 'Print', 'Linear TV', 'CTV'] as const
+/**
+ * Print was dropped (Scott, 29 October 2026): it is not populated in every
+ * taxonomy — no GPC print in Databricks, thin VX print — so it read as gaps
+ * that were not real.
+ */
+export const MEDIA_TYPES = ['Digital', 'Social', 'Linear TV', 'CTV'] as const
 export type MediaType = (typeof MEDIA_TYPES)[number]
 
 /**
@@ -34,12 +39,7 @@ export type Month = (typeof MONTHS)[number]
 export const MONTH_LABEL: Record<Month, string> = { '2026-08': 'Aug 2026', '2026-09': 'Sep 2026' }
 
 /** Media a taxonomy does not track at all, so a blank there is not a gap. */
-export const NOT_TRACKED: Partial<Record<Taxonomy, MediaType[]>> = {
-  Classic: ['CTV'],
-  // Databricks has no GPC print; ClickHouse Dev does, but its August was half
-  // loaded on 29 October 2026. Scott: fine to leave it out.
-  GPC: ['Print'],
-}
+export const NOT_TRACKED: Partial<Record<Taxonomy, MediaType[]>> = { Classic: ['CTV'] }
 
 export const MAX_ADVERTISERS = 25
 
@@ -81,18 +81,33 @@ export function normaliseName(name: string): string {
 }
 
 /**
- * Search terms for finding candidates by name: the longest distinctive word
- * runs first. "The Procter & Gamble Company" → ["procter and gamble", "procter",
- * "gamble"]. Short words are dropped; a three-letter brand name stays whole.
+ * A name as letters and digits only: "Wendy's" and "Wendys" are both "wendys",
+ * "AT&T" is "att". Every name search compares this form on both sides — the
+ * pasted name and the stored one — so punctuation can never hide a candidate.
+ * The SQL side is regexp_replace(lower(name), '[^a-z0-9]', '').
  */
-export function searchTerms(name: string): string[] {
-  const norm = normaliseName(name)
-  if (!norm) return [name.trim().toLowerCase()].filter(Boolean)
-  const words = norm.split(' ')
-  const terms = [norm]
-  const long = words.filter((w) => w.length >= 4 && w !== 'and').sort((a, b) => b.length - a.length)
-  for (const w of long.slice(0, 2)) if (!terms.includes(w)) terms.push(w)
-  return terms
+export function compactName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+/**
+ * LIKE patterns, matched against compactName of the stored name:
+ *
+ *   the whole name compacted         "%wendys%", "%att%"
+ *   its distinctive words in order   "%procter%gamble%" (suffixes, "and", 1–2 letter words dropped)
+ *   its longest word alone           "%procter%", when the name has several
+ */
+export function namePatterns(name: string): string[] {
+  const out = new Set<string>()
+  const whole = compactName(name)
+  if (whole) out.add(`%${whole}%`)
+  const words = normaliseName(name)
+    .split(' ')
+    .filter((w) => w.length >= 3 && w !== 'and')
+  if (words.length) out.add(`%${words.join('%')}%`)
+  const longest = [...words].sort((a, b) => b.length - a.length)[0]
+  if (words.length > 1 && longest.length >= 5) out.add(`%${longest}%`)
+  return [...out]
 }
 
 /** exact: the same name. close: the same once case, punctuation and suffixes are ignored. different: anything else. */
@@ -112,6 +127,8 @@ export interface Candidate {
   size?: string
   /** For ordering when there is no model: spend, or the count behind `size`. */
   weight?: number
+  /** VX1 only: "Parent company" or "Advertiser" — VX1 offers both levels. */
+  level?: string
   /** What the source calls the level this name sits at, when it is not the advertiser itself. */
   via?: string
 }
@@ -122,6 +139,10 @@ export interface Resolved {
   kind: MatchKind
   /** Why this entity was chosen, in a sentence, when it was not an exact name match. */
   reason?: string
+  /** Set when a person picked it from the list rather than the model. */
+  chosenBy?: string
+  /** VX1 only: "Parent company" or "Advertiser". */
+  level?: string
 }
 
 /** spend[media][month], dollars. Absent is zero. */
@@ -129,6 +150,8 @@ export type Grid = Partial<Record<MediaType, Partial<Record<Month, number>>>>
 
 export interface TaxonomyResult {
   entity: Resolved | null
+  /** Every candidate the search found, so a person can pick a different one. */
+  candidates?: Candidate[]
   /** Why nothing matched, when nothing did. */
   missing?: string
   grid: Grid
@@ -182,7 +205,7 @@ export function computeFlags(input: string, taxonomies: Record<Taxonomy, Taxonom
       flags.push({
         kind: 'name',
         taxonomy: t,
-        text: `${TAXONOMY_LABEL[t]}: matched "${r.entity.name}"${r.entity.kind === 'close' ? ' (same name, different punctuation or suffix)' : ''}${r.entity.reason ? ` — ${r.entity.reason}` : ''}.`,
+        text: `${TAXONOMY_LABEL[t]}: matched "${r.entity.name}"${r.entity.level ? ` (${r.entity.level.toLowerCase()})` : ''}${r.entity.kind === 'close' ? ' (same name, different punctuation or suffix)' : ''}${r.entity.reason ? ` — ${r.entity.reason.replace(/[.\s]+$/, '')}` : ''}.`,
       })
     }
   }
@@ -234,7 +257,7 @@ export function toCsv(results: AdvertiserResult[]): string {
     const s = String(v)
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
   }
-  const lines = [['Advertiser (as entered)', 'Taxonomy', 'Matched entity', 'Entity ID', 'Match', 'Media type', 'Month', 'Spend (USD)', 'Flags'].join(',')]
+  const lines = [['Advertiser (as entered)', 'Taxonomy', 'Matched entity', 'Entity level', 'Entity ID', 'Match', 'Media type', 'Month', 'Spend (USD)', 'Flags'].join(',')]
   for (const r of results) {
     const flagText = r.flags.map((f) => f.text).join(' | ')
     for (const t of TAXONOMIES) {
@@ -247,6 +270,7 @@ export function toCsv(results: AdvertiserResult[]): string {
               r.input,
               TAXONOMY_LABEL[t],
               tr.entity?.name ?? '',
+              tr.entity?.level ?? '',
               tr.entity?.id ?? '',
               tr.entity ? tr.entity.kind : 'not found',
               media,

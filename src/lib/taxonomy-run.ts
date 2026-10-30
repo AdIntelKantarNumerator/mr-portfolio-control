@@ -29,7 +29,8 @@ import {
   money,
   MONTHS,
   normaliseName,
-  searchTerms,
+  compactName,
+  namePatterns,
   TAXONOMIES,
   TAXONOMY_LABEL,
   total,
@@ -131,6 +132,7 @@ async function execute(id: string, names: string[]): Promise<void> {
       const grids = t === 'Classic' ? classicGrids : dbxGrids[t]
       taxonomies[t] = {
         entity,
+        candidates: candidates[i][t],
         missing: entity ? undefined : candidates[i][t].length ? 'candidates were found, none is this advertiser' : 'no name like it',
         grid: entity ? (grids.get(entity.id) ?? {}) : {},
       }
@@ -156,39 +158,50 @@ async function execute(id: string, names: string[]): Promise<void> {
 
 // --- Classic, from the snapshot -------------------------------------------
 
+/**
+ * Classic candidates in one query per name: every advertiser with any name —
+ * its own, a subsidiary's or a brand's — that matches a pattern once both
+ * sides are letters and digits only. A name identical in that form ranks
+ * first, then the biggest spender.
+ */
 async function classicCandidates(names: string[]): Promise<Map<string, Candidate[]>> {
   const out = new Map<string, Candidate[]>()
+  const compact = sql`regexp_replace(lower(${classicNames.name}), '[^a-z0-9]', '', 'g')`
   for (const name of names) {
-    const terms = searchTerms(name)
-    const byId = new Map<number, { via?: string; exact: boolean }>()
-    for (const term of terms) {
-      const rows = await db
-        .select({ id: classicNames.advertiserId, name: classicNames.name, level: classicNames.level })
-        .from(classicNames)
-        .where(sql`lower(${classicNames.name}) like ${'%' + term.replace(/[%_]/g, '') + '%'}`)
-        .limit(200)
-      for (const r of rows) {
-        const exact = normaliseName(r.name) === normaliseName(name)
-        const prior = byId.get(r.id)
-        if (!prior || (exact && !prior.exact)) byId.set(r.id, { via: r.level === 'advertiser' ? undefined : `found via ${r.level} "${r.name}"`, exact })
-      }
-      if (byId.size >= 12) break
-    }
-    if (!byId.size) {
+    const key = compactName(name)
+    const pats = namePatterns(name)
+    if (!pats.length) {
       out.set(name, [])
       continue
     }
-    const ids = [...byId.keys()]
-    const rows = await db
-      .select({ id: classicSpend.advertiserId, name: classicSpend.advertiserName, spend: sql<number>`sum(${classicSpend.spend})` })
-      .from(classicSpend)
-      .where(inArray(classicSpend.advertiserId, ids))
-      .groupBy(classicSpend.advertiserId, classicSpend.advertiserName)
-    const list = rows
-      .map((r) => ({ id: String(r.id), name: r.name, spend: Number(r.spend), via: byId.get(r.id)?.via, exact: byId.get(r.id)?.exact }))
-      .sort((a, b) => Number(b.exact) - Number(a.exact) || b.spend - a.spend)
-      .slice(0, 10)
-      .map(({ exact: _e, ...c }) => c)
+    const rows = (await db.execute(sql`
+      WITH hits AS (
+        SELECT ${classicNames.advertiserId} AS id, ${classicNames.name} AS name, ${classicNames.level} AS level, (${compact} = ${key}) AS exact
+        FROM ${classicNames}
+        WHERE ${sql.join(pats.map((p) => sql`${compact} LIKE ${p}`), sql` OR `)}
+      ),
+      best AS (
+        SELECT DISTINCT ON (id) id, name, level, exact FROM hits
+        ORDER BY id, exact DESC, (level = 'advertiser') DESC
+      )
+      SELECT b.id, b.name AS matched, b.level, b.exact, s.name, s.spend
+      FROM best b
+      JOIN (SELECT ${classicSpend.advertiserId} AS id, max(${classicSpend.advertiserName}) AS name, sum(${classicSpend.spend}) AS spend
+            FROM ${classicSpend}
+            WHERE ${inArray(classicSpend.mediaType, [...MEDIA_TYPES])} AND ${inArray(classicSpend.month, [...MONTHS])}
+            GROUP BY ${classicSpend.advertiserId}) s ON s.id = b.id
+      ORDER BY b.exact DESC, s.spend DESC
+      LIMIT 12`)) as unknown as { rows?: Record<string, unknown>[] } | Record<string, unknown>[]
+    const list = (Array.isArray(rows) ? rows : (rows.rows ?? [])).map((r) => {
+      const spend = Number(r.spend)
+      return {
+        id: String(r.id),
+        name: String(r.name),
+        spend,
+        weight: spend,
+        via: r.level === 'advertiser' ? undefined : `found via ${r.level} "${r.matched}"`,
+      }
+    })
     out.set(name, list)
   }
   return out
@@ -234,14 +247,14 @@ async function resolveAll(names: string[], candidates: Candidates[]): Promise<{ 
       for (const t of TAXONOMIES) {
         const c = candidates[i][t]
         lines.push(`  ${t}: ${c.length ? '' : '(no candidates)'}`)
-        for (const x of c) lines.push(`    - id=${x.id} | ${x.name} | ${x.spend != null ? `spend ${money(x.spend)}` : (x.size ?? '')}${x.via ? ` | ${x.via}` : ''}`)
+        for (const x of c) lines.push(`    - id=${x.id} | ${x.level ? `${x.level}: ` : ''}${x.name} | ${x.spend != null ? `spend ${money(x.spend)}` : (x.size ?? '')}${x.via ? ` | ${x.via}` : ''}`)
       }
       return lines.join('\n')
     })
     .join('\n\n')
 
   try {
-    const { text, model } = await completeJson(MATCH_SYSTEM, prompt, { maxTokens: 4000, timeoutMs: 150_000 })
+    const { text, model } = await completeJson(MATCH_SYSTEM, prompt, { maxTokens: 4000, timeoutMs: 180_000, tier: 'advanced' })
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')) as {
       matches?: ({ input?: string } & Partial<Record<Taxonomy, { id?: string; reason?: string } | null>>)[]
     }
@@ -252,7 +265,7 @@ async function resolveAll(names: string[], candidates: Candidates[]): Promise<{ 
       for (const t of TAXONOMIES) {
         const pick = m[t]
         const c = pick?.id ? candidates[i][t].find((x) => x.id === String(pick.id)) : undefined
-        out[t] = c ? { id: c.id, name: c.name, kind: matchKind(n, c.name), reason: matchKind(n, c.name) === 'exact' ? undefined : pick?.reason?.slice(0, 300) } : null
+        out[t] = c ? { id: c.id, name: c.name, level: c.level, kind: matchKind(n, c.name), reason: matchKind(n, c.name) === 'exact' ? undefined : pick?.reason?.slice(0, 300) } : null
       }
       return out
     })
@@ -268,7 +281,7 @@ function byNameOnly(name: string, c: Candidates): Record<Taxonomy, Resolved | nu
   const out = {} as Record<Taxonomy, Resolved | null>
   for (const t of TAXONOMIES) {
     const pick = c[t].filter((x) => normaliseName(x.name) === normaliseName(name)).sort((a, b) => (b.weight ?? b.spend ?? 0) - (a.weight ?? a.spend ?? 0))[0]
-    out[t] = pick ? { id: pick.id, name: pick.name, kind: matchKind(name, pick.name) } : null
+    out[t] = pick ? { id: pick.id, name: pick.name, level: pick.level, kind: matchKind(name, pick.name) } : null
   }
   return out
 }
@@ -300,7 +313,7 @@ async function writeCommentary(advertisers: AdvertiserResult[]): Promise<Map<str
     })
     .join('\n\n')
   try {
-    const { text } = await completeJson(COMMENTARY_SYSTEM, prompt, { maxTokens: 3500, timeoutMs: 150_000 })
+    const { text } = await completeJson(COMMENTARY_SYSTEM, prompt, { maxTokens: 3500, timeoutMs: 180_000, tier: 'advanced' })
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')) as { commentary?: { input?: string; text?: string }[] }
     for (const c of parsed.commentary ?? []) {
       const a = advertisers.find((x) => x.input.toLowerCase() === c.input?.trim().toLowerCase())
@@ -318,6 +331,43 @@ export function fallbackCommentary(a: AdvertiserResult): string {
   const totals = found.map((t) => `${TAXONOMY_LABEL[t]} ${money(total(a.taxonomies[t].grid))}`).join(', ')
   const issues = a.flags.filter((f) => f.kind === 'spread' || f.kind === 'gap').length
   return `Aug–Sep total: ${totals}.${issues ? ` ${issues} media-type difference${issues === 1 ? '' : 's'} flagged.` : ' The taxonomies broadly agree.'}`
+}
+
+/**
+ * A person picks a different candidate (or none) for one advertiser in one
+ * taxonomy. Only a candidate the run's search found may be picked. Its spend
+ * is read again, the flags recomputed and the commentary rewritten, and the
+ * run's stored result is updated — so the page, the CSV and anyone else
+ * opening the run see the choice.
+ */
+export async function chooseEntity(runId: string, input: string, taxonomy: Taxonomy, candidateId: string | null, by: string): Promise<{ error?: string }> {
+  const run = await readRun(runId)
+  if (!run?.result) return { error: 'That comparison has not finished.' }
+  const a = run.result.advertisers.find((x) => x.input === input)
+  if (!a) return { error: 'That advertiser is not in this comparison.' }
+  const tr = a.taxonomies[taxonomy]
+  if (!tr) return { error: 'Unknown taxonomy.' }
+
+  if (!candidateId) {
+    a.taxonomies[taxonomy] = { ...tr, entity: null, missing: `set to none by ${by}`, grid: {} }
+  } else {
+    const c = tr.candidates?.find((x) => x.id === candidateId)
+    if (!c) return { error: 'That entity was not among the candidates found.' }
+    const grid =
+      taxonomy === 'Classic'
+        ? ((await classicSpendFor([Number(c.id)])).get(c.id) ?? {})
+        : ((await dbxSpend({ VX1: [], VX2: [], GPC: [], [taxonomy]: [c.id] } as Record<Exclude<Taxonomy, 'Classic'>, string[]>))[taxonomy as Exclude<Taxonomy, 'Classic'>].get(c.id) ?? {})
+    a.taxonomies[taxonomy] = {
+      ...tr,
+      entity: { id: c.id, name: c.name, level: c.level, kind: matchKind(input, c.name), chosenBy: by, reason: `chosen by ${by}` },
+      missing: undefined,
+      grid,
+    }
+  }
+  a.flags = computeFlags(input, a.taxonomies)
+  a.commentary = (await writeCommentary([a])).get(a.input) ?? fallbackCommentary(a)
+  await db.update(taxonomyRuns).set({ result: JSON.stringify(run.result) }).where(eq(taxonomyRuns.id, runId))
+  return {}
 }
 
 export async function readRun(id: string) {

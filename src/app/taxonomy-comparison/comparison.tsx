@@ -6,7 +6,7 @@
  * Progress is polled from the run's row every two seconds (actions.ts
  * pollRun): the work happens in the server process, not in this request.
  */
-import { useActionState, useEffect, useState } from 'react'
+import { useActionState, useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   cell,
@@ -20,11 +20,13 @@ import {
   TAXONOMY_LABEL,
   total,
   type AdvertiserResult,
+  type Candidate,
   type Flag,
   type Step,
+  type Taxonomy,
 } from '@/lib/taxonomy-rules'
 import type { RunView } from '@/lib/taxonomy-run'
-import { pollRun, startComparison, type StartState } from './actions'
+import { pickEntity, pollRun, startComparison, type StartState } from './actions'
 
 export function Comparison({ initial }: { initial: RunView | null }) {
   const router = useRouter()
@@ -66,7 +68,7 @@ export function Comparison({ initial }: { initial: RunView | null }) {
 
       {run ? (
         run.status === 'done' && run.result ? (
-          <Results run={run} />
+          <Results run={run} onChange={setRun} />
         ) : (
           <Progress steps={run.steps} failed={run.status === 'failed' ? (run.error ?? 'The comparison failed.') : null} />
         )
@@ -108,7 +110,7 @@ function Progress({ steps, failed }: { steps: Step[]; failed: string | null }) {
 const FLAG_TONE: Record<Flag['kind'], string> = { name: 'warn', missing: 'crit', gap: 'crit', spread: 'warn' }
 const FLAG_LABEL: Record<Flag['kind'], string> = { name: 'Name differs', missing: 'Not found', gap: 'Missing spend', spread: 'Spend differs' }
 
-function Results({ run }: { run: RunView }) {
+function Results({ run, onChange }: { run: RunView; onChange: (run: RunView) => void }) {
   const result = run.result!
   const flagged = result.advertisers.filter((a) => a.flags.length).length
   return (
@@ -127,19 +129,29 @@ function Results({ run }: { run: RunView }) {
         {result.model ? ` by ${result.model}` : ' by name only'} · Classic does not track CTV
       </p>
       {result.advertisers.map((a) => (
-        <AdvertiserCard key={a.input} a={a} />
+        <AdvertiserCard key={a.input} a={a} runId={run.id} onChange={onChange} />
       ))}
     </>
   )
 }
 
-function AdvertiserCard({ a }: { a: AdvertiserResult }) {
+function AdvertiserCard({ a, runId, onChange }: { a: AdvertiserResult; runId: string; onChange: (run: RunView) => void }) {
+  const [pending, start] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+  const pick = (t: Taxonomy, id: string) =>
+    start(async () => {
+      setError(null)
+      const out = await pickEntity(runId, a.input, t, id)
+      if (out.error) setError(out.error)
+      else if (out.run) onChange(out.run)
+    })
   const flagMedia = new Set(a.flags.filter((f) => f.media).map((f) => f.media))
   return (
-    <div className="tile tx-card">
+    <div className={`tile tx-card ${pending ? 'tx-busy' : ''}`}>
       <div className="tile-head">
         <h2 className="tx-title">{a.input}</h2>
         <div className="tile-right">
+          {pending ? <span className="status quiet">Updating…</span> : null}
           {a.flags.length ? <span className="status warn">{a.flags.length} flag{a.flags.length === 1 ? '' : 's'}</span> : <span className="status good">Consistent</span>}
         </div>
       </div>
@@ -148,16 +160,38 @@ function AdvertiserCard({ a }: { a: AdvertiserResult }) {
 
       <div className="tx-entities">
         {TAXONOMIES.map((t) => {
-          const e = a.taxonomies[t].entity
+          const r = a.taxonomies[t]
+          const e = r.entity
           const tone = !e ? 'crit' : e.kind === 'exact' ? 'good' : 'warn'
+          const title = e?.reason ?? (e ? `Exact name match (id ${e.id})` : r.missing)
           return (
-            <div key={t} className="tx-entity" title={e?.reason ?? (e ? `Exact name match (id ${e.id})` : a.taxonomies[t].missing)}>
-              <span className="tx-muted">{TAXONOMY_LABEL[t]}</span>
-              <span className={`status ${tone}`}>{e ? e.name : 'Not found'}</span>
-            </div>
+            <label key={t} className="tx-entity" title={title}>
+              <span className="tx-muted">
+                {TAXONOMY_LABEL[t]}
+                {e?.level ? <strong className="tx-level"> · {e.level}</strong> : null}
+              </span>
+              {r.candidates?.length ? (
+                <select
+                  className={`tx-pick status ${tone}`}
+                  value={e?.id ?? ''}
+                  disabled={pending}
+                  onChange={(ev) => pick(t, ev.target.value)}
+                >
+                  {r.candidates.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {optionLabel(c)}
+                    </option>
+                  ))}
+                  <option value="">None of these</option>
+                </select>
+              ) : (
+                <span className={`status ${tone}`}>{e ? e.name : 'Not found'}</span>
+              )}
+            </label>
           )
         })}
       </div>
+      {error ? <p className="status crit">{error}</p> : null}
 
       <div className="tx-scroll">
         <table className="tx-table">
@@ -215,4 +249,9 @@ function AdvertiserCard({ a }: { a: AdvertiserResult }) {
       ) : null}
     </div>
   )
+}
+
+function optionLabel(c: Candidate): string {
+  const size = c.spend != null ? money(c.spend) : c.size
+  return `${c.name}${c.level ? ` (${c.level.toLowerCase()})` : ''}${size ? ` · ${size}` : ''}${c.via ? ` · ${c.via}` : ''}`
 }

@@ -13,7 +13,8 @@ import {
   matchKind,
   normaliseName,
   parseAdvertisers,
-  searchTerms,
+  compactName,
+  namePatterns,
   toCsv,
   type Grid,
   type Taxonomy,
@@ -43,9 +44,13 @@ test('names normalise past case, punctuation and legal suffixes', () => {
   assert.equal(matchKind('Progressive', 'Progressive Lighting'), 'different')
 })
 
-test('search terms lead with the whole name, then its longest words', () => {
-  assert.deepEqual(searchTerms('The Procter & Gamble Company'), ['procter and gamble', 'procter', 'gamble'])
-  assert.deepEqual(searchTerms('3M'), ['3m'])
+test('punctuation never hides a candidate: both sides compare letters and digits only', () => {
+  assert.equal(compactName("Wendy's"), compactName('Wendys'))
+  assert.equal(compactName('AT&T'), 'att')
+  assert.ok(namePatterns('Wendys').includes('%wendys%'))
+  assert.ok(namePatterns("Wendy's").includes('%wendys%'))
+  assert.deepEqual(namePatterns('The Procter & Gamble Company'), ['%theproctergamblecompany%', '%procter%gamble%', '%procter%'])
+  assert.equal(matchKind("Wendy's", 'Wendys'), 'close')
 })
 
 const result = (name: string | null, spend: [string, string, number][] = [], kind: 'exact' | 'close' | 'different' = 'exact'): TaxonomyResult => {
@@ -81,7 +86,7 @@ test('Classic is not flagged for CTV, which it does not track', () => {
 
 test('small amounts are not flagged', () => {
   const t: Record<Taxonomy, TaxonomyResult> = {
-    VX1: result('Acme', [['Print', '2026-08', 900]]),
+    VX1: result('Acme', [['Social', '2026-08', 900]]),
     VX2: result('Acme'),
     GPC: result('Acme'),
     Classic: result('Acme'),
@@ -93,7 +98,8 @@ test('the CSV has a row per taxonomy, media type and month, and marks untracked 
   const t: Record<Taxonomy, TaxonomyResult> = { VX1: result('Acme, Inc.'), VX2: result('Acme'), GPC: result('Acme'), Classic: result('Acme') }
   const csv = toCsv([{ input: 'Acme', taxonomies: t, flags: [], commentary: '' }])
   const lines = csv.trim().split('\r\n')
-  assert.equal(lines.length, 1 + 4 * 5 * 2)
+  assert.equal(lines.length, 1 + 4 * 4 * 2)
+  assert.ok(!lines.some((l) => l.includes(',Print,')))
   assert.ok(lines.some((l) => l.includes('"Acme, Inc."')))
   assert.ok(lines.some((l) => l.startsWith('Acme,MediaRadar Classic') && l.includes(',CTV,') && l.includes('not tracked')))
 })
