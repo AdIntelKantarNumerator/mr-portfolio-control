@@ -8,6 +8,8 @@ import assert from 'node:assert/strict'
 import { canSee, NO_ROLE } from '../src/lib/access-rules'
 import { assertSelect } from '../src/lib/databricks'
 import {
+  gpcTotalView,
+  hasMoreElsewhere,
   computeFlags,
   filterFlows,
   flowTotal,
@@ -17,6 +19,7 @@ import {
   sankeyData,
   UNCLASSIFIED,
   type Flow,
+  type GpcTotalRow,
   matchKind,
   normaliseName,
   parseAdvertisers,
@@ -121,6 +124,36 @@ test('the CSV has a row per flow and names the FROM taxonomy', () => {
   assert.ok(lines[1].includes(',VX2,') && lines.some((l) => l.includes('"Acme, Inc."')))
 })
 
+const totalRow = (fromId: string | null, spend: number, extra: Partial<GpcTotalRow> = {}): GpcTotalRow => ({
+  fromId,
+  fromName: fromId ? `Adv ${fromId}` : null,
+  month: '2026-08',
+  media: 'Digital',
+  spend,
+  ...extra,
+})
+
+test("a GPC entity's total separates the compared FROM entity from the others", () => {
+  const rows = [totalRow('2578833', 293_000_000), totalRow('4924263', 735_000), totalRow(null, 199_000)]
+  const v = gpcTotalView(rows, {}, { id: '2578833', name: 'Progressive', kind: 'exact' }, 'VX1')
+  assert.equal(v.own, 293_000_000)
+  assert.equal(Math.round(v.total), 293_934_000)
+  assert.ok(v.rows[0].own)
+  assert.equal(v.rows.find((r) => r.key === '∅')?.label, 'Not in VX1')
+  assert.ok(hasMoreElsewhere(v))
+})
+
+test('a VX1 parent-company match owns the rows of all its advertisers', () => {
+  const rows = [totalRow('11', 500, { fromParentId: 'P7' }), totalRow('12', 400, { fromParentId: 'P7' }), totalRow('13', 100, { fromParentId: 'P8' })]
+  const v = gpcTotalView(rows, {}, { id: 'P7', name: 'Parent', kind: 'exact', level: 'Parent company' }, 'VX1')
+  assert.equal(v.own, 900)
+})
+
+test('no button when nearly all the GPC spend is already on the chart', () => {
+  const v = gpcTotalView([totalRow('1', 1_000_000), totalRow('2', 500)], {}, { id: '1', name: 'A', kind: 'exact' }, 'VX2')
+  assert.equal(hasMoreElsewhere(v), false)
+})
+
 test('every role may open the comparison', () => {
   assert.ok(canSee(NO_ROLE, '/taxonomy-comparison'))
   assert.ok(canSee(NO_ROLE, '/taxonomy-comparison/csv'))
@@ -131,4 +164,9 @@ test('only a single SELECT reaches Databricks', () => {
   assert.doesNotThrow(() => assertSelect("WITH x AS (SELECT 1) SELECT * FROM x -- note; here"))
   assert.throws(() => assertSelect('DROP TABLE t'))
   assert.throws(() => assertSelect('SELECT 1; DELETE FROM t'))
+})
+
+test('a semicolon inside a string literal is not a second statement', () => {
+  assert.doesNotThrow(() => assertSelect("SELECT array_join(x, '; ') FROM t"))
+  assert.throws(() => assertSelect("SELECT ';' FROM t; DROP TABLE t"))
 })

@@ -39,7 +39,7 @@ export function databricksConfig(env: Record<string, string | undefined> = proce
 export function assertSelect(sql: string): void {
   const s = sql.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '').trim().replace(/;\s*$/, '')
   if (!/^(select|with)\b/i.test(s)) throw new DatabricksError('Only SELECT statements may be sent to Databricks.')
-  if (s.includes(';')) throw new DatabricksError('One statement at a time.')
+  if (s.replace(/'[^']*'/g, "''").includes(';')) throw new DatabricksError('One statement at a time.')
   if (/\b(insert|update|delete|merge|drop|create|alter|truncate|grant|revoke|copy|optimize|vacuum)\b\s/i.test(s.replace(/'[^']*'/g, "''"))) {
     throw new DatabricksError('That statement is not read-only.')
   }
@@ -51,7 +51,13 @@ interface StatementResponse {
   statement_id: string
   status: { state: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELED' | 'CLOSED'; error?: { message?: string } }
   manifest?: { schema?: { columns?: { name: string }[] }; total_chunk_count?: number }
-  result?: { data_array?: (string | null)[][]; next_chunk_internal_link?: string }
+  result?: Chunk
+}
+
+interface Chunk {
+  data_array?: (string | null)[][]
+  next_chunk_internal_link?: string
+  external_links?: { external_link: string; next_chunk_internal_link?: string }[]
 }
 
 /**
@@ -65,7 +71,12 @@ export async function dbxQuery(
   config: DatabricksConfig,
   sql: string,
   params: Param[] = [],
-  options: { onWait?: (seconds: number) => void | Promise<void>; timeoutMs?: number } = {},
+  options: {
+    onWait?: (seconds: number) => void | Promise<void>
+    timeoutMs?: number
+    /** Over 25 MB of results (a creative list): fetched through presigned download links instead of inline. */
+    large?: boolean
+  } = {},
 ): Promise<Record<string, string | null>[]> {
   assertSelect(sql)
   const headers = { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json' }
@@ -93,7 +104,7 @@ export async function dbxQuery(
       parameters: params.map((p) => ({ name: p.name, value: p.value, type: p.type ?? 'STRING' })),
       wait_timeout: '10s',
       on_wait_timeout: 'CONTINUE',
-      disposition: 'INLINE',
+      disposition: options.large ? 'EXTERNAL_LINKS' : 'INLINE',
       format: 'JSON_ARRAY',
     }),
   })
@@ -112,12 +123,18 @@ export async function dbxQuery(
   }
 
   const cols = (r.manifest?.schema?.columns ?? []).map((c) => c.name)
-  const rows: (string | null)[][] = [...(r.result?.data_array ?? [])]
-  let next = r.result?.next_chunk_internal_link
-  while (next) {
-    const chunk = (await call(next)) as unknown as { data_array?: (string | null)[][]; next_chunk_internal_link?: string }
-    rows.push(...(chunk.data_array ?? []))
-    next = chunk.next_chunk_internal_link
+  const rows: (string | null)[][] = []
+  // Presigned links carry their own credentials: sending the bearer token to them is refused, and would hand it to storage.
+  const take = async (chunk: Chunk | undefined) => {
+    for (const row of chunk?.data_array ?? []) rows.push(row)
+    for (const link of chunk?.external_links ?? []) {
+      const res = await fetch(link.external_link, { cache: 'no-store' })
+      if (!res.ok) throw new DatabricksError(`Downloading a Databricks result chunk failed: ${res.status}`)
+      for (const row of (await res.json()) as (string | null)[][]) rows.push(row)
+    }
+    return chunk?.next_chunk_internal_link ?? chunk?.external_links?.at(-1)?.next_chunk_internal_link
   }
+  let next = await take(r.result)
+  while (next) next = await take((await call(next)) as unknown as Chunk)
   return rows.map((row) => Object.fromEntries(cols.map((c, i) => [c, row[i] ?? null])))
 }

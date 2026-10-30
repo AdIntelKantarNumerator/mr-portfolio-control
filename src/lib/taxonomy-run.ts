@@ -22,12 +22,13 @@ import { eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { classicBrandProducts, classicNames, classicSpend, taxonomyRuns } from '@/db/schema'
 import { completeJson, ModelError, resolveProvider } from './llm'
-import { dbxCandidates, dbxFlows } from './taxonomy-dbx'
+import { dbxCandidates, dbxCreatives, dbxFlows, dbxGpcTotals, type GpcTotalRaw } from './taxonomy-dbx'
 import {
   compactName,
   computeFlags,
   filterFlows,
   flowTotal,
+  gpcTotalKey,
   initialSteps,
   isFromTaxonomy,
   matchKind,
@@ -35,6 +36,7 @@ import {
   money,
   MONTHS,
   namePatterns,
+  NO_GPC,
   normaliseName,
   pct,
   rankAdvertisers,
@@ -44,6 +46,8 @@ import {
   type Candidate,
   type Flow,
   type FromTaxonomy,
+  type GpcBy,
+  type GpcTotalRow,
   type Resolved,
   type Step,
 } from './taxonomy-rules'
@@ -53,6 +57,8 @@ export interface RunResult {
   version: 2
   from: FromTaxonomy
   advertisers: AdvertiserResult[]
+  /** Each charted GPC entity's whole spend by FROM entity, keyed gpcTotalKey(by, id). Absent on runs before 30 October 2026. */
+  gpcTotals?: Record<string, GpcTotalRow[]>
   model: string | null
   classicLoadedAt: string | null
   finishedAt: string
@@ -154,14 +160,135 @@ async function execute(id: string, from: FromTaxonomy, names: string[]): Promise
     return r
   })
 
+  const gpcTotals = await step('gpc-totals', async (note) => {
+    const out = await computeGpcTotals(from, advertisers, {}, (s) => note(`Query running… ${s}s`))
+    await note(`${Object.keys(out).length} GPC entities checked`)
+    return out
+  })
+
   await step('commentary', async (note) => {
     const written = await writeCommentary(from, advertisers)
     for (const a of advertisers) a.commentary = written.get(a.input) ?? fallbackCommentary(a)
     await note(written.size ? 'Written' : 'Summarised without a model')
   })
 
-  const result: RunResult = { version: 2, from, advertisers, model, classicLoadedAt: await classicLoadedAt(), finishedAt: new Date().toISOString() }
+  const result: RunResult = { version: 2, from, advertisers, gpcTotals, model, classicLoadedAt: await classicLoadedAt(), finishedAt: new Date().toISOString() }
   await db.update(taxonomyRuns).set({ status: 'done', result: JSON.stringify(result) }).where(eq(taxonomyRuns.id, id))
+}
+
+// --- each charted GPC entity's whole spend -----------------------------------
+
+/** The GPC entities worth checking for an advertiser: its top ones on the chart, as advertisers and as top parents. */
+function chartedKeys(a: AdvertiserResult): Record<GpcBy, string[]> {
+  const top = (by: GpcBy) =>
+    rankAdvertisers(a.flows, by)
+      .filter((r) => r.key !== NO_GPC)
+      .slice(0, 7)
+      .map((r) => r.key)
+  return { advertiser: top('advertiser'), parent: top('parent') }
+}
+
+const OTHER_KEY = 'OTHER'
+const FROM_CAP = 40
+const isDigits = (v: string | null): v is string => Boolean(v && /^[0-9]+$/.test(v))
+
+/**
+ * Totals for the charted GPC entities not already in `have`. For Classic the
+ * query answers by VX0 product; those fold into Classic advertisers here,
+ * split evenly where a product maps to several.
+ */
+async function computeGpcTotals(
+  from: FromTaxonomy,
+  advertisers: AdvertiserResult[],
+  have: Record<string, GpcTotalRow[]>,
+  onWait?: (s: number) => void | Promise<void>,
+): Promise<Record<string, GpcTotalRow[]>> {
+  const want: Record<GpcBy, Set<string>> = { advertiser: new Set(), parent: new Set() }
+  for (const a of advertisers) {
+    const k = chartedKeys(a)
+    for (const by of ['advertiser', 'parent'] as GpcBy[]) for (const id of k[by]) if (!have[gpcTotalKey(by, id)]) want[by].add(id)
+  }
+  if (!want.advertiser.size && !want.parent.size) return {}
+  let raw = await dbxGpcTotals(from, [...want.advertiser], [...want.parent], onWait)
+  if (from === 'Classic') raw = await foldClassicProducts(raw)
+
+  const out: Record<string, GpcTotalRow[]> = {}
+  for (const by of ['advertiser', 'parent'] as GpcBy[]) for (const id of want[by]) out[gpcTotalKey(by, id)] = []
+  for (const r of raw) {
+    const list = out[gpcTotalKey(r.gby, r.key)]
+    if (!list) continue
+    list.push({ fromId: r.fromId, fromName: r.fromName, fromParentId: r.fromParentId, fromParentName: r.fromParentName, month: r.month, media: r.media, spend: r.spend })
+  }
+  return out
+}
+
+async function foldClassicProducts(raw: GpcTotalRaw[]): Promise<GpcTotalRaw[]> {
+  const products = [...new Set(raw.flatMap((r) => (isDigits(r.fromId) ? [Number(r.fromId)] : [])))]
+  const byProduct = new Map<number, number[]>()
+  for (let i = 0; i < products.length; i += 5000) {
+    const rows = await db.select().from(classicBrandProducts).where(inArray(classicBrandProducts.vxProductId, products.slice(i, i + 5000)))
+    for (const r of rows) byProduct.set(r.vxProductId, [...(byProduct.get(r.vxProductId) ?? []), r.advertiserId])
+  }
+  const ids = [...new Set([...byProduct.values()].flat())]
+  const names = new Map<number, string>()
+  for (let i = 0; i < ids.length; i += 5000) {
+    const rows = await db
+      .select({ id: classicSpend.advertiserId, name: sql<string>`max(${classicSpend.advertiserName})` })
+      .from(classicSpend)
+      .where(inArray(classicSpend.advertiserId, ids.slice(i, i + 5000)))
+      .groupBy(classicSpend.advertiserId)
+    for (const r of rows) names.set(r.id, r.name)
+  }
+
+  // Fold products into advertisers…
+  const folded = new Map<string, GpcTotalRaw>()
+  for (const r of raw) {
+    const advs = isDigits(r.fromId) ? (byProduct.get(Number(r.fromId)) ?? []) : []
+    const targets = advs.length ? advs.map((a) => ({ id: String(a), name: names.get(a) ?? `Classic company ${a}` })) : [{ id: null, name: null }]
+    for (const t of targets) {
+      const k = JSON.stringify([r.gby, r.key, t.id, r.month, r.media])
+      const x = folded.get(k) ?? { ...r, fromId: t.id, fromName: t.name, fromParentId: null, fromParentName: null, spend: 0 }
+      x.spend += r.spend / targets.length
+      folded.set(k, x)
+    }
+  }
+  // …then keep the top Classic advertisers per GPC entity and gather the rest as OTHER.
+  const totals = new Map<string, { entity: string; spend: number }>()
+  for (const r of folded.values()) {
+    const k = JSON.stringify([r.gby, r.key, r.fromId])
+    const t = totals.get(k) ?? { entity: JSON.stringify([r.gby, r.key]), spend: 0 }
+    t.spend += r.spend
+    totals.set(k, t)
+  }
+  const byEntity = new Map<string, [string, number][]>()
+  for (const [k, t] of totals) byEntity.set(t.entity, [...(byEntity.get(t.entity) ?? []), [k, t.spend]])
+  const keepers = new Set<string>()
+  for (const list of byEntity.values()) for (const [k] of list.sort((a, b) => b[1] - a[1]).slice(0, FROM_CAP)) keepers.add(k)
+  const out = new Map<string, GpcTotalRaw>()
+  for (const r of folded.values()) {
+    const keep = r.fromId === null || keepers.has(JSON.stringify([r.gby, r.key, r.fromId]))
+    const row = keep ? r : { ...r, fromId: OTHER_KEY, fromName: null }
+    const k = JSON.stringify([row.gby, row.key, row.fromId, row.month, row.media])
+    const x = out.get(k) ?? { ...row, spend: 0 }
+    x.spend += row.spend
+    out.set(k, x)
+  }
+  return [...out.values()]
+}
+
+// --- the creatives behind a run -------------------------------------------------
+
+/** Rows for the creatives CSV: every creative behind the run's FROM entities (or one advertiser's), with its metadata. */
+export async function runCreatives(run: RunView, input?: string | null): Promise<{ advertiser: AdvertiserResult; row: Record<string, string | null> }[]> {
+  if (!run.result) return []
+  const from = run.result.from
+  const advertisers = run.result.advertisers.filter((a) => a.entity && (!input || a.input === input))
+  const ids = [...new Set(advertisers.map((a) => a.entity!.id))]
+  const products = from === 'Classic' ? await classicProductsFor(ids) : new Map<string, number[]>()
+  const rows = await dbxCreatives(from, ids, products)
+  const out: { advertiser: AdvertiserResult; row: Record<string, string | null> }[] = []
+  for (const a of advertisers) for (const row of rows) if (row.from_id === a.entity!.id) out.push({ advertiser: a, row })
+  return out
 }
 
 async function classicLoadedAt(): Promise<string | null> {
@@ -394,6 +521,7 @@ export async function chooseEntity(runId: string, input: string, candidateId: st
     })
   }
   a.flags = computeFlags(a, from)
+  run.result.gpcTotals = { ...(run.result.gpcTotals ?? {}), ...(await computeGpcTotals(from, [a], run.result.gpcTotals ?? {})) }
   a.commentary = (await writeCommentary(from, [a])).get(a.input) ?? fallbackCommentary(a)
   await db.update(taxonomyRuns).set({ result: JSON.stringify(run.result) }).where(eq(taxonomyRuns.id, runId))
   return {}

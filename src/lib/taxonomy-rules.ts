@@ -287,6 +287,59 @@ export function sankeyData(flows: Flow[], level: NodeLevel, top = 7, gpcBy: GpcB
   return { total: flowTotal(flows), advertisers: adv.out, nodes: nodes.out, links: [...links.values()].filter((l) => l.spend > 0) }
 }
 
+// --- a GPC entity's whole spend ------------------------------------------------
+
+/**
+ * One slice of a GPC entity's TOTAL Aug–Sep spend, by the FROM entity its
+ * creatives belong to — including creatives of other FROM advertisers, which
+ * the Sankey (following one FROM entity) never sees. fromId null: the
+ * creatives have no entity in the FROM taxonomy. "OTHER": the long tail.
+ */
+export interface GpcTotalRow {
+  fromId: string | null
+  fromName: string | null
+  /** VX1 only: the parent company ("P<id>"), so a parent-company FROM match can be recognised. */
+  fromParentId?: string | null
+  fromParentName?: string | null
+  month: Month
+  media: MediaType
+  spend: number
+}
+
+/** Stored per run, keyed `${GpcBy}:${GPC id}`, so each entity is computed once however many advertisers reach it. */
+export const gpcTotalKey = (by: GpcBy, key: string) => `${by}:${key}`
+
+export const isOwnRow = (row: GpcTotalRow, entity: Resolved | null) =>
+  Boolean(entity && (row.fromId === entity.id || (entity.id.startsWith('P') && row.fromParentId === entity.id)))
+
+export interface GpcTotalView {
+  total: number
+  /** The part that comes from the FROM entity being compared: what the Sankey shows. */
+  own: number
+  rows: (Ranked & { own: boolean; parent?: string | null })[]
+}
+
+export function gpcTotalView(rows: GpcTotalRow[], filter: FlowFilter, entity: Resolved | null, from: FromTaxonomy): GpcTotalView {
+  const by = new Map<string, Ranked & { own: boolean; parent?: string | null }>()
+  let total = 0
+  let own = 0
+  for (const r of rows) {
+    if ((filter.media && r.media !== filter.media) || (filter.month && r.month !== filter.month)) continue
+    total += r.spend
+    const mine = isOwnRow(r, entity)
+    if (mine) own += r.spend
+    const key = r.fromId ?? '∅'
+    const label = r.fromId === OTHER.toUpperCase() ? `${OTHER} ${TAXONOMY_LABEL[from]} entities` : (r.fromName ?? `Not in ${TAXONOMY_LABEL[from]}`)
+    const x = by.get(key) ?? { key, label, spend: 0, own: mine, parent: r.fromParentName }
+    x.spend += r.spend
+    by.set(key, x)
+  }
+  return { total, own, rows: [...by.values()].sort((a, b) => b.spend - a.spend) }
+}
+
+/** More than this beyond the FROM entity's own share, and a GPC entity gets its "total spend" button. */
+export const hasMoreElsewhere = (v: GpcTotalView) => v.total - v.own > Math.max(1000, v.total * 0.001)
+
 /** Below this share, a GPC advertiser is noise and does not make a split. */
 export const SPLIT_SHARE = 0.05
 /** Above this share of FROM dollars with no GPC advertiser, it is flagged. */
@@ -394,6 +447,7 @@ export function initialSteps(from: FromTaxonomy): Step[] {
     { key: 'candidates', label: `Find candidate advertisers in ${TAXONOMY_LABEL[from]}`, state: 'waiting' },
     { key: 'match', label: 'Decide which entity is the advertiser', state: 'waiting' },
     { key: 'flows', label: 'Follow its creatives into GPC (Databricks)', state: 'waiting' },
+    { key: 'gpc-totals', label: "Check each GPC entity's total spend (Databricks)", state: 'waiting' },
     { key: 'commentary', label: 'Write the commentary', state: 'waiting' },
   ]
 }

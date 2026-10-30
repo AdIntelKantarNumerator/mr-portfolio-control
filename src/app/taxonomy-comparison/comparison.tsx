@@ -23,6 +23,9 @@ import {
   NODE_LEVEL_LABEL,
   NODE_LEVELS,
   OTHER,
+  gpcTotalKey,
+  gpcTotalView,
+  hasMoreElsewhere,
   pct,
   rankAdvertisers,
   rankNodes,
@@ -39,6 +42,8 @@ import {
   type NodeLevel,
   type Ranked,
   type SankeyData,
+  type GpcTotalRow,
+  type GpcTotalView,
   type Step,
 } from '@/lib/taxonomy-rules'
 import type { RunView } from '@/lib/taxonomy-run'
@@ -163,28 +168,46 @@ function Results({ run, onChange }: { run: RunView; onChange: (run: RunView) => 
           <span className="tx-big">{result.advertisers.length}</span> advertisers · {TAXONOMY_LABEL[result.from]} → GPC ·{' '}
           <span className={flagged ? 'tx-warn' : ''}>{flagged} with flags</span>
         </div>
-        <a className="btn" href={`/taxonomy-comparison/csv?run=${run.id}`}>
-          Download CSV
-        </a>
+        <div className="tx-downloads">
+          <a className="btn" href={`/taxonomy-comparison/csv?run=${run.id}`} title="Spend by GPC advertiser and node, one row per slice">
+            Download CSV
+          </a>
+          <a className="btn" href={`/taxonomy-comparison/creatives?run=${run.id}`} title="Every creative behind every advertiser, with its metadata. Read live from Databricks: allow up to a minute.">
+            Creatives CSV
+          </a>
+        </div>
       </div>
       <p className="tx-muted tx-meta">
         Matching {result.model ? `by ${result.model}` : 'by name only'}
         {result.from === 'Classic' && result.classicLoadedAt ? ` · Classic snapshot ${result.classicLoadedAt.slice(0, 10)}, linked to creatives through Vivvix` : ''}
       </p>
       {result.advertisers.map((a) => (
-        <AdvertiserCard key={a.input} a={a} from={result.from} runId={run.id} onChange={onChange} />
+        <AdvertiserCard key={a.input} a={a} from={result.from} runId={run.id} totals={result.gpcTotals ?? {}} onChange={onChange} />
       ))}
     </>
   )
 }
 
-function AdvertiserCard({ a, from, runId, onChange }: { a: AdvertiserResult; from: FromTaxonomy; runId: string; onChange: (run: RunView) => void }) {
+function AdvertiserCard({
+  a,
+  from,
+  runId,
+  totals,
+  onChange,
+}: {
+  a: AdvertiserResult
+  from: FromTaxonomy
+  runId: string
+  totals: Record<string, GpcTotalRow[]>
+  onChange: (run: RunView) => void
+}) {
   const [pending, start] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [media, setMedia] = useState<MediaType | ''>('')
   const [month, setMonth] = useState<Month | ''>('')
   const [level, setLevel] = useState<NodeLevel>('category')
   const [gpcBy, setGpcBy] = useState<GpcBy>('advertiser')
+  const [open, setOpen] = useState<string | null>(null)
 
   const pick = (id: string) =>
     start(async () => {
@@ -198,6 +221,19 @@ function AdvertiserCard({ a, from, runId, onChange }: { a: AdvertiserResult; fro
   const data = useMemo(() => sankeyData(flows, level, 7, gpcBy), [flows, level, gpcBy])
   const e = a.entity
   const tone = !e ? 'crit' : e.kind === 'exact' ? 'good' : 'warn'
+
+  // GPC entities on the chart that have spend from OTHER FROM entities too: they get the "total" button.
+  const filter = { media: media || null, month: month || null }
+  const totalFor = (key: string): GpcTotalView | null => {
+    const rows = totals[gpcTotalKey(gpcBy, key)]
+    return rows ? gpcTotalView(rows, filter, e, from) : null
+  }
+  const more = new Set(rankAdvertisers(flows, gpcBy).flatMap((r) => {
+    const v = totalFor(r.key)
+    return v && hasMoreElsewhere(v) ? [r.key] : []
+  }))
+  const openView = open ? totalFor(open) : null
+  const openLabel = open ? (rankAdvertisers(flows, gpcBy).find((r) => r.key === open)?.label ?? open) : ''
 
   return (
     <div className={`tile tx-card ${pending ? 'tx-busy' : ''}`}>
@@ -272,9 +308,18 @@ function AdvertiserCard({ a, from, runId, onChange }: { a: AdvertiserResult; fro
           </div>
           {data.total > 0 ? (
             <>
-              <Sankey data={data} fromLabel={e?.name ?? a.input} gpcBy={gpcBy} />
+              <Sankey data={data} fromLabel={e?.name ?? a.input} gpcBy={gpcBy} more={more} onMore={setOpen} />
+              {open && openView ? (
+                <GpcTotalPanel label={openLabel} view={openView} from={from} entityName={e?.name ?? a.input} onClose={() => setOpen(null)} />
+              ) : null}
               <div className="tx-lists">
-                <RankList title={gpcBy === 'parent' ? 'GPC top parents' : 'GPC advertisers'} rows={rankAdvertisers(flows, gpcBy)} total={data.total} />
+                <RankList
+                  title={gpcBy === 'parent' ? 'GPC top parents' : 'GPC advertisers'}
+                  rows={rankAdvertisers(flows, gpcBy)}
+                  total={data.total}
+                  more={more}
+                  onMore={setOpen}
+                />
                 <RankList title={`GPC ${NODE_LEVEL_LABEL[level].toLowerCase()}`} rows={rankNodes(flows, level)} total={data.total} />
               </div>
             </>
@@ -282,6 +327,12 @@ function AdvertiserCard({ a, from, runId, onChange }: { a: AdvertiserResult; fro
             <p className="tx-muted">No spend for this media and month.</p>
           )}
         </>
+      ) : null}
+
+      {e && a.flows.length ? (
+        <a className="tx-link-csv" href={`/taxonomy-comparison/creatives?run=${runId}&input=${encodeURIComponent(a.input)}`} title="Read live from Databricks: allow up to a minute">
+          ⤓ Creatives behind {e.name} (CSV)
+        </a>
       ) : null}
 
       {a.flags.length ? (
@@ -310,7 +361,19 @@ function Seg({ label, value, options, onChange }: { label: string; value: string
   )
 }
 
-function RankList({ title, rows, total }: { title: string; rows: Ranked[]; total: number }) {
+function RankList({
+  title,
+  rows,
+  total,
+  more,
+  onMore,
+}: {
+  title: string
+  rows: Ranked[]
+  total: number
+  more?: Set<string>
+  onMore?: (key: string) => void
+}) {
   return (
     <div className="tx-rank">
       <div className="tx-rank-head">{title}</div>
@@ -318,7 +381,14 @@ function RankList({ title, rows, total }: { title: string; rows: Ranked[]; total
         <tbody>
           {rows.slice(0, 12).map((r) => (
             <tr key={r.key} className={r.key === NO_GPC || r.key === UNCLASSIFIED ? 'flagged' : ''}>
-              <td>{r.label}</td>
+              <td>
+                {r.label}
+                {more?.has(r.key) ? (
+                  <button type="button" className="tx-more" onClick={() => onMore?.(r.key)} title="This GPC entity has more spend, from other advertisers: see its total">
+                    Σ total
+                  </button>
+                ) : null}
+              </td>
               <td className="num">{money(r.spend)}</td>
               <td className="num tx-muted">{pct(total ? r.spend / total : 0)}</td>
             </tr>
@@ -327,6 +397,74 @@ function RankList({ title, rows, total }: { title: string; rows: Ranked[]; total
             <tr>
               <td className="tx-muted" colSpan={3}>
                 +{rows.length - 12} more in the CSV
+              </td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/** A GPC entity's whole spend, by the FROM entity each of its creatives belongs to. */
+function GpcTotalPanel({
+  label,
+  view,
+  from,
+  entityName,
+  onClose,
+}: {
+  label: string
+  view: GpcTotalView
+  from: FromTaxonomy
+  entityName: string
+  onClose: () => void
+}) {
+  return (
+    <div className="tx-total" role="dialog" aria-label={`${label}: total GPC spend`}>
+      <div className="tx-total-head">
+        <div>
+          <div className="tx-muted">GPC total for</div>
+          <strong className="tx-total-title">{label}</strong>
+        </div>
+        <div className="tx-stat">
+          <span className="tx-muted">Total in GPC</span>
+          <strong>{money(view.total)}</strong>
+        </div>
+        <div className="tx-stat">
+          <span className="tx-muted">From {entityName}</span>
+          <strong>
+            {money(view.own)} <span className="tx-muted">{pct(view.total ? view.own / view.total : 0)}</span>
+          </strong>
+        </div>
+        <button type="button" className="tx-close" onClick={onClose} aria-label="Close">
+          ×
+        </button>
+      </div>
+      <table className="tx-table">
+        <thead>
+          <tr>
+            <th>{TAXONOMY_LABEL[from]} entity</th>
+            <th className="num">Spend</th>
+            <th className="num">Share</th>
+          </tr>
+        </thead>
+        <tbody>
+          {view.rows.slice(0, 25).map((r) => (
+            <tr key={r.key} className={r.own ? 'own' : r.key === '∅' ? 'flagged' : ''}>
+              <td>
+                {r.label}
+                {r.parent && r.parent !== r.label ? <span className="tx-muted"> · {r.parent}</span> : null}
+                {r.own ? <span className="status good tx-own">this comparison</span> : null}
+              </td>
+              <td className="num">{money(r.spend)}</td>
+              <td className="num tx-muted">{pct(view.total ? r.spend / view.total : 0)}</td>
+            </tr>
+          ))}
+          {view.rows.length > 25 ? (
+            <tr>
+              <td className="tx-muted" colSpan={3}>
+                +{view.rows.length - 25} more
               </td>
             </tr>
           ) : null}
@@ -359,7 +497,19 @@ const X = [180, 430, 660]
 /** The FROM node's height; the other columns use the same dollars-per-pixel. */
 const FROM_H = 300
 
-function Sankey({ data, fromLabel, gpcBy }: { data: SankeyData; fromLabel: string; gpcBy: GpcBy }) {
+function Sankey({
+  data,
+  fromLabel,
+  gpcBy,
+  more,
+  onMore,
+}: {
+  data: SankeyData
+  fromLabel: string
+  gpcBy: GpcBy
+  more: Set<string>
+  onMore: (key: string) => void
+}) {
   const hatch = `tx-hatch-${useId().replace(/[^a-zA-Z0-9]/g, '')}`
   const fillFor = (key: string) => (key === NO_GPC ? `url(#${hatch})` : color.get(key))
   const scale = FROM_H / data.total
@@ -461,6 +611,20 @@ function Sankey({ data, fromLabel, gpcBy }: { data: SankeyData; fromLabel: strin
               <rect x={X[1]} y={a.y} width={NODE_W} height={Math.max(a.h, 3)} rx={3} fill={color.get(r.key)} className={r.key === NO_GPC ? 'tx-node-nogpc' : ''}>
                 <title>{`${r.label}: ${money(r.spend)} (${pct(r.spend / data.total)})`}</title>
               </rect>
+              {more.has(r.key) ? (
+                <g
+                  className="tx-more-dot"
+                  role="button"
+                  tabIndex={0}
+                  transform={`translate(${X[1] - 13}, ${a.y + a.h / 2})`}
+                  onClick={() => onMore(r.key)}
+                  onKeyDown={(ev) => (ev.key === 'Enter' || ev.key === ' ') && onMore(r.key)}
+                >
+                  <title>More GPC spend from other advertisers: see the total</title>
+                  <circle r={9} />
+                  <text textAnchor="middle" dominantBaseline="central">Σ</text>
+                </g>
+              ) : null}
               <text x={X[1] + NODE_W + 6} y={a.y + a.h / 2} dominantBaseline="middle" className={`tx-node-label halo ${r.key === NO_GPC ? 'nogpc' : ''}`}>
                 {r.key === NO_GPC ? `⚠ ${advLabel(r)} · ${pct(r.spend / data.total)}` : advLabel(r)}
               </text>
