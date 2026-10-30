@@ -7,7 +7,7 @@
  * Progress is polled from the run's row every two seconds (actions.ts
  * pollRun): the work happens in the server process, not in this request.
  */
-import { useActionState, useEffect, useMemo, useState, useTransition } from 'react'
+import { useActionState, useEffect, useId, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   filterFlows,
@@ -238,6 +238,19 @@ function AdvertiserCard({ a, from, runId, onChange }: { a: AdvertiserResult; fro
           <span className="tx-muted">Spend followed</span>
           <strong>{money(flowTotal(a.flows))}</strong>
         </div>
+        {(() => {
+          const total = flowTotal(a.flows)
+          const none = a.flows.filter((f) => !f.gpcId).reduce((sum, f) => sum + f.spend, 0)
+          return total > 0 ? (
+            <div className={`tx-stat ${none ? 'tx-stat-nogpc' : ''}`} title="Spend on creatives that have no GPC advertiser">
+              <span className="tx-muted">No GPC advertiser</span>
+              <strong>
+                {none ? '⚠ ' : ''}
+                {money(none)} <span className="tx-muted">{pct(none / total)}</span>
+              </strong>
+            </div>
+          ) : null
+        })()}
         {a.classicReported != null ? (
           <div className="tx-stat" title="Classic's own estimate for the same advertiser and media">
             <span className="tx-muted">Classic reports</span>
@@ -328,7 +341,8 @@ function RankList({ title, rows, total }: { title: string; rows: Ranked[]; total
 /** Categorical slots in fixed order (validated light and dark, 30 October 2026); the tail and "none" are neutral. */
 const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6']
 const NEUTRAL = '#a3a29b'
-const NONE = '#d4d3cc'
+/** "No GPC advertiser" is a finding, not a series: amber and hatched, with a warning label (Scott, 30 October 2026). */
+const NONE = '#c98500'
 
 function colorFor(key: string, index: number): string {
   if (key === NO_GPC) return NONE
@@ -346,6 +360,8 @@ const X = [180, 430, 660]
 const FROM_H = 300
 
 function Sankey({ data, fromLabel, gpcBy }: { data: SankeyData; fromLabel: string; gpcBy: GpcBy }) {
+  const hatch = `tx-hatch-${useId().replace(/[^a-zA-Z0-9]/g, '')}`
+  const fillFor = (key: string) => (key === NO_GPC ? `url(#${hatch})` : color.get(key))
   const scale = FROM_H / data.total
 
   const stack = (rows: Ranked[]) => {
@@ -412,14 +428,20 @@ function Sankey({ data, fromLabel, gpcBy }: { data: SankeyData; fromLabel: strin
   return (
     <div className="tx-sankey-wrap">
       <svg className="tx-sankey" viewBox={`0 0 ${W} ${H + 28}`} role="img" aria-label={`Where ${fromLabel}'s spend lands in GPC`}>
+        <defs>
+          <pattern id={hatch} width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <rect width={6} height={6} fill={NONE} opacity={0.35} />
+            <line x1={0} y1={0} x2={0} y2={6} stroke={NONE} strokeWidth={3} />
+          </pattern>
+        </defs>
         <g transform="translate(0, 28)">
         {left.map((p) => (
-          <path key={`l-${p.key}`} d={p.d} fill={color.get(p.key)} className="tx-link">
+          <path key={`l-${p.key}`} d={p.d} fill={fillFor(p.key)} className={p.key === NO_GPC ? 'tx-link tx-link-none' : 'tx-link'}>
             <title>{`${fromLabel} → ${p.r.label}: ${money(p.r.spend)} (${pct(p.r.spend / data.total)})`}</title>
           </path>
         ))}
         {rightPaths.map((p, i) => (
-          <path key={`r-${i}`} d={p.d} fill={color.get(p.from)} className="tx-link">
+          <path key={`r-${i}`} d={p.d} fill={fillFor(p.from)} className={p.from === NO_GPC ? 'tx-link tx-link-none' : 'tx-link'}>
             <title>{`${data.advertisers.find((r) => r.key === p.from)?.label} → ${data.nodes.find((r) => r.key === p.l.to)?.label}: ${money(p.l.spend)} (${pct(p.l.spend / data.total)})`}</title>
           </path>
         ))}
@@ -436,11 +458,11 @@ function Sankey({ data, fromLabel, gpcBy }: { data: SankeyData; fromLabel: strin
           const a = adv.get(r.key)!
           return (
             <g key={`a-${r.key}`}>
-              <rect x={X[1]} y={a.y} width={NODE_W} height={a.h} rx={3} fill={color.get(r.key)} className={r.key === NO_GPC ? 'tx-node-none' : ''}>
+              <rect x={X[1]} y={a.y} width={NODE_W} height={Math.max(a.h, 3)} rx={3} fill={color.get(r.key)} className={r.key === NO_GPC ? 'tx-node-nogpc' : ''}>
                 <title>{`${r.label}: ${money(r.spend)} (${pct(r.spend / data.total)})`}</title>
               </rect>
-              <text x={X[1] + NODE_W + 6} y={a.y + a.h / 2} dominantBaseline="middle" className="tx-node-label halo">
-                {advLabel(r)}
+              <text x={X[1] + NODE_W + 6} y={a.y + a.h / 2} dominantBaseline="middle" className={`tx-node-label halo ${r.key === NO_GPC ? 'nogpc' : ''}`}>
+                {r.key === NO_GPC ? `⚠ ${advLabel(r)} · ${pct(r.spend / data.total)}` : advLabel(r)}
               </text>
             </g>
           )
