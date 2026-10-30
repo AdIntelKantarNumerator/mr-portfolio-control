@@ -73,6 +73,18 @@ UNION SELECT DISTINCT ParentBrandId, BrandName, 'brand' FROM DW.PrintAdMetricsWe
 UNION SELECT DISTINCT CompanyPrimogenitor, CompanyPrimogenitorName, 'advertiser' FROM AllMedia.Companies_Sites_Instances_Spend WHERE RptDate >= @start AND RptDate < @end
 UNION SELECT DISTINCT CompanyPrimogenitor, CompanyName, 'company' FROM AllMedia.Companies_Sites_Instances_Spend WHERE RptDate >= @start AND RptDate < @end`
 
+// Each advertiser's brands and companies — and the advertiser itself — to the
+// VX0 products Vivvix.Product maps them to. Checked 29 October 2026: brands
+// carrying 93% of Classic TV spend and 80% of digital are mapped.
+const PRODUCTS_SQL = `
+WITH b AS (
+  SELECT DISTINCT ParentCompanyId top_id, BrandId brand_id FROM DW.TvAdMetricsMonthly WHERE Month >= @start AND Month < @end
+  UNION SELECT DISTINCT CompanyPrimogenitor, CompanyId FROM AllMedia.Companies_Sites_Instances_Spend WHERE RptDate >= @start AND RptDate < @end
+  UNION SELECT DISTINCT ParentCompanyId, ParentCompanyId FROM DW.TvAdMetricsMonthly WHERE Month >= @start AND Month < @end
+  UNION SELECT DISTINCT CompanyPrimogenitor, CompanyPrimogenitor FROM AllMedia.Companies_Sites_Instances_Spend WHERE RptDate >= @start AND RptDate < @end)
+SELECT DISTINCT b.top_id id, p.VxProductId product_id FROM b JOIN Vivvix.Product p ON p.MrBrandId = b.brand_id
+WHERE b.top_id IS NOT NULL AND p.VxProductId IS NOT NULL`
+
 async function main() {
   const env = readEnvFile(process.env.SQLSERVER_ENV_FILE ?? join(process.cwd(), '..', '.sqlserver.env'))
   const [server, port] = env.SQLSERVER_SERVER.replace(/^tcp:/, '').split(',')
@@ -96,6 +108,8 @@ async function main() {
   )
   console.log('Reading Classic names…')
   const nameRows = (await read<{ id: number; name: string; level: string }>(NAMES_SQL)).filter((r) => r.id != null && r.name?.trim())
+  console.log('Reading Classic brand → VX product links…')
+  const productRows = await read<{ id: number; product_id: number }>(PRODUCTS_SQL)
   await pool.close()
 
   // The advertiser's own name: the advertiser-level row, else any.
@@ -132,10 +146,13 @@ async function main() {
       }
       const all = [...names.values()]
       for (let i = 0; i < all.length; i += 4000) await tx.insert(s.classicNames).values(all.slice(i, i + 4000))
+      await tx.delete(s.classicBrandProducts)
+      const links = productRows.map((r) => ({ advertiserId: r.id, vxProductId: r.product_id }))
+      for (let i = 0; i < links.length; i += 8000) await tx.insert(s.classicBrandProducts).values(links.slice(i, i + 8000))
     })
     const totals = new Map<string, number>()
     for (const r of spend) totals.set(`${r.month} ${r.mediaType}`, (totals.get(`${r.month} ${r.mediaType}`) ?? 0) + r.spend)
-    console.log(`Loaded ${spend.length} spend rows for ${advertiserName.size} advertisers, ${names.size} names.`)
+    console.log(`Loaded ${spend.length} spend rows for ${advertiserName.size} advertisers, ${names.size} names, ${productRows.length} product links.`)
     for (const [k, v] of [...totals].sort()) console.log(`  ${k.padEnd(20)} $${Math.round(v).toLocaleString()}`)
     await warnIfServerRunning(embedded)
   } finally {

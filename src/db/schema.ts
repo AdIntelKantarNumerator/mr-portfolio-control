@@ -2292,3 +2292,18 @@ export const taxonomyRuns = pgTable(
   },
   (t) => [index('taxonomy_runs_created_idx').on(t.createdAt)],
 )
+
+/**
+ * Which VX0 products (gold.creative.primary_product_id) each Classic
+ * advertiser's brands map to, from the SQL Server's Vivvix.Product
+ * (VxProductId ↔ MrBrandId). This is how a Classic advertiser reaches
+ * creatives, and through them GPC. Replaced whole by each load.
+ */
+export const classicBrandProducts = pgTable(
+  'classic_brand_products',
+  {
+    advertiserId: integer('advertiser_id').notNull(),
+    vxProductId: integer('vx_product_id').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.advertiserId, t.vxProductId] })],
+)

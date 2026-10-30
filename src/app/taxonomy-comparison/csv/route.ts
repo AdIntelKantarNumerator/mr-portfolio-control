@@ -15,10 +15,10 @@ export async function GET(req: Request) {
   const run = id ? await readRun(id) : null
   if (!run?.result) return new Response('No finished comparison with that id.', { status: 404 })
   const day = run.createdAt.slice(0, 10)
-  return new Response(toCsv(run.result.advertisers), {
+  return new Response(toCsv(run.result.from, run.result.advertisers), {
     headers: {
       'content-type': 'text/csv; charset=utf-8',
-      'content-disposition': `attachment; filename="taxonomy-comparison-${day}.csv"`,
+      'content-disposition': `attachment; filename="taxonomy-${run.result.from.toLowerCase()}-to-gpc-${day}.csv"`,
       'cache-control': 'no-store',
     },
   })

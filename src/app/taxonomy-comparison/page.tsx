@@ -1,17 +1,18 @@
 /**
  * Taxonomy Comparison (Scott, 29 October 2026; temporary).
  *
- * Paste advertisers; see their Aug–Sep 2026 spend by media type in VX1, VX2,
- * GPC and MediaRadar Classic side by side, which entity was taken as the
- * advertiser in each, and where they disagree. lib/taxonomy-run.ts does the
- * work; this page starts it and shows it.
+ * Pick a FROM taxonomy (VX1, VX2 or MediaRadar Classic), paste advertisers,
+ * and see where each one's Aug–Sep 2026 dollars land in GPC — which GPC
+ * advertisers and taxonomy nodes — as a Sankey per advertiser.
+ * lib/taxonomy-run.ts does the work; this page starts it and shows it.
  */
 import Link from 'next/link'
 import { desc } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { taxonomyRuns } from '@/db/schema'
 import { Kicker } from '@/components/ui'
-import { readRun } from '@/lib/taxonomy-run'
+import { parseRunInput, readRun } from '@/lib/taxonomy-run'
+import { TAXONOMY_LABEL } from '@/lib/taxonomy-rules'
 import { Comparison } from './comparison'
 
 export const metadata = { title: 'Taxonomy Comparison' }
@@ -47,7 +48,7 @@ export default async function TaxonomyComparisonPage({ searchParams }: { searchP
           </div>
           <div className="tx-recent">
             {recent.map((r) => {
-              const names = JSON.parse(r.input) as string[]
+              const { from, names } = parseRunInput(r.input)
               return (
                 <Link key={r.id} href={`/taxonomy-comparison?run=${r.id}`} className="tx-recent-row">
                   <span className="tx-recent-names">
@@ -55,6 +56,7 @@ export default async function TaxonomyComparisonPage({ searchParams }: { searchP
                     {names.length > 4 ? ` +${names.length - 4}` : ''}
                   </span>
                   <span className="tx-muted">
+                    {from ? `${TAXONOMY_LABEL[from]} → GPC · ` : ''}
                     {r.askedBy ?? ''} · {r.createdAt.toISOString().slice(0, 16).replace('T', ' ')} UTC
                     {r.status !== 'done' ? ` · ${r.status}` : ''}
                   </span>

@@ -1,15 +1,18 @@
 /**
- * Taxonomy Comparison: running one comparison.
+ * Taxonomy Comparison: running one comparison, FROM a taxonomy TO GPC.
  *
  * A run is a row in taxonomy_runs. Starting one returns at once; the work
  * carries on in this process and writes its progress to the row after every
  * step, and the screen polls the row. Databricks can take minutes on a cold
  * warehouse, longer than a request may stay open on App Service.
  *
- *   1. candidates   each pasted name searched by name in every taxonomy
+ *   1. candidates   each pasted name searched by name in the FROM taxonomy only
  *   2. match        the model decides which candidate (if any) is the advertiser
- *   3. spend        VX1, VX2 and GPC from Databricks; Classic from the snapshot
+ *   3. flows        that entity's creatives followed into GPC (lib/taxonomy-dbx.ts)
  *   4. commentary   computed flags, then the model writes a short paragraph
+ *
+ * GPC is never searched by name: its side of the answer is whatever the FROM
+ * advertiser's creatives are assigned to there.
  *
  * Flags are computed (lib/taxonomy-rules.ts), never the model's: the same
  * numbers always raise the same flags. The model only chooses among real
@@ -17,49 +20,63 @@
  */
 import { eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { classicNames, classicSpend, taxonomyRuns } from '@/db/schema'
+import { classicBrandProducts, classicNames, classicSpend, taxonomyRuns } from '@/db/schema'
 import { completeJson, ModelError, resolveProvider } from './llm'
-import { dbxCandidates, dbxSpend } from './taxonomy-dbx'
+import { dbxCandidates, dbxFlows } from './taxonomy-dbx'
 import {
-  addToGrid,
+  compactName,
   computeFlags,
+  filterFlows,
+  flowTotal,
   initialSteps,
+  isFromTaxonomy,
   matchKind,
   MEDIA_TYPES,
   money,
   MONTHS,
-  normaliseName,
-  compactName,
   namePatterns,
-  TAXONOMIES,
+  normaliseName,
+  pct,
+  rankAdvertisers,
+  rankNodes,
   TAXONOMY_LABEL,
-  total,
   type AdvertiserResult,
   type Candidate,
-  type Grid,
-  type MediaType,
-  type Month,
+  type Flow,
+  type FromTaxonomy,
   type Resolved,
   type Step,
-  type Taxonomy,
-  type TaxonomyResult,
 } from './taxonomy-rules'
 
 export interface RunResult {
+  /** 2 since FROM → GPC (30 October 2026); results without it are the side-by-side version. */
+  version: 2
+  from: FromTaxonomy
   advertisers: AdvertiserResult[]
   model: string | null
   classicLoadedAt: string | null
   finishedAt: string
 }
 
-type Candidates = Record<Taxonomy, Candidate[]>
+/** What a run was asked: stored as JSON in taxonomy_runs.input. Older runs stored a bare string[]. */
+export interface RunInput {
+  from: FromTaxonomy | null
+  names: string[]
+}
 
-export async function startRun(names: string[], askedBy: string | null): Promise<string> {
+export function parseRunInput(raw: string): RunInput {
+  const v = JSON.parse(raw) as unknown
+  if (Array.isArray(v)) return { from: null, names: v.map(String) }
+  const o = v as { from?: string; names?: unknown[] }
+  return { from: o.from && isFromTaxonomy(o.from) ? o.from : null, names: (o.names ?? []).map(String) }
+}
+
+export async function startRun(from: FromTaxonomy, names: string[], askedBy: string | null): Promise<string> {
   const [row] = await db
     .insert(taxonomyRuns)
-    .values({ input: JSON.stringify(names), askedBy, status: 'running', progress: JSON.stringify(initialSteps()) })
+    .values({ input: JSON.stringify({ from, names }), askedBy, status: 'running', progress: JSON.stringify(initialSteps(from)) })
     .returning({ id: taxonomyRuns.id })
-  void execute(row.id, names).catch(async (err) => {
+  void execute(row.id, from, names).catch(async (err) => {
     console.error('[taxonomy] run failed', err)
     await db
       .update(taxonomyRuns)
@@ -69,8 +86,8 @@ export async function startRun(names: string[], askedBy: string | null): Promise
   return row.id
 }
 
-async function execute(id: string, names: string[]): Promise<void> {
-  const steps = initialSteps()
+async function execute(id: string, from: FromTaxonomy, names: string[]): Promise<void> {
+  const steps = initialSteps(from)
   const save = () => db.update(taxonomyRuns).set({ progress: JSON.stringify(steps) }).where(eq(taxonomyRuns.id, id))
   const step = async <T>(key: string, work: (note: (detail: string) => Promise<void>) => Promise<T>): Promise<T> => {
     const s = steps.find((x) => x.key === key)!
@@ -97,63 +114,59 @@ async function execute(id: string, names: string[]): Promise<void> {
   }
 
   const candidates = await step('candidates', async (note) => {
-    const classic = await classicCandidates(names)
-    await note('Classic searched; searching Databricks…')
-    const dbx = await dbxCandidates(names, (s) => note(`Searching Databricks… ${s}s`))
-    const per = names.map((n): Candidates => ({ VX1: dbx.VX1.get(n) ?? [], VX2: dbx.VX2.get(n) ?? [], GPC: dbx.GPC.get(n) ?? [], Classic: classic.get(n) ?? [] }))
-    const found = per.reduce((a, c) => a + TAXONOMIES.filter((t) => c[t].length).length, 0)
-    await note(`${found} of ${names.length * TAXONOMIES.length} name searches found candidates`)
+    const found =
+      from === 'Classic' ? await classicCandidates(names) : await dbxCandidates(from, names, (s) => note(`Searching Databricks… ${s}s`))
+    const per = names.map((n) => found.get(n) ?? [])
+    await note(`${per.filter((c) => c.length).length} of ${names.length} names found candidates`)
     return per
   })
 
   const { resolved, model } = await step('match', async (note) => {
-    const out = await resolveAll(names, candidates)
+    const out = await resolveAll(from, names, candidates)
     await note(out.model ? `Decided by ${out.model}` : 'No model configured: matched by name only')
     return out
   })
 
-  const idsFor = (t: Taxonomy) => [...new Set(resolved.flatMap((r) => (r[t] ? [r[t]!.id] : [])))]
-
-  const dbxGrids = await step('spend-dbx', async (note) => {
-    const ids = { VX1: idsFor('VX1'), VX2: idsFor('VX2'), GPC: idsFor('GPC') }
-    if (!ids.VX1.length && !ids.VX2.length && !ids.GPC.length) {
-      await note('Nothing matched in Databricks')
-      return { VX1: new Map<string, Grid>(), VX2: new Map<string, Grid>(), GPC: new Map<string, Grid>() }
+  const ids = [...new Set(resolved.flatMap((r) => (r ? [r.id] : [])))]
+  const flows = await step('flows', async (note) => {
+    if (!ids.length) {
+      await note('Nothing matched, so nothing to follow')
+      return new Map<string, Flow[]>()
     }
-    return dbxSpend(ids, (s) => note(`Query running… ${s}s`))
+    const products = from === 'Classic' ? await classicProductsFor(ids) : new Map<string, number[]>()
+    return dbxFlows(from, ids, products, (s) => note(`Query running… ${s}s`))
   })
-
-  const classicGrids = await step('spend-classic', async () => classicSpendFor(idsFor('Classic').map(Number)))
+  const reported = from === 'Classic' ? await classicReportedFor(ids) : new Map<string, number>()
 
   const advertisers: AdvertiserResult[] = names.map((input, i) => {
-    const taxonomies = {} as Record<Taxonomy, TaxonomyResult>
-    for (const t of TAXONOMIES) {
-      const entity = resolved[i][t]
-      const grids = t === 'Classic' ? classicGrids : dbxGrids[t]
-      taxonomies[t] = {
-        entity,
-        candidates: candidates[i][t],
-        missing: entity ? undefined : candidates[i][t].length ? 'candidates were found, none is this advertiser' : 'no name like it',
-        grid: entity ? (grids.get(entity.id) ?? {}) : {},
-      }
+    const entity = resolved[i]
+    const r: AdvertiserResult = {
+      input,
+      entity,
+      candidates: candidates[i],
+      missing: entity ? undefined : candidates[i].length ? 'candidates were found, none is this advertiser' : 'no name like it',
+      flows: entity ? (flows.get(entity.id) ?? []) : [],
+      classicReported: entity && from === 'Classic' ? (reported.get(entity.id) ?? 0) : undefined,
+      flags: [],
+      commentary: '',
     }
-    return { input, taxonomies, flags: computeFlags(input, taxonomies), commentary: '' }
+    r.flags = computeFlags(r, from)
+    return r
   })
 
   await step('commentary', async (note) => {
-    const written = await writeCommentary(advertisers)
+    const written = await writeCommentary(from, advertisers)
     for (const a of advertisers) a.commentary = written.get(a.input) ?? fallbackCommentary(a)
     await note(written.size ? 'Written' : 'Summarised without a model')
   })
 
-  const [loaded] = await db.select({ at: sql<string>`max(${classicSpend.loadedAt})` }).from(classicSpend)
-  const result: RunResult = {
-    advertisers,
-    model,
-    classicLoadedAt: loaded?.at ? new Date(loaded.at).toISOString() : null,
-    finishedAt: new Date().toISOString(),
-  }
+  const result: RunResult = { version: 2, from, advertisers, model, classicLoadedAt: await classicLoadedAt(), finishedAt: new Date().toISOString() }
   await db.update(taxonomyRuns).set({ status: 'done', result: JSON.stringify(result) }).where(eq(taxonomyRuns.id, id))
+}
+
+async function classicLoadedAt(): Promise<string | null> {
+  const [loaded] = await db.select({ at: sql<string>`max(${classicSpend.loadedAt})` }).from(classicSpend)
+  return loaded?.at ? new Date(loaded.at).toISOString() : null
 }
 
 // --- Classic, from the snapshot -------------------------------------------
@@ -207,67 +220,86 @@ async function classicCandidates(names: string[]): Promise<Map<string, Candidate
   return out
 }
 
-async function classicSpendFor(ids: number[]): Promise<Map<string, Grid>> {
-  const out = new Map<string, Grid>()
-  if (!ids.length) return out
-  const rows = await db.select().from(classicSpend).where(inArray(classicSpend.advertiserId, ids))
+async function classicProductsFor(ids: string[]): Promise<Map<string, number[]>> {
+  const out = new Map<string, number[]>()
+  const nums = ids.map(Number).filter(Number.isInteger)
+  if (!nums.length) return out
+  const rows = await db.select().from(classicBrandProducts).where(inArray(classicBrandProducts.advertiserId, nums))
   for (const r of rows) {
-    const grid = out.get(String(r.advertiserId)) ?? {}
-    if ((MEDIA_TYPES as readonly string[]).includes(r.mediaType) && (MONTHS as readonly string[]).includes(r.month)) {
-      addToGrid(grid, r.mediaType as MediaType, r.month as Month, r.spend)
-    }
-    out.set(String(r.advertiserId), grid)
+    const list = out.get(String(r.advertiserId)) ?? []
+    list.push(r.vxProductId)
+    out.set(String(r.advertiserId), list)
   }
+  return out
+}
+
+/** Classic's own Aug–Sep spend for each entity, across the compared media. */
+async function classicReportedFor(ids: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  const nums = ids.map(Number).filter(Number.isInteger)
+  if (!nums.length) return out
+  const rows = await db
+    .select({ id: classicSpend.advertiserId, spend: sql<number>`sum(${classicSpend.spend})` })
+    .from(classicSpend)
+    .where(sql`${inArray(classicSpend.advertiserId, nums)} AND ${inArray(classicSpend.mediaType, [...MEDIA_TYPES])} AND ${inArray(classicSpend.month, [...MONTHS])}`)
+    .groupBy(classicSpend.advertiserId)
+  for (const r of rows) out.set(String(r.id), Number(r.spend))
   return out
 }
 
 // --- deciding which entity is the advertiser --------------------------------
 
-const MATCH_SYSTEM = `You match advertiser names across four media-measurement taxonomies (VX1, VX2, GPC, MediaRadar Classic).
-For each pasted advertiser and each taxonomy you get candidate entities found by name search, each with an id, its name, a size (Classic: its Aug–Sep 2026 ad spend; VX1 and VX2: its product count; GPC: its creative count including child entities) and sometimes its parent, or the subsidiary or brand name that led to it.
-In GPC a parent entity includes its children's spend: when both "The Progressive Corporation" and its child "Progressive" are offered, pick the top entity that is the advertiser itself.
+const matchSystem = (from: FromTaxonomy) => `You match pasted advertiser names to entities in the ${TAXONOMY_LABEL[from]} media-measurement taxonomy.
+For each pasted advertiser you get candidate entities found by name search, each with an id, its name, a size (${
+  from === 'Classic' ? 'its Aug–Sep 2026 ad spend' : 'its product count'
+}) and sometimes its parent, or the subsidiary or brand name that led to it.
 Pick the ONE candidate that is the same real-world advertiser at the ADVERTISER level (the company that buys the media, not a brand or product line), or null when none is.
 Rules:
 - Same company under a different legal suffix or punctuation is a match.
-- A parent company is a match when the pasted name is the company itself; prefer the entity whose name is the advertiser, not a subsidiary or brand, when both exist.
-- A namesake in a different business (e.g. "Progressive Lighting" for "Progressive" the insurer) is NOT a match. Use spend size and the other taxonomies' choices to tell the real advertiser from a namesake.
-- MediaRadar Classic offers only top-level companies. When the pasted advertiser is a subsidiary there (e.g. GEICO under Berkshire Hathaway, found via company "GEICO"), pick that top company and say in the reason that its spend includes other subsidiaries.
-- VX1 offers both advertisers and parent companies (ids starting "P"). When the company's spend is spread over brand-named advertisers (Procter & Gamble's brands), the parent company is the advertiser-level match; when one VX1 advertiser carries the company's spend (Progressive), pick that advertiser.
+- Prefer the entity whose name is the advertiser itself over a subsidiary or brand when both exist.
+- A namesake in a different business (e.g. "Progressive Lighting" for "Progressive" the insurer) is NOT a match. Use size to tell the real advertiser from a namesake.${
+  from === 'Classic'
+    ? `
+- MediaRadar Classic offers only top-level companies. When the pasted advertiser is a subsidiary there (e.g. GEICO under Berkshire Hathaway, found via company "GEICO"), pick that top company and say in the reason that its spend includes other subsidiaries.`
+    : ''
+}${
+  from === 'VX1'
+    ? `
+- VX1 offers both advertisers and parent companies (marked "Parent company", ids starting "P"). When the company's spend is spread over brand-named advertisers (Procter & Gamble's brands), the parent company is the match; when one VX1 advertiser carries the company's spend (Progressive), pick that advertiser.`
+    : ''
+}
 - Use only ids you were given. Never invent one.
 - For every pick whose name is not identical to the pasted name, give a one-sentence reason a salesperson would understand.
-Reply with JSON only: {"matches":[{"input":"<pasted name>","VX1":{"id":"…","reason":"…"}|null,"VX2":…,"GPC":…,"Classic":…}]}`
+Reply with JSON only: {"matches":[{"input":"<pasted name>","pick":{"id":"…","reason":"…"}|null}]}`
 
-async function resolveAll(names: string[], candidates: Candidates[]): Promise<{ resolved: Record<Taxonomy, Resolved | null>[]; model: string | null }> {
+async function resolveAll(from: FromTaxonomy, names: string[], candidates: Candidate[][]): Promise<{ resolved: (Resolved | null)[]; model: string | null }> {
   const byName = names.map((n, i) => byNameOnly(n, candidates[i]))
   if (!resolveProvider()) return { resolved: byName, model: null }
 
   const prompt = names
     .map((n, i) => {
-      const lines = [`ADVERTISER: ${n}`]
-      for (const t of TAXONOMIES) {
-        const c = candidates[i][t]
-        lines.push(`  ${t}: ${c.length ? '' : '(no candidates)'}`)
-        for (const x of c) lines.push(`    - id=${x.id} | ${x.level ? `${x.level}: ` : ''}${x.name} | ${x.spend != null ? `spend ${money(x.spend)}` : (x.size ?? '')}${x.via ? ` | ${x.via}` : ''}`)
+      const c = candidates[i]
+      const lines = [`ADVERTISER: ${n}${c.length ? '' : '  (no candidates)'}`]
+      for (const x of c) {
+        const size = x.spend != null ? `spend ${money(x.spend)}` : (x.size ?? '')
+        lines.push(`  - id=${x.id} | ${x.level ? `${x.level}: ` : ''}${x.name} | ${size}${x.via ? ` | ${x.via}` : ''}`)
       }
       return lines.join('\n')
     })
     .join('\n\n')
 
   try {
-    const { text, model } = await completeJson(MATCH_SYSTEM, prompt, { maxTokens: 4000, timeoutMs: 180_000, tier: 'advanced' })
+    const { text, model } = await completeJson(matchSystem(from), prompt, { maxTokens: 4000, timeoutMs: 180_000, tier: 'advanced' })
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')) as {
-      matches?: ({ input?: string } & Partial<Record<Taxonomy, { id?: string; reason?: string } | null>>)[]
+      matches?: { input?: string; pick?: { id?: string; reason?: string } | null }[]
     }
     const resolved = names.map((n, i) => {
       const m = parsed.matches?.find((x) => x.input?.trim().toLowerCase() === n.toLowerCase()) ?? parsed.matches?.[i]
       if (!m) return byName[i]
-      const out = {} as Record<Taxonomy, Resolved | null>
-      for (const t of TAXONOMIES) {
-        const pick = m[t]
-        const c = pick?.id ? candidates[i][t].find((x) => x.id === String(pick.id)) : undefined
-        out[t] = c ? { id: c.id, name: c.name, level: c.level, kind: matchKind(n, c.name), reason: matchKind(n, c.name) === 'exact' ? undefined : pick?.reason?.slice(0, 300) } : null
-      }
-      return out
+      const c = m.pick?.id ? candidates[i].find((x) => x.id === String(m.pick!.id)) : undefined
+      if (!c) return null
+      const kind = matchKind(n, c.name)
+      return { id: c.id, name: c.name, level: c.level, kind, reason: kind === 'exact' ? undefined : m.pick?.reason?.slice(0, 300) }
     })
     return { resolved, model }
   } catch (err) {
@@ -276,42 +308,41 @@ async function resolveAll(names: string[], candidates: Candidates[]): Promise<{ 
   }
 }
 
-/** Without a model: the candidate whose name is the same once normalised, largest spend first. */
-function byNameOnly(name: string, c: Candidates): Record<Taxonomy, Resolved | null> {
-  const out = {} as Record<Taxonomy, Resolved | null>
-  for (const t of TAXONOMIES) {
-    const pick = c[t].filter((x) => normaliseName(x.name) === normaliseName(name)).sort((a, b) => (b.weight ?? b.spend ?? 0) - (a.weight ?? a.spend ?? 0))[0]
-    out[t] = pick ? { id: pick.id, name: pick.name, level: pick.level, kind: matchKind(name, pick.name) } : null
-  }
-  return out
+/** Without a model: the candidate whose name is the same once normalised, largest first. */
+function byNameOnly(name: string, c: Candidate[]): Resolved | null {
+  const pick = c
+    .filter((x) => normaliseName(x.name) === normaliseName(name))
+    .sort((a, b) => (b.weight ?? b.spend ?? 0) - (a.weight ?? a.spend ?? 0))[0]
+  return pick ? { id: pick.id, name: pick.name, level: pick.level, kind: matchKind(name, pick.name) } : null
 }
 
 // --- commentary ---------------------------------------------------------------
 
-const COMMENTARY_SYSTEM = `You write short commentary comparing one advertiser's ad spend across taxonomies (VX1, VX2, GPC, MediaRadar Classic) for Aug–Sep 2026.
-You get the matched entity names, spend totals by media type per taxonomy, and computed flags. MediaRadar Classic does not track CTV.
-Write 2–4 plain sentences per advertiser: where the taxonomies agree, the biggest disagreement and by how much, and any entity-match caveat. Use the numbers given; do not invent any. No preamble, no bullet points.
+const COMMENTARY_SYSTEM = `You write short commentary on where one advertiser's ad spend lands in GPC, the target taxonomy.
+The spend is that of the advertiser's entity in a FROM taxonomy (VX1, VX2 or MediaRadar Classic), Aug–Sep 2026. Its creatives were followed into GPC: you get the GPC advertisers those creatives are assigned to and the GPC taxonomy nodes, with dollars and shares, and computed flags.
+Write 2–4 plain sentences per advertiser: how cleanly it maps (one GPC advertiser or several, how much has none), where it sits in the GPC taxonomy, and any match caveat. Use only the numbers given. No preamble, no bullet points.
 Reply with JSON only: {"commentary":[{"input":"<pasted name>","text":"…"}]}`
 
-async function writeCommentary(advertisers: AdvertiserResult[]): Promise<Map<string, string>> {
+function describe(from: FromTaxonomy, a: AdvertiserResult): string {
+  const lines = [`ADVERTISER: ${a.input}`]
+  if (!a.entity) return `${lines[0]}\n  not found in ${TAXONOMY_LABEL[from]}`
+  const total = flowTotal(a.flows)
+  lines.push(`  ${TAXONOMY_LABEL[from]} entity: "${a.entity.name}"${a.entity.level ? ` (${a.entity.level})` : ''}; creative spend ${money(total)}`)
+  if (a.classicReported != null) lines.push(`  Classic's own reported spend: ${money(a.classicReported)}`)
+  for (const r of rankAdvertisers(a.flows).slice(0, 8)) lines.push(`  GPC advertiser: ${r.label} ${money(r.spend)} (${pct(total ? r.spend / total : 0)})`)
+  for (const r of rankNodes(a.flows, 'category').slice(0, 6)) lines.push(`  GPC category: ${r.label} ${money(r.spend)} (${pct(total ? r.spend / total : 0)})`)
+  for (const m of MEDIA_TYPES) {
+    const t = flowTotal(filterFlows(a.flows, { media: m }))
+    if (t) lines.push(`  ${m}: ${money(t)}`)
+  }
+  for (const f of a.flags) lines.push(`  FLAG: ${f.text}`)
+  return lines.join('\n')
+}
+
+async function writeCommentary(from: FromTaxonomy, advertisers: AdvertiserResult[]): Promise<Map<string, string>> {
   const out = new Map<string, string>()
   if (!resolveProvider()) return out
-  const prompt = advertisers
-    .map((a) => {
-      const lines = [`ADVERTISER: ${a.input}`]
-      for (const t of TAXONOMIES) {
-        const r = a.taxonomies[t]
-        if (!r.entity) {
-          lines.push(`  ${TAXONOMY_LABEL[t]}: not found`)
-          continue
-        }
-        const parts = MEDIA_TYPES.map((m) => `${m} ${money(total(r.grid, m))}`).join(', ')
-        lines.push(`  ${TAXONOMY_LABEL[t]} ("${r.entity.name}"): total ${money(total(r.grid))}; ${parts}`)
-      }
-      for (const f of a.flags) lines.push(`  FLAG: ${f.text}`)
-      return lines.join('\n')
-    })
-    .join('\n\n')
+  const prompt = advertisers.map((a) => describe(from, a)).join('\n\n')
   try {
     const { text } = await completeJson(COMMENTARY_SYSTEM, prompt, { maxTokens: 3500, timeoutMs: 180_000, tier: 'advanced' })
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')) as { commentary?: { input?: string; text?: string }[] }
@@ -326,46 +357,44 @@ async function writeCommentary(advertisers: AdvertiserResult[]): Promise<Map<str
 }
 
 export function fallbackCommentary(a: AdvertiserResult): string {
-  const found = TAXONOMIES.filter((t) => a.taxonomies[t].entity)
-  if (!found.length) return 'Not found in any taxonomy.'
-  const totals = found.map((t) => `${TAXONOMY_LABEL[t]} ${money(total(a.taxonomies[t].grid))}`).join(', ')
-  const issues = a.flags.filter((f) => f.kind === 'spread' || f.kind === 'gap').length
-  return `Aug–Sep total: ${totals}.${issues ? ` ${issues} media-type difference${issues === 1 ? '' : 's'} flagged.` : ' The taxonomies broadly agree.'}`
+  if (!a.entity) return 'Not found.'
+  const total = flowTotal(a.flows)
+  if (!total) return 'No creative spend found in Aug–Sep 2026.'
+  const top = rankAdvertisers(a.flows)[0]
+  return `${money(total)} of creative spend; ${pct(top.spend / total)} lands on ${top.label} in GPC.`
 }
 
+// --- a person picks a different FROM entity ---------------------------------
+
 /**
- * A person picks a different candidate (or none) for one advertiser in one
- * taxonomy. Only a candidate the run's search found may be picked. Its spend
- * is read again, the flags recomputed and the commentary rewritten, and the
- * run's stored result is updated — so the page, the CSV and anyone else
- * opening the run see the choice.
+ * Only a candidate the run's search found may be picked. Its creatives are
+ * followed into GPC again, the flags recomputed and the commentary
+ * rewritten, and the run's stored result is updated — so the page, the CSV
+ * and anyone else opening the run see the choice.
  */
-export async function chooseEntity(runId: string, input: string, taxonomy: Taxonomy, candidateId: string | null, by: string): Promise<{ error?: string }> {
+export async function chooseEntity(runId: string, input: string, candidateId: string | null, by: string): Promise<{ error?: string }> {
   const run = await readRun(runId)
-  if (!run?.result) return { error: 'That comparison has not finished.' }
+  if (!run?.result || run.result.version !== 2) return { error: 'That comparison has not finished.' }
+  const from = run.result.from
   const a = run.result.advertisers.find((x) => x.input === input)
   if (!a) return { error: 'That advertiser is not in this comparison.' }
-  const tr = a.taxonomies[taxonomy]
-  if (!tr) return { error: 'Unknown taxonomy.' }
 
   if (!candidateId) {
-    a.taxonomies[taxonomy] = { ...tr, entity: null, missing: `set to none by ${by}`, grid: {} }
+    Object.assign(a, { entity: null, missing: `set to none by ${by}`, flows: [], classicReported: undefined })
   } else {
-    const c = tr.candidates?.find((x) => x.id === candidateId)
+    const c = a.candidates.find((x) => x.id === candidateId)
     if (!c) return { error: 'That entity was not among the candidates found.' }
-    const grid =
-      taxonomy === 'Classic'
-        ? ((await classicSpendFor([Number(c.id)])).get(c.id) ?? {})
-        : ((await dbxSpend({ VX1: [], VX2: [], GPC: [], [taxonomy]: [c.id] } as Record<Exclude<Taxonomy, 'Classic'>, string[]>))[taxonomy as Exclude<Taxonomy, 'Classic'>].get(c.id) ?? {})
-    a.taxonomies[taxonomy] = {
-      ...tr,
+    const products = from === 'Classic' ? await classicProductsFor([c.id]) : new Map<string, number[]>()
+    const flows = await dbxFlows(from, [c.id], products)
+    Object.assign(a, {
       entity: { id: c.id, name: c.name, level: c.level, kind: matchKind(input, c.name), chosenBy: by, reason: `chosen by ${by}` },
       missing: undefined,
-      grid,
-    }
+      flows: flows.get(c.id) ?? [],
+      classicReported: from === 'Classic' ? ((await classicReportedFor([c.id])).get(c.id) ?? 0) : undefined,
+    })
   }
-  a.flags = computeFlags(input, a.taxonomies)
-  a.commentary = (await writeCommentary([a])).get(a.input) ?? fallbackCommentary(a)
+  a.flags = computeFlags(a, from)
+  a.commentary = (await writeCommentary(from, [a])).get(a.input) ?? fallbackCommentary(a)
   await db.update(taxonomyRuns).set({ result: JSON.stringify(run.result) }).where(eq(taxonomyRuns.id, runId))
   return {}
 }
@@ -373,13 +402,16 @@ export async function chooseEntity(runId: string, input: string, taxonomy: Taxon
 export async function readRun(id: string) {
   const [row] = await db.select().from(taxonomyRuns).where(eq(taxonomyRuns.id, id))
   if (!row) return null
+  const result = row.result ? (JSON.parse(row.result) as RunResult | { version?: undefined }) : null
   return {
     id: row.id,
-    input: JSON.parse(row.input) as string[],
+    input: parseRunInput(row.input),
     askedBy: row.askedBy,
     status: row.status as 'running' | 'done' | 'failed',
     steps: JSON.parse(row.progress) as Step[],
-    result: row.result ? (JSON.parse(row.result) as RunResult) : null,
+    /** Null for a run of the earlier side-by-side version: the page asks for it to be run again. */
+    result: result && result.version === 2 ? result : null,
+    outdated: Boolean(result && result.version !== 2),
     error: row.error,
     createdAt: row.createdAt.toISOString(),
   }

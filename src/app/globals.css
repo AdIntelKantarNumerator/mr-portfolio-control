@@ -2152,3 +2152,33 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .tx-recent-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line); color: inherit; text-decoration: none; }
 .tx-recent-row:hover .tx-recent-names { color: var(--brand); }
 @media (max-width: 720px) { .tx-entities { grid-template-columns: 1fr 1fr; } .tx-recent-row { flex-direction: column; gap: 2px; } }
+
+/* Taxonomy Comparison, FROM → GPC (30 October 2026) */
+.tx-from { display: flex; align-items: center; gap: 12px; }
+.tx-from-pick { display: flex; align-items: center; gap: 8px; }
+.tx-select { font: inherit; font-size: 15px; font-weight: 700; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; }
+.tx-arrow { font-size: 20px; color: var(--muted); }
+.tx-to { font-size: 15px; font-weight: 750; color: var(--brand); }
+.tx-entity-row { display: flex; align-items: flex-end; gap: 22px; flex-wrap: wrap; }
+.tx-entity-row .tx-entity { min-width: 260px; max-width: 460px; flex: 1; }
+.tx-stat { display: flex; flex-direction: column; gap: 2px; }
+.tx-stat strong { font-size: 20px; font-weight: 750; }
+.tx-filters { display: flex; flex-wrap: wrap; gap: 14px; }
+.tx-seg { display: flex; align-items: center; gap: 4px; }
+.tx-seg .tx-muted { margin-right: 4px; }
+.tx-seg-btn { font: inherit; font-size: 12.5px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: inherit; cursor: pointer; }
+.tx-seg-btn.on { border-color: var(--brand); color: var(--brand); font-weight: 700; }
+.tx-sankey-wrap { overflow-x: auto; }
+.tx-sankey { width: 100%; min-width: 640px; height: auto; display: block; }
+.tx-link { opacity: .42; transition: opacity .15s; }
+.tx-link:hover { opacity: .75; }
+.tx-node-from { fill: var(--brand); }
+.tx-node-gpc { fill: #5f5e58; }
+.tx-node-none { fill: #d4d3cc; stroke: #8a8983; stroke-dasharray: 3 2; }
+.tx-node-label { font-size: 12.5px; fill: var(--text, currentColor); }
+.tx-node-label.strong { font-weight: 750; font-size: 14px; }
+.tx-node-label.halo { paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.tx-col-head { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; fill: var(--muted); }
+.tx-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.tx-rank-head { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
+@media (max-width: 720px) { .tx-lists { grid-template-columns: 1fr; } }
