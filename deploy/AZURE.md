@@ -472,6 +472,74 @@ the web app has no network path to port 8123.
 Run step 2 again with the new value, then `az webapp restart`. App Service
 re-reads Key Vault references on restart, and otherwise within about a day.
 
+### Prod: a private address, so the web app needs a network path
+
+Since 2 November 2026 the dictionary opens on Prod (`?env=dev` for Dev).
+Prod ClickHouse is `http://10.232.80.7:8123` (node `redear`). Steps 1 to 5
+apply as they are, with `PROD` for `DEV`: its own `portfolio_ro` user and
+password, `CLICKHOUSE-PROD-PASSWORD` in `kv-mr-portfolio-web`, and the settings
+`CLICKHOUSE_PROD_URL`, `CLICKHOUSE_PROD_USER`, `CLICKHOUSE_PROD_PASSWORD`.
+
+What Dev did not need: **a route to it.** Dev is on a public IP; Prod is not.
+Checked 2 November 2026:
+
+| From | Reaches 10.232.80.7:8123 |
+|---|---|
+| A laptop on the corporate VPN | yes |
+| The web app (no VNet integration, public outbound) | no |
+| Yaara's AKS pod | no |
+
+10.232.80.7 is in **`vnet-extension-all-p-eu2`** (10.232.80.0/21), resource
+group `dbw-network-connectivity-rg`, subscription **MediaRadar-VX -
+Production**, East US 2. That network is peered to the Prod hub
+`vnet-prod-internal-core-10.232.0.0m22`, which carries the gateway the VPN
+comes in through.
+
+The web app cannot borrow Yaara's network for this: the AKS network is
+`10.224.0.0/12`, which **overlaps** 10.232.0.0/16, and overlapping networks
+cannot be peered. It needs a small network of its own.
+
+**Ask whoever owns the Production networks for:**
+
+1. An address range for the web app's integration subnet - a /26 (64
+   addresses; a /28 is Azure's minimum) - that overlaps nothing peered with
+   `vnet-extension-all-p-eu2` or the hub.
+2. A peering from `vnet-extension-all-p-eu2` to that network (the Prod side;
+   our side is below), and nothing in the way of TCP 8123 from that range to
+   10.232.80.7 - an NSG rule or a firewall rule, if they filter.
+
+**Our side,** in the web app's own subscription (MediaRadar-VXC-Dev-01), once
+the range is agreed. The web app is in East US, so its network must be too;
+peering to East US 2 is global peering and works across subscriptions:
+
+```powershell
+$rg    = 'rg-mr-portfolio-control'
+$app   = 'mr-portfolio-control'
+$range = '<the agreed /26>'
+
+az network vnet create -g $rg -n vnet-mr-portfolio-web --location eastus `
+  --address-prefixes $range --subnet-name snet-webapp --subnet-prefixes $range
+az network vnet subnet update -g $rg --vnet-name vnet-mr-portfolio-web -n snet-webapp `
+  --delegations Microsoft.Web/serverFarms
+
+# Join the web app to it. The B1 plan supports this; nothing to upgrade.
+az webapp vnet-integration add -g $rg -n $app --vnet vnet-mr-portfolio-web --subnet snet-webapp
+
+# Our half of the peering. The Prod side runs the matching command there.
+$prodVnet = '/subscriptions/<MediaRadar-VX - Production id>/resourceGroups/dbw-network-connectivity-rg/providers/Microsoft.Network/virtualNetworks/vnet-extension-all-p-eu2'
+az network vnet peering create -g $rg --vnet-name vnet-mr-portfolio-web -n peer-to-vnet-extension-all-p-eu2 `
+  --remote-vnet $prodVnet --allow-vnet-access
+```
+
+Only private (RFC 1918) traffic goes into the network by default, which is
+exactly 10.232.80.7; everything else - OpenRouter, Google sign-in, Dev on its
+public IP - keeps going out as it does now. Do not turn on "route all".
+
+**Check it** from the web app's console (Kudu, **Development Tools →
+Console**): `curl -s -m 5 http://10.232.80.7:8123/ping` answers `Ok.` Then
+`/data-dictionary` reads Prod; its **Re-read** button forgets the cached
+catalog, so every table and column is read fresh.
+
 ## The language model: DeepSeek through OpenRouter
 
 The conversation briefs and the Workflow Assessment chat both use a language

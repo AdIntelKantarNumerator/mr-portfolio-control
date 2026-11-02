@@ -34,6 +34,7 @@ import {
   readableBytes,
   type DatabaseStatus,
   type EmptyReason,
+  DEFAULT_ENV,
 } from '@/lib/dictionary-rules'
 import { ConnectionNote, DictionaryHeader } from './header'
 import { DatasetBoard, type DatasetTile } from './board'
@@ -368,7 +369,7 @@ function TablesTab({
     <section>
       <form className="dd-filter" action="/data-dictionary">
         <input type="hidden" name="tab" value="tables" />
-        {view.env !== 'dev' ? <input type="hidden" name="env" value={view.env} /> : null}
+        {view.env !== DEFAULT_ENV ? <input type="hidden" name="env" value={view.env} /> : null}
         {view.edit ? <input type="hidden" name="edit" value="1" /> : null}
         {view.showAll ? <input type="hidden" name="show" value="all" /> : null}
         <input type="search" name="q" defaultValue={view.q} placeholder="Filter by table, dataset or description" aria-label="Filter tables" />

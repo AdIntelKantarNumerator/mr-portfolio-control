@@ -103,10 +103,11 @@ test('small things', async (t) => {
     assert.equal(parseTableRef('nodot'), null)
     assert.equal(parseTableRef('.x'), null)
   })
-  await t.test('anything but "prod" is Dev, so a mistyped link never reads Prod by accident', () => {
+  await t.test('Prod is the default (2 November 2026); only "dev", exactly, reads Dev', () => {
     assert.equal(readEnvironment('prod'), 'prod')
-    assert.equal(readEnvironment('PROD'), 'dev')
-    assert.equal(readEnvironment(undefined), 'dev')
+    assert.equal(readEnvironment(undefined), 'prod')
+    assert.equal(readEnvironment('DEV'), 'prod')
+    assert.equal(readEnvironment('dev'), 'dev')
   })
   await t.test('row counts read compactly', () => {
     assert.equal(compactCount(5_450_000_000), '5.45bn')

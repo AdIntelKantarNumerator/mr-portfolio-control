@@ -6,7 +6,7 @@
  * is server-rendered: a toggle held in the browser would reset on the first
  * link somebody followed, and they would have to find the button again.
  */
-import type { Environment } from '@/lib/dictionary-rules'
+import { DEFAULT_ENV, type Environment } from '@/lib/dictionary-rules'
 
 export interface DictView {
   env: Environment
@@ -21,7 +21,7 @@ export interface DictView {
 
 function query(v: DictView, extra: Record<string, string> = {}): string {
   const p = new URLSearchParams()
-  if (v.env !== 'dev') p.set('env', v.env)
+  if (v.env !== DEFAULT_ENV) p.set('env', v.env)
   if (v.tab && v.tab !== 'datasets') p.set('tab', v.tab)
   if (v.edit) p.set('edit', '1')
   if (v.showAll) p.set('show', 'all')

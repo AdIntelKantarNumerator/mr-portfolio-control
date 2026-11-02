@@ -6,13 +6,25 @@
  * a test in the terms of the case that motivated it.
  */
 
-export const ENVIRONMENTS = ['dev', 'prod'] as const
+export const ENVIRONMENTS = ['prod', 'dev'] as const
 export type Environment = (typeof ENVIRONMENTS)[number]
 
 export const ENV_LABEL: Record<Environment, string> = { dev: 'Dev', prod: 'Prod' }
 
+/**
+ * Prod is what the dictionary describes (Scott, 2 November 2026: "pivot the
+ * data dictionary to point to the production ClickHouse instance now that we
+ * have it"). Dev stays one click away for comparison.
+ *
+ * It used to be the other way - anything but "prod" was Dev, so a mistyped
+ * link could not read Prod by accident. Every read is guarded read-only
+ * (lib/clickhouse-guard.ts), so landing on Prod by default costs nothing that
+ * rule protected; only "dev", exactly, reads Dev.
+ */
+export const DEFAULT_ENV: Environment = 'prod'
+
 export function readEnvironment(raw: unknown): Environment {
-  return raw === 'prod' ? 'prod' : 'dev'
+  return raw === 'dev' ? 'dev' : DEFAULT_ENV
 }
 
 /** What people say a dataset should be, per environment. */
