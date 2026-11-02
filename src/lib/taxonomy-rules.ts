@@ -429,6 +429,124 @@ export function toCsv(from: FromTaxonomy, results: AdvertiserResult[]): string {
   return `﻿${lines.join('\r\n')}\r\n`
 }
 
+// --- the short assessment ---------------------------------------------------------
+
+/**
+ * The tile a person reads first, and what Yaara posts in Slack (Scott, 2 November
+ * 2026). Four facts, each cut to what matters:
+ *
+ *   1. the FROM advertiser's total spend;
+ *   2. where it lands in GPC — each GPC advertiser (or "No GPC advertiser") with
+ *      at least SUMMARY_SHARE of it, the rest as "Others";
+ *   3. when one GPC advertiser takes at least DOMINANT_SHARE, that advertiser's
+ *      WHOLE GPC spend, split into what followed from this FROM advertiser and
+ *      what reached it from creatives the FROM taxonomy files elsewhere;
+ *   4. the GPC industries it lands in, the same 10% rule.
+ *
+ * Computed, never the model's, so the same run always reads the same way.
+ */
+export const SUMMARY_SHARE = 0.1
+export const DOMINANT_SHARE = 0.75
+
+export interface Slice {
+  label: string
+  spend: number
+  share: number
+}
+
+export interface Rest {
+  count: number
+  spend: number
+  share: number
+}
+
+export interface AdvertiserSummary {
+  input: string
+  /** The FROM entity matched, or null when none was. */
+  fromEntity: string | null
+  fromLevel: string | null
+  total: number
+  gpc: Slice[]
+  gpcOthers: Rest | null
+  /** Set when one GPC advertiser takes DOMINANT_SHARE or more. gpcTotal is null when the run did not measure it. */
+  dominant: {
+    label: string
+    share: number
+    gpcTotal: number | null
+    followed: number | null
+    followedShare: number | null
+    shifted: number | null
+    shiftedShare: number | null
+  } | null
+  industries: Slice[]
+  industryOthers: Rest | null
+}
+
+function cut(ranked: Ranked[], total: number): { kept: Slice[]; rest: Rest | null } {
+  const kept: Slice[] = []
+  let count = 0
+  let spend = 0
+  for (const r of ranked) {
+    if (r.spend <= 0) continue
+    if (r.spend / total >= SUMMARY_SHARE) kept.push({ label: r.label, spend: r.spend, share: r.spend / total })
+    else {
+      count++
+      spend += r.spend
+    }
+  }
+  return { kept, rest: count ? { count, spend, share: spend / total } : null }
+}
+
+export function summarise(a: AdvertiserResult, from: FromTaxonomy, totals: Record<string, GpcTotalRow[]> = {}): AdvertiserSummary {
+  const total = flowTotal(a.flows)
+  const base = { input: a.input, fromEntity: a.entity?.name ?? null, fromLevel: a.entity?.level ?? null, total }
+  if (!a.entity || total <= 0) return { ...base, gpc: [], gpcOthers: null, dominant: null, industries: [], industryOthers: null }
+
+  const advertisers = rankAdvertisers(a.flows, 'advertiser')
+  const gpc = cut(advertisers, total)
+  const industries = cut(rankNodes(a.flows, 'industry'), total)
+
+  let dominant: AdvertiserSummary['dominant'] = null
+  const top = advertisers[0]
+  if (top && top.key !== NO_GPC && top.spend / total >= DOMINANT_SHARE) {
+    const rows = totals[gpcTotalKey('advertiser', top.key)]
+    const v = rows ? gpcTotalView(rows, {}, a.entity, from) : null
+    dominant = {
+      label: top.label,
+      share: top.spend / total,
+      gpcTotal: v ? v.total : null,
+      followed: v ? v.own : null,
+      followedShare: v && v.total ? v.own / v.total : null,
+      shifted: v ? v.total - v.own : null,
+      shiftedShare: v && v.total ? (v.total - v.own) / v.total : null,
+    }
+  }
+  return { ...base, gpc: gpc.kept, gpcOthers: gpc.rest, dominant, industries: industries.kept, industryOthers: industries.rest }
+}
+
+/** The same summary as plain text, for Slack and anything else without the tile. */
+export function summaryText(s: AdvertiserSummary, from: FromTaxonomy): string {
+  const name = TAXONOMY_LABEL[from]
+  if (!s.fromEntity) return `${s.input}: not found in ${name}.`
+  const lines = [`${s.input} — ${name} "${s.fromEntity}"${s.fromLevel ? ` (${s.fromLevel.toLowerCase()})` : ''}`]
+  lines.push(`Total ${name} spend, Aug–Sep 2026: ${money(s.total)}`)
+  if (s.total <= 0) return [...lines, 'No creative spend in the window.'].join('\n')
+  lines.push('Where it lands in GPC:')
+  for (const g of s.gpc) lines.push(`  • ${g.label}: ${money(g.spend)} (${pct(g.share)})`)
+  if (s.gpcOthers) lines.push(`  • Others (${s.gpcOthers.count}): ${money(s.gpcOthers.spend)} (${pct(s.gpcOthers.share)})`)
+  const d = s.dominant
+  if (d && d.gpcTotal != null && d.followed != null && d.shifted != null) {
+    lines.push(
+      `GPC "${d.label}" in total: ${money(d.gpcTotal)} — ${money(d.followed)} (${pct(d.followedShare ?? 0)}) followed from ${name} "${s.fromEntity}", ` +
+        `${money(d.shifted)} (${pct(d.shiftedShare ?? 0)}) came from creatives ${name} files under other advertisers.`,
+    )
+  }
+  lines.push('GPC industries:')
+  for (const i of s.industries) lines.push(`  • ${i.label}: ${money(i.spend)} (${pct(i.share)})`)
+  if (s.industryOthers) lines.push(`  • Other (${s.industryOthers.count}): ${money(s.industryOthers.spend)} (${pct(s.industryOthers.share)})`)
+  return lines.join('\n')
+}
+
 // --- progress ---------------------------------------------------------------
 
 export type StepState = 'waiting' | 'running' | 'done' | 'failed'

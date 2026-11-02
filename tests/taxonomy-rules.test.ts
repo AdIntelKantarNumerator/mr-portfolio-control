@@ -8,6 +8,8 @@ import assert from 'node:assert/strict'
 import { canSee, NO_ROLE } from '../src/lib/access-rules'
 import { assertSelect } from '../src/lib/databricks'
 import {
+  summarise,
+  summaryText,
   gpcTotalView,
   hasMoreElsewhere,
   computeFlags,
@@ -169,4 +171,46 @@ test('only a single SELECT reaches Databricks', () => {
 test('a semicolon inside a string literal is not a second statement', () => {
   assert.doesNotThrow(() => assertSelect("SELECT array_join(x, '; ') FROM t"))
   assert.throws(() => assertSelect("SELECT ';' FROM t; DROP TABLE t"))
+})
+
+test('the summary keeps GPC advertisers and industries at 10% or more and folds the rest into Others', () => {
+  const flows = [
+    flow('1', 'Chevrolet', 'Cars', 800, 'Digital'),
+    flow('2', 'Chevy Dealers', 'Cars', 120, 'Digital'),
+    flow('3', 'Small A', 'Cars', 40, 'Digital'),
+    flow(null, null, null, 40, 'Digital'),
+  ]
+  const s = summarise({ input: 'Chevrolet', entity: { id: '9', name: 'Chevrolet', kind: 'exact' }, candidates: [], flows, flags: [], commentary: '' }, 'VX1')
+  assert.equal(s.total, 1000)
+  assert.deepEqual(s.gpc.map((g) => g.label), ['Chevrolet', 'Chevy Dealers'])
+  assert.equal(s.gpcOthers?.count, 2)
+  assert.equal(s.gpcOthers?.spend, 80)
+  assert.equal(s.dominant?.label, 'Chevrolet')
+  assert.equal(s.dominant?.gpcTotal, null, 'not measured in this run')
+})
+
+test('when one GPC advertiser dominates, its whole GPC spend splits into followed and shifted', () => {
+  const flows = [flow('1', 'Chevrolet', 'Cars', 900), flow('2', 'Other', 'Cars', 100)]
+  const totals = {
+    'advertiser:1': [totalRow('9', 900), totalRow('44', 250, { fromName: 'Chevy Silverado' }), totalRow(null, 50)],
+  }
+  const a = { input: 'Chevrolet', entity: { id: '9', name: 'Chevrolet', kind: 'exact' as const }, candidates: [], flows, flags: [], commentary: '' }
+  const s = summarise(a, 'VX1', totals)
+  assert.equal(s.dominant?.gpcTotal, 1200)
+  assert.equal(s.dominant?.followed, 900)
+  assert.equal(s.dominant?.shifted, 300)
+  assert.equal(s.dominant?.shiftedShare, 0.25)
+  const text = summaryText(s, 'VX1')
+  assert.ok(text.includes('$900 (75%) followed from VX1 "Chevrolet"'), text)
+  assert.ok(text.includes('$300 (25%) came from creatives VX1 files under other advertisers'), text)
+})
+
+test('no dominant advertiser below 75%, and "No GPC advertiser" never dominates', () => {
+  const split = [flow('1', 'A', 'Cars', 700), flow('2', 'B', 'Cars', 300)]
+  const e = { id: '9', name: 'X', kind: 'exact' as const }
+  assert.equal(summarise({ input: 'X', entity: e, candidates: [], flows: split, flags: [], commentary: '' }, 'VX2').dominant, null)
+  const none = [flow(null, null, null, 900), flow('2', 'B', 'Cars', 100)]
+  const s = summarise({ input: 'X', entity: e, candidates: [], flows: none, flags: [], commentary: '' }, 'VX2')
+  assert.equal(s.dominant, null)
+  assert.equal(s.gpc[0].label, 'No GPC advertiser')
 })

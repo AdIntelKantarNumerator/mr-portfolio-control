@@ -27,6 +27,7 @@ import {
   gpcTotalView,
   hasMoreElsewhere,
   pct,
+  summarise,
   rankAdvertisers,
   rankNodes,
   sankeyData,
@@ -44,6 +45,7 @@ import {
   type SankeyData,
   type GpcTotalRow,
   type GpcTotalView,
+  type AdvertiserSummary,
   type Step,
 } from '@/lib/taxonomy-rules'
 import type { RunView } from '@/lib/taxonomy-run'
@@ -208,6 +210,8 @@ function AdvertiserCard({
   const [level, setLevel] = useState<NodeLevel>('category')
   const [gpcBy, setGpcBy] = useState<GpcBy>('advertiser')
   const [open, setOpen] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const summary = useMemo(() => summarise(a, from, totals), [a, from, totals])
 
   const pick = (id: string) =>
     start(async () => {
@@ -248,102 +252,193 @@ function AdvertiserCard({
           ) : (
             <span className="status good">Clean mapping</span>
           )}
+          <button type="button" className="btn" onClick={() => setExpanded((x) => !x)} aria-expanded={expanded}>
+            {expanded ? 'Hide details ▴' : 'Details ▾'}
+          </button>
         </div>
       </div>
 
-      <div className="tx-entity-row">
-        <label className="tx-entity" title={e?.reason ?? (e ? `Exact name match (id ${e.id})` : a.missing)}>
-          <span className="tx-muted">
-            {TAXONOMY_LABEL[from]}
-            {e?.level ? <strong className="tx-level"> · {e.level}</strong> : null}
-          </span>
-          {a.candidates.length ? (
-            <select className={`tx-pick status ${tone}`} value={e?.id ?? ''} disabled={pending} onChange={(ev) => pick(ev.target.value)}>
-              {a.candidates.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {optionLabel(c)}
-                </option>
-              ))}
-              <option value="">None of these</option>
-            </select>
-          ) : (
-            <span className={`status ${tone}`}>{e ? e.name : 'Not found'}</span>
-          )}
-        </label>
-        <div className="tx-stat">
-          <span className="tx-muted">Spend followed</span>
-          <strong>{money(flowTotal(a.flows))}</strong>
-        </div>
-        {(() => {
-          const total = flowTotal(a.flows)
-          const none = a.flows.filter((f) => !f.gpcId).reduce((sum, f) => sum + f.spend, 0)
-          return total > 0 ? (
-            <div className={`tx-stat ${none ? 'tx-stat-nogpc' : ''}`} title="Spend on creatives that have no GPC advertiser">
-              <span className="tx-muted">No GPC advertiser</span>
-              <strong>
-                {none ? '⚠ ' : ''}
-                {money(none)} <span className="tx-muted">{pct(none / total)}</span>
-              </strong>
-            </div>
-          ) : null
-        })()}
-        {a.classicReported != null ? (
-          <div className="tx-stat" title="Classic's own estimate for the same advertiser and media">
-            <span className="tx-muted">Classic reports</span>
-            <strong>{money(a.classicReported)}</strong>
-          </div>
-        ) : null}
-      </div>
-      {error ? <p className="status crit">{error}</p> : null}
+      <SummaryView s={summary} from={from} />
 
-      <p className="tx-commentary">{a.commentary}</p>
-
-      {a.flows.length ? (
+      {expanded ? (
         <>
-          <div className="tx-filters">
-            <Seg label="Media" value={media} onChange={(v) => setMedia(v as MediaType | '')} options={[['', 'All'], ...MEDIA_TYPES.map((m) => [m, m] as [string, string])]} />
-            <Seg label="Month" value={month} onChange={(v) => setMonth(v as Month | '')} options={[['', 'Both'], ...MONTHS.map((m) => [m, MONTH_LABEL[m].slice(0, 3)] as [string, string])]} />
-            <Seg label="GPC advertiser" value={gpcBy} onChange={(v) => setGpcBy(v as GpcBy)} options={(['advertiser', 'parent'] as GpcBy[]).map((b) => [b, GPC_BY_LABEL[b]] as [string, string])} />
-            <Seg label="GPC node" value={level} onChange={(v) => setLevel(v as NodeLevel)} options={NODE_LEVELS.map((l) => [l, NODE_LEVEL_LABEL[l]] as [string, string])} />
-          </div>
-          {data.total > 0 ? (
-            <>
-              <Sankey data={data} fromLabel={e?.name ?? a.input} gpcBy={gpcBy} more={more} onMore={setOpen} />
-              {open && openView ? (
-                <GpcTotalPanel label={openLabel} view={openView} from={from} entityName={e?.name ?? a.input} onClose={() => setOpen(null)} />
-              ) : null}
-              <div className="tx-lists">
-                <RankList
-                  title={gpcBy === 'parent' ? 'GPC top parents' : 'GPC advertisers'}
-                  rows={rankAdvertisers(flows, gpcBy)}
-                  total={data.total}
-                  more={more}
-                  onMore={setOpen}
-                />
-                <RankList title={`GPC ${NODE_LEVEL_LABEL[level].toLowerCase()}`} rows={rankNodes(flows, level)} total={data.total} />
+          <div className="tx-entity-row">
+            <label className="tx-entity" title={e?.reason ?? (e ? `Exact name match (id ${e.id})` : a.missing)}>
+              <span className="tx-muted">
+                {TAXONOMY_LABEL[from]}
+                {e?.level ? <strong className="tx-level"> · {e.level}</strong> : null}
+              </span>
+              {a.candidates.length ? (
+                <select className={`tx-pick status ${tone}`} value={e?.id ?? ''} disabled={pending} onChange={(ev) => pick(ev.target.value)}>
+                  {a.candidates.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {optionLabel(c)}
+                    </option>
+                  ))}
+                  <option value="">None of these</option>
+                </select>
+              ) : (
+                <span className={`status ${tone}`}>{e ? e.name : 'Not found'}</span>
+              )}
+            </label>
+            <div className="tx-stat">
+              <span className="tx-muted">Spend followed</span>
+              <strong>{money(flowTotal(a.flows))}</strong>
+            </div>
+            {(() => {
+              const total = flowTotal(a.flows)
+              const none = a.flows.filter((f) => !f.gpcId).reduce((sum, f) => sum + f.spend, 0)
+              return total > 0 ? (
+                <div className={`tx-stat ${none ? 'tx-stat-nogpc' : ''}`} title="Spend on creatives that have no GPC advertiser">
+                  <span className="tx-muted">No GPC advertiser</span>
+                  <strong>
+                    {none ? '⚠ ' : ''}
+                    {money(none)} <span className="tx-muted">{pct(none / total)}</span>
+                  </strong>
+                </div>
+              ) : null
+            })()}
+            {a.classicReported != null ? (
+              <div className="tx-stat" title="Classic's own estimate for the same advertiser and media">
+                <span className="tx-muted">Classic reports</span>
+                <strong>{money(a.classicReported)}</strong>
               </div>
+            ) : null}
+          </div>
+          {error ? <p className="status crit">{error}</p> : null}
+
+          <p className="tx-commentary">{a.commentary}</p>
+
+          {a.flows.length ? (
+            <>
+              <div className="tx-filters">
+                <Seg label="Media" value={media} onChange={(v) => setMedia(v as MediaType | '')} options={[['', 'All'], ...MEDIA_TYPES.map((m) => [m, m] as [string, string])]} />
+                <Seg label="Month" value={month} onChange={(v) => setMonth(v as Month | '')} options={[['', 'Both'], ...MONTHS.map((m) => [m, MONTH_LABEL[m].slice(0, 3)] as [string, string])]} />
+                <Seg label="GPC advertiser" value={gpcBy} onChange={(v) => setGpcBy(v as GpcBy)} options={(['advertiser', 'parent'] as GpcBy[]).map((b) => [b, GPC_BY_LABEL[b]] as [string, string])} />
+                <Seg label="GPC node" value={level} onChange={(v) => setLevel(v as NodeLevel)} options={NODE_LEVELS.map((l) => [l, NODE_LEVEL_LABEL[l]] as [string, string])} />
+              </div>
+              {data.total > 0 ? (
+                <>
+                  <Sankey data={data} fromLabel={e?.name ?? a.input} gpcBy={gpcBy} more={more} onMore={setOpen} />
+                  {open && openView ? (
+                    <GpcTotalPanel label={openLabel} view={openView} from={from} entityName={e?.name ?? a.input} onClose={() => setOpen(null)} />
+                  ) : null}
+                  <div className="tx-lists">
+                    <RankList
+                      title={gpcBy === 'parent' ? 'GPC top parents' : 'GPC advertisers'}
+                      rows={rankAdvertisers(flows, gpcBy)}
+                      total={data.total}
+                      more={more}
+                      onMore={setOpen}
+                    />
+                    <RankList title={`GPC ${NODE_LEVEL_LABEL[level].toLowerCase()}`} rows={rankNodes(flows, level)} total={data.total} />
+                  </div>
+                </>
+              ) : (
+                <p className="tx-muted">No spend for this media and month.</p>
+              )}
             </>
-          ) : (
-            <p className="tx-muted">No spend for this media and month.</p>
-          )}
+          ) : null}
+
+          {e && a.flows.length ? (
+            <a className="tx-link-csv" href={`/taxonomy-comparison/creatives?run=${runId}&input=${encodeURIComponent(a.input)}`} title="Read live from Databricks: allow up to a minute">
+              ⤓ Creatives behind {e.name} (CSV)
+            </a>
+          ) : null}
+
+          {a.flags.length ? (
+            <ul className="tx-flags">
+              {a.flags.map((f, i) => (
+                <li key={i}>
+                  <span className={`status ${FLAG_TONE[f.kind]}`}>{FLAG_LABEL[f.kind]}</span> {f.text}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </>
       ) : null}
+    </div>
+  )
+}
 
-      {e && a.flows.length ? (
-        <a className="tx-link-csv" href={`/taxonomy-comparison/creatives?run=${runId}&input=${encodeURIComponent(a.input)}`} title="Read live from Databricks: allow up to a minute">
-          ⤓ Creatives behind {e.name} (CSV)
-        </a>
-      ) : null}
+/** The short assessment: large type, four facts (lib/taxonomy-rules.ts summarise). */
+function SummaryView({ s, from }: { s: AdvertiserSummary; from: FromTaxonomy }) {
+  const name = TAXONOMY_LABEL[from]
+  if (!s.fromEntity) return <p className="tx-sum-empty">Not found in {name}.</p>
+  if (s.total <= 0) return <p className="tx-sum-empty">No creative spend for {name} &quot;{s.fromEntity}&quot; in Aug–Sep 2026.</p>
+  const d = s.dominant
+  return (
+    <div className="tx-sum">
+      <div className="tx-sum-total">
+        <div className="tx-muted">
+          {name} spend · Aug–Sep 2026
+        </div>
+        <div className="tx-sum-big">{money(s.total)}</div>
+        <div className="tx-muted">
+          {s.fromEntity}
+          {s.fromLevel ? ` (${s.fromLevel.toLowerCase()})` : ''}
+        </div>
+      </div>
 
-      {a.flags.length ? (
-        <ul className="tx-flags">
-          {a.flags.map((f, i) => (
-            <li key={i}>
-              <span className={`status ${FLAG_TONE[f.kind]}`}>{FLAG_LABEL[f.kind]}</span> {f.text}
-            </li>
-          ))}
-        </ul>
+      <div className="tx-sum-col">
+        <div className="tx-sum-head">Lands in GPC</div>
+        {s.gpc.map((g) => (
+          <SumRow key={g.label} label={g.label} spend={g.spend} share={g.share} warn={g.label === NO_GPC} />
+        ))}
+        {s.gpcOthers ? <SumRow label={`Others (${s.gpcOthers.count})`} spend={s.gpcOthers.spend} share={s.gpcOthers.share} quiet /> : null}
+      </div>
+
+      <div className="tx-sum-col">
+        <div className="tx-sum-head">GPC industries</div>
+        {s.industries.map((i) => (
+          <SumRow key={i.label} label={i.label} spend={i.spend} share={i.share} warn={i.label === UNCLASSIFIED} />
+        ))}
+        {s.industryOthers ? <SumRow label={`Other (${s.industryOthers.count})`} spend={s.industryOthers.spend} share={s.industryOthers.share} quiet /> : null}
+      </div>
+
+      {d && d.gpcTotal != null && d.followed != null && d.shifted != null ? (
+        <div className="tx-sum-dominant">
+          <div>
+            <div className="tx-muted">GPC &quot;{d.label}&quot; in total</div>
+            <div className="tx-sum-big">{money(d.gpcTotal)}</div>
+          </div>
+          <div className="tx-sum-split">
+            <div className="tx-sum-bar" aria-hidden>
+              <span className="followed" style={{ width: `${(d.followedShare ?? 0) * 100}%` }} />
+              <span className="shifted" style={{ width: `${(d.shiftedShare ?? 0) * 100}%` }} />
+            </div>
+            <div className="tx-sum-split-row">
+              <span>
+                <i className="dot followed" /> Followed from {name} &quot;{s.fromEntity}&quot;
+              </span>
+              <strong>
+                {money(d.followed)} <span className="tx-muted">{pct(d.followedShare ?? 0)}</span>
+              </strong>
+            </div>
+            <div className="tx-sum-split-row">
+              <span>
+                <i className="dot shifted" /> From creatives {name} files under other advertisers
+              </span>
+              <strong>
+                {money(d.shifted)} <span className="tx-muted">{pct(d.shiftedShare ?? 0)}</span>
+              </strong>
+            </div>
+          </div>
+        </div>
       ) : null}
+    </div>
+  )
+}
+
+function SumRow({ label, spend, share, warn, quiet }: { label: string; spend: number; share: number; warn?: boolean; quiet?: boolean }) {
+  return (
+    <div className={`tx-sum-row ${warn ? 'warn' : ''} ${quiet ? 'quiet' : ''}`}>
+      <span className="tx-sum-label">
+        {warn ? '⚠ ' : ''}
+        {label}
+      </span>
+      <span className="tx-sum-val">{money(spend)}</span>
+      <span className="tx-sum-pct">{pct(share)}</span>
     </div>
   )
 }
