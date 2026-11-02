@@ -22,9 +22,12 @@ export function DictionaryHeader({
   edit: boolean
   hrefFor: (change: { env?: Environment; edit?: boolean }) => string
 }) {
+  const snapshot = result.state === 'ok' ? result.catalog.snapshot : null
   const read =
     result.state === 'ok'
-      ? `Read ${new Date(result.catalog.readAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · ${result.catalog.databases.length} databases · ${result.catalog.tables.length} tables`
+      ? snapshot
+        ? `${result.catalog.databases.length} databases · ${result.catalog.tables.length} tables`
+        : `Read ${new Date(result.catalog.readAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · ${result.catalog.databases.length} databases · ${result.catalog.tables.length} tables`
       : result.state === 'not_connected'
         ? 'Not connected'
         : 'Could not be read'
@@ -37,8 +40,15 @@ export function DictionaryHeader({
           </Link>
         ))}
       </span>
+      {snapshot ? (
+        // A copy, not a live read: said in words, with when (Scott, 2 November
+        // 2026), so nobody takes a number here for what is in ClickHouse now.
+        <span className="dd-static" title={`A copy taken from a laptop on the VPN${snapshot.takenBy ? ` by ${snapshot.takenBy}` : ''}: this site cannot reach ClickHouse ${ENV_LABEL[env]} live yet.`}>
+          Static copy · last updated {etTime(snapshot.takenAt)}
+        </span>
+      ) : null}
       <span className="dd-read">{read}</span>
-      {result.state !== 'not_connected' ? (
+      {result.state !== 'not_connected' && !snapshot ? (
         <form action={rereadCatalog}>
           <input type="hidden" name="env" value={env} />
           <button type="submit" className="btn">
@@ -51,6 +61,11 @@ export function DictionaryHeader({
       </Link>
     </div>
   )
+}
+
+/** "Nov 2, 2026, 4:34 PM ET": Eastern, because the server's own zone is UTC. */
+function etTime(iso: string): string {
+  return `${new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} ET`
 }
 
 export function ConnectionNote({ result }: { result: CatalogResult }) {

@@ -2,10 +2,20 @@
  * The Data Dictionary's reads: structure from ClickHouse, meaning from here.
  *
  * Structure — databases, tables, engines, row counts, columns — is read live
- * from ClickHouse's system tables and held for a few minutes. Nothing about
- * it is written to Postgres; a stored copy is wrong the next time a loader
- * runs. What people know is read from the dictionary_* tables and laid over
- * the top.
+ * from ClickHouse's system tables and held for a few minutes (lib/
+ * dictionary-live.ts). What people know is read from the dictionary_* tables
+ * and laid over the top.
+ *
+ * OR FROM A STORED COPY
+ *
+ * Prod ClickHouse is on a private address the web app cannot reach yet
+ * (deploy/AZURE.md). Until it can, a laptop on the VPN reads it and sends the
+ * copy here (scripts/dictionary-snapshot.ts), and with
+ * CLICKHOUSE_PROD_SOURCE=snapshot the site shows that copy instead of trying
+ * a connection that would only time out on every page. The pages say it is
+ * static and when it was taken (Scott, 2 November 2026). Previews need a live
+ * connection, so they say so rather than showing nothing. Set the source back
+ * to live (or remove it) once the network path exists.
  *
  * WHY A SHORT CACHE
  *
@@ -23,55 +33,20 @@ import {
   dictionaryDatabases,
   dictionaryDatasets,
   dictionaryDatasetTables,
+  dictionarySnapshots,
   dictionaryTables,
 } from '@/db/schema'
-import { chQuery, chSelect, clickhouseConfig, ClickHouseError } from './clickhouse'
-import { PREVIEW_SETTINGS, Q_COLUMNS, Q_COLUMN_COUNTS, Q_DATABASES, Q_PARTS, Q_PREVIEW, Q_TABLES } from './dictionary-queries'
-import { isSystemDatabase, tableRef, type Environment } from './dictionary-rules'
+import { chSelect, clickhouseConfig, ClickHouseError } from './clickhouse'
+import { clickhouseMessage, readLiveCatalog, readLiveColumns, type Catalog, type CatalogColumn } from './dictionary-live'
+import { PREVIEW_SETTINGS, Q_PREVIEW } from './dictionary-queries'
+import { ENV_LABEL, tableRef, type Environment } from './dictionary-rules'
 
-export interface CatalogDatabase {
-  name: string
-  comment: string
-}
-
-export interface CatalogTable {
-  database: string
-  name: string
-  ref: string
-  engine: string
-  rows: number
-  bytes: number
-  comment: string
-  sortingKey: string
-  partitionKey: string
-  metadataModified: string | null
-  lastWrite: string | null
-  latestPartition: string | null
-  columnCount: number
-}
-
-export interface Catalog {
-  env: Environment
-  readAt: string
-  databases: CatalogDatabase[]
-  tables: CatalogTable[]
-}
+export type { Catalog, CatalogColumn, CatalogDatabase, CatalogTable } from './dictionary-live'
 
 export type CatalogResult =
   | { state: 'ok'; catalog: Catalog }
   | { state: 'not_connected'; env: Environment }
   | { state: 'error'; env: Environment; message: string }
-
-export interface CatalogColumn {
-  name: string
-  type: string
-  comment: string
-  position: number
-  inSortingKey: boolean
-  inPartitionKey: boolean
-  defaultKind: string
-  defaultExpression: string
-}
 
 const OK_TTL_MS = 5 * 60_000
 const ERROR_TTL_MS = 20_000
@@ -96,11 +71,14 @@ export function forgetCatalog(env: Environment): void {
   for (const k of [...cache.keys()]) if (k.startsWith(`${env}:`)) cache.delete(k)
 }
 
-// ClickHouse's JSON output quotes 64-bit integers by default, so every count
-// arrives as a string. Number() handles both.
-const num = (v: unknown) => {
-  const n = Number(v)
-  return Number.isFinite(n) ? n : 0
+/** Whether this environment is shown from its stored copy: CLICKHOUSE_<ENV>_SOURCE=snapshot. */
+export function readsSnapshot(env: Environment, source: Record<string, string | undefined> = process.env): boolean {
+  return source[`CLICKHOUSE_${env.toUpperCase()}_SOURCE`]?.trim().toLowerCase() === 'snapshot'
+}
+
+async function storedSnapshot(env: Environment) {
+  const [row] = await db.select().from(dictionarySnapshots).where(eq(dictionarySnapshots.env, env)).limit(1)
+  return row ?? null
 }
 
 export function readCatalog(env: Environment): Promise<CatalogResult> {
@@ -108,50 +86,20 @@ export function readCatalog(env: Environment): Promise<CatalogResult> {
     `${env}:catalog`,
     (v) => (v.state === 'ok' ? OK_TTL_MS : ERROR_TTL_MS),
     async () => {
+      if (readsSnapshot(env)) {
+        const row = await storedSnapshot(env)
+        if (!row) {
+          return { state: 'error', env, message: `No copy of ClickHouse ${ENV_LABEL[env]} has been taken yet. Run the snapshot from a laptop on the VPN (npm run dictionary:snapshot).` }
+        }
+        const catalog = JSON.parse(row.catalog) as Catalog
+        return { state: 'ok', catalog: { ...catalog, snapshot: { takenAt: row.takenAt.toISOString(), takenBy: row.takenBy } } }
+      }
       const config = clickhouseConfig(env)
       if (!config) return { state: 'not_connected', env }
       try {
-        const [dbs, tables, parts, cols] = await Promise.all([
-          chQuery<{ name: string; comment: string }>(config, Q_DATABASES),
-          chQuery<Record<string, unknown>>(config, Q_TABLES),
-          chQuery<Record<string, unknown>>(config, Q_PARTS),
-          chQuery<Record<string, unknown>>(config, Q_COLUMN_COUNTS),
-        ])
-
-        const partOf = new Map(parts.map((p) => [tableRef(String(p.database), String(p.table)), p]))
-        const colsOf = new Map(cols.map((c) => [tableRef(String(c.database), String(c.table)), num(c.columns)]))
-
-        return {
-          state: 'ok',
-          catalog: {
-            env,
-            readAt: new Date().toISOString(),
-            databases: dbs.filter((d) => !isSystemDatabase(d.name)).map((d) => ({ name: d.name, comment: d.comment ?? '' })),
-            tables: tables.map((t) => {
-              const ref = tableRef(String(t.database), String(t.name))
-              const p = partOf.get(ref)
-              return {
-                database: String(t.database),
-                name: String(t.name),
-                ref,
-                engine: String(t.engine ?? ''),
-                rows: num(t.rows),
-                bytes: num(t.bytes),
-                comment: String(t.comment ?? ''),
-                sortingKey: String(t.sorting_key ?? ''),
-                partitionKey: String(t.partition_key ?? ''),
-                metadataModified: t.metadata_modified ? String(t.metadata_modified) : null,
-                lastWrite: p?.last_write ? String(p.last_write) : null,
-                // An unpartitioned MergeTree reports its single partition as 'tuple()'.
-                latestPartition: p?.latest_partition && String(p.latest_partition) !== 'tuple()' ? String(p.latest_partition) : null,
-                columnCount: colsOf.get(ref) ?? 0,
-              }
-            }),
-          },
-        }
+        return { state: 'ok', catalog: await readLiveCatalog(config) }
       } catch (err) {
-        const message = err instanceof ClickHouseError ? err.message : `Reading ClickHouse failed: ${(err as Error).message}`
-        return { state: 'error', env, message }
+        return { state: 'error', env, message: clickhouseMessage(err) }
       }
     },
   )
@@ -166,23 +114,16 @@ export function readColumns(
     `${env}:columns:${database}.${table}`,
     (v) => (v.ok ? OK_TTL_MS : ERROR_TTL_MS),
     async () => {
+      if (readsSnapshot(env)) {
+        const row = await storedSnapshot(env)
+        if (!row) return { ok: false as const, message: `No copy of ClickHouse ${ENV_LABEL[env]} has been taken yet.` }
+        const all = JSON.parse(row.columns) as Record<string, CatalogColumn[]>
+        return { ok: true as const, columns: all[tableRef(database, table)] ?? [] }
+      }
       const config = clickhouseConfig(env)
       if (!config) return { ok: false as const, message: `ClickHouse ${env} is not connected.` }
       try {
-        const rows = await chQuery<Record<string, unknown>>(config, Q_COLUMNS, { db: database, tbl: table })
-        return {
-          ok: true as const,
-          columns: rows.map((r) => ({
-            name: String(r.name),
-            type: String(r.type),
-            comment: String(r.comment ?? ''),
-            position: num(r.position),
-            inSortingKey: num(r.is_in_sorting_key) === 1,
-            inPartitionKey: num(r.is_in_partition_key) === 1,
-            defaultKind: String(r.default_kind ?? ''),
-            defaultExpression: String(r.default_expression ?? ''),
-          })),
-        }
+        return { ok: true as const, columns: await readLiveColumns(config, database, table) }
       } catch (err) {
         return { ok: false as const, message: err instanceof ClickHouseError ? err.message : (err as Error).message }
       }
@@ -196,13 +137,17 @@ export type PreviewResult =
 
 /**
  * The first rows of one table, for the Preview tab. Held for a minute, so
- * flicking between tabs does not re-read, and never stored anywhere.
+ * flicking between tabs does not re-read, and never stored anywhere - which is
+ * also why a snapshot has none: it keeps structure, never rows.
  */
 export function readPreview(env: Environment, database: string, table: string): Promise<PreviewResult> {
   return cached(
     `${env}:preview:${database}.${table}`,
     (v) => (v.ok ? 60_000 : ERROR_TTL_MS),
     async () => {
+      if (readsSnapshot(env)) {
+        return { ok: false as const, message: `${ENV_LABEL[env]} is shown from a static copy, which keeps structure but never rows. A preview needs a live connection to ClickHouse ${ENV_LABEL[env]}.` }
+      }
       const config = clickhouseConfig(env)
       if (!config) return { ok: false as const, message: `ClickHouse ${env} is not connected.` }
       try {
@@ -213,6 +158,19 @@ export function readPreview(env: Environment, database: string, table: string): 
       }
     },
   )
+}
+
+/** Store a copy sent from a laptop (app/api/sync/dictionary-snapshot), replacing the last. */
+export async function saveSnapshot(snap: { env: Environment; takenAt: Date; takenBy: string | null; catalog: Catalog; columns: Record<string, CatalogColumn[]> }): Promise<void> {
+  const values = {
+    env: snap.env,
+    takenAt: snap.takenAt,
+    takenBy: snap.takenBy,
+    catalog: JSON.stringify({ ...snap.catalog, snapshot: null }),
+    columns: JSON.stringify(snap.columns),
+  }
+  await db.insert(dictionarySnapshots).values(values).onConflictDoUpdate({ target: dictionarySnapshots.env, set: { ...values, updatedAt: new Date() } })
+  forgetCatalog(snap.env)
 }
 
 // ---------------------------------------------------------------------------

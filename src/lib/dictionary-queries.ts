@@ -41,6 +41,12 @@ export const Q_COLUMNS = `SELECT name, type, comment, position, is_in_sorting_ke
  * "the first ten" means the first ten ClickHouse reads, which the screen says.
  * The row and byte caps that go with it are PREVIEW_SETTINGS, below.
  */
+/** Every column of every table at once, for a snapshot (2 November 2026). */
+export const Q_ALL_COLUMNS = `SELECT database, table, name, type, comment, position, is_in_sorting_key, is_in_partition_key, default_kind, default_expression
+  FROM system.columns
+ WHERE ${NOT_SYSTEM}
+ ORDER BY database, table, position`
+
 export const Q_PREVIEW = `SELECT * FROM {db:Identifier}.{tbl:Identifier} LIMIT 10`
 
 /**
@@ -56,4 +62,4 @@ export const PREVIEW_SETTINGS: Readonly<Record<string, string>> = {
   max_execution_time: '10',
 }
 
-export const ALL_QUERIES = { Q_DATABASES, Q_TABLES, Q_PARTS, Q_COLUMN_COUNTS, Q_COLUMNS, Q_PREVIEW }
+export const ALL_QUERIES = { Q_DATABASES, Q_TABLES, Q_PARTS, Q_COLUMN_COUNTS, Q_COLUMNS, Q_ALL_COLUMNS, Q_PREVIEW }

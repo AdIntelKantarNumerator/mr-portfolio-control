@@ -49,7 +49,7 @@ import {
 import { getScoringContext, scoreForRequest } from './scoring'
 import { readWorkflowMap } from './workflow'
 import { readCatalog, readDictionaryNotes } from './dictionary'
-import { DATABASE_STATUS_LABEL, DATASET_STATUS_LABEL, INTENT_LABEL, datasetStatus, readDatabaseStatus, readEmptyReason, readIntent, type EmptyReason } from './dictionary-rules'
+import { DATABASE_STATUS_LABEL, DATASET_STATUS_LABEL, DEFAULT_ENV, ENV_LABEL, INTENT_LABEL, datasetStatus, readDatabaseStatus, readEmptyReason, readIntent, type EmptyReason } from './dictionary-rules'
 import { KIND_LABEL } from './workflow-map'
 import { LIMIT, filterLines, line, type LookupArea } from './agent-lookup-rules'
 
@@ -183,7 +183,10 @@ async function workflow(): Promise<string[]> {
 }
 
 async function dictionary(): Promise<{ lines: string[]; note: string | null }> {
-  const [notes, result] = await Promise.all([readDictionaryNotes(), readCatalog('dev')])
+  // The environment the dictionary describes: Prod since 2 November 2026.
+  const env = DEFAULT_ENV
+  const label = ENV_LABEL[env]
+  const [notes, result] = await Promise.all([readDictionaryNotes(), readCatalog(env)])
   const catalog = result.state === 'ok' ? new Map(result.catalog.tables.map((t) => [t.ref, { rows: t.rows }])) : null
   const reasons = new Map<string, EmptyReason>()
   for (const t of notes.tables) {
@@ -199,7 +202,7 @@ async function dictionary(): Promise<{ lines: string[]; note: string | null }> {
     lines.push(
       line(
         `Dataset ${d.name}`,
-        `Dev: ${DATASET_STATUS_LABEL[status]}`,
+        `${label}: ${DATASET_STATUS_LABEL[status]}`,
         `meant to be ${INTENT_LABEL[readIntent(d.intentDev) ?? 'undecided']} in Dev and ${INTENT_LABEL[readIntent(d.intentProd) ?? 'undecided']} in Prod`,
         d.owner ? `owner ${d.owner}` : null,
         `${tables.length} tables`,
@@ -217,9 +220,11 @@ async function dictionary(): Promise<{ lines: string[]; note: string | null }> {
   return {
     lines,
     note:
-      result.state === 'ok'
-        ? `Loaded status read live from ClickHouse Dev at ${result.catalog.readAt.slice(11, 16)} UTC. Prod is not connected yet.`
-        : 'ClickHouse Dev could not be read just now, so loaded status is unknown; the notes are still current.',
+      result.state !== 'ok'
+        ? `ClickHouse ${label} could not be read just now, so loaded status is unknown; the notes are still current.`
+        : result.catalog.snapshot
+          ? `Loaded status is from a static copy of ClickHouse ${label} taken ${result.catalog.snapshot.takenAt.slice(0, 16).replace('T', ' ')} UTC, not a live read: say so, with that time, when you quote it.`
+          : `Loaded status read live from ClickHouse ${label} at ${result.catalog.readAt.slice(11, 16)} UTC.`,
   }
 }
 

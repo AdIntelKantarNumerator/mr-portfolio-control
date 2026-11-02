@@ -25,7 +25,8 @@
     "check:grouping": "tsx scripts/check-grouping.ts",
     "check:objective-lifecycle": "tsx scripts/check-objective-lifecycle.ts",
     "check:discussions": "tsx scripts/check-discussion-resolve.ts",
-    "load:classic": "tsx scripts/load-classic.ts"
+    "load:classic": "tsx scripts/load-classic.ts",
+    "dictionary:snapshot": "tsx scripts/dictionary-snapshot.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

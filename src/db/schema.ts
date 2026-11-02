@@ -1973,6 +1973,20 @@ export const dictionaryColumns = pgTable(
 )
 
 /**
+ * A stored copy of one environment's ClickHouse catalog, for when the site
+ * cannot read it live (drizzle/0038). JSON: `catalog` is lib/dictionary-live's
+ * Catalog, `columns` its CatalogColumn[] by table ref.
+ */
+export const dictionarySnapshots = pgTable('dictionary_snapshots', {
+  env: text('env').primaryKey(),
+  takenAt: timestamp('taken_at', { withTimezone: true }).notNull(),
+  takenBy: text('taken_by'),
+  catalog: text('catalog').notNull(),
+  columns: text('columns').notNull(),
+  updatedAt: updatedAt(),
+})
+
+/**
  * Questions asked of Yaara in the portfolio's chat, while she answers them.
  *
  * A relay, not a record. Open WebUI keeps the conversation; Yaara keeps what

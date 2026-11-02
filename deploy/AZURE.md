@@ -535,6 +535,20 @@ Only private (RFC 1918) traffic goes into the network by default, which is
 exactly 10.232.80.7; everything else - OpenRouter, Google sign-in, Dev on its
 public IP - keeps going out as it does now. Do not turn on "route all".
 
+**Until then: a static copy.** With `CLICKHOUSE_PROD_SOURCE=snapshot` the
+site shows a copy of Prod's catalog instead of trying to reach it, marked on
+every page "Static copy · last updated <date, time> ET"; previews say they
+need a live connection. Refresh the copy from a laptop on the VPN:
+
+```bash
+node C:\temp\Portfolio\dictionary-snapshot.mjs
+```
+
+That reads Prod (`npm run dictionary:snapshot -- prod`, lib/dictionary-live.ts)
+and posts it to `/api/sync/dictionary-snapshot` with `SYNC_TOKEN` from Key
+Vault. Structure only: names, types, row counts, last writes. When the network
+path exists, remove `CLICKHOUSE_PROD_SOURCE` (or set it to `live`) and restart.
+
 **Check it** from the web app's console (Kudu, **Development Tools →
 Console**): `curl -s -m 5 http://10.232.80.7:8123/ping` answers `Ok.` Then
 `/data-dictionary` reads Prod; its **Re-read** button forgets the cached
