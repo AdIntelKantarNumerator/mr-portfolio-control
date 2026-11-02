@@ -6,13 +6,8 @@
  * advertisers and taxonomy nodes — as a Sankey per advertiser.
  * lib/taxonomy-run.ts does the work; this page starts it and shows it.
  */
-import Link from 'next/link'
-import { desc } from 'drizzle-orm'
-import { db } from '@/db/client'
-import { taxonomyRuns } from '@/db/schema'
 import { Kicker } from '@/components/ui'
-import { parseRunInput, readRun } from '@/lib/taxonomy-run'
-import { TAXONOMY_LABEL } from '@/lib/taxonomy-rules'
+import { readRun } from '@/lib/taxonomy-run'
 import { Comparison } from './comparison'
 
 export const metadata = { title: 'Taxonomy Comparison' }
@@ -23,14 +18,7 @@ type Search = Promise<Record<string, string | string[] | undefined>>
 export default async function TaxonomyComparisonPage({ searchParams }: { searchParams: Search }) {
   const sp = await searchParams
   const runId = typeof sp.run === 'string' ? sp.run : ''
-  const [run, recent] = await Promise.all([
-    runId ? readRun(runId) : null,
-    db
-      .select({ id: taxonomyRuns.id, input: taxonomyRuns.input, askedBy: taxonomyRuns.askedBy, status: taxonomyRuns.status, createdAt: taxonomyRuns.createdAt })
-      .from(taxonomyRuns)
-      .orderBy(desc(taxonomyRuns.createdAt))
-      .limit(8),
-  ])
+  const run = runId ? await readRun(runId) : null
 
   return (
     <div className="stack">
@@ -41,31 +29,6 @@ export default async function TaxonomyComparisonPage({ searchParams }: { searchP
         </div>
       </div>
       <Comparison key={runId || 'new'} initial={run} />
-      {recent.length ? (
-        <div className="tile">
-          <div className="tile-head">
-            <h2>Recent comparisons</h2>
-          </div>
-          <div className="tx-recent">
-            {recent.map((r) => {
-              const { from, names } = parseRunInput(r.input)
-              return (
-                <Link key={r.id} href={`/taxonomy-comparison?run=${r.id}`} className="tx-recent-row">
-                  <span className="tx-recent-names">
-                    {names.slice(0, 4).join(', ')}
-                    {names.length > 4 ? ` +${names.length - 4}` : ''}
-                  </span>
-                  <span className="tx-muted">
-                    {from ? `${TAXONOMY_LABEL[from]} → GPC · ` : ''}
-                    {r.askedBy ?? ''} · {r.createdAt.toISOString().slice(0, 16).replace('T', ' ')} UTC
-                    {r.status !== 'done' ? ` · ${r.status}` : ''}
-                  </span>
-                </Link>
-              )
-            })}
-          </div>
-        </div>
-      ) : null}
     </div>
   )
 }

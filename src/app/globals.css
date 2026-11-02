@@ -2226,3 +2226,11 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 .tx-sum-empty { font-size: 17px; margin: 0; color: var(--muted); }
 @media (max-width: 860px) { .tx-sum, .tx-sum-dominant { grid-template-columns: 1fr; gap: 16px; } }
+
+/* Taxonomy Comparison tiles, spaced and edged like the home page's cards (2 November 2026). */
+.tx-card { margin-bottom: 14px; border-left: 4px solid var(--edge, var(--line-2)); box-shadow: var(--shadow); }
+.tx-sum-big.total { color: var(--blue); }
+.tx-sum-big.gpc { color: var(--accent); }
+.tx-sum-head { color: var(--brand-2); }
+.tx-sum-row:first-of-type .tx-sum-val { color: var(--ink); }
+.tx-summary { margin: 6px 0 4px; }

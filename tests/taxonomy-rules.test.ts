@@ -201,8 +201,10 @@ test('when one GPC advertiser dominates, its whole GPC spend splits into followe
   assert.equal(s.dominant?.shifted, 300)
   assert.equal(s.dominant?.shiftedShare, 0.25)
   const text = summaryText(s, 'VX1')
-  assert.ok(text.includes('$900 (75%) followed from VX1 "Chevrolet"'), text)
-  assert.ok(text.includes('$300 (25%) came from creatives VX1 files under other advertisers'), text)
+  assert.ok(text.includes('Followed from VX1 "Chevrolet": $900 (75%)'), text)
+  assert.ok(text.includes('From creatives VX1 files under other advertisers: $300 (25%)'), text)
+  // Scott, 2 November 2026: every line carries both dollars and a percent.
+  for (const line of text.split(String.fromCharCode(10))) assert.match(line, /[$][0-9].*[(][0-9.]+%/, line)
 })
 
 test('no dominant advertiser below 75%, and "No GPC advertiser" never dominates', () => {

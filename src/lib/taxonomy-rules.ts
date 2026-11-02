@@ -524,24 +524,30 @@ export function summarise(a: AdvertiserResult, from: FromTaxonomy, totals: Recor
   return { ...base, gpc: gpc.kept, gpcOthers: gpc.rest, dominant, industries: industries.kept, industryOthers: industries.rest }
 }
 
-/** The same summary as plain text, for Slack and anything else without the tile. */
+/**
+ * The same summary as plain text, for Slack and anything else without the
+ * tile. Every line carries dollars AND a percent (Scott, 2 November 2026), so
+ * no line has to be read against another to be understood: the section heads
+ * carry the whole (100%), and the dominant GPC advertiser's percents are of
+ * its own GPC total, which its line says.
+ */
 export function summaryText(s: AdvertiserSummary, from: FromTaxonomy): string {
   const name = TAXONOMY_LABEL[from]
   if (!s.fromEntity) return `${s.input}: not found in ${name}.`
-  const lines = [`${s.input} — ${name} "${s.fromEntity}"${s.fromLevel ? ` (${s.fromLevel.toLowerCase()})` : ''}`]
-  lines.push(`Total ${name} spend, Aug–Sep 2026: ${money(s.total)}`)
+  const all = `${money(s.total)} (100%)`
+  const lines = [`${s.input} — ${name} "${s.fromEntity}"${s.fromLevel ? ` (${s.fromLevel.toLowerCase()})` : ''}: ${all}`]
+  lines.push(`Total ${name} spend, Aug–Sep 2026: ${all}`)
   if (s.total <= 0) return [...lines, 'No creative spend in the window.'].join('\n')
-  lines.push('Where it lands in GPC:')
+  lines.push(`Where it lands in GPC: ${all}`)
   for (const g of s.gpc) lines.push(`  • ${g.label}: ${money(g.spend)} (${pct(g.share)})`)
   if (s.gpcOthers) lines.push(`  • Others (${s.gpcOthers.count}): ${money(s.gpcOthers.spend)} (${pct(s.gpcOthers.share)})`)
   const d = s.dominant
   if (d && d.gpcTotal != null && d.followed != null && d.shifted != null) {
-    lines.push(
-      `GPC "${d.label}" in total: ${money(d.gpcTotal)} — ${money(d.followed)} (${pct(d.followedShare ?? 0)}) followed from ${name} "${s.fromEntity}", ` +
-        `${money(d.shifted)} (${pct(d.shiftedShare ?? 0)}) came from creatives ${name} files under other advertisers.`,
-    )
+    lines.push(`GPC "${d.label}" in total: ${money(d.gpcTotal)} (100% of its GPC spend)`)
+    lines.push(`  • Followed from ${name} "${s.fromEntity}": ${money(d.followed)} (${pct(d.followedShare ?? 0)})`)
+    lines.push(`  • From creatives ${name} files under other advertisers: ${money(d.shifted)} (${pct(d.shiftedShare ?? 0)})`)
   }
-  lines.push('GPC industries:')
+  lines.push(`GPC industries: ${all}`)
   for (const i of s.industries) lines.push(`  • ${i.label}: ${money(i.spend)} (${pct(i.share)})`)
   if (s.industryOthers) lines.push(`  • Other (${s.industryOthers.count}): ${money(s.industryOthers.spend)} (${pct(s.industryOthers.share)})`)
   return lines.join('\n')

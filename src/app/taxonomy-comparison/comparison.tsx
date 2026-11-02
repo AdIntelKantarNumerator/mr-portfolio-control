@@ -162,13 +162,11 @@ const FLAG_LABEL: Record<Flag['kind'], string> = {
 
 function Results({ run, onChange }: { run: RunView; onChange: (run: RunView) => void }) {
   const result = run.result!
-  const flagged = result.advertisers.filter((a) => a.flags.some((f) => f.kind !== 'coverage')).length
   return (
     <>
       <div className="tx-summary">
         <div>
-          <span className="tx-big">{result.advertisers.length}</span> advertisers · {TAXONOMY_LABEL[result.from]} → GPC ·{' '}
-          <span className={flagged ? 'tx-warn' : ''}>{flagged} with flags</span>
+          <span className="tx-big">{result.advertisers.length}</span> advertisers · {TAXONOMY_LABEL[result.from]} → GPC
         </div>
         <div className="tx-downloads">
           <a className="btn" href={`/taxonomy-comparison/csv?run=${run.id}`} title="Spend by GPC advertiser and node, one row per slice">
@@ -240,18 +238,11 @@ function AdvertiserCard({
   const openLabel = open ? (rankAdvertisers(flows, gpcBy).find((r) => r.key === open)?.label ?? open) : ''
 
   return (
-    <div className={`tile tx-card ${pending ? 'tx-busy' : ''}`}>
+    <div className={`tile tx-card ${pending ? 'tx-busy' : ''}`} style={{ ['--edge' as string]: `var(--${edgeTone(summary)})` }}>
       <div className="tile-head">
         <h2 className="tx-title">{a.input}</h2>
         <div className="tile-right">
           {pending ? <span className="status quiet">Updating…</span> : null}
-          {a.flags.some((f) => f.kind !== 'coverage') ? (
-            <span className="status warn">
-              {a.flags.filter((f) => f.kind !== 'coverage').length} flag{a.flags.filter((f) => f.kind !== 'coverage').length === 1 ? '' : 's'}
-            </span>
-          ) : (
-            <span className="status good">Clean mapping</span>
-          )}
           <button type="button" className="btn" onClick={() => setExpanded((x) => !x)} aria-expanded={expanded}>
             {expanded ? 'Hide details ▴' : 'Details ▾'}
           </button>
@@ -361,6 +352,18 @@ function AdvertiserCard({
   )
 }
 
+/**
+ * The tile's left edge, the home page's convention: green when the spend maps
+ * cleanly (one GPC advertiser takes most of it and little reaches that
+ * advertiser from elsewhere), amber when it needs a look, slate when there is
+ * nothing to show.
+ */
+function edgeTone(s: AdvertiserSummary): 'green' | 'amber' | 'slate' {
+  if (!s.fromEntity || s.total <= 0) return 'slate'
+  const d = s.dominant
+  return d && (d.shiftedShare == null || d.shiftedShare < 0.1) ? 'green' : 'amber'
+}
+
 /** The short assessment: large type, four facts (lib/taxonomy-rules.ts summarise). */
 function SummaryView({ s, from }: { s: AdvertiserSummary; from: FromTaxonomy }) {
   const name = TAXONOMY_LABEL[from]
@@ -373,7 +376,7 @@ function SummaryView({ s, from }: { s: AdvertiserSummary; from: FromTaxonomy }) 
         <div className="tx-muted">
           {name} spend · Aug–Sep 2026
         </div>
-        <div className="tx-sum-big">{money(s.total)}</div>
+        <div className="tx-sum-big total">{money(s.total)}</div>
         <div className="tx-muted">
           {s.fromEntity}
           {s.fromLevel ? ` (${s.fromLevel.toLowerCase()})` : ''}
@@ -400,7 +403,7 @@ function SummaryView({ s, from }: { s: AdvertiserSummary; from: FromTaxonomy }) 
         <div className="tx-sum-dominant">
           <div>
             <div className="tx-muted">GPC &quot;{d.label}&quot; in total</div>
-            <div className="tx-sum-big">{money(d.gpcTotal)}</div>
+            <div className="tx-sum-big gpc">{money(d.gpcTotal)}</div>
           </div>
           <div className="tx-sum-split">
             <div className="tx-sum-bar" aria-hidden>
