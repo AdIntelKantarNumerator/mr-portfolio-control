@@ -546,7 +546,7 @@ node C:\temp\Portfolio\dictionary-snapshot.mjs
 
 That reads Prod (`npm run dictionary:snapshot -- prod`, lib/dictionary-live.ts)
 and posts it to `/api/sync/dictionary-snapshot` with `SYNC_TOKEN` from Key
-Vault. Structure only: names, types, row counts, last writes. When the network
+Vault: names, types, row counts, last writes, and the first rows of each table. When the network
 path exists, remove `CLICKHOUSE_PROD_SOURCE` (or set it to `live`) and restart.
 
 **Check it** from the web app's console (Kudu, **Development Tools →

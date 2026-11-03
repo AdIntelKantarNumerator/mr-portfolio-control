@@ -6,8 +6,8 @@
  * VPN without opening the portfolio's database. The site reads the same
  * shapes, either live through these functions or from the stored snapshot.
  */
-import { chQuery, ClickHouseError, type ClickHouseConfig } from './clickhouse'
-import { Q_ALL_COLUMNS, Q_COLUMNS, Q_COLUMN_COUNTS, Q_DATABASES, Q_PARTS, Q_TABLES } from './dictionary-queries'
+import { chQuery, chSelect, ClickHouseError, type ClickHouseConfig } from './clickhouse'
+import { PREVIEW_SETTINGS, Q_ALL_COLUMNS, Q_COLUMNS, Q_COLUMN_COUNTS, Q_DATABASES, Q_PARTS, Q_PREVIEW, Q_TABLES } from './dictionary-queries'
 import { isSystemDatabase, tableRef, type Environment } from './dictionary-rules'
 
 export interface CatalogDatabase {
@@ -121,6 +121,12 @@ export async function readAllLiveColumns(config: ClickHouseConfig): Promise<Reco
     ;(out[tableRef(String(r.database), String(r.table))] ??= []).push(toColumn(r))
   }
   return out
+}
+
+/** The first rows of one table, as the Preview tab reads them: capped, read-only. */
+export async function readLivePreview(config: ClickHouseConfig, database: string, table: string): Promise<{ columns: Array<{ name: string; type: string }>; rows: Array<Record<string, unknown>> }> {
+  const { meta, data } = await chSelect<Record<string, unknown>>(config, Q_PREVIEW, { db: database, tbl: table }, PREVIEW_SETTINGS)
+  return { columns: meta, rows: data.slice(0, 10) }
 }
 
 export function clickhouseMessage(err: unknown): string {

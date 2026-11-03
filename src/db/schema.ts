@@ -1983,6 +1983,8 @@ export const dictionarySnapshots = pgTable('dictionary_snapshots', {
   takenBy: text('taken_by'),
   catalog: text('catalog').notNull(),
   columns: text('columns').notNull(),
+  /** The first rows of each table, by table ref (drizzle/0039). Null in a copy taken before samples. */
+  previews: text('previews'),
   updatedAt: updatedAt(),
 })
 

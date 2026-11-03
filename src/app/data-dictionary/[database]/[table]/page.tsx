@@ -269,8 +269,10 @@ function PreviewPane({
   return (
     <>
       <p className="dd-h2-note dd-pane-note">
-        The first {preview.rows.length} rows ClickHouse read, in no particular order · {preview.columns.length} columns · read{' '}
-        {preview.readAt.slice(11, 16)} UTC, read-only, not stored
+        The first {preview.rows.length} rows ClickHouse read, in no particular order · {preview.columns.length} columns ·{' '}
+        {preview.fromSnapshot
+          ? `from the static copy, last updated ${new Date(preview.readAt).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} ET; long values are cut`
+          : `read ${preview.readAt.slice(11, 16)} UTC, read-only, not stored`}
         {computed ? ` · ${computed} computed ${computed === 1 ? 'column is' : 'columns are'} not part of a plain read and ${computed === 1 ? 'is' : 'are'} left out` : ''}
       </p>
       <div className="dd-tablewrap dd-preview-wrap">

@@ -116,8 +116,9 @@ test('the preview reads ten rows of the named table and nothing else', async (t)
 
   await t.test('rows and bytes are capped by ClickHouse as well as by the LIMIT', () => {
     assert.equal(PREVIEW_SETTINGS.max_result_rows, '10')
-    assert.equal(PREVIEW_SETTINGS.result_overflow_mode, 'break')
     assert.ok(Number(PREVIEW_SETTINGS.max_result_bytes) <= 5_000_000)
+    // Prod refuses any query that sets it (3 November 2026), which failed every preview.
+    assert.equal(PREVIEW_SETTINGS.result_overflow_mode, undefined)
   })
 
   await t.test('a hostile table name is sent as a parameter, and readonly cannot be overridden', async () => {

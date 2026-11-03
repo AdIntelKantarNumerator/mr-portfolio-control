@@ -54,11 +54,17 @@ export const Q_PREVIEW = `SELECT * FROM {db:Identifier}.{tbl:Identifier} LIMIT 1
  * these hold if a view ignores it, and stop one row of enormous strings from
  * becoming a page-sized response. Ten seconds rather than the usual twenty,
  * because a preview that slow is answering a question nobody asked.
+ *
+ * No result_overflow_mode (3 November 2026). It was 'break', so an
+ * oversized result came back cut rather than refused - but Prod pins it to
+ * 'throw' for this user and refuses any query that sets it, which failed
+ * every preview. With the caps left as they are, a table whose ten rows pass
+ * 2 MB is refused with a message instead of shown in part; the row cap is
+ * never reached, because the LIMIT asks for exactly ten.
  */
 export const PREVIEW_SETTINGS: Readonly<Record<string, string>> = {
   max_result_rows: '10',
   max_result_bytes: '2000000',
-  result_overflow_mode: 'break',
   max_execution_time: '10',
 }
 
