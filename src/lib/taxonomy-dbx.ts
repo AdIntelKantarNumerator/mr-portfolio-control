@@ -16,12 +16,16 @@
  *        Classic advertiser's brands map to (classic_brand_products, from the
  *        SQL Server's Vivvix.Product). There is no Classic id on a creative.
  *
- *   GPC advertiser  global_catalog.creative_entity (Advertiser role,
- *        has_spend) → entity; a creative with several is split evenly. Its
- *        top parent is the root of its materialized_path.
- *   GPC node  global_catalog.creative_product → product.taxonomy_node_id →
- *        taxonomy_node_flattened_view (industry › category › subcategory);
- *        a creative with several products is split evenly.
+ *   GPC advertiser and node both come from the creative's GPC products:
+ *        global_catalog.creative_product → product. The entity is
+ *        product.entity_id, not the entity assigned to the creative in
+ *        creative_entity (Scott, 4 November 2026: they differ on about 8% of
+ *        creatives). Its top parent is the root of its materialized_path. The
+ *        node is product.taxonomy_node_id → taxonomy_node_flattened_view
+ *        (industry › category › subcategory). A creative with several products
+ *        is split evenly across them, each share carrying that product's
+ *        entity and node together. A creative with no product has no GPC
+ *        advertiser.
  *
  *   Digital, Social, CTV  gold.digital_gold_occurrence.final_spend by
  *        capture_month. Social = source channels 17, 18; CTV = 15, 16, 20, 21,
@@ -162,21 +166,18 @@ occ AS (
   FROM mrdpp_prod.gold.tv_gold_occurrence t
   WHERE t.country_iso_2_code = 'US' AND t.broadcast_date BETWEEN '${FIRST_DAY}' AND '${LAST_DAY}' AND NOT t.delete_flag AND t.creative_id IN (SELECT creative_id FROM from_crtv)
   GROUP BY ALL),
-adv AS (SELECT ce.creative_id, ce.entity_id, 1.0 / count(*) OVER (PARTITION BY ce.creative_id) w FROM mrdpp_prod.global_catalog.creative_entity ce
-  WHERE ce.has_spend AND ce.entity_role = 'Advertiser' AND ce.creative_id IN (SELECT creative_id FROM from_crtv)),
-cat AS (SELECT cp.creative_id, n.industry_name, n.category_name, n.subcategory_name, 1.0 / count(*) OVER (PARTITION BY cp.creative_id) w
+gp AS (SELECT cp.creative_id, p.entity_id, n.industry_name, n.category_name, n.subcategory_name, 1.0 / count(*) OVER (PARTITION BY cp.creative_id) w
   FROM mrdpp_prod.global_catalog.creative_product cp JOIN mrdpp_prod.global_catalog.product p ON p.product_id = cp.product_id
   LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = p.taxonomy_node_id
   WHERE cp.creative_id IN (SELECT creative_id FROM from_crtv))
-SELECT f.from_id, o.month, o.media, cast(a.entity_id AS string) gpc_id, e.display_name gpc_name,
+SELECT f.from_id, o.month, o.media, cast(g.entity_id AS string) gpc_id, e.display_name gpc_name,
   cast(rt.entity_id AS string) gpc_parent_id, rt.display_name gpc_parent_name,
-  c.industry_name industry, c.category_name category, c.subcategory_name subcategory,
-  sum(o.spend * coalesce(a.w, 1) * coalesce(c.w, 1)) spend
+  g.industry_name industry, g.category_name category, g.subcategory_name subcategory,
+  sum(o.spend * coalesce(g.w, 1)) spend
 FROM occ o JOIN from_crtv f ON f.creative_id = o.creative_id
-LEFT JOIN adv a ON a.creative_id = o.creative_id
-LEFT JOIN mrdpp_prod.global_catalog.entity e ON e.entity_id = a.entity_id
+LEFT JOIN gp g ON g.creative_id = o.creative_id
+LEFT JOIN mrdpp_prod.global_catalog.entity e ON e.entity_id = g.entity_id
 LEFT JOIN mrdpp_prod.global_catalog.entity rt ON rt.entity_id = int(element_at(split(e.materialized_path, '[.]'), 1))
-LEFT JOIN cat c ON c.creative_id = o.creative_id
 GROUP BY ALL`
 
 /**
@@ -237,13 +238,14 @@ const creativesSql = (fromCte: string) => `
 WITH ${fromCte},
 ${occSql('SELECT creative_id FROM from_crtv')},
 spend AS (SELECT creative_id, media, sum(CASE WHEN month = ${AUG} THEN spend END) aug, sum(CASE WHEN month = ${SEP} THEN spend END) sep FROM occ GROUP BY ALL),
-adv AS (SELECT ce.creative_id,
-    array_join(array_sort(collect_set(concat(e.display_name, ' #', ce.entity_id))), '; ') gpc_advertisers,
+adv AS (SELECT cp.creative_id,
+    array_join(array_sort(collect_set(concat(e.display_name, ' #', e.entity_id))), '; ') gpc_advertisers,
     array_join(array_sort(collect_set(concat(coalesce(rt.display_name, e.display_name), ' #', coalesce(rt.entity_id, e.entity_id)))), '; ') gpc_top_parents
-  FROM mrdpp_prod.global_catalog.creative_entity ce
-  JOIN mrdpp_prod.global_catalog.entity e ON e.entity_id = ce.entity_id
+  FROM mrdpp_prod.global_catalog.creative_product cp
+  JOIN mrdpp_prod.global_catalog.product p ON p.product_id = cp.product_id
+  JOIN mrdpp_prod.global_catalog.entity e ON e.entity_id = p.entity_id
   LEFT JOIN mrdpp_prod.global_catalog.entity rt ON rt.entity_id = int(element_at(split(e.materialized_path, '[.]'), 1))
-  WHERE ce.has_spend AND ce.entity_role = 'Advertiser' AND ce.creative_id IN (SELECT creative_id FROM from_crtv)
+  WHERE cp.creative_id IN (SELECT creative_id FROM from_crtv)
   GROUP BY 1),
 prod AS (SELECT cp.creative_id,
     array_join(array_sort(collect_set(p.product_name)), '; ') gpc_products,
@@ -311,8 +313,8 @@ function gpcTotalsSql(from: FromTaxonomy, advIds: string[], parentIds: string[])
   // Classic keys are products, folded into advertisers afterwards, so they are not capped here.
   const cap = from === 'Classic' ? 1000000 : 40
   return `
-WITH w AS (SELECT creative_id, entity_id, 1.0 / count(*) OVER (PARTITION BY creative_id) w
-  FROM mrdpp_prod.global_catalog.creative_entity WHERE has_spend AND entity_role = 'Advertiser'),
+WITH w AS (SELECT cp.creative_id, p.entity_id, 1.0 / count(*) OVER (PARTITION BY cp.creative_id) w
+  FROM mrdpp_prod.global_catalog.creative_product cp JOIN mrdpp_prod.global_catalog.product p ON p.product_id = cp.product_id),
 g AS (
   SELECT 'advertiser' gby, cast(entity_id AS string) gpc_key, creative_id, w FROM w WHERE entity_id IN (${inList(advIds)})
   UNION ALL
