@@ -21,6 +21,7 @@ const COLUMNS: [string, string][] = [
   ['sep', `Spend ${MONTH_LABEL[MONTHS[1]]} (USD)`],
   ['gpc_advertisers', 'GPC advertiser(s)'],
   ['gpc_top_parents', 'GPC top parent(s)'],
+  ['gpc_attribution', 'GPC spend split (payer <- product)'],
   ['gpc_products', 'GPC product(s)'],
   ['gpc_nodes', 'GPC taxonomy node(s)'],
   ['creative_title', 'Title'],

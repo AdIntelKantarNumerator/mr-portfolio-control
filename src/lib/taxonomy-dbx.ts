@@ -16,16 +16,8 @@
  *        Classic advertiser's brands map to (classic_brand_products, from the
  *        SQL Server's Vivvix.Product). There is no Classic id on a creative.
  *
- *   GPC advertiser and node both come from the creative's GPC products:
- *        global_catalog.creative_product → product. The entity is
- *        product.entity_id, not the entity assigned to the creative in
- *        creative_entity (Scott, 4 November 2026: they differ on about 8% of
- *        creatives). Its top parent is the root of its materialized_path. The
- *        node is product.taxonomy_node_id → taxonomy_node_flattened_view
- *        (industry › category › subcategory). A creative with several products
- *        is split evenly across them, each share carrying that product's
- *        entity and node together. A creative with no product has no GPC
- *        advertiser.
+ *   GPC advertiser and node  the GPC serving model's spend attribution
+ *        (Scott, 4 November 2026), rebuilt here; see ATTRIBUTION below.
  *
  *   Digital, Social, CTV  gold.digital_gold_occurrence.final_spend by
  *        capture_month. Social = source channels 17, 18; CTV = 15, 16, 20, 21,
@@ -41,6 +33,63 @@ import { compactName, MONTHS, namePatterns, type Candidate, type Flow, type From
 
 type OnWait = (seconds: number) => void | Promise<void>
 type VxTaxonomy = Exclude<FromTaxonomy, 'Classic'>
+
+/**
+ * Who a creative's dollars belong to in GPC, as the serving model attributes
+ * them (Scott, 4 November 2026):
+ *
+ *   1. Payers: the creative's creative_entity rows with has_spend. The
+ *      product-level flag is ignored on purpose.
+ *   2. Products: the creative's creative_product rows; each product's owner is
+ *      product.entity_id.
+ *   3. A payer qualifies for a product when it is the owner (distance 0) or an
+ *      ancestor of the owner. Ancestors only: a sibling does not count, and
+ *      neither does sharing an ultimate parent (that leaked spend between
+ *      unrelated brands under Disney and Comcast).
+ *   4. Each product keeps its closest qualifying payer.
+ *   5. Each qualifying product takes 1 / (qualifying products) of the spend,
+ *      for that payer, in that product's own taxonomy node.
+ *   6. No product qualifies: the spend goes to the Unknown product, split
+ *      evenly across the payers.
+ *   7. A payer with no qualifying product gets nothing when another does.
+ *   A creative with no payer has no GPC advertiser.
+ *
+ * ClickHouse reads ancestry from gpc_reference.entity_descendant. Databricks
+ * has no such table, so ANCESTRY walks parent_entity_id up to ten levels (the
+ * deepest chain was seven on 4 November 2026; a root is its own parent). Not
+ * materialized_path: five entities kept a stale path after a move.
+ *
+ * ANCESTRY gives `anc` (descendant, ancestor, distance) and `root`
+ * (entity_id, root_id). ATTRIBUTION then needs a CTE `cs` of creative ids and
+ * gives `attr` (creative_id, entity_id, product_name, taxonomy_node_id, w, kind).
+ */
+const ANCESTRY_DEPTH = 10
+const ANCESTRY = `
+ent AS (SELECT entity_id, nullif(parent_entity_id, entity_id) par FROM mrdpp_prod.global_catalog.entity),
+chain AS (SELECT e0.entity_id, array(e0.entity_id, e0.par${Array.from({ length: ANCESTRY_DEPTH - 1 }, (_, i) => `, e${i + 1}.par`).join('')}) up
+  FROM ent e0${Array.from({ length: ANCESTRY_DEPTH - 1 }, (_, i) => ` LEFT JOIN ent e${i + 1} ON e${i + 1}.entity_id = e${i}.par`).join('')}),
+anc AS (SELECT entity_id descendant, a ancestor, d distance FROM chain LATERAL VIEW posexplode(up) t AS d, a WHERE a IS NOT NULL),
+root AS (SELECT descendant entity_id, max_by(ancestor, distance) root_id FROM anc GROUP BY 1)`
+const ATTRIBUTION = `
+payer AS (SELECT DISTINCT creative_id, entity_id payer FROM mrdpp_prod.global_catalog.creative_entity
+  WHERE has_spend AND creative_id IN (SELECT creative_id FROM cs)),
+prods AS (SELECT DISTINCT cp.creative_id, cp.product_id, p.entity_id owner, p.product_name, p.taxonomy_node_id
+  FROM mrdpp_prod.global_catalog.creative_product cp JOIN mrdpp_prod.global_catalog.product p ON p.product_id = cp.product_id
+  WHERE cp.creative_id IN (SELECT creative_id FROM cs)),
+closest AS (SELECT pr.creative_id, pr.product_id, pr.product_name, pr.taxonomy_node_id, py.payer, a.distance
+  FROM prods pr JOIN payer py ON py.creative_id = pr.creative_id
+  JOIN anc a ON a.descendant = pr.owner AND a.ancestor = py.payer
+  QUALIFY row_number() OVER (PARTITION BY pr.creative_id, pr.product_id ORDER BY a.distance) = 1),
+attr AS (
+  SELECT creative_id, payer entity_id, product_name, taxonomy_node_id, 1.0 / count(*) OVER (PARTITION BY creative_id) w,
+    CASE WHEN distance = 0 THEN 'payer' ELSE 'below_payer' END kind
+  FROM closest
+  UNION ALL
+  SELECT py.creative_id, py.payer, 'Unknown product', CAST(NULL AS int), 1.0 / count(*) OVER (PARTITION BY py.creative_id), 'unknown'
+  FROM payer py LEFT ANTI JOIN closest c ON c.creative_id = py.creative_id)`
+
+/** The label a node takes when the spend went to the Unknown product. */
+const UNKNOWN_NODE = 'Unknown product'
 
 function config() {
   const c = databricksConfig()
@@ -166,18 +215,19 @@ occ AS (
   FROM mrdpp_prod.gold.tv_gold_occurrence t
   WHERE t.country_iso_2_code = 'US' AND t.broadcast_date BETWEEN '${FIRST_DAY}' AND '${LAST_DAY}' AND NOT t.delete_flag AND t.creative_id IN (SELECT creative_id FROM from_crtv)
   GROUP BY ALL),
-gp AS (SELECT cp.creative_id, p.entity_id, n.industry_name, n.category_name, n.subcategory_name, 1.0 / count(*) OVER (PARTITION BY cp.creative_id) w
-  FROM mrdpp_prod.global_catalog.creative_product cp JOIN mrdpp_prod.global_catalog.product p ON p.product_id = cp.product_id
-  LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = p.taxonomy_node_id
-  WHERE cp.creative_id IN (SELECT creative_id FROM from_crtv))
+cs AS (SELECT DISTINCT creative_id FROM occ),
+${ANCESTRY},
+${ATTRIBUTION}
 SELECT f.from_id, o.month, o.media, cast(g.entity_id AS string) gpc_id, e.display_name gpc_name,
   cast(rt.entity_id AS string) gpc_parent_id, rt.display_name gpc_parent_name,
-  g.industry_name industry, g.category_name category, g.subcategory_name subcategory,
+  CASE WHEN g.kind = 'unknown' THEN '${UNKNOWN_NODE}' ELSE n.industry_name END industry, n.category_name category, n.subcategory_name subcategory,
   sum(o.spend * coalesce(g.w, 1)) spend
 FROM occ o JOIN from_crtv f ON f.creative_id = o.creative_id
-LEFT JOIN gp g ON g.creative_id = o.creative_id
+LEFT JOIN attr g ON g.creative_id = o.creative_id
+LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = g.taxonomy_node_id
 LEFT JOIN mrdpp_prod.global_catalog.entity e ON e.entity_id = g.entity_id
-LEFT JOIN mrdpp_prod.global_catalog.entity rt ON rt.entity_id = int(element_at(split(e.materialized_path, '[.]'), 1))
+LEFT JOIN root r ON r.entity_id = g.entity_id
+LEFT JOIN mrdpp_prod.global_catalog.entity rt ON rt.entity_id = r.root_id
 GROUP BY ALL`
 
 /**
@@ -238,14 +288,17 @@ const creativesSql = (fromCte: string) => `
 WITH ${fromCte},
 ${occSql('SELECT creative_id FROM from_crtv')},
 spend AS (SELECT creative_id, media, sum(CASE WHEN month = ${AUG} THEN spend END) aug, sum(CASE WHEN month = ${SEP} THEN spend END) sep FROM occ GROUP BY ALL),
-adv AS (SELECT cp.creative_id,
+cs AS (SELECT DISTINCT creative_id FROM spend),
+${ANCESTRY},
+${ATTRIBUTION},
+adv AS (SELECT g.creative_id,
     array_join(array_sort(collect_set(concat(e.display_name, ' #', e.entity_id))), '; ') gpc_advertisers,
-    array_join(array_sort(collect_set(concat(coalesce(rt.display_name, e.display_name), ' #', coalesce(rt.entity_id, e.entity_id)))), '; ') gpc_top_parents
-  FROM mrdpp_prod.global_catalog.creative_product cp
-  JOIN mrdpp_prod.global_catalog.product p ON p.product_id = cp.product_id
-  JOIN mrdpp_prod.global_catalog.entity e ON e.entity_id = p.entity_id
-  LEFT JOIN mrdpp_prod.global_catalog.entity rt ON rt.entity_id = int(element_at(split(e.materialized_path, '[.]'), 1))
-  WHERE cp.creative_id IN (SELECT creative_id FROM from_crtv)
+    array_join(array_sort(collect_set(concat(coalesce(rt.display_name, e.display_name), ' #', coalesce(rt.entity_id, e.entity_id)))), '; ') gpc_top_parents,
+    array_join(array_sort(collect_list(concat(e.display_name, ' #', e.entity_id, ' <- ', g.product_name, ' (', g.kind, ', ', round(g.w * 100, 1), '%)'))), '; ') gpc_attribution
+  FROM attr g
+  JOIN mrdpp_prod.global_catalog.entity e ON e.entity_id = g.entity_id
+  LEFT JOIN root r ON r.entity_id = g.entity_id
+  LEFT JOIN mrdpp_prod.global_catalog.entity rt ON rt.entity_id = r.root_id
   GROUP BY 1),
 prod AS (SELECT cp.creative_id,
     array_join(array_sort(collect_set(p.product_name)), '; ') gpc_products,
@@ -260,7 +313,7 @@ SELECT f.from_id, s.creative_id, s.media, s.aug, s.sep,
   c.created_timestamp, c.first_seen_occurrence_timestamp, c.last_seen_timestamp,
   c.first_seen_media_property_name, c.first_seen_provider_advertiser_name, c.first_seen_provider_product_name, c.first_seen_provider_creative_link_url,
   c.primary_product_id, c.vx1_product_id, c.vx2_product_id, c.additional_multi_product_flag, c.additional_coop_product_flag,
-  a.gpc_advertisers, a.gpc_top_parents, pr.gpc_products, pr.gpc_nodes
+  a.gpc_advertisers, a.gpc_top_parents, a.gpc_attribution, pr.gpc_products, pr.gpc_nodes
 FROM spend s JOIN from_crtv f ON f.creative_id = s.creative_id
 JOIN mrdpp_prod.gold.creative c ON c.creative_id = s.creative_id
 LEFT JOIN adv a ON a.creative_id = s.creative_id
@@ -313,15 +366,16 @@ function gpcTotalsSql(from: FromTaxonomy, advIds: string[], parentIds: string[])
   // Classic keys are products, folded into advertisers afterwards, so they are not capped here.
   const cap = from === 'Classic' ? 1000000 : 40
   return `
-WITH w AS (SELECT cp.creative_id, p.entity_id, 1.0 / count(*) OVER (PARTITION BY cp.creative_id) w
-  FROM mrdpp_prod.global_catalog.creative_product cp JOIN mrdpp_prod.global_catalog.product p ON p.product_id = cp.product_id),
+WITH ${ANCESTRY},
+targets AS (SELECT descendant entity_id FROM anc WHERE ancestor IN (${inList(parentIds)}) UNION SELECT entity_id FROM ent WHERE entity_id IN (${inList(advIds)})),
+cs AS (SELECT DISTINCT creative_id FROM mrdpp_prod.global_catalog.creative_entity WHERE has_spend AND entity_id IN (SELECT entity_id FROM targets)),
+${occSql('SELECT creative_id FROM cs')},
+${ATTRIBUTION},
 g AS (
-  SELECT 'advertiser' gby, cast(entity_id AS string) gpc_key, creative_id, w FROM w WHERE entity_id IN (${inList(advIds)})
+  SELECT 'advertiser' gby, cast(entity_id AS string) gpc_key, creative_id, w FROM attr WHERE entity_id IN (${inList(advIds)})
   UNION ALL
-  SELECT 'parent', element_at(split(e.materialized_path, '[.]'), 1), w.creative_id, w.w FROM w
-  JOIN mrdpp_prod.global_catalog.entity e ON e.entity_id = w.entity_id
-  WHERE int(element_at(split(e.materialized_path, '[.]'), 1)) IN (${inList(parentIds)})),
-${occSql('SELECT creative_id FROM g')},
+  SELECT 'parent', cast(r.root_id AS string), attr.creative_id, attr.w FROM attr JOIN root r ON r.entity_id = attr.entity_id
+  WHERE r.root_id IN (${inList(parentIds)})),
 ${fa},
 r AS (SELECT g.gby, g.gpc_key, fa.from_id, fa.from_name, fa.from_parent_id, fa.from_parent_name, o.month, o.media, sum(o.spend * g.w) spend
   FROM occ o JOIN g ON g.creative_id = o.creative_id LEFT JOIN fa ON fa.creative_id = o.creative_id GROUP BY ALL),
