@@ -2288,6 +2288,25 @@ export const classicNames = pgTable(
   (t) => [primaryKey({ columns: [t.name, t.advertiserId] })],
 )
 
+/**
+ * The Industry View (drizzle/0040): the GPC taxonomy tree and each node's top
+ * spenders, read from Databricks once and kept. key is "tree" or
+ * "node:<taxonomy_node_id>"; lib/taxonomy-industry.ts.
+ */
+export const taxonomyIndustry = pgTable('taxonomy_industry', {
+  key: text('key').primaryKey(),
+  /** running | done | failed */
+  status: text('status').notNull(),
+  /** JSON: the steps shown while it runs. */
+  progress: text('progress').notNull(),
+  /** JSON, when done. */
+  result: text('result'),
+  error: text('error'),
+  askedBy: text('asked_by'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+})
+
 /** One comparison asked for, its progress while it runs, and its result. */
 export const taxonomyRuns = pgTable(
   'taxonomy_runs',

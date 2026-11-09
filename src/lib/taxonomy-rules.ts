@@ -157,6 +157,14 @@ export interface Flow {
   /** The top of the GPC advertiser's entity tree (materialized_path root); itself when it is the top. */
   gpcParentId?: string | null
   gpcParentName?: string | null
+  /**
+   * The GPC product the slice was attributed to (lib/taxonomy-dbx.ts
+   * ATTRIBUTION); "0" is the Unknown product, null when the creative has no
+   * payer. Undefined on runs from before 9 November 2026, which did not
+   * record it.
+   */
+  gpcProductId?: string | null
+  gpcProductName?: string | null
   industry: string | null
   category: string | null
   subcategory: string | null
@@ -237,6 +245,32 @@ export function rankAdvertisers(flows: Flow[], gpcBy: GpcBy = 'advertiser'): Ran
   for (const r of out) if (r.key !== NO_GPC && (count.get(r.label) ?? 0) > 1) r.label = `${r.label} #${r.key}`
   return out
 }
+
+/**
+ * GPC products by spend (Scott, 9 November 2026), beside the advertisers.
+ * Spend a creative with no payer carries sits under "No GPC advertiser", the
+ * same dollars the advertiser list shows there. Null when the run predates
+ * products: its flows never recorded them, and an empty list would read as
+ * "no products".
+ */
+export function rankProducts(flows: Flow[]): Ranked[] | null {
+  if (flows.length && flows.every((f) => f.gpcProductId === undefined)) return null
+  const by = new Map<string, Ranked>()
+  for (const f of flows) {
+    const key = f.gpcProductId ?? NO_GPC
+    const r = by.get(key) ?? { key, label: f.gpcProductName ?? NO_GPC, spend: 0 }
+    r.spend += f.spend
+    by.set(key, r)
+  }
+  const out = [...by.values()].sort((a, b) => b.spend - a.spend)
+  const count = new Map<string, number>()
+  for (const r of out) count.set(r.label, (count.get(r.label) ?? 0) + 1)
+  for (const r of out) if (r.key !== NO_GPC && (count.get(r.label) ?? 0) > 1) r.label = `${r.label} #${r.key}`
+  return out
+}
+
+/** The GPC Unknown product's id: spend whose payers own none of the creative's products. */
+export const UNKNOWN_PRODUCT_ID = '0'
 
 export function rankNodes(flows: Flow[], level: NodeLevel): Ranked[] {
   const by = new Map<string, Ranked>()
@@ -404,14 +438,14 @@ export function toCsv(from: FromTaxonomy, results: AdvertiserResult[]): string {
   const lines = [
     [
       'Advertiser (as entered)', 'FROM taxonomy', 'FROM entity', 'FROM level', 'FROM id', 'Month', 'Media type',
-      'GPC advertiser', 'GPC id', 'GPC top parent', 'GPC top parent id', 'GPC industry', 'GPC category', 'GPC subcategory', 'Spend (USD)', 'Flags',
+      'GPC advertiser', 'GPC id', 'GPC top parent', 'GPC top parent id', 'GPC product', 'GPC product id', 'GPC industry', 'GPC category', 'GPC subcategory', 'Spend (USD)', 'Flags',
     ].join(','),
   ]
   for (const r of results) {
     const flagText = r.flags.map((f) => f.text).join(' | ')
     const head = [r.input, TAXONOMY_LABEL[from], r.entity?.name ?? 'not found', r.entity?.level ?? '', r.entity?.id ?? '']
     if (!r.flows.length) {
-      lines.push([...head, '', '', '', '', '', '', '', '', '', 0, flagText].map(esc).join(','))
+      lines.push([...head, '', '', '', '', '', '', '', '', '', '', '', 0, flagText].map(esc).join(','))
       continue
     }
     const sorted = [...r.flows].sort((a, b) => a.month.localeCompare(b.month) || a.media.localeCompare(b.media) || b.spend - a.spend)
@@ -419,6 +453,7 @@ export function toCsv(from: FromTaxonomy, results: AdvertiserResult[]): string {
       lines.push(
         [
           ...head, MONTH_LABEL[f.month], f.media, f.gpcName ?? NO_GPC, f.gpcId ?? '', f.gpcParentName ?? '', f.gpcParentId ?? '',
+          f.gpcProductName ?? '', f.gpcProductId ?? '',
           f.industry ?? UNCLASSIFIED, f.category ?? '', f.subcategory ?? '', Math.round(f.spend), flagText,
         ]
           .map(esc)

@@ -281,6 +281,13 @@
       "when": 1793718079999,
       "tag": "0039_dictionary_snapshot_previews",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794200000000,
+      "tag": "0040_taxonomy_industry",
+      "breakpoints": true
     }
   ]
 }

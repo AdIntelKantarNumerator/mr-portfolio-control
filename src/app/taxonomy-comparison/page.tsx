@@ -9,6 +9,7 @@
 import { Kicker } from '@/components/ui'
 import { readRun } from '@/lib/taxonomy-run'
 import { Comparison } from './comparison'
+import { TaxonomyTabs } from './tabs'
 
 export const metadata = { title: 'Taxonomy Comparison' }
 export const dynamic = 'force-dynamic'
@@ -28,6 +29,7 @@ export default async function TaxonomyComparisonPage({ searchParams }: { searchP
           <h1>Taxonomy Comparison</h1>
         </div>
       </div>
+      <TaxonomyTabs current="advertisers" />
       <Comparison key={runId || 'new'} initial={run} />
     </div>
   )

@@ -20,6 +20,7 @@ import {
   MONTH_LABEL,
   MONTHS,
   NO_GPC,
+  UNKNOWN_PRODUCT_ID,
   NODE_LEVEL_LABEL,
   NODE_LEVELS,
   OTHER,
@@ -30,6 +31,7 @@ import {
   summarise,
   rankAdvertisers,
   rankNodes,
+  rankProducts,
   sankeyData,
   TAXONOMY_LABEL,
   UNCLASSIFIED,
@@ -50,6 +52,7 @@ import {
 } from '@/lib/taxonomy-rules'
 import type { RunView } from '@/lib/taxonomy-run'
 import { pickEntity, pollRun, startComparison, type StartState } from './actions'
+import { TreeButton } from './rollup'
 
 export function Comparison({ initial }: { initial: RunView | null }) {
   const router = useRouter()
@@ -121,21 +124,26 @@ export function Comparison({ initial }: { initial: RunView | null }) {
   )
 }
 
-function Progress({ steps, failed }: { steps: Step[]; failed: string | null }) {
-  const [now, setNow] = useState(() => Date.now())
+export function Progress({ steps, failed, what = 'Comparison' }: { steps: Step[]; failed: string | null; what?: string }) {
+  // The clock starts in the browser: read during the server render it would
+  // differ from the first client render, and React discards the whole tree.
+  const [now, setNow] = useState<number | null>(null)
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000)
+    const tick = () => setNow(Date.now())
+    tick()
+    const t = setInterval(tick, 1000)
     return () => clearInterval(t)
   }, [])
   const done = steps.filter((s) => s.state === 'done').length
   return (
     <div className="tile">
       <div className="tile-head">
-        <h2>{failed ? 'Comparison failed' : `Working… ${done} of ${steps.length}`}</h2>
+        <h2>{failed ? `${what} failed` : `Working… ${done} of ${steps.length}`}</h2>
       </div>
       <ol className="tx-steps">
         {steps.map((s) => {
-          const secs = s.startedAt ? Math.round(((s.endedAt ? Date.parse(s.endedAt) : now) - Date.parse(s.startedAt)) / 1000) : null
+          const end = s.endedAt ? Date.parse(s.endedAt) : now
+          const secs = s.startedAt && end != null ? Math.round((end - Date.parse(s.startedAt)) / 1000) : null
           return (
             <li key={s.key} className={`tx-step ${s.state}`}>
               <span className="tx-dot" aria-hidden />
@@ -314,6 +322,7 @@ function AdvertiserCard({
                   {open && openView ? (
                     <GpcTotalPanel label={openLabel} view={openView} from={from} entityName={e?.name ?? a.input} onClose={() => setOpen(null)} />
                   ) : null}
+                  {/* Advertisers and products side by side, the taxonomy below (Scott, 9 November 2026). */}
                   <div className="tx-lists">
                     <RankList
                       title={gpcBy === 'parent' ? 'GPC top parents' : 'GPC advertisers'}
@@ -321,7 +330,26 @@ function AdvertiserCard({
                       total={data.total}
                       more={more}
                       onMore={setOpen}
+                      tree={(r) => (r.key === NO_GPC ? null : { entity: r.key, role: gpcBy === 'parent' ? 'parent' : 'advertiser' })}
                     />
+                    {(() => {
+                      const products = rankProducts(flows)
+                      return products ? (
+                        <RankList
+                          title="GPC products"
+                          rows={products}
+                          total={data.total}
+                          tree={(r) => (r.key === NO_GPC || r.key === UNKNOWN_PRODUCT_ID ? null : { product: r.key })}
+                        />
+                      ) : (
+                        <div className="tx-rank">
+                          <div className="tx-rank-head">GPC products</div>
+                          <p className="tx-muted">This comparison was run before products were recorded. Compare again to see them.</p>
+                        </div>
+                      )
+                    })()}
+                  </div>
+                  <div className="tx-lists tx-lists-one">
                     <RankList title={`GPC ${NODE_LEVEL_LABEL[level].toLowerCase()}`} rows={rankNodes(flows, level)} total={data.total} />
                   </div>
                 </>
@@ -446,7 +474,7 @@ function SumRow({ label, spend, share, warn, quiet }: { label: string; spend: nu
   )
 }
 
-function Seg({ label, value, options, onChange }: { label: string; value: string; options: [string, string][]; onChange: (v: string) => void }) {
+export function Seg({ label, value, options, onChange }: { label: string; value: string; options: [string, string][]; onChange: (v: string) => void }) {
   return (
     <div className="tx-seg" role="group" aria-label={label}>
       <span className="tx-muted">{label}</span>
@@ -465,12 +493,15 @@ function RankList({
   total,
   more,
   onMore,
+  tree,
 }: {
   title: string
   rows: Ranked[]
   total: number
   more?: Set<string>
   onMore?: (key: string) => void
+  /** What a row's tree icon opens (rollup.tsx); null for none, as on "No GPC advertiser". */
+  tree?: (r: Ranked) => { product?: string; entity?: string; role?: 'advertiser' | 'parent' | 'brand' } | null
 }) {
   return (
     <div className="tx-rank">
@@ -481,6 +512,10 @@ function RankList({
             <tr key={r.key} className={r.key === NO_GPC || r.key === UNCLASSIFIED ? 'flagged' : ''}>
               <td>
                 {r.label}
+                {(() => {
+                  const t = tree?.(r)
+                  return t ? <TreeButton product={t.product} entity={t.entity} role={t.role} label={r.label} /> : null
+                })()}
                 {more?.has(r.key) ? (
                   <button type="button" className="tx-more" onClick={() => onMore?.(r.key)} title="This GPC entity has more spend, from other advertisers: see its total">
                     Σ total

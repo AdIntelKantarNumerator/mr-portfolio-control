@@ -2187,6 +2187,20 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .tx-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .tx-rank-head { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
 @media (max-width: 720px) { .tx-lists { grid-template-columns: 1fr; } }
+.tx-lists-one { grid-template-columns: 1fr; margin-top: 14px; }
+/* The rollup tree icon and its popup (rollup.tsx). */
+.tx-tree-wrap { position: relative; display: inline-block; vertical-align: middle; }
+.tx-tree { margin-left: 6px; padding: 2px 3px; line-height: 0; border: 1px solid transparent; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; }
+.tx-tree svg { fill: currentColor; stroke: currentColor; }
+.tx-tree:hover, .tx-tree.on { color: var(--brand); border-color: var(--line); background: var(--surface); }
+.tx-tree-pop { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; min-width: 260px; max-width: 420px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); box-shadow: var(--shadow); font-size: 13px; font-weight: 400; white-space: normal; }
+.tx-chain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.tx-chain li { display: flex; align-items: baseline; gap: 8px; padding-left: calc(var(--depth, 0) * 14px); }
+.tx-chain li + li::before { content: '└'; color: var(--muted); margin-left: -14px; width: 6px; }
+.tx-chain-level { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); min-width: 72px; }
+.tx-chain-name { font-weight: 600; }
+.tx-chain-product .tx-chain-name { color: var(--brand); }
+.tx-chain-id { font-size: 11px; }
 
 /* Taxonomy Comparison: GPC totals and creatives (30 October 2026) */
 .tx-downloads { display: flex; gap: 8px; }
@@ -2235,3 +2249,31 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .tx-sum-head { color: var(--brand-2); }
 .tx-sum-row:first-of-type .tx-sum-val { color: var(--ink); }
 .tx-summary { margin: 6px 0 4px; }
+
+/* Taxonomy Comparison › Industry View (9 November 2026): the tree left, a node's spenders right. */
+.ix-grid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .ix-grid { grid-template-columns: 1fr; } }
+.ix-tree-tile { position: sticky; top: 12px; }
+.ix-find { width: 100%; margin: 4px 0 8px; }
+.ix-tree-scroll { max-height: 72vh; overflow: auto; margin: 0 -6px; }
+.ix-tree { list-style: none; margin: 0; padding: 0; }
+.ix-row { display: flex; align-items: center; gap: 4px; padding: 3px 6px 3px calc(6px + var(--depth, 0) * 16px); border-radius: 7px; font-size: 13.5px; }
+.ix-row:hover { background: var(--canvas); }
+.ix-row.on { background: var(--blue-bg); }
+.ix-row.on .ix-name { font-weight: 700; color: var(--brand); }
+.ix-caret { width: 18px; flex: none; border: 0; background: none; padding: 0; color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; line-height: 1; }
+.ix-leaf { cursor: default; }
+.ix-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ix-go { flex: none; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--brand); font: inherit; font-size: 12px; font-weight: 700; padding: 0 8px; line-height: 18px; cursor: pointer; opacity: .55; }
+.ix-row:hover .ix-go, .ix-row.on .ix-go, .ix-go:focus-visible { opacity: 1; }
+.ix-go:hover { background: var(--brand); color: var(--surface); border-color: var(--brand); }
+.ix-side { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.ix-path { font-size: 12.5px; margin-bottom: 2px; }
+.ix-totals { display: flex; gap: 28px; flex-wrap: wrap; margin: 4px 0 12px; }
+.ix-big { font-size: 24px; }
+.ix-table td:nth-child(2) { max-width: 360px; }
+.ix-share-head { width: 34%; }
+.ix-share { display: flex; align-items: center; gap: 8px; }
+.ix-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--canvas); overflow: hidden; }
+.ix-bar span { display: block; height: 100%; background: var(--brand); border-radius: 4px; }
+.ix-share .tx-muted { min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
