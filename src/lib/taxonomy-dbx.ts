@@ -419,53 +419,97 @@ export async function dbxGpcTotals(from: FromTaxonomy, advIds: string[], parentI
   return out
 }
 
-// --- a rollup chain, for the tree icon -----------------------------------------
+// --- the family tree, for the tree icon -----------------------------------------
 
-export interface ChainLink {
+export interface FamilyEntity {
   id: string
+  /** Null at the top of the family. */
+  parentId: string | null
   name: string
+  /** Products whose brand is this entity; listed when the entity is opened (dbxEntityProducts). */
+  products: number
 }
 
-export interface Rollup {
-  /** Set when asked about a product: the product, whose brand starts the chain. */
+export interface Family {
+  /** The entity the icon was on: an advertiser, brand or parent - or, for a product, its brand. */
+  focusId: string
+  /** Set when the icon was on a product. */
   product: { id: string; name: string } | null
-  /** The entity first (the brand, or the advertiser asked about), its parent next, the top parent last. */
-  chain: ChainLink[]
+  rootId: string
+  entities: FamilyEntity[]
+  /** True when the family was larger than FAMILY_CAP and only part of it is listed. */
+  cut: boolean
 }
+
+/** Most entities a family tree lists. The Walt Disney Company, the largest checked, has 255 (10 November 2026). */
+export const FAMILY_CAP = 3000
+/** Most products listed under one entity. */
+export const PRODUCTS_CAP = 1000
 
 /**
- * The rollup tree from a GPC product or entity to the top (Scott, 9 November
- * 2026): a product's brand is the entity on the product, and each entity
- * rolls up through parent_entity_id - a root is its own parent - to the
- * parent company, with every level between. GPC labels no level, so neither
- * does the popup: it shows every link as it is. The same walk
- * as ANCESTRY, for one entity: one Databricks round trip, a second or two warm.
+ * The whole family a GPC product or entity belongs to (Scott, 10 November
+ * 2026): up to the top parent, then every entity below that parent, each
+ * with how many products carry it as their brand. The tree icon shows it
+ * with the item it was opened from highlighted and the path to it open.
+ * Products themselves come on demand (dbxEntityProducts): Disney alone has
+ * 11,537.
+ *
+ * GPC labels no level, so neither does the tree: brand is the entity on a
+ * product, the top is the parent, and everything between is shown as it is.
+ * One query over ANCESTRY: a second or two warm.
  */
-export async function dbxRollup(ask: { product?: string; entity?: string }, onWait?: OnWait): Promise<Rollup | null> {
+export async function dbxFamily(ask: { product?: string; entity?: string }, onWait?: OnWait): Promise<Family | null> {
   const product = ask.product && isInt(ask.product) ? ask.product : null
   const entity = !product && ask.entity && isInt(ask.entity) ? ask.entity : null
   if (!product && !entity) return null
-  const D = ANCESTRY_DEPTH
   const start = product ? `(SELECT entity_id FROM mrdpp_prod.global_catalog.product WHERE product_id = ${product})` : entity
   const sql = `
-WITH ent AS (SELECT entity_id, nullif(parent_entity_id, entity_id) par, coalesce(display_name, legal_name) name FROM mrdpp_prod.global_catalog.entity),
-walk AS (SELECT array(e0.entity_id, e0.par${Array.from({ length: D - 1 }, (_, i) => `, e${i + 1}.par`).join('')}) up
-  FROM ent e0${Array.from({ length: D - 1 }, (_, i) => ` LEFT JOIN ent e${i + 1} ON e${i + 1}.entity_id = e${i}.par`).join('')}
-  WHERE e0.entity_id = ${start}),
-steps AS (SELECT d, a FROM walk LATERAL VIEW posexplode(up) t AS d, a WHERE a IS NOT NULL)
-SELECT 'entity' kind, cast(s.d AS string) pos, cast(s.a AS string) id, e.name FROM steps s JOIN ent e ON e.entity_id = s.a
-${product ? `UNION ALL SELECT 'product', '-1', cast(product_id AS string), product_name FROM mrdpp_prod.global_catalog.product WHERE product_id = ${product}` : ''}`
+WITH ${ANCESTRY},
+focus AS (SELECT ${start} id),
+tp AS (SELECT root_id FROM root WHERE entity_id = (SELECT id FROM focus)),
+fam AS (SELECT descendant id FROM anc WHERE ancestor = (SELECT root_id FROM tp) LIMIT ${FAMILY_CAP + 1}),
+pc AS (SELECT entity_id, count(*) n FROM mrdpp_prod.global_catalog.product WHERE entity_id IN (SELECT id FROM fam) GROUP BY 1)
+SELECT 'entity' kind, cast(e.entity_id AS string) id, cast(nullif(e.parent_entity_id, e.entity_id) AS string) parent_id,
+  coalesce(e.display_name, e.legal_name) name, cast(coalesce(pc.n, 0) AS string) products,
+  cast((SELECT id FROM focus) AS string) focus_id, cast((SELECT root_id FROM tp) AS string) root_id
+FROM mrdpp_prod.global_catalog.entity e JOIN fam ON fam.id = e.entity_id LEFT JOIN pc ON pc.entity_id = e.entity_id
+${product ? `UNION ALL SELECT 'product', cast(product_id AS string), NULL, product_name, NULL, NULL, NULL FROM mrdpp_prod.global_catalog.product WHERE product_id = ${product}` : ''}`
   const rows = await dbxQuery(config(), sql, [], { onWait })
+  const ents = rows.filter((r) => r.kind === 'entity')
+  if (!ents.length) return null
   const p = rows.find((r) => r.kind === 'product')
-  const chain = rows
-    .filter((r) => r.kind === 'entity')
-    .sort((a, b) => Number(a.pos) - Number(b.pos))
-    .map((r) => ({ id: r.id!, name: r.name ?? `#${r.id}` }))
-  // A cycle in the parents would repeat ids; stop at the first repeat.
-  const seen = new Set<string>()
-  const clean = chain.filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)))
-  if (!p && !clean.length) return null
-  return { product: p ? { id: p.id!, name: p.name ?? `#${p.id}` } : null, chain: clean }
+  const ids = new Set(ents.map((r) => r.id!))
+  return {
+    focusId: ents[0]!.focus_id!,
+    product: p ? { id: p.id!, name: p.name ?? `#${p.id}` } : null,
+    rootId: ents[0]!.root_id!,
+    entities: ents.slice(0, FAMILY_CAP).map((r) => ({
+      id: r.id!,
+      // A parent outside the family (it should not happen) is treated as the top.
+      parentId: r.parent_id && ids.has(r.parent_id) ? r.parent_id : null,
+      name: r.name ?? `#${r.id}`,
+      products: Number(r.products ?? 0),
+    })),
+    cut: ents.length > FAMILY_CAP,
+  }
+}
+
+/**
+ * The products whose brand is one entity, by name, for opening it in the
+ * family tree. `first`, the product the tree was opened from, leads the list
+ * whatever its name: YouTube alone has more than PRODUCTS_CAP.
+ */
+export async function dbxEntityProducts(entityId: string, first?: string | null, onWait?: OnWait): Promise<{ id: string; name: string }[]> {
+  if (!isInt(entityId)) return []
+  const lead = first && isInt(first) ? `CASE WHEN product_id = ${first} THEN 0 ELSE 1 END, ` : ''
+  const rows = await dbxQuery(
+    config(),
+    `SELECT cast(product_id AS string) id, product_name name FROM mrdpp_prod.global_catalog.product
+     WHERE entity_id = ${entityId} ORDER BY ${lead}lower(product_name), product_id LIMIT ${PRODUCTS_CAP}`,
+    [],
+    { onWait },
+  )
+  return rows.map((r) => ({ id: r.id!, name: r.name ?? `#${r.id}` }))
 }
 
 // --- the Industry View ----------------------------------------------------------
@@ -506,6 +550,9 @@ export interface NodeSpenderRaw {
  * totals and each view's full count. 13 to 22 seconds on a warm warehouse for
  * an industry group, an industry or a category (measured 9 November 2026).
  */
+/** VX1's category levels, as brandcentral.category_flatten names its columns. */
+const VX1_LEVELS = ['section', 'industry', 'major', 'class', 'subcategory', 'microcategory'] as const
+
 export async function dbxNodeSpenders(nodeId: string, keep: number, onWait?: OnWait): Promise<NodeSpenderRaw[]> {
   if (!isInt(nodeId)) throw new DatabricksError(`Not a taxonomy node id: ${nodeId}`)
   const sql = `
@@ -519,7 +566,7 @@ ${occSql('SELECT creative_id FROM cand')},
 cs AS (SELECT DISTINCT creative_id FROM occ),
 ${ANCESTRY},
 ${ATTRIBUTION},
-a AS (SELECT o.media, o.month, g.product_id, p.entity_id brand, g.entity_id payer, coalesce(r.root_id, g.entity_id) parent, o.spend * g.w spend
+a AS (SELECT o.creative_id, o.media, o.month, g.product_id, p.entity_id brand, g.entity_id payer, coalesce(r.root_id, g.entity_id) parent, o.spend * g.w spend
   FROM occ o JOIN attr g ON g.creative_id = o.creative_id
   JOIN mrdpp_prod.global_catalog.product p ON p.product_id = g.product_id
   LEFT JOIN root r ON r.entity_id = g.entity_id
@@ -530,7 +577,33 @@ v AS (
   UNION ALL SELECT 'advertiser', payer, media, month, sum(spend) FROM a GROUP BY ALL
   UNION ALL SELECT 'parent', parent, media, month, sum(spend) FROM a GROUP BY ALL),
 t AS (SELECT *, dense_rank() OVER (PARTITION BY gby ORDER BY tot DESC, k) rk
-  FROM (SELECT *, sum(s) OVER (PARTITION BY gby, k) tot FROM v))
+  FROM (SELECT *, sum(s) OVER (PARTITION BY gby, k) tot FROM v)),
+-- Where the node's spend falls in the legacy taxonomies, for "Compare to":
+-- each creative's share of it, placed by the VX1 and VX2 product the creative
+-- carries; Classic is placed afterwards from its VX0 product
+-- (lib/taxonomy-industry.ts). One pass: each creative lists every legacy node
+-- it is in and one aggregation adds them up. Joining the attribution once per
+-- taxonomy instead made Databricks work it out again for each, and took the
+-- read from 20 seconds to 105 (10 November 2026).
+cw AS (SELECT creative_id, sum(spend) s FROM a GROUP BY 1),
+lp1 AS (SELECT source_product_id, max(category_id) category_id FROM mrdpp_prod.brandcentral.product
+  WHERE record_status_flag = 'ACTIVE'
+    AND source_product_id IN (SELECT c.vx1_product_id FROM mrdpp_prod.gold.creative c WHERE c.creative_id IN (SELECT creative_id FROM cand))
+  GROUP BY 1),
+lx AS (SELECT cw.s, explode(array(
+    ${VX1_LEVELS.map((l) => `named_struct('k', 'VX1|${l}|' || f.${l}_category_id, 'n', f.${l}_category_n)`).join(',\n    ')},
+    named_struct('k', 'VX2|industry|' || i.ID, 'n', i.NAME),
+    named_struct('k', 'VX2|category|' || ct.ID, 'n', ct.NAME),
+    named_struct('k', 'VX2|subcategory|' || sc.ID, 'n', sc.NAME),
+    named_struct('k', 'VX0|' || c.primary_product_id, 'n', cast(NULL AS string)))) e
+  FROM cw JOIN mrdpp_prod.gold.creative c ON c.creative_id = cw.creative_id
+  LEFT JOIN lp1 ON lp1.source_product_id = c.vx1_product_id
+  LEFT JOIN mrdpp_prod.brandcentral.category_flatten f ON f.leaf_category_id = lp1.category_id
+  LEFT JOIN mrdpp_prod.vx2_taxonomy.d_product p2 ON p2.PRSEQ = c.vx2_product_id
+  LEFT JOIN mrdpp_prod.vx2_taxonomy.d_industry i ON i.CODE = p2.PRIGRP
+  LEFT JOIN mrdpp_prod.vx2_taxonomy.d_category ct ON ct.CODE = p2.PRCATGY
+  LEFT JOIN mrdpp_prod.vx2_taxonomy.d_subcategory sc ON sc.CODE = p2.PRSBCAT),
+leg AS (SELECT e.k k, max(e.n) n, sum(s) s FROM lx WHERE e.k IS NOT NULL GROUP BY e.k)
 SELECT t.gby, cast(t.k AS string) key,
   CASE WHEN t.gby = 'product' THEN pr.product_name ELSE coalesce(e.display_name, e.legal_name) END name,
   t.media, cast(t.month AS string) month, t.s spend
@@ -541,7 +614,99 @@ WHERE t.rk <= ${Math.max(1, Math.floor(keep))}
 UNION ALL
 SELECT 'total', NULL, NULL, media, cast(month AS string), sum(spend) FROM a GROUP BY ALL
 UNION ALL
+SELECT 'count', gby, NULL, NULL, NULL, cast(count(DISTINCT k) AS double) FROM v GROUP BY gby
+UNION ALL
+SELECT CASE WHEN k LIKE 'VX0|%' THEN 'vx0' ELSE 'legacy' END, CASE WHEN k LIKE 'VX0|%' THEN substr(k, 5) ELSE k END, n, NULL, NULL, s FROM leg`
+  const rows = await dbxQuery(config(), sql, [], { onWait, large: true })
+  return rows.map((r) => ({ gby: r.gby!, key: r.key, name: r.name, media: r.media, month: r.month, spend: Number(r.spend ?? 0) }))
+}
+
+/**
+ * The spenders of one VX1 or VX2 node, for "Compare to" (Scott, 10 November
+ * 2026): ALL its Aug–Sep spend, not only what reached it from the GPC node
+ * beside it. The same dollars as everywhere else - occurrences, US, the four
+ * media types - assigned by the VX1 or VX2 product each creative carries, so
+ * the two lists are comparable line for line. A creative has one VX1 and one
+ * VX2 product: nothing is split.
+ *
+ *   VX1  product  brandcentral.product (source_product_id), in categories
+ *                 under the node (category_flatten)
+ *        brand    brandcentral.brand · advertiser  brandcentral.advertiser ·
+ *        parent   brandcentral.company (the product's parent_company_id)
+ *   VX2  product  d_product (PRSEQ) whose industry group, category or
+ *                 subcategory code is the node's
+ *        advertiser  d_advertiser by PRINST · parent  its PARENT_ADVERTISER_ID,
+ *                 itself when it has none. VX2 has no brands.
+ *
+ * The same rows as dbxNodeSpenders: KEPT_SPENDERS per view by month and
+ * media, the totals, and each view's count.
+ */
+export async function dbxLegacySpenders(tax: 'VX1' | 'VX2', level: string, nodeId: string, keep: number, onWait?: OnWait): Promise<NodeSpenderRaw[]> {
+  if (!isInt(nodeId)) throw new DatabricksError(`Not a ${tax} node id: ${nodeId}`)
+  let products: string
+  if (tax === 'VX1') {
+    if (!(VX1_LEVELS as readonly string[]).includes(level)) throw new DatabricksError(`Not a VX1 level: ${level}`)
+    products = `
+lp AS (SELECT p.source_product_id product_id, max(p.product_n) product_name, max(p.brand_id) brand, max(p.advertiser_id) adv, max(p.parent_company_id) par
+  FROM mrdpp_prod.brandcentral.product p
+  WHERE p.record_status_flag = 'ACTIVE'
+    AND p.category_id IN (SELECT leaf_category_id FROM mrdpp_prod.brandcentral.category_flatten WHERE ${level}_category_id = ${nodeId})
+  GROUP BY 1),
+named AS (SELECT lp.product_id, lp.product_name, cast(lp.brand AS string) brand, b.n brand_name,
+    cast(a.source_advertiser_id AS string) payer, a.n payer_name,
+    CASE WHEN lp.par IS NULL OR lp.par = 9999 THEN cast(a.source_advertiser_id AS string) ELSE 'P' || lp.par END parent,
+    coalesce(co.n, a.n) parent_name
+  FROM lp
+  LEFT JOIN (SELECT brand_id, max(brand_n) n FROM mrdpp_prod.brandcentral.brand WHERE record_status_flag = 'ACTIVE' GROUP BY 1) b ON b.brand_id = lp.brand
+  LEFT JOIN (SELECT advertiser_id, max(source_advertiser_id) source_advertiser_id, max(advertiser_n) n FROM mrdpp_prod.brandcentral.advertiser WHERE record_status_flag = 'ACTIVE' GROUP BY 1) a ON a.advertiser_id = lp.adv
+  LEFT JOIN (SELECT source_company_id, max(company_n) n FROM mrdpp_prod.brandcentral.company WHERE record_status_flag = 'ACTIVE' GROUP BY 1) co ON co.source_company_id = lp.par),
+cand AS (SELECT creative_id, vx1_product_id product_id FROM mrdpp_prod.gold.creative WHERE vx1_product_id IN (SELECT product_id FROM lp))`
+  } else {
+    const col = { industry: ['PRIGRP', 'd_industry'], category: ['PRCATGY', 'd_category'], subcategory: ['PRSBCAT', 'd_subcategory'] }[level]
+    if (!col) throw new DatabricksError(`Not a VX2 level: ${level}`)
+    products = `
+lp AS (SELECT PRSEQ product_id, PRNAME product_name, PRINST inst FROM mrdpp_prod.vx2_taxonomy.d_product
+  WHERE ${col[0]} = (SELECT max(CODE) FROM mrdpp_prod.vx2_taxonomy.${col[1]} WHERE ID = ${nodeId})),
+adv AS (SELECT CODE, max(ID) id, max(NAME) n, max(PARENT_ADVERTISER_ID) par FROM mrdpp_prod.vx2_taxonomy.d_advertiser GROUP BY CODE),
+names AS (SELECT ID, max(NAME) n FROM mrdpp_prod.vx2_taxonomy.d_advertiser GROUP BY ID),
+named AS (SELECT lp.product_id, lp.product_name, cast(NULL AS string) brand, cast(NULL AS string) brand_name,
+    cast(a.id AS string) payer, a.n payer_name, cast(coalesce(a.par, a.id) AS string) parent, coalesce(pn.n, a.n) parent_name
+  FROM lp LEFT JOIN adv a ON a.CODE = lp.inst LEFT JOIN names pn ON pn.ID = a.par),
+cand AS (SELECT creative_id, vx2_product_id product_id FROM mrdpp_prod.gold.creative WHERE vx2_product_id IN (SELECT product_id FROM lp))`
+  }
+  const sql = `
+WITH ${products},
+${occSql('SELECT creative_id FROM cand')},
+a AS (SELECT o.media, o.month, n.*, o.spend FROM occ o JOIN cand c ON c.creative_id = o.creative_id JOIN named n ON n.product_id = c.product_id),
+v AS (
+  SELECT 'product' gby, cast(product_id AS string) k, max(product_name) n, media, month, sum(spend) s FROM a GROUP BY 1, 2, 4, 5
+  UNION ALL SELECT 'brand', brand, max(brand_name), media, month, sum(spend) FROM a WHERE brand IS NOT NULL GROUP BY 1, 2, 4, 5
+  UNION ALL SELECT 'advertiser', payer, max(payer_name), media, month, sum(spend) FROM a WHERE payer IS NOT NULL GROUP BY 1, 2, 4, 5
+  UNION ALL SELECT 'parent', parent, max(parent_name), media, month, sum(spend) FROM a WHERE parent IS NOT NULL GROUP BY 1, 2, 4, 5),
+t AS (SELECT *, dense_rank() OVER (PARTITION BY gby ORDER BY tot DESC, k) rk, max(n) OVER (PARTITION BY gby, k) name
+  FROM (SELECT *, sum(s) OVER (PARTITION BY gby, k) tot FROM v))
+SELECT gby, k key, name, media, cast(month AS string) month, s spend FROM t WHERE rk <= ${Math.max(1, Math.floor(keep))}
+UNION ALL
+SELECT 'total', NULL, NULL, media, cast(month AS string), sum(spend) FROM a GROUP BY media, month
+UNION ALL
 SELECT 'count', gby, NULL, NULL, NULL, cast(count(DISTINCT k) AS double) FROM v GROUP BY gby`
   const rows = await dbxQuery(config(), sql, [], { onWait, large: true })
   return rows.map((r) => ({ gby: r.gby!, key: r.key, name: r.name, media: r.media, month: r.month, spend: Number(r.spend ?? 0) }))
+}
+
+/** VX1's and VX2's node names at a level, for a legacy node's heading. */
+export async function dbxLegacyNodeName(tax: 'VX1' | 'VX2', level: string, nodeId: string): Promise<{ name: string; path: string[] } | null> {
+  if (!isInt(nodeId)) return null
+  if (tax === 'VX1') {
+    if (!(VX1_LEVELS as readonly string[]).includes(level)) return null
+    const up = VX1_LEVELS.slice(0, VX1_LEVELS.indexOf(level as (typeof VX1_LEVELS)[number]) + 1)
+    const rows = await dbxQuery(config(), `SELECT ${up.map((l) => `max(${l}_category_n) ${l}`).join(', ')} FROM mrdpp_prod.brandcentral.category_flatten WHERE ${level}_category_id = ${nodeId}`, [])
+    const r = rows[0]
+    if (!r?.[level]) return null
+    return { name: r[level]!, path: up.map((l) => r[l] ?? '').filter(Boolean) }
+  }
+  const table = { industry: 'd_industry', category: 'd_category', subcategory: 'd_subcategory' }[level]
+  if (!table) return null
+  const rows = await dbxQuery(config(), `SELECT max(NAME) n FROM mrdpp_prod.vx2_taxonomy.${table} WHERE ID = ${nodeId}`, [])
+  return rows[0]?.n ? { name: rows[0].n, path: [rows[0].n] } : null
 }

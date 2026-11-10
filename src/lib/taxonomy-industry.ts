@@ -9,15 +9,28 @@
  * everybody until someone asks for it to be read again. A node takes 13 to 22
  * seconds warm and minutes on a cold warehouse; nobody should wait twice.
  */
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { taxonomyIndustry } from '@/db/schema'
-import { dbxNodeSpenders, dbxTaxonomyTree } from './taxonomy-dbx'
-import { industryResult, KEPT_SPENDERS, pathTo, type IndustryResult, type TaxNode } from './taxonomy-industry-rules'
+import { classicBrandSpend, classicCategories, classicVxCategories, taxonomyIndustry } from '@/db/schema'
+import { dbxLegacyNodeName, dbxLegacySpenders, dbxNodeSpenders, dbxTaxonomyTree, type NodeSpenderRaw } from './taxonomy-dbx'
+import {
+  industryResult,
+  KEPT_SPENDERS,
+  LEGACY_LABEL,
+  LEGACY_LEVELS,
+  legacyPlacement,
+  pathTo,
+  type IndustryResult,
+  type LegacyTaxonomy,
+  type TaxNode,
+} from './taxonomy-industry-rules'
 import type { Step } from './taxonomy-rules'
 
 export const TREE_KEY = 'tree'
 export const nodeKey = (id: string) => `node:${id}`
+/** A legacy node read for "Compare to": "legacy:VX1:industry:123", "legacy:Classic:2:4165". */
+export const legacyKey = (tax: LegacyTaxonomy, level: string, id: string) => `legacy:${tax}:${level}:${id}`
+const LEGACY_KEY = /^legacy:(VX1|VX2|Classic):([a-z0-9]+):(\d{1,12})$/
 
 /**
  * A read still marked running after this long was cut off - the process
@@ -26,6 +39,17 @@ export const nodeKey = (id: string) => `node:${id}`
 const STALE_MS = 15 * 60_000
 
 function stepsFor(key: string): Step[] {
+  const legacy = LEGACY_KEY.exec(key)
+  if (legacy) {
+    const tax = legacy[1] as LegacyTaxonomy
+    return tax === 'Classic'
+      ? [{ key: 'spend', label: 'Add up the Classic snapshot by brand and company', state: 'waiting' }]
+      : [
+          { key: 'tree', label: `Find the ${tax} node`, state: 'waiting' },
+          { key: 'spend', label: `Read all its Aug–Sep spend by ${tax} product (Databricks)`, state: 'waiting' },
+          { key: 'rank', label: 'Rank the spenders', state: 'waiting' },
+        ]
+  }
   return key === TREE_KEY
     ? [{ key: 'tree', label: 'Read the GPC taxonomy (Databricks)', state: 'waiting' }]
     : [
@@ -65,7 +89,7 @@ export async function readIndustry<T = unknown>(key: string): Promise<IndustryVi
  * this process.
  */
 export async function startIndustry(key: string, askedBy: string | null, again = false): Promise<void> {
-  if (key !== TREE_KEY && !/^node:\d{1,12}$/.test(key)) throw new Error(`Not something the Industry View reads: ${key}`)
+  if (key !== TREE_KEY && !/^node:\d{1,12}$/.test(key) && !LEGACY_KEY.test(key)) throw new Error(`Not something the Industry View reads: ${key}`)
   const now = await readIndustry(key)
   if (now?.status === 'running' && Date.now() - Date.parse(now.updatedAt) < STALE_MS) return
   if (now?.status === 'done' && !again) return
@@ -121,6 +145,12 @@ async function execute(key: string, steps: Step[]): Promise<void> {
     return
   }
 
+  const legacy = LEGACY_KEY.exec(key)
+  if (legacy) {
+    await finish(await readLegacy(legacy[1] as LegacyTaxonomy, legacy[2]!, legacy[3]!, step))
+    return
+  }
+
   const id = key.slice('node:'.length)
   const node = await step('tree', async (note) => {
     // The tree read for the page, when there is one; it holds every active node.
@@ -134,8 +164,122 @@ async function execute(key: string, steps: Step[]): Promise<void> {
   const raw = await step('spend', (note) => dbxNodeSpenders(id, KEPT_SPENDERS, (s) => note(`Query running… ${s}s`)))
   const result = await step('rank', async (note) => {
     const out: IndustryResult = industryResult(node, raw, new Date().toISOString())
+    // Where the node's spend falls in VX1 and VX2 came with the read; Classic
+    // is placed here, from the snapshot, by each creative's VX0 product.
+    const legacy = raw
+      .filter((r) => r.gby === 'legacy' && r.key)
+      .map((r) => {
+        const [tax, level, lid] = r.key!.split('|')
+        return { tax: tax!, level: level!, id: lid!, name: r.name ?? `#${lid}`, spend: r.spend }
+      })
+    out.legacy = legacyPlacement([...legacy, ...(await classicPlacement(raw.filter((r) => r.gby === 'vx0')))])
     await note(`${out.counts.product.toLocaleString('en-US')} products, ${out.counts.advertiser.toLocaleString('en-US')} advertisers`)
     return out
   })
   await finish(result)
+}
+
+type StepFn = <T>(k: string, work: (note: (detail: string) => Promise<void>) => Promise<T>) => Promise<T>
+
+/**
+ * A GPC node's spend placed in Classic's categories: each VX0 product's share
+ * goes to the category of the Classic brand Vivvix maps it to (split evenly
+ * when it maps to several), and counts at that category and every one above
+ * it. Products with no Classic brand are not placed.
+ */
+async function classicPlacement(rows: readonly NodeSpenderRaw[]): Promise<{ tax: string; level: string; id: string; name: string; spend: number }[]> {
+  const spendOf = new Map<number, number>()
+  for (const r of rows) if (r.key && /^\d+$/.test(r.key)) spendOf.set(Number(r.key), (spendOf.get(Number(r.key)) ?? 0) + r.spend)
+  if (!spendOf.size) return []
+  const links: { vxProductId: number; categoryId: number }[] = []
+  const ids = [...spendOf.keys()]
+  for (let i = 0; i < ids.length; i += 5000) {
+    links.push(...(await db.select().from(classicVxCategories).where(inArray(classicVxCategories.vxProductId, ids.slice(i, i + 5000)))))
+  }
+  if (!links.length) return []
+  const cats = new Map((await db.select().from(classicCategories)).map((c) => [c.id, c]))
+  const perProduct = new Map<number, number>()
+  for (const l of links) perProduct.set(l.vxProductId, (perProduct.get(l.vxProductId) ?? 0) + 1)
+  const at = new Map<number, number>()
+  for (const l of links) {
+    const share = (spendOf.get(l.vxProductId) ?? 0) / perProduct.get(l.vxProductId)!
+    const seen = new Set<number>()
+    for (let c = cats.get(l.categoryId); c && !seen.has(c.id); c = c.parentId != null ? cats.get(c.parentId) : undefined) {
+      seen.add(c.id)
+      if (c.depth >= 1) at.set(c.id, (at.get(c.id) ?? 0) + share)
+    }
+  }
+  return [...at].map(([id, spend]) => {
+    const c = cats.get(id)!
+    return { tax: 'Classic', level: String(c.depth), id: String(id), name: c.name, spend }
+  })
+}
+
+/** One legacy node's spenders: VX1 and VX2 from Databricks, Classic from its snapshot. */
+async function readLegacy(tax: LegacyTaxonomy, level: string, id: string, step: StepFn): Promise<IndustryResult> {
+  const levelLabel = LEGACY_LEVELS[tax].find((l) => l.key === level)?.label ?? level
+  if (tax === 'Classic') return step('spend', (note) => readClassic(id, levelLabel, note))
+  const named = await step('tree', async (note) => {
+    const found = await dbxLegacyNodeName(tax, level, id)
+    if (!found) throw new Error(`There is no ${LEGACY_LABEL[tax]} ${levelLabel.toLowerCase()} ${id}.`)
+    await note(found.path.join(' › '))
+    return found
+  })
+  const raw = await step('spend', (note) => dbxLegacySpenders(tax, level, id, KEPT_SPENDERS, (s) => note(`Query running… ${s}s`)))
+  return step('rank', async (note) => {
+    const out = industryResult({ id: `${tax}:${level}:${id}`, name: named.name, level: levelLabel, path: named.path }, raw, new Date().toISOString())
+    await note(`${out.counts.advertiser.toLocaleString('en-US')} advertisers`)
+    return out
+  })
+}
+
+/**
+ * A Classic category's spenders, from the snapshot: every brand in the
+ * category or below it. Classic's advertiser is the top of its company tree,
+ * so the Advertiser and Parent views are the same list; it has no products.
+ */
+async function readClassic(id: string, levelLabel: string, note: (d: string) => Promise<void>): Promise<IndustryResult> {
+  const cats = await db.select().from(classicCategories)
+  const node = cats.find((c) => c.id === Number(id))
+  if (!node) throw new Error(`There is no Classic category ${id} in the snapshot. Load it again (npm run load:classic).`)
+  const under = new Set([node.id])
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const c of cats) {
+      if (c.parentId != null && under.has(c.parentId) && !under.has(c.id)) {
+        under.add(c.id)
+        grew = true
+      }
+    }
+  }
+  const rows = await db.select().from(classicBrandSpend).where(inArray(classicBrandSpend.categoryId, [...under]))
+  const sums = new Map<string, NodeSpenderRaw>()
+  const add = (gby: string, key: string | null, name: string | null, media: string, month: string, spend: number) => {
+    const k = `${gby}|${key}|${media}|${month}`
+    const prior = sums.get(k)
+    if (prior) prior.spend += spend
+    else sums.set(k, { gby, key, name, media, month: month.replace('-', ''), spend })
+  }
+  const brands = new Set<number>()
+  const companies = new Set<number>()
+  for (const r of rows) {
+    add('brand', String(r.brandId), r.brandName, r.mediaType, r.month, r.spend)
+    add('advertiser', String(r.advertiserId), r.advertiserName, r.mediaType, r.month, r.spend)
+    add('parent', String(r.advertiserId), r.advertiserName, r.mediaType, r.month, r.spend)
+    add('total', null, null, r.mediaType, r.month, r.spend)
+    brands.add(r.brandId)
+    companies.add(r.advertiserId)
+  }
+  const raw = [
+    ...sums.values(),
+    { gby: 'count', key: 'brand', name: null, media: null, month: null, spend: brands.size },
+    { gby: 'count', key: 'advertiser', name: null, media: null, month: null, spend: companies.size },
+    { gby: 'count', key: 'parent', name: null, media: null, month: null, spend: companies.size },
+  ]
+  await note(`${brands.size.toLocaleString('en-US')} brands, ${companies.size.toLocaleString('en-US')} companies`)
+  const out = industryResult({ id: `Classic:${node.depth}:${id}`, name: node.name, level: levelLabel, path: node.chain.split('>').map((x) => x.trim()) }, raw, new Date().toISOString())
+  // Keep the biggest per view, as a Databricks read does.
+  const total = (x: { cells: { spend: number }[] }) => x.cells.reduce((a, c) => a + c.spend, 0)
+  for (const by of ['brand', 'advertiser', 'parent'] as const) out.views[by] = out.views[by].sort((a, b) => total(b) - total(a)).slice(0, KEPT_SPENDERS)
+  return out
 }

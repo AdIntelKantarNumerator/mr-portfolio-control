@@ -114,6 +114,8 @@ export interface IndustryResult {
   views: Record<IndustryBy, IndustryRow[]>
   /** How many spenders each view has in all, before KEPT_SPENDERS. */
   counts: Record<IndustryBy, number>
+  /** GPC nodes only, read since 10 November 2026: where its spend falls in each legacy taxonomy, for "Compare to". */
+  legacy?: LegacyPlacement
   finishedAt: string
 }
 
@@ -196,3 +198,89 @@ export function industryResult(
     finishedAt,
   }
 }
+
+// --- Compare to: the legacy taxonomies (Scott, 10 November 2026) ----------------
+
+/**
+ * Beside a GPC node's spenders, the spenders of a node in a legacy taxonomy.
+ * The second dropdown lists the legacy nodes the GPC node's own spend falls
+ * into, biggest first: each creative carries its VX1, VX2 and VX0 product,
+ * so the GPC read places its dollars in each legacy taxonomy as it goes. The
+ * legacy list itself is ALL the spend of the legacy node, not only what came
+ * from the GPC node - a separate read, kept like a GPC node.
+ */
+export const LEGACY_TAXONOMIES = ['VX1', 'VX2', 'Classic'] as const
+export type LegacyTaxonomy = (typeof LEGACY_TAXONOMIES)[number]
+export const LEGACY_LABEL: Record<LegacyTaxonomy, string> = { VX1: 'VX1', VX2: 'VX2', Classic: 'MediaRadar Classic' }
+export const isLegacyTaxonomy = (v: string): v is LegacyTaxonomy => (LEGACY_TAXONOMIES as readonly string[]).includes(v)
+
+/**
+ * Each taxonomy's levels, top first. VX1's are brandcentral.category_flatten's
+ * columns. VX2 classifies a product three ways - industry group, category,
+ * subcategory - and its industries are not above its categories. Classic's
+ * are depths in its category tree.
+ */
+export const LEGACY_LEVELS: Record<LegacyTaxonomy, { key: string; label: string }[]> = {
+  VX1: [
+    { key: 'section', label: 'Section' },
+    { key: 'industry', label: 'Industry' },
+    { key: 'major', label: 'Major' },
+    { key: 'class', label: 'Class' },
+    { key: 'subcategory', label: 'Subcategory' },
+    { key: 'microcategory', label: 'Microcategory' },
+  ],
+  VX2: [
+    { key: 'industry', label: 'Industry' },
+    { key: 'category', label: 'Category' },
+    { key: 'subcategory', label: 'Subcategory' },
+  ],
+  Classic: [1, 2, 3, 4, 5, 6, 7].map((d) => ({ key: String(d), label: d === 1 ? 'Level 1 (top)' : `Level ${d}` })),
+}
+
+/** The views each legacy taxonomy has: VX2 has no brands, Classic no products (Scott: fine). */
+export const LEGACY_VIEWS: Record<LegacyTaxonomy, readonly IndustryBy[]> = {
+  VX1: ['product', 'brand', 'advertiser', 'parent'],
+  VX2: ['product', 'advertiser', 'parent'],
+  Classic: ['brand', 'advertiser', 'parent'],
+}
+
+/** The legacy level nearest the GPC node's depth, as a default for the level picker. */
+export function defaultLegacyLevel(tax: LegacyTaxonomy, gpcLevel: string): string {
+  const i = Math.max(0, ['Industry Group', 'Industry', 'Category', 'Subcategory'].indexOf(gpcLevel))
+  const pick: Record<LegacyTaxonomy, string[]> = {
+    VX1: ['section', 'industry', 'major', 'class'],
+    VX2: ['industry', 'category', 'category', 'subcategory'],
+    Classic: ['1', '2', '3', '4'],
+  }
+  return pick[tax][i]!
+}
+
+export interface LegacyOption {
+  id: string
+  name: string
+  /** The GPC node's spend that falls in it. */
+  spend: number
+}
+
+/** Where a GPC node's spend falls in each legacy taxonomy, by level: the top LEGACY_OPTIONS of each. */
+export type LegacyPlacement = Partial<Record<LegacyTaxonomy, Record<string, LegacyOption[]>>>
+
+/** Legacy nodes offered per level (Scott: up to 50). */
+export const LEGACY_OPTIONS = 50
+
+/** Raw "taxonomy|level|id" rows into the placement, keeping the biggest per level. */
+export function legacyPlacement(rows: readonly { tax: string; level: string; id: string; name: string; spend: number }[]): LegacyPlacement {
+  const out: LegacyPlacement = {}
+  for (const r of rows) {
+    if (!isLegacyTaxonomy(r.tax) || !(r.spend > 0)) continue
+    const levels = (out[r.tax] ??= {})
+    ;(levels[r.level] ??= []).push({ id: r.id, name: r.name, spend: r.spend })
+  }
+  for (const levels of Object.values(out)) {
+    for (const k of Object.keys(levels)) levels[k] = levels[k]!.sort((a, b) => b.spend - a.spend).slice(0, LEGACY_OPTIONS)
+  }
+  return out
+}
+
+/** Exact matches across the two lists (Scott: exact only): the same name, ignoring case and spacing. */
+export const matchName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ')

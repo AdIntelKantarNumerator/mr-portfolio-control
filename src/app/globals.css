@@ -2188,18 +2188,24 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .tx-rank-head { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
 @media (max-width: 720px) { .tx-lists { grid-template-columns: 1fr; } }
 .tx-lists-one { grid-template-columns: 1fr; margin-top: 14px; }
-/* The rollup tree icon and its popup (rollup.tsx). */
-.tx-tree-wrap { position: relative; display: inline-block; vertical-align: middle; }
-.tx-tree { margin-left: 6px; padding: 2px 3px; line-height: 0; border: 1px solid transparent; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; }
+/* The tree icon and the family tree it opens (rollup.tsx). */
+.tx-tree { margin-left: 6px; padding: 2px 3px; line-height: 0; vertical-align: middle; border: 1px solid transparent; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; }
 .tx-tree svg { fill: currentColor; stroke: currentColor; }
 .tx-tree:hover, .tx-tree.on { color: var(--brand); border-color: var(--line); background: var(--surface); }
-.tx-tree-pop { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; min-width: 260px; max-width: 420px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); box-shadow: var(--shadow); font-size: 13px; font-weight: 400; white-space: normal; }
-.tx-chain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.tx-chain li { display: flex; align-items: baseline; gap: 8px; padding-left: calc(var(--depth, 0) * 14px); }
-.tx-chain li + li::before { content: '└'; color: var(--muted); margin-left: -14px; width: 6px; }
-.tx-chain-level { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); min-width: 72px; }
-.tx-chain-name { font-weight: 600; }
-.tx-chain-product .tx-chain-name { color: var(--brand); }
+.tx-family-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--ink) 28%, transparent); }
+.tx-family { width: min(760px, 100%); max-height: min(82vh, 900px); display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; background: var(--raised); box-shadow: var(--shadow); }
+.tx-family-head { display: flex; align-items: flex-start; gap: 16px; padding: 14px 18px 10px; border-bottom: 1px solid var(--line); }
+.tx-family-body { overflow: auto; padding: 10px 12px 16px; font-size: 13.5px; }
+.tx-ftree { list-style: none; margin: 0; padding: 0; }
+.tx-frow { display: flex; align-items: baseline; gap: 6px; padding: 3px 8px 3px calc(8px + var(--depth, 0) * 18px); border-radius: 7px; }
+.tx-frow:hover { background: var(--canvas); }
+.tx-frow.focus { background: var(--blue-bg); }
+.tx-frow.focus .tx-fname { font-weight: 700; color: var(--brand); }
+.tx-fname { font-weight: 600; }
+.tx-fproducts .tx-fname, .tx-fproduct .tx-fname { font-weight: 400; }
+.tx-fproducts .tx-fname { color: var(--muted); }
+.tx-fcount { font-size: 11.5px; }
+.tx-chain-level { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .tx-chain-id { font-size: 11px; }
 
 /* Taxonomy Comparison: GPC totals and creatives (30 October 2026) */
@@ -2277,3 +2283,18 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .ix-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--canvas); overflow: hidden; }
 .ix-bar span { display: block; height: 100%; background: var(--brand); border-radius: 4px; }
 .ix-share .tx-muted { min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
+/* Industry View "Compare to" (10 November 2026): the pickers by the heading, two lists side by side. */
+.ix-head { flex-wrap: wrap; row-gap: 8px; }
+.ix-compare { flex-wrap: wrap; gap: 6px; align-items: center; }
+.ix-compare .tx-select { max-width: 220px; }
+.ix-node-pick { min-width: 200px; }
+.ix-read { margin-left: 6px; }
+.ix-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 1100px) { .ix-pair { grid-template-columns: 1fr; } }
+.ix-list { min-width: 0; }
+.ix-list-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+.ix-list-sub { font-size: 12px; }
+.ix-note { font-size: 12.5px; margin: -6px 0 8px; }
+.ix-pair .ix-share-head { width: 28%; }
+.ix-match td:nth-child(2) { font-weight: 600; }
+.ix-match-dot { color: var(--green); font-size: 10px; margin-right: 6px; vertical-align: 1px; }

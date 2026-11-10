@@ -104,3 +104,40 @@ test('top N cuts the list and says what the listed take together', () => {
 test('a view with nothing read is empty, not an error', () => {
   assert.deepEqual(rankIndustry(result, 'brand').rows, [])
 })
+
+// --- Compare to (10 November 2026) --------------------------------------------
+
+import { defaultLegacyLevel, LEGACY_OPTIONS, LEGACY_VIEWS, legacyPlacement, matchName } from '../src/lib/taxonomy-industry-rules'
+
+test('the legacy nodes offered are where the GPC node spend falls, biggest first, at most 50 per level', () => {
+  const rows = [
+    { tax: 'VX1', level: 'major', id: '7', name: 'Television & Cable Television', spend: 741 },
+    { tax: 'VX1', level: 'major', id: '9', name: 'Misc NEC: Not Itemized', spend: 36 },
+    { tax: 'VX1', level: 'industry', id: '3', name: 'Media & Advertising', spend: 790 },
+    { tax: 'VX2', level: 'category', id: '5', name: 'Streaming Media', spend: 477 },
+    { tax: 'VX2', level: 'category', id: '6', name: 'Nothing', spend: 0 },
+    { tax: 'Nope', level: 'x', id: '1', name: 'not a taxonomy', spend: 5 },
+    ...Array.from({ length: 60 }, (_, i) => ({ tax: 'Classic', level: '2', id: String(100 + i), name: `C${i}`, spend: i + 1 })),
+  ]
+  const p = legacyPlacement(rows)
+  assert.deepEqual(p.VX1!.major!.map((o) => o.name), ['Television & Cable Television', 'Misc NEC: Not Itemized'])
+  assert.deepEqual(p.VX2!.category!.map((o) => o.id), ['5'], 'no spend, not offered')
+  assert.equal(p.Classic!['2']!.length, LEGACY_OPTIONS)
+  assert.equal(p.Classic!['2']![0]!.name, 'C59')
+  assert.equal(Object.keys(p).length, 3)
+})
+
+test('the level picker starts near the GPC node depth', () => {
+  assert.equal(defaultLegacyLevel('VX1', 'Industry'), 'industry')
+  assert.equal(defaultLegacyLevel('VX1', 'Category'), 'major')
+  assert.equal(defaultLegacyLevel('VX2', 'Industry Group'), 'industry')
+  assert.equal(defaultLegacyLevel('VX2', 'Subcategory'), 'subcategory')
+  assert.equal(defaultLegacyLevel('Classic', 'Category'), '3')
+})
+
+test('VX2 has no brands and Classic no products; names match exactly, ignoring case and spacing', () => {
+  assert.ok(!LEGACY_VIEWS.VX2.includes('brand'))
+  assert.ok(!LEGACY_VIEWS.Classic.includes('product'))
+  assert.equal(matchName('  Disney+ '), matchName('disney+'))
+  assert.notEqual(matchName('Disney'), matchName('Disney+'))
+})

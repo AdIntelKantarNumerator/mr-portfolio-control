@@ -27,6 +27,17 @@
  *              DW.SocialSpendMonthly on 29 October 2026: within 1.5%.
  *   CTV        Classic does not track it.
  *
+ * CATEGORIES (10 November 2026), for the Industry View's "Compare to"
+ *
+ *   classic_categories     magradar_public.productCategories (enabled).
+ *   classic_brand_spend    the same spend by brand - TV's BrandId, digital's
+ *                          CompanyId - with the brand's one category from
+ *                          DW.BrandCategoryInfo (99.9% of Aug-Sep spend has
+ *                          one) and the top company it sits under. Print is
+ *                          left out, as everywhere in Taxonomy Comparison.
+ *   classic_vx_categories  VX0 product -> category, through Vivvix.Product's
+ *                          brand, for brands with spend in the window.
+ *
  * Read-only on the SQL Server: SELECTs only, with read-only intent.
  */
 import 'dotenv/config'
@@ -85,6 +96,32 @@ WITH b AS (
 SELECT DISTINCT b.top_id id, p.VxProductId product_id FROM b JOIN Vivvix.Product p ON p.MrBrandId = b.brand_id
 WHERE b.top_id IS NOT NULL AND p.VxProductId IS NOT NULL`
 
+const CATEGORIES_SQL = `
+SELECT categoryId id, parentId parent_id, name, depth, nameChain chain FROM magradar_public.productCategories WHERE enabled = 1`
+
+const BRAND_SPEND_SQL = `
+WITH x AS (
+  SELECT BrandId brand_id, MAX(BrandName) brand_name, ParentCompanyId top_id, MAX(ParentCompanyName) top_name, 'Linear TV' media,
+    CONVERT(char(7), Month, 126) month, SUM(CAST(EstTvSpend AS float)) spend
+  FROM DW.TvAdMetricsMonthly WHERE Month >= @start AND Month < @end GROUP BY BrandId, ParentCompanyId, CONVERT(char(7), Month, 126)
+  UNION ALL
+  SELECT CompanyId, MAX(CompanyName), CompanyPrimogenitor, MAX(CompanyPrimogenitorName), 'Digital', CONVERT(char(7), RptDate, 126), SUM(CAST(${DIGITAL} AS float))
+  FROM AllMedia.Companies_Sites_Instances_Spend WHERE RptDate >= @start AND RptDate < @end GROUP BY CompanyId, CompanyPrimogenitor, CONVERT(char(7), RptDate, 126)
+  UNION ALL
+  SELECT CompanyId, MAX(CompanyName), CompanyPrimogenitor, MAX(CompanyPrimogenitorName), 'Social', CONVERT(char(7), RptDate, 126),
+    SUM(CAST(CASE WHEN ISNULL(AllFormatSpendReported,0) > ${DIGITAL} THEN ISNULL(AllFormatSpendReported,0) - (${DIGITAL}) ELSE 0 END AS float))
+  FROM AllMedia.Companies_Sites_Instances_Spend WHERE RptDate >= @start AND RptDate < @end GROUP BY CompanyId, CompanyPrimogenitor, CONVERT(char(7), RptDate, 126))
+SELECT x.*, c.CategoryId category_id FROM x LEFT JOIN DW.BrandCategoryInfo c ON c.BrandId = x.brand_id
+WHERE x.brand_id IS NOT NULL AND x.top_id IS NOT NULL AND x.spend > 0`
+
+const VX_CATEGORIES_SQL = `
+WITH b AS (
+  SELECT DISTINCT BrandId brand_id FROM DW.TvAdMetricsMonthly WHERE Month >= @start AND Month < @end
+  UNION SELECT DISTINCT CompanyId FROM AllMedia.Companies_Sites_Instances_Spend WHERE RptDate >= @start AND RptDate < @end)
+SELECT DISTINCT p.VxProductId product_id, c.CategoryId category_id
+FROM b JOIN Vivvix.Product p ON p.MrBrandId = b.brand_id JOIN DW.BrandCategoryInfo c ON c.BrandId = b.brand_id
+WHERE p.VxProductId IS NOT NULL AND c.CategoryId IS NOT NULL`
+
 async function main() {
   const env = readEnvFile(process.env.SQLSERVER_ENV_FILE ?? join(process.cwd(), '..', '.sqlserver.env'))
   const [server, port] = env.SQLSERVER_SERVER.replace(/^tcp:/, '').split(',')
@@ -110,6 +147,19 @@ async function main() {
   const nameRows = (await read<{ id: number; name: string; level: string }>(NAMES_SQL)).filter((r) => r.id != null && r.name?.trim())
   console.log('Reading Classic brand → VX product links…')
   const productRows = await read<{ id: number; product_id: number }>(PRODUCTS_SQL)
+  console.log('Reading Classic categories, spend by brand, and VX product categories…')
+  const categoryRows = await read<{ id: number; parent_id: number | null; name: string; depth: number; chain: string | null }>(CATEGORIES_SQL)
+  const brandRows = await read<{
+    brand_id: number
+    brand_name: string | null
+    top_id: number
+    top_name: string | null
+    media: string
+    month: string
+    spend: number
+    category_id: number | null
+  }>(BRAND_SPEND_SQL)
+  const vxCategoryRows = await read<{ product_id: number; category_id: number }>(VX_CATEGORIES_SQL)
   await pool.close()
 
   // The advertiser's own name: the advertiser-level row, else any.
@@ -149,7 +199,27 @@ async function main() {
       await tx.delete(s.classicBrandProducts)
       const links = productRows.map((r) => ({ advertiserId: r.id, vxProductId: r.product_id }))
       for (let i = 0; i < links.length; i += 8000) await tx.insert(s.classicBrandProducts).values(links.slice(i, i + 8000))
+
+      await tx.delete(s.classicCategories)
+      const cats = categoryRows.map((r) => ({ id: r.id, parentId: r.parent_id, name: r.name.trim(), depth: r.depth, chain: (r.chain ?? r.name).trim() }))
+      for (let i = 0; i < cats.length; i += 4000) await tx.insert(s.classicCategories).values(cats.slice(i, i + 4000))
+      await tx.delete(s.classicBrandSpend)
+      const brands = brandRows.map((r) => ({
+        brandId: r.brand_id,
+        brandName: r.brand_name?.trim() || `Classic brand ${r.brand_id}`,
+        advertiserId: r.top_id,
+        advertiserName: r.top_name?.trim() || advertiserName.get(r.top_id) || `Classic company ${r.top_id}`,
+        categoryId: r.category_id,
+        mediaType: r.media,
+        month: r.month,
+        spend: r.spend,
+      }))
+      for (let i = 0; i < brands.length; i += 2000) await tx.insert(s.classicBrandSpend).values(brands.slice(i, i + 2000))
+      await tx.delete(s.classicVxCategories)
+      const vx = vxCategoryRows.map((r) => ({ vxProductId: r.product_id, categoryId: r.category_id }))
+      for (let i = 0; i < vx.length; i += 8000) await tx.insert(s.classicVxCategories).values(vx.slice(i, i + 8000))
     })
+    console.log(`Categories: ${categoryRows.length}; brand spend rows: ${brandRows.length}; VX product categories: ${vxCategoryRows.length}.`)
     const totals = new Map<string, number>()
     for (const r of spend) totals.set(`${r.month} ${r.mediaType}`, (totals.get(`${r.month} ${r.mediaType}`) ?? 0) + r.spend)
     console.log(`Loaded ${spend.length} spend rows for ${advertiserName.size} advertisers, ${names.size} names, ${productRows.length} product links.`)

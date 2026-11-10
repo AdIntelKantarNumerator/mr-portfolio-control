@@ -2288,6 +2288,45 @@ export const classicNames = pgTable(
   (t) => [primaryKey({ columns: [t.name, t.advertiserId] })],
 )
 
+/** Classic's category tree, enabled categories only (drizzle/0041; npm run load:classic). */
+export const classicCategories = pgTable('classic_categories', {
+  id: integer('id').primaryKey(),
+  parentId: integer('parent_id'),
+  name: text('name').notNull(),
+  /** 0 is the root; 1 the top level a person sees. */
+  depth: integer('depth').notNull(),
+  /** "Beauty & Personal Care > Makeup & Cosmetics > Lipstick & Lip Gloss" */
+  chain: text('chain').notNull(),
+})
+
+/** Aug-Sep 2026 Classic spend by brand, with its category and top company (drizzle/0041). */
+export const classicBrandSpend = pgTable(
+  'classic_brand_spend',
+  {
+    brandId: integer('brand_id').notNull(),
+    brandName: text('brand_name').notNull(),
+    /** The top of the company tree: what Classic calls the advertiser. */
+    advertiserId: integer('advertiser_id').notNull(),
+    advertiserName: text('advertiser_name').notNull(),
+    /** DW.BrandCategoryInfo: one per brand; null for the few uncategorised. */
+    categoryId: integer('category_id'),
+    mediaType: text('media_type').notNull(),
+    month: text('month').notNull(),
+    spend: doublePrecision('spend').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.brandId, t.advertiserId, t.mediaType, t.month] }), index('classic_brand_spend_category_idx').on(t.categoryId)],
+)
+
+/** A VX0 product's Classic category, through the brand Vivvix.Product maps it to (drizzle/0041). */
+export const classicVxCategories = pgTable(
+  'classic_vx_categories',
+  {
+    vxProductId: integer('vx_product_id').notNull(),
+    categoryId: integer('category_id').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.vxProductId, t.categoryId] })],
+)
+
 /**
  * The Industry View (drizzle/0040): the GPC taxonomy tree and each node's top
  * spenders, read from Databricks once and kept. key is "tree" or
