@@ -2387,6 +2387,7 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rb-choice small { color: var(--muted); font-size: 12px; }
 .rb-choice:hover { border-color: var(--brand-2); background: var(--blue-bg); }
 .rb-choice.rb-quiet { min-height: 44px; }
+.rb-choice:disabled { opacity: 0.5; cursor: not-allowed; }
 .rb-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .rb-chip { border: 1px solid var(--line); background: var(--canvas); color: var(--ink); border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer; }
 .rb-chip:hover { border-color: var(--brand-2); }

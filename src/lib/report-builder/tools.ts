@@ -29,6 +29,37 @@ export interface ToolContext {
   chat: ChatState
   /** Builds the download link for a report: the portfolio's own address. */
   downloadUrl: (spec: Spec, name: string) => string
+  /** What the last tool produced, for a page to draw (the Prototypes page). Chat hosts ignore it. */
+  view?: View
+}
+
+/** A table as the page draws it: raw values, typed columns, so it can chart them too. */
+export interface ViewTable {
+  columns: Result['columns']
+  rows: unknown[][]
+  totals: unknown[] | null
+  rowCount: number
+}
+
+/** The last thing a tool produced, in a shape a page can draw without parsing text. */
+export interface View {
+  kind: 'question' | 'problem' | 'ready' | 'run' | 'saved' | 'deleted' | 'data'
+  /** The report's one-line summary, or the saved report's name. */
+  title?: string
+  question?: string
+  problem?: string
+  acceptsName?: boolean
+  /** The numbered choices offered: a question's options, a problem's fixes, or a preview's adjustments. */
+  choices?: Array<{ number: number; label: string; description?: string }>
+  table?: ViewTable
+  period?: string
+  dataThrough?: string
+  notes?: string[]
+  downloadUrl?: string
+  sinceLastRun?: string
+  savedName?: string
+  picksUpNewData?: boolean
+  message?: string
 }
 
 export interface ToolDef {
@@ -128,27 +159,52 @@ function status(ctx: ToolContext, v: Validation) {
   }
   if (v.errors.length) {
     const e = v.errors[0]!
-    return { status: 'problem', problem: e.message, fixes: numbered(e.fixes) }
+    const fixes = numbered(e.fixes)
+    ctx.view = { kind: 'problem', problem: e.message, choices: fixes }
+    return { status: 'problem', problem: e.message, fixes }
   }
   if (v.questions.length) {
     const q = v.questions[0]!
-    return { status: 'question', question: q.prompt, accepts_typed_name: q.kind === 'entity', choices: numbered(q.options) }
+    const choices = numbered(q.options)
+    ctx.view = { kind: 'question', question: q.prompt, acceptsName: q.kind === 'entity', choices }
+    return { status: 'question', question: q.prompt, accepts_typed_name: q.kind === 'entity', choices }
   }
   const preview = engine.preview(v.spec, PREVIEW_ROWS)
+  const adjustments = numbered(v.refinements.slice(0, 7))
+  const notes = Array.from(new Set(v.warnings.concat(preview.notes)))
+  ctx.view = {
+    kind: 'ready',
+    title: preview.summary,
+    table: tableOf(preview),
+    period: `${preview.period.label} (${preview.period.how})`,
+    notes,
+    choices: adjustments,
+  }
   return {
     status: 'ready',
     summary: preview.summary,
     period: `${preview.period.label} (${preview.period.how})`,
     rows_in_report: preview.row_count,
     table_markdown: engine.markdown(preview, PREVIEW_ROWS),
-    notes: Array.from(new Set(v.warnings.concat(preview.notes))),
+    notes,
     large_extract: v.delivery === 'file' ? 'The full report is large; it will be a download.' : undefined,
-    adjustments: numbered(v.refinements.slice(0, 7)),
+    adjustments,
     editing_saved_report: chat.editing?.name,
   }
 }
 
+const tableOf = (r: Result): ViewTable => ({ columns: r.columns, rows: r.rows, totals: r.totals, rowCount: r.row_count })
+
 function shown(ctx: ToolContext, result: Result, spec: Spec, name: string) {
+  ctx.view = {
+    kind: 'run',
+    title: result.summary,
+    table: { ...tableOf(result), rows: result.rows.slice(0, RUN_ROWS) },
+    period: `${result.period.label} (${result.period.how})`,
+    dataThrough: result.data_through_label,
+    notes: result.notes,
+    downloadUrl: ctx.downloadUrl(spec, name),
+  }
   return {
     summary: result.summary,
     period: `${result.period.label} (${result.period.how})`,
@@ -246,6 +302,7 @@ export function runTool(ctx: ToolContext, name: string, input: Record<string, un
       const replace = input.replace_saved === true && chat.editing
       const saved = engine.saveReport(str(input.name).trim() || chat.editing?.name || 'Untitled report', spec, replace ? chat.editing!.id : undefined)
       chat.editing = { id: saved.id, name: saved.name }
+      ctx.view = { kind: 'saved', savedName: saved.name, title: saved.summary, picksUpNewData: saved.moves_with_new_data }
       return { saved: saved.name, replaced: Boolean(replace), summary: saved.summary, picks_up_new_data: saved.moves_with_new_data }
     }
 
@@ -268,7 +325,9 @@ export function runTool(ctx: ToolContext, name: string, input: Record<string, un
       if (!found) throw new Error(`No saved report matches "${input.report}". list_saved_reports shows what there is.`)
       const r = engine.runSaved(found.id)
       const spec = engine.getSaved(found.id).spec
-      return { report: r.saved_report.name, since_last_run: r.since_last_run.text, ...shown(ctx, r, spec, r.saved_report.name) }
+      const out = { report: r.saved_report.name, since_last_run: r.since_last_run.text, ...shown(ctx, r, spec, r.saved_report.name) }
+      ctx.view = { ...ctx.view!, savedName: r.saved_report.name, sinceLastRun: r.since_last_run.text }
+      return out
     }
 
     case 'delete_saved_report': {
@@ -276,11 +335,16 @@ export function runTool(ctx: ToolContext, name: string, input: Record<string, un
       const found = engine.findSaved(str(input.report))
       if (!found) throw new Error(`No saved report matches "${input.report}".`)
       if (chat.editing?.id === found.id) chat.editing = null
-      return { deleted: engine.deleteSaved(found.id).name }
+      const deleted = engine.deleteSaved(found.id).name
+      ctx.view = { kind: 'deleted', savedName: deleted }
+      return { deleted }
     }
 
-    case 'demo_load_next_month':
-      return { final_data_through: engine.advanceData(1).final_through_label }
+    case 'demo_load_next_month': {
+      const through = engine.advanceData(1).final_through_label
+      ctx.view = { kind: 'data', message: `New data arrived. Final data now runs through ${through}.` }
+      return { final_data_through: through }
+    }
 
     default:
       throw new Error(`Unknown tool ${name}.`)

@@ -1,0 +1,86 @@
+/**
+ * The Report Builder page's conversation.
+ *
+ *   POST /prototypes/report-builder/api
+ *     { chatId, action }   a click: applied at once, no model (lib/report-builder/agent.ts)
+ *     { chatId, turns }    a typed message: the model runs, with the page's instructions
+ *
+ * Returns what to show: the assistant's words, the last table or question
+ * (view), the report's details for the side panel, and the saved reports.
+ * Under /prototypes, so the request gate already requires "Sees prototypes";
+ * checked again here because the gate does not enforce roles on the embedded
+ * local database.
+ */
+import { currentAccess } from '@/lib/auth/access'
+import { getAuthConfig } from '@/lib/auth/config'
+import { reportBuilderAction, reportBuilderPageTurn, type PageAction } from '@/lib/report-builder/agent'
+import { ReportModelError, type Turn } from '@/lib/report-builder/model'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+const ACTIONS = new Set(['start', 'choose', 'run', 'save', 'open_saved', 'run_saved', 'delete_saved', 'demo_month'])
+const MAX_TURNS = 30
+const MAX_CHARS = 4000
+
+function readTurns(raw: unknown): Turn[] | null {
+  if (!Array.isArray(raw)) return null
+  const turns = raw
+    .filter((t): t is { role: string; content: string } => !!t && typeof t === 'object' && typeof (t as Turn).content === 'string')
+    .filter((t) => t.role === 'user' || t.role === 'assistant')
+    .map((t) => ({ role: t.role as Turn['role'], content: t.content.slice(0, MAX_CHARS) }))
+    .filter((t) => t.content.trim())
+    .slice(-MAX_TURNS)
+  while (turns.length && turns[0]!.role !== 'user') turns.shift()
+  return turns.length && turns[turns.length - 1]!.role === 'user' ? turns : null
+}
+
+function readAction(raw: unknown): PageAction | null {
+  const a = raw as Record<string, unknown> | null
+  if (!a || typeof a.type !== 'string' || !ACTIONS.has(a.type)) return null
+  const str = (k: string) => (typeof a[k] === 'string' ? (a[k] as string).slice(0, 200) : '')
+  switch (a.type) {
+    case 'choose':
+      return { type: 'choose', choice: str('choice') }
+    case 'run':
+      return { type: 'run', name: str('name') || undefined }
+    case 'save':
+      return { type: 'save', name: str('name') || 'Untitled report', replace: a.replace === true }
+    case 'open_saved':
+    case 'run_saved':
+    case 'delete_saved':
+      return { type: a.type, report: str('report') }
+    default:
+      return { type: a.type as 'start' | 'demo_month' }
+  }
+}
+
+export async function POST(req: Request) {
+  const access = await currentAccess()
+  const authOn = getAuthConfig().enabled
+  if (authOn && !access.canSeePrototypes) return Response.json({ error: 'Report Builder is not switched on for you.' }, { status: 403 })
+  const email = access.email || 'local@localhost'
+
+  let body: Record<string, unknown>
+  try {
+    body = (await req.json()) as Record<string, unknown>
+  } catch {
+    return Response.json({ error: 'The body must be JSON.' }, { status: 400 })
+  }
+  const id = typeof body.chatId === 'string' && /^[a-z0-9-]{8,64}$/i.test(body.chatId) ? `page:${body.chatId}` : null
+  if (!id) return Response.json({ error: 'A chatId is needed.' }, { status: 400 })
+  const appUrl = process.env.APP_URL?.trim() || new URL(req.url).origin
+
+  const action = body.action === undefined ? null : readAction(body.action)
+  if (body.action !== undefined && !action) return Response.json({ error: 'Unknown action.' }, { status: 400 })
+  if (action) return Response.json(await reportBuilderAction(email, id, appUrl, action))
+
+  const turns = readTurns(body.turns)
+  if (!turns) return Response.json({ error: 'The last message must be from you.' }, { status: 400 })
+  try {
+    return Response.json(await reportBuilderPageTurn({ email, chatId: id, turns, appUrl, signal: req.signal }))
+  } catch (err) {
+    const msg = err instanceof ReportModelError ? err.message : 'Something went wrong on my side.'
+    return Response.json({ text: `I couldn't finish that: ${msg}`, view: null, panel: null, saved: null, dataThrough: null })
+  }
+}

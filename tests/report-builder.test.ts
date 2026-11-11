@@ -11,6 +11,7 @@ import { canSee, navSectionsFor, normalise } from '../src/lib/access-rules'
 import ReportEngine from '../src/lib/report-builder/engine.js'
 import { TOOLS, emptyChat, runTool, type ToolContext } from '../src/lib/report-builder/tools'
 import { chooseModel, reportBuilderOpenRouter, runLoop, type Post } from '../src/lib/report-builder/model'
+import { describeReport, suggestName } from '../src/lib/report-builder/page-view'
 
 test('the Prototypes section needs its own flag, whatever the role, and admin does not imply it', () => {
   const product = normalise({ role: 'product' })
@@ -179,4 +180,23 @@ test('OpenRouter tool turns ask for low reasoning and hand the model its reasoni
   assert.deepEqual(bodies[0]!.reasoning, { effort: 'low' })
   const assistant = (bodies[1]!.messages as Array<Record<string, unknown>>).find((m) => m.role === 'assistant')!
   assert.deepEqual(assistant.reasoning_details, [{ type: 'reasoning.text', text: 't' }])
+})
+
+test('the page gets what to draw: choices, then a table it can chart, and the report in plain words', () => {
+  const ctx = context()
+  call(ctx, 'new_report', { template: 'media_mix' })
+  assert.equal(ctx.view?.kind, 'question')
+  assert.ok((ctx.view?.choices ?? []).length > 1)
+  const ford = (call(ctx, 'search_names', { query: 'Ford', types: ['advertiser'] }).matches as Array<{ id: string }>)[0]!
+  call(ctx, 'change_report', { names: [ford.id] })
+  assert.equal(ctx.view?.kind, 'ready')
+  assert.ok(ctx.view?.table?.columns.some((c) => c.type === 'money'))
+  call(ctx, 'run_report', {})
+  assert.equal(ctx.view?.kind, 'run')
+  assert.match(String(ctx.view?.downloadUrl), /export/)
+  const panel = describeReport(ctx.engine, ctx.chat)
+  assert.equal(panel.status, 'ready')
+  assert.equal(panel.name, 'Ford media mix')
+  assert.equal(suggestName(ctx.engine, ctx.chat.report!), 'Ford media mix')
+  assert.ok(panel.rows.some((r) => r.label === 'Limited to' && r.value === 'Ford'))
 })

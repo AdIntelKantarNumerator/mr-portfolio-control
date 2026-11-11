@@ -1,0 +1,553 @@
+'use client'
+
+/**
+ * The Report Builder conversation, on its own page (11 November 2026).
+ *
+ * Built here rather than in Open WebUI because Open WebUI shows a model's
+ * answer as text: no buttons, no charts. Here the model only writes a sentence
+ * or two; the page draws the rest from what the tools returned (view): the
+ * question's choices as two columns of buttons, the table, a chart above it,
+ * the download, and the report's details beside the chat.
+ *
+ * A click is applied directly by the server, with no model round, so it is
+ * instant. A typed message goes to the model. Either way it is added to the
+ * conversation the model sees next time.
+ */
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { MarkdownView } from '@/components/markdown-view'
+import type { PageReply } from '@/lib/report-builder/agent'
+import type { SavedItem } from '@/lib/report-builder/page-view'
+import type { View, ViewTable } from '@/lib/report-builder/tools'
+
+interface Message {
+  id: number
+  role: 'user' | 'assistant' | 'note'
+  text: string
+  view?: View | null
+}
+
+type Action =
+  | { type: 'start' }
+  | { type: 'choose'; choice: string }
+  | { type: 'run'; name?: string }
+  | { type: 'save'; name: string; replace?: boolean }
+  | { type: 'open_saved'; report: string }
+  | { type: 'run_saved'; report: string }
+  | { type: 'delete_saved'; report: string }
+  | { type: 'demo_month' }
+
+const EXAMPLES = ['Media mix for Toyota and Ford, last 6 months', "Which automotive advertisers aren't buying on ESPN?", 'Spend trend for Verizon, AT&T and T-Mobile', 'Run my auto insurance share report']
+
+const newId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`)
+
+// ---------------------------------------------------------------- formatting
+
+function cell(type: string, v: unknown): string {
+  if (v == null || v === '') return type === 'text' ? '' : '–'
+  const n = Number(v)
+  if (type === 'money') return '$' + Math.round(n).toLocaleString('en-US')
+  if (type === 'int') return Math.round(n).toLocaleString('en-US')
+  if (type === 'pct') return `${n.toFixed(1)}%`
+  if (type === 'change') return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`
+  return String(v)
+}
+
+function short(n: number): string {
+  const a = Math.abs(n)
+  return '$' + (a >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : a >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : a >= 1e3 ? `${Math.round(n / 1e3)}K` : Math.round(n))
+}
+
+const SERIES = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c5)', 'var(--c4)']
+
+/** A trend line when the columns are periods; bars of each row's total otherwise. */
+function Chart({ table }: { table: ViewTable }) {
+  const text = table.columns.filter((c) => c.type === 'text').length
+  const label = (r: unknown[]) =>
+    r
+      .slice(0, text)
+      .filter(Boolean)
+      .map(String)
+      .join(' · ')
+  const timeIdx = table.columns.map((c, i) => (/^c:(\d{4}(-\d{2}|-Q\d)?)$/.test(c.key) ? i : -1)).filter((i) => i >= 0)
+  if (!table.rows.length || !table.columns.some((c) => c.type === 'money')) return null
+  const W = 640
+  const H = 190
+  const L = 58
+  const R = 14
+  const T = 10
+  const B = 24
+
+  if (timeIdx.length >= 3) {
+    const series = table.rows.slice(0, 5)
+    const max = Math.max(1, ...series.flatMap((r) => timeIdx.map((i) => Number(r[i]) || 0)))
+    const x = (j: number) => L + (j * (W - L - R)) / (timeIdx.length - 1)
+    const y = (v: number) => T + (H - T - B) * (1 - v / max)
+    return (
+      <figure className="rb-chart">
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Trend by period">
+          {[0, 1, 2, 3, 4].map((g) => (
+            <g key={g}>
+              <line x1={L} x2={W - R} y1={y((max * g) / 4)} y2={y((max * g) / 4)} stroke="var(--line)" strokeDasharray={g ? '3 3' : undefined} />
+              <text x={L - 6} y={y((max * g) / 4) + 4} textAnchor="end">
+                {short((max * g) / 4)}
+              </text>
+            </g>
+          ))}
+          <text x={x(0)} y={H - 6}>
+            {table.columns[timeIdx[0]!]!.label}
+          </text>
+          <text x={x(timeIdx.length - 1)} y={H - 6} textAnchor="end">
+            {table.columns[timeIdx[timeIdx.length - 1]!]!.label}
+          </text>
+          {series.map((r, k) => (
+            <g key={k}>
+              <polyline points={timeIdx.map((i, j) => `${x(j)},${y(Number(r[i]) || 0)}`).join(' ')} fill="none" stroke={SERIES[k % SERIES.length]} strokeWidth={2} strokeLinejoin="round" />
+              <circle cx={x(timeIdx.length - 1)} cy={y(Number(r[timeIdx[timeIdx.length - 1]!]) || 0)} r={3.5} fill={SERIES[k % SERIES.length]} />
+            </g>
+          ))}
+        </svg>
+        <figcaption className="rb-legend">
+          {series.map((r, k) => (
+            <span key={k}>
+              <i style={{ background: SERIES[k % SERIES.length] }} />
+              {label(r)}
+            </span>
+          ))}
+          {table.rows.length > 5 ? <span className="rb-muted">Top 5 shown</span> : null}
+        </figcaption>
+      </figure>
+    )
+  }
+
+  const vi = table.columns.findIndex((c) => c.type === 'money' && (c.key === 'spend' || c.key === 'total'))
+  const rows = table.rows.slice(0, 8)
+  if (vi < 0 || rows.length < 2) return null
+  const max = Math.max(1, ...rows.map((r) => Number(r[vi]) || 0))
+  const bh = 20
+  const gap = 6
+  const LW = 190
+  const h = T + rows.length * (bh + gap)
+  return (
+    <figure className="rb-chart">
+      <svg viewBox={`0 0 ${W} ${h}`} role="img" aria-label={table.columns[vi]!.label}>
+        {rows.map((r, k) => {
+          const yy = T + k * (bh + gap)
+          const w = Math.max(2, ((W - LW - 74) * (Number(r[vi]) || 0)) / max)
+          return (
+            <g key={k}>
+              <text x={LW - 8} y={yy + 14} textAnchor="end">
+                {label(r).slice(0, 30)}
+              </text>
+              <rect x={LW} y={yy} width={w} height={bh} rx={3} fill={k === 0 ? 'var(--c1)' : 'var(--brand-2)'} opacity={k === 0 ? 1 : 0.55} />
+              <text x={LW + w + 6} y={yy + 14}>
+                {short(Number(r[vi]) || 0)}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+      <figcaption className="rb-legend">
+        <span className="rb-muted">
+          {table.columns[vi]!.label}
+          {table.rows.length > 8 ? ' · top 8 shown' : ''}
+        </span>
+      </figcaption>
+    </figure>
+  )
+}
+
+function Table({ table, max }: { table: ViewTable; max: number }) {
+  const rows = table.rows.slice(0, max)
+  const cls = (type: string, v: unknown) => (type === 'text' ? '' : 'rb-n') + (type === 'change' && v != null ? (Number(v) >= 0 ? ' rb-up' : ' rb-down') : '')
+  return (
+    <div>
+      <div className="rb-tablewrap">
+        <table className="rb-table">
+          <thead>
+            <tr>
+              {table.columns.map((c) => (
+                <th key={c.key} className={c.type === 'text' ? '' : 'rb-n'}>
+                  {c.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                {r.map((v, j) => (
+                  <td key={j} className={cls(table.columns[j]!.type, v)}>
+                    {cell(table.columns[j]!.type, v)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {table.totals ? (
+              <tr className="rb-total">
+                {table.totals.map((v, j) => (
+                  <td key={j} className={cls(table.columns[j]!.type, v)}>
+                    {cell(table.columns[j]!.type, v)}
+                  </td>
+                ))}
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+      {table.rowCount > rows.length ? (
+        <p className="rb-muted rb-cap">
+          Showing {rows.length} of {table.rowCount.toLocaleString('en-US')} rows. Totals cover every row; the download has them all.
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- the page
+
+export function ReportBuilderChat({ initialSaved, initialThrough, modelReady }: { initialSaved: SavedItem[]; initialThrough: string; modelReady: boolean }) {
+  const [chatId, setChatId] = useState(newId)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [panel, setPanel] = useState<PageReply['panel'] | null>(null)
+  const [saved, setSaved] = useState<SavedItem[]>(initialSaved)
+  const [through, setThrough] = useState(initialThrough)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [input, setInput] = useState('')
+  const [tab, setTab] = useState<'report' | 'saved'>('report')
+  const [naming, setNaming] = useState<string | null>(null)
+  const [arming, setArming] = useState<string | null>(null)
+  const seq = useRef(0)
+  const logRef = useRef<HTMLDivElement>(null)
+  const started = useRef(false)
+
+  const push = (m: Omit<Message, 'id'>) => setMessages((all) => [...all, { ...m, id: ++seq.current }])
+
+  useEffect(() => {
+    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' })
+  }, [messages, busy])
+
+  function take(r: PageReply) {
+    push({ role: 'assistant', text: r.text, view: r.view })
+    if (r.panel) setPanel(r.panel)
+    if (r.saved) setSaved(r.saved)
+    if (r.dataThrough) setThrough(r.dataThrough)
+  }
+
+  async function send(body: { action?: Action; turns?: Array<{ role: string; content: string }> }, id = chatId) {
+    const res = await fetch('/prototypes/report-builder/api', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chatId: id, ...body }),
+    })
+    const json = (await res.json().catch(() => ({}))) as PageReply & { error?: string }
+    if (!res.ok) throw new Error(json.error ?? `The server said ${res.status}.`)
+    return json
+  }
+
+  /** A click: shown as the person's words, applied directly. */
+  async function act(action: Action, said: string | null, id = chatId) {
+    if (busy) return
+    if (said) push({ role: 'user', text: said })
+    setBusy('Updating')
+    try {
+      take(await send({ action }, id))
+    } catch (err) {
+      push({ role: 'assistant', text: (err as Error).message })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /** A typed message: the model reads the conversation so far. */
+  async function ask(text: string) {
+    if (busy || !text.trim()) return
+    const turns = [...messages.filter((m) => m.role !== 'note').map((m) => ({ role: m.role, content: m.text })), { role: 'user', content: text }]
+    push({ role: 'user', text })
+    setInput('')
+    setBusy('Working on it')
+    try {
+      take(await send({ turns }))
+    } catch (err) {
+      push({ role: 'assistant', text: (err as Error).message })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  function startOver() {
+    const id = newId()
+    setChatId(id)
+    setMessages([])
+    setPanel(null)
+    setNaming(null)
+    void act({ type: 'start' }, null, id)
+  }
+
+  useEffect(() => {
+    if (started.current) return
+    started.current = true
+    void act({ type: 'start' }, null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    void ask(input)
+  }
+
+  return (
+    <div className="rb-frame">
+      <section className="rb-chatcard" aria-label="Conversation">
+        <div className="rb-log" ref={logRef} aria-live="polite">
+          <div className="rb-msg rb-bot">
+            <p>Hi! I can set up a custom report or data extract for you. Pick a starting point, or just tell me what you need.</p>
+          </div>
+          {messages.map((m) => (
+            <MessageView
+              key={m.id}
+              m={m}
+              live={m === lastAssistant && !busy}
+              panel={panel}
+              onChoose={(label) => act({ type: 'choose', choice: label }, label)}
+              onRun={() => act({ type: 'run', name: panel?.name }, 'Run the full report')}
+              onSave={() => setNaming(panel?.name || 'My report')}
+              onNew={startOver}
+            />
+          ))}
+          {messages.length <= 1 && !busy ? (
+            <div className="rb-msg rb-bot">
+              <span className="rb-label">Or try asking:</span>
+              <div className="rb-grid">
+                {EXAMPLES.map((e) => (
+                  <button key={e} type="button" className="rb-choice rb-quiet" disabled={!modelReady} title={modelReady ? undefined : 'Needs a model to be configured'} onClick={() => ask(e)}>
+                    {e}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {naming !== null ? (
+            <form
+              className="rb-msg rb-bot rb-naming"
+              onSubmit={(e) => {
+                e.preventDefault()
+                const name = naming.trim() || 'My report'
+                setNaming(null)
+                void act({ type: 'save', name, replace: Boolean(panel?.editing) }, `Save it as "${name}"`)
+              }}
+            >
+              <label htmlFor="rb-name">{panel?.editing ? `Save changes to "${panel.editing}", or rename to save a copy:` : 'Name this report:'}</label>
+              <div className="rb-row">
+                <input id="rb-name" value={naming} onChange={(e) => setNaming(e.target.value)} autoFocus />
+                <button type="submit" className="btn btn-primary">
+                  Save
+                </button>
+                <button type="button" className="btn" onClick={() => setNaming(null)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : null}
+          {busy ? <div className="rb-msg rb-bot rb-thinking">{busy}…</div> : null}
+        </div>
+        <form className="rb-compose" onSubmit={submit}>
+          <input
+            id="rb-ask"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder={modelReady ? 'Describe a report, or type a name, for example "Toyota" or "auto insurance"' : 'Typing needs a model to be configured; the buttons work without one'}
+            aria-label="Message"
+            disabled={!modelReady}
+          />
+          <button type="submit" className="btn btn-primary" disabled={!modelReady || !!busy || !input.trim()}>
+            Send
+          </button>
+        </form>
+      </section>
+
+      <aside className="rb-rail" aria-label="Report details">
+        <div className="rb-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={tab === 'report'} onClick={() => setTab('report')}>
+            Your report
+          </button>
+          <button type="button" role="tab" aria-selected={tab === 'saved'} onClick={() => setTab('saved')}>
+            Saved reports{saved.length ? ` (${saved.length})` : ''}
+          </button>
+        </div>
+        {tab === 'report' ? (
+          <div className="rb-panel">
+            {!panel || panel.status === 'empty' ? (
+              <p className="rb-muted">Your report takes shape here as you answer. When it looks right, run it, download it, or save it to run again whenever new data arrives.</p>
+            ) : (
+              <>
+                <div className="rb-eyebrow">{panel.editing ? 'Editing saved report' : 'Report being built'}</div>
+                <div className="rb-name">{panel.editing ?? panel.name}</div>
+                <dl className="rb-dl">
+                  <dt>Status</dt>
+                  <dd>
+                    <span className={`rb-status rb-${panel.status}`}>{panel.statusText}</span>
+                  </dd>
+                  {panel.rows.map((r) => (
+                    <div key={r.label} className="rb-dlrow">
+                      <dt>{r.label}</dt>
+                      <dd>{r.value}</dd>
+                    </div>
+                  ))}
+                  <dt>Period</dt>
+                  <dd>
+                    {panel.period ?? 'Not chosen yet'}{' '}
+                    {panel.period ? <span className={`rb-pill${panel.picksUpNewData ? ' rb-live' : ''}`}>{panel.picksUpNewData ? 'updates with new data' : 'fixed'}</span> : null}
+                  </dd>
+                </dl>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="rb-panel">
+            <p className="rb-muted">Run a saved report any time to get it on the newest data.</p>
+            {!saved.length ? <p className="rb-muted">None yet. Build a report and choose Save report.</p> : null}
+            {saved.map((s) => (
+              <div key={s.id} className="rb-saved">
+                <div className="rb-row">
+                  <b>{s.name}</b>
+                  <span className={`rb-pill${s.picksUpNewData ? ' rb-live' : ''}`}>{s.picksUpNewData ? 'updates with new data' : 'fixed period'}</span>
+                </div>
+                <p className="rb-muted">{s.summary}</p>
+                <p className="rb-muted rb-cap">{s.lastRun ? `Last run: ${s.lastRun}` : 'Not run yet'}</p>
+                <div className="rb-row">
+                  <button type="button" className="btn" disabled={!!busy} onClick={() => act({ type: 'run_saved', report: s.id }, `Run ${s.name}`)}>
+                    Run
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={!!busy}
+                    onClick={() => {
+                      setTab('report')
+                      void act({ type: 'open_saved', report: s.id }, `Change ${s.name}`)
+                    }}
+                  >
+                    Change
+                  </button>
+                  <button
+                    type="button"
+                    className="btn rb-danger"
+                    disabled={!!busy}
+                    onClick={() => {
+                      if (arming !== s.id) return setArming(s.id)
+                      setArming(null)
+                      void act({ type: 'delete_saved', report: s.id }, `Delete ${s.name}`)
+                    }}
+                  >
+                    {arming === s.id ? 'Confirm delete' : 'Delete'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="rb-railfoot">
+          <span className="rb-muted">Final data through {through}</span>
+          <button type="button" className="btn rb-small" disabled={!!busy} title="For demonstrations: pretend next month's data has arrived" onClick={() => act({ type: 'demo_month' }, 'Demo: load next month of data')}>
+            Demo: load next month
+          </button>
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+function MessageView({
+  m,
+  live,
+  panel,
+  onChoose,
+  onRun,
+  onSave,
+  onNew,
+}: {
+  m: Message
+  live: boolean
+  panel: PageReply['panel'] | null
+  onChoose: (label: string) => void
+  onRun: () => void
+  onSave: () => void
+  onNew: () => void
+}) {
+  if (m.role === 'user') {
+    return (
+      <div className="rb-msg rb-me">
+        <div className="rb-bubble">{m.text}</div>
+      </div>
+    )
+  }
+  const v = m.view
+  const choices = v?.choices ?? []
+  return (
+    <div className="rb-msg rb-bot">
+      {v?.title && (v.kind === 'ready' || v.kind === 'run') ? <p className="rb-summary">{v.savedName ? `${v.savedName}: ` : ''}{v.title}</p> : null}
+      {v?.kind === 'run' && v.sinceLastRun ? <p className="rb-since">{v.sinceLastRun}</p> : null}
+      <MarkdownView text={m.text} />
+      {v?.table && (v.kind === 'ready' || v.kind === 'run') ? (
+        <div className="rb-result">
+          <Chart table={v.table} />
+          <Table table={v.table} max={v.kind === 'run' ? 25 : 10} />
+          {v.downloadUrl ? (
+            <div className="rb-row">
+              <a className="btn" href={v.downloadUrl}>
+                Download spreadsheet
+              </a>
+              <span className="rb-muted">
+                {v.table.rowCount.toLocaleString('en-US')} rows · {v.period}
+              </span>
+            </div>
+          ) : null}
+          {v.notes?.length ? <p className="rb-notes">{Array.from(new Set(v.notes)).join(' ')}</p> : null}
+        </div>
+      ) : null}
+      {live && (v?.kind === 'question' || v?.kind === 'problem') && choices.length ? (
+        <div className="rb-grid">
+          {choices.map((c) => (
+            <button key={c.number} type="button" className="rb-choice" onClick={() => onChoose(c.label)}>
+              <b>{c.label}</b>
+              {c.description ? <small>{c.description}</small> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {live && v?.kind === 'question' && v.acceptsName ? <span className="rb-label">Or type a name below.</span> : null}
+      {live && (v?.kind === 'ready' || v?.kind === 'run' || v?.kind === 'saved') ? (
+        <>
+          <div className="rb-row">
+            {v.kind === 'ready' ? (
+              <button type="button" className="btn btn-primary" onClick={onRun}>
+                Run full report
+              </button>
+            ) : null}
+            {v.kind !== 'saved' && panel && panel.status === 'ready' ? (
+              <button type="button" className={`btn${v.kind === 'run' ? ' btn-primary' : ''}`} onClick={onSave}>
+                {panel.editing ? 'Save changes' : 'Save report'}
+              </button>
+            ) : null}
+            <button type="button" className="btn" onClick={onNew}>
+              Start a new report
+            </button>
+          </div>
+          {v.kind === 'ready' && choices.length ? (
+            <>
+              <span className="rb-label">Or adjust it:</span>
+              <div className="rb-chips">
+                {choices.map((c) => (
+                  <button key={c.number} type="button" className="rb-chip" onClick={() => onChoose(c.label)}>
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  )
+}

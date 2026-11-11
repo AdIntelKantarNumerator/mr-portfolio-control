@@ -14,8 +14,9 @@ import { db } from '@/db/client'
 import { reportBuilderChats, reportBuilderUsers } from '@/db/schema'
 import ReportEngine, { type Engine, type EngineState, type Spec } from './engine.js'
 import { chooseModel, runLoop, ReportModelError, type Post, type Turn } from './model'
-import { REPORT_BUILDER_SKILL } from './skill'
-import { TOOLS, emptyChat, progressNote, runTool, type ChatState } from './tools'
+import { describeReport, savedList } from './page-view'
+import { REPORT_BUILDER_PAGE_SKILL, REPORT_BUILDER_SKILL } from './skill'
+import { TOOLS, emptyChat, progressNote, runTool, type ChatState, type ToolContext, type View } from './tools'
 
 export const REPORT_BUILDER_MODEL_ID = 'report-builder'
 export const REPORT_BUILDER_MODEL_NAME = 'Report Builder'
@@ -72,26 +73,37 @@ export interface TurnInput {
   post?: Post
 }
 
-/** Answers the turn. Throws ReportModelError when no model is configured or it fails. */
-export async function reportBuilderTurn(input: TurnInput): Promise<string> {
-  const choice = chooseModel()
-  if (!choice) throw new ReportModelError('No model is configured for Report Builder. Set ANTHROPIC_API_KEY, or OpenRouter with pinned providers.')
-  const email = input.email.trim().toLowerCase()
-  const chatKey = input.chatId?.trim() || `default:${email}`
-
-  const before = await loadUser(email)
+/**
+ * Loads one person's saved reports and one chat's state, runs `work` on them,
+ * and saves whichever changed. Every turn and every page action goes through here.
+ */
+async function withSession<T>(email: string, chatId: string | null, appUrl: string, work: (ctx: ToolContext) => Promise<T> | T): Promise<T> {
+  const who = email.trim().toLowerCase()
+  const chatKey = chatId?.trim() || `default:${who}`
+  const before = await loadUser(who)
   const { engine, state } = engineFor(before)
-  const chat = await loadChat(chatKey, email)
+  const chat = await loadChat(chatKey, who)
   const chatBefore = JSON.stringify(chat)
   const userBefore = JSON.stringify(state())
+  const ctx: ToolContext = { engine, chat, downloadUrl: (spec, n) => downloadUrl(appUrl, spec, n) }
 
+  const out = await work(ctx)
+
+  if (!before || JSON.stringify(state()) !== userBefore) await saveUser(who, state())
+  if (JSON.stringify(chat) !== chatBefore) await saveChat(chatKey, who, chat)
+  return out
+}
+
+async function modelTurn(ctx: ToolContext, input: TurnInput, system: string): Promise<string> {
+  const choice = chooseModel()
+  if (!choice) throw new ReportModelError('No model is configured for Report Builder. Set REPORT_BUILDER_MODEL and REPORT_BUILDER_PROVIDERS (OpenRouter), or ANTHROPIC_API_KEY.')
   let last = ''
-  const text = await runLoop(
+  return runLoop(
     {
-      system: REPORT_BUILDER_SKILL,
+      system,
       turns: input.turns,
       tools: TOOLS,
-      exec: (name, args) => runTool({ engine, chat, downloadUrl: (spec, n) => downloadUrl(input.appUrl, spec, n) }, name, args),
+      exec: (name, args) => runTool(ctx, name, args),
       onTool: (name) => {
         const note = progressNote(name)
         if (note !== last) input.onProgress?.(note)
@@ -102,8 +114,112 @@ export async function reportBuilderTurn(input: TurnInput): Promise<string> {
     choice,
     input.post,
   )
+}
 
-  if (!before || JSON.stringify(state()) !== userBefore) await saveUser(email, state())
-  if (JSON.stringify(chat) !== chatBefore) await saveChat(chatKey, email, chat)
-  return text
+/** Answers a turn in Open WebUI. Throws ReportModelError when no model is configured or it fails. */
+export async function reportBuilderTurn(input: TurnInput): Promise<string> {
+  return withSession(input.email, input.chatId, input.appUrl, (ctx) => modelTurn(ctx, input, REPORT_BUILDER_SKILL))
+}
+
+// ---------------------------------------------------------------------------
+// The Prototypes page: typed messages go to the model; clicks are applied
+// directly, with no model round, so a choice takes effect at once.
+// ---------------------------------------------------------------------------
+
+export type PageAction =
+  | { type: 'start' }
+  | { type: 'choose'; choice: string }
+  | { type: 'run'; name?: string }
+  | { type: 'save'; name: string; replace?: boolean }
+  | { type: 'open_saved'; report: string }
+  | { type: 'run_saved'; report: string }
+  | { type: 'delete_saved'; report: string }
+  | { type: 'demo_month' }
+
+const ACTION_TOOL: Record<PageAction['type'], string> = {
+  start: 'new_report',
+  choose: 'choose',
+  run: 'run_report',
+  save: 'save_report',
+  open_saved: 'open_saved_report',
+  run_saved: 'run_saved_report',
+  delete_saved: 'delete_saved_report',
+  demo_month: 'demo_load_next_month',
+}
+
+function actionInput(a: PageAction): Record<string, unknown> {
+  switch (a.type) {
+    case 'choose':
+      return { choice: a.choice }
+    case 'run':
+      return { name: a.name }
+    case 'save':
+      return { name: a.name, replace_saved: a.replace === true }
+    case 'open_saved':
+    case 'run_saved':
+      return { report: a.report }
+    case 'delete_saved':
+      return { report: a.report, confirmed: true }
+    default:
+      return {}
+  }
+}
+
+/** What the assistant says after a click: the page shows the rest. */
+function cannedText(view: View | undefined): string {
+  if (!view) return 'Done.'
+  switch (view.kind) {
+    case 'question':
+      return view.question ?? 'What next?'
+    case 'problem':
+      return `${view.problem} Which would you like?`
+    case 'ready':
+      return 'Here is the preview. Run it for the full report, save it, or adjust it below.'
+    case 'run':
+      return view.sinceLastRun ? `Here it is on the data loaded now, through ${view.dataThrough}.` : `Here is the full report, with data through ${view.dataThrough}.`
+    case 'saved':
+      return `Saved as "${view.savedName}". ${view.picksUpNewData ? 'Its period is rolling, so each run picks up the newest data.' : 'Its period is fixed, so re-running it will not pick up newer months.'}`
+    case 'deleted':
+      return `Deleted "${view.savedName}".`
+    default:
+      return view.message ?? 'Done.'
+  }
+}
+
+export interface PageReply {
+  text: string
+  view: View | null
+  panel: ReturnType<typeof describeReport>
+  saved: ReturnType<typeof savedList>
+  dataThrough: string
+}
+
+function reply(ctx: ToolContext, text: string): PageReply {
+  return { text, view: ctx.view ?? null, panel: describeReport(ctx.engine, ctx.chat), saved: savedList(ctx.engine), dataThrough: ctx.engine.availability().final_through_label }
+}
+
+/** A click on the page: applied directly. Errors come back as the assistant's words. */
+export function reportBuilderAction(email: string, chatId: string, appUrl: string, action: PageAction): Promise<PageReply> {
+  return withSession(email, chatId, appUrl, (ctx) => {
+    try {
+      runTool(ctx, ACTION_TOOL[action.type], actionInput(action))
+      return reply(ctx, cannedText(ctx.view))
+    } catch (err) {
+      return reply(ctx, (err as Error).message)
+    }
+  })
+}
+
+/** A typed message on the page: the model, with the page's instructions. */
+export function reportBuilderPageTurn(input: TurnInput & { chatId: string }): Promise<PageReply> {
+  return withSession(input.email, input.chatId, input.appUrl, async (ctx) => {
+    const text = await modelTurn(ctx, input, REPORT_BUILDER_PAGE_SKILL)
+    return reply(ctx, text)
+  })
+}
+
+/** The page's first look: saved reports and data freshness, with no chat yet. */
+export async function reportBuilderOverview(email: string): Promise<Pick<PageReply, 'saved' | 'dataThrough'>> {
+  const { engine } = engineFor(await loadUser(email.trim().toLowerCase()))
+  return { saved: savedList(engine), dataThrough: engine.availability().final_through_label }
 }
