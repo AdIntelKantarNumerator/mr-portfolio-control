@@ -112,6 +112,19 @@ export const TOOLS: ToolDef[] = [
     }),
   },
   {
+    name: 'offer_names',
+    description:
+      'Ask the user which of several matching names they mean, as choices they can pick (the Report Builder page shows them as buttons). ids: 2 to 6 ids from search_names. Use whenever a name could mean more than one thing, instead of listing the options yourself. Picking one adds it to the report the way change_report would.',
+    parameters: obj(
+      {
+        question: { type: 'string', description: 'A short question, such as "Which do you mean?"' },
+        ids: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 6 },
+        names_mode: { type: 'string', enum: ['replace', 'add'] },
+      },
+      ['question', 'ids'],
+    ),
+  },
+  {
     name: 'choose',
     description: 'Apply one of the numbered choices last shown (a question option, a fix or an adjustment). choice: the number, or the choice words the user replied with.',
     parameters: obj({ choice: { type: 'string' } }, ['choice']),
@@ -277,6 +290,24 @@ export function runTool(ctx: ToolContext, name: string, input: Record<string, un
         patch.remove[key] = [...(patch.remove[key] ?? []), id]
       }
       return status(ctx, engine.validate(report, patch))
+    }
+
+    case 'offer_names': {
+      const report = needReport(ctx)
+      const ids = strs(input.ids).filter((id) => NAME_TYPES.includes(id.split(':')[0]!)).slice(0, 6)
+      if (ids.length < 2) throw new Error('Give at least two ids from search_names.')
+      const question = str(input.question).trim() || 'Which do you mean?'
+      const add = input.names_mode === 'add'
+      const choices = ids.map((id, i) => {
+        const type = id.split(':')[0]!
+        const label = engine.labelOf(type, id)
+        const hit = engine.search(label, { types: [type], limit: 10 }).find((h) => h.id === id)
+        chat.offered[i] = { label, patch: engine.patchFromUnderstanding(report, { entities: [{ id, type }], add }) }
+        return { number: i + 1, label, description: hit ? `${hit.type_label}${hit.context && hit.context !== hit.type_label ? ` · ${hit.context}` : ''}` : undefined }
+      })
+      chat.offered.length = choices.length
+      ctx.view = { kind: 'question', question, acceptsName: true, choices }
+      return { status: 'question', question, choices }
     }
 
     case 'choose': {

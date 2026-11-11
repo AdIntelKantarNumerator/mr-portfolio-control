@@ -200,3 +200,23 @@ test('the page gets what to draw: choices, then a table it can chart, and the re
   assert.equal(suggestName(ctx.engine, ctx.chat.report!), 'Ford media mix')
   assert.ok(panel.rows.some((r) => r.label === 'Limited to' && r.value === 'Ford'))
 })
+
+test('everyday words find the right thing: fast food is Quick Service Restaurants', () => {
+  const ctx = context()
+  const hits = call(ctx, 'search_names', { query: 'Fast Food' }).matches as Array<{ label: string }>
+  assert.equal(hits[0]!.label, 'Quick Service Restaurants')
+})
+
+test('the model can put its own which-one choices on the buttons, and picking one applies it', () => {
+  const ctx = context()
+  call(ctx, 'new_report', { template: 'advertiser_trend' })
+  const qsr = (call(ctx, 'search_names', { query: 'Quick Service Restaurants', types: ['subcategory'] }).matches as Array<{ id: string }>)[0]!
+  const rest = (call(ctx, 'search_names', { query: 'Restaurants', types: ['category'] }).matches as Array<{ id: string }>)[0]!
+  const asked = call(ctx, 'offer_names', { question: 'Which one?', ids: [qsr.id, rest.id] })
+  assert.equal(asked.status, 'question')
+  assert.deepEqual(ctx.view?.choices?.map((c) => c.label), ['Quick Service Restaurants', 'Restaurants'])
+  assert.match(String(ctx.view?.choices?.[1]?.description), /Category/)
+  const picked = call(ctx, 'choose', { choice: '1' })
+  assert.equal(picked.status, 'ready')
+  assert.match(String(picked.summary), /Quick Service Restaurants/)
+})
