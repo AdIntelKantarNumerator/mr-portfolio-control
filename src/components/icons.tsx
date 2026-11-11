@@ -89,6 +89,15 @@ export const IconTimeline = (p: IconProps) => (
   </Glyph>
 )
 
+/** Release Calendar — a calendar page with a day marked. */
+export const IconReleaseCalendar = (p: IconProps) => (
+  <Glyph {...p}>
+    <rect x="1.8" y="2.6" width="12.4" height="11" rx="1.2" />
+    <path d="M1.8 6h12.4M5 1.4v2.4M11 1.4v2.4" />
+    <path d="M9.4 8.6l1.2 1.2 2-2.2" />
+  </Glyph>
+)
+
 /** Register — decisions and blockers, as a clipboard. */
 export const IconRegister = (p: IconProps) => (
   <Glyph {...p}>

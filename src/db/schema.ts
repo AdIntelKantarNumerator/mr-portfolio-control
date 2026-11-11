@@ -2349,6 +2349,48 @@ export const taxonomyIndustry = pgTable('taxonomy_industry', {
   updatedAt: updatedAt(),
 })
 
+/**
+ * Planned Production releases for the Release Calendar (drizzle/0043): Linear
+ * tickets labelled as a production release, sent by Yaara each pass. One row
+ * per ticket; lib/releases.ts.
+ */
+export const releases = pgTable(
+  'releases',
+  {
+    linearId: text('linear_id').primaryKey(),
+    /** "MED-339" */
+    identifier: text('identifier').notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+    url: text('url'),
+    /** The ticket's target date, YYYY-MM-DD; null when it has none. */
+    targetDate: text('target_date'),
+    /** The ticket's workflow state, as Linear names it ("Todo", "In Progress"). */
+    status: text('status'),
+    /** Linear's state type: backlog | unstarted | started | completed | canceled. */
+    statusType: text('status_type'),
+    createdBy: text('created_by'),
+    assignee: text('assignee'),
+    projectLinearId: text('project_linear_id'),
+    projectName: text('project_name'),
+    projectLead: text('project_lead'),
+    /** JSON string[]: the teams the ticket says it affects, as read by Yaara's model. */
+    teamsImpacted: text('teams_impacted').notNull().default('[]'),
+    /** Who to ask: the assignee, else the project lead. */
+    contactName: text('contact_name'),
+    /** A link that opens a Slack message to them, when she found them in Slack. */
+    contactSlackUrl: text('contact_slack_url'),
+    /** The target date last announced in the channel ("none" for no date); null until announced. */
+    announcedKey: text('announced_key'),
+    announcedAt: timestamp('announced_at', { withTimezone: true }),
+    /** No longer labelled as a release, or gone from Linear. Hidden, kept. */
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('releases_identifier_idx').on(t.identifier)],
+)
+
 /** One comparison asked for, its progress while it runs, and its result. */
 export const taxonomyRuns = pgTable(
   'taxonomy_runs',

@@ -44,6 +44,7 @@ import {
   IconSeries,
   IconTemplates,
   IconTimeline,
+  IconReleaseCalendar,
   IconProjects,
   IconReportBuilder,
   IconWorkflow,
@@ -78,6 +79,7 @@ export const NAV: NavSection[] = [
       { href: '/initiatives', label: 'Initiatives', icon: IconInitiatives },
       { href: '/projects', label: 'Projects', icon: IconProjects },
       { href: '/roadmap', label: 'Timeline', icon: IconTimeline, hint: 'Everything against the calendar' },
+      { href: '/release-calendar', label: 'Release Calendar', icon: IconReleaseCalendar, hint: 'Planned Production releases, from Linear' },
     ],
   },
   {
