@@ -30,8 +30,10 @@ export interface IncomingRelease {
   title: string
   description: string | null
   url: string | null
-  /** YYYY-MM-DD, or null. */
+  /** YYYY-MM-DD, or null: the ticket's target date, or its project's when it has none (Scott, 11 November 2026). */
   targetDate: string | null
+  /** Where targetDate came from: the ticket, or its project. Null with no date. */
+  targetDateFrom: 'ticket' | 'project' | null
   status: string | null
   statusType: string | null
   createdBy: string | null
@@ -66,6 +68,8 @@ export function parseRelease(v: unknown): IncomingRelease | string {
     description: typeof o.description === 'string' ? o.description.slice(0, 20_000) : null,
     url: url && /^https:\/\//.test(url) ? url : null,
     targetDate,
+    // Older senders said nothing: a date they sent was the ticket's own.
+    targetDateFrom: !targetDate ? null : o.targetDateFrom === 'project' ? 'project' : 'ticket',
     status: text(o.status, 80),
     statusType: text(o.statusType, 40),
     createdBy: text(o.createdBy, 120),

@@ -89,6 +89,7 @@ export async function saveReleases(list: IncomingRelease[], complete: boolean): 
       description: r.description,
       url: r.url,
       targetDate: r.targetDate,
+      targetDateFrom: r.targetDateFrom,
       status: r.status,
       statusType: r.statusType,
       createdBy: r.createdBy,
@@ -154,6 +155,8 @@ export interface CalendarRelease {
   description: string | null
   url: string | null
   targetDate: string | null
+  /** "project" when the ticket had no date and its project's stands in. */
+  targetDateFrom: string | null
   status: string | null
   statusType: string | null
   createdBy: string | null
@@ -186,6 +189,7 @@ export async function readCalendar(): Promise<CalendarRelease[]> {
         description: r.description,
         url: r.url,
         targetDate: r.targetDate,
+        targetDateFrom: r.targetDateFrom,
         status: r.status,
         statusType: r.statusType,
         createdBy: r.createdBy,

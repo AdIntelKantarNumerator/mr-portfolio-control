@@ -37,6 +37,17 @@ test('a release is read as sent, teams de-duplicated; a bad date or a foreign li
   assert.match(parseRelease({ title: 'x' }) as string, /linearId/)
 })
 
+test('the reported case, INS-659: no date of its own, so its project target date stands in, and says so', () => {
+  const r = parseRelease({ ...med339, identifier: 'INS-659', targetDate: '2026-11-14', targetDateFrom: 'project' })
+  assert.ok(typeof r !== 'string')
+  assert.equal(r.targetDate, '2026-11-14')
+  assert.equal(r.targetDateFrom, 'project')
+  assert.equal((parseRelease(med339) as { targetDateFrom: string }).targetDateFrom, 'ticket', 'a sender that does not say: the ticket')
+  assert.equal((parseRelease({ ...med339, targetDate: null, targetDateFrom: 'project' }) as { targetDateFrom: string | null }).targetDateFrom, null)
+  // Announced with "no date" before; the stand-in date is a change, and is announced.
+  assert.equal(announceFor({ announcedKey: 'none' }, r), 'date')
+})
+
 test('announced once when new, again only when the date moves; never for a done or cancelled ticket', () => {
   assert.equal(announceFor(null, med339), 'new')
   assert.equal(announceFor({ announcedKey: null }, med339), 'new', 'seen but never posted: still owed')

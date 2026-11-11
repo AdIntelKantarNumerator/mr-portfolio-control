@@ -2363,8 +2363,10 @@ export const releases = pgTable(
     title: text('title').notNull(),
     description: text('description'),
     url: text('url'),
-    /** The ticket's target date, YYYY-MM-DD; null when it has none. */
+    /** The ticket's target date, YYYY-MM-DD - or its project's, when the ticket has none; null when neither has one. */
     targetDate: text('target_date'),
+    /** "ticket" or "project": where targetDate came from (drizzle/0044). */
+    targetDateFrom: text('target_date_from'),
     /** The ticket's workflow state, as Linear names it ("Todo", "In Progress"). */
     status: text('status'),
     /** Linear's state type: backlog | unstarted | started | completed | canceled. */

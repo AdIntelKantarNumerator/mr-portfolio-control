@@ -2328,7 +2328,8 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rc-card.tone-cancelled { --tone: var(--slate); opacity: .75; }
 .rc-card.on { box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 45%, transparent); }
 .rc-card.wide { font-size: 13.5px; padding: 10px 14px; }
-.rc-card-head { display: flex; align-items: center; gap: 6px; }
+.rc-card-head { display: flex; align-items: center; gap: 3px 6px; flex-wrap: wrap; }
+.rc-ident { white-space: nowrap; }
 .rc-ident { font-weight: 700; color: var(--muted); font-size: 11px; }
 .rc-status { font-size: 10.5px; font-weight: 700; padding: 0 6px; border-radius: 999px; color: var(--tone, var(--blue)); background: color-mix(in srgb, var(--tone, var(--blue)) 14%, transparent); }
 /* The whole tile opens the popup (calendar.tsx). */
@@ -2343,6 +2344,9 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rc-card.compact { padding: 4px 6px 5px; }
 .rc-card.compact .rc-name { margin: 1px 0 1px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.25; }
 .rc-card.brief .rc-name { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* A date that is the project's, not the ticket's (INS-659). */
+.rc-from { font-size: 10px; font-weight: 600; color: var(--muted); border: 1px dashed var(--line-2); border-radius: 999px; padding: 0 5px; white-space: nowrap; }
+.rc-from-note { font-weight: 400; font-size: 12.5px; }
 .rc-proj { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rc-dialog-facts { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
 .rc-dialog-when { font-weight: 600; margin-bottom: 6px; }

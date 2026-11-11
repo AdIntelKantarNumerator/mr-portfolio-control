@@ -257,6 +257,11 @@ function ReleaseCard({
         <div className="rc-card-head">
           <span className="rc-ident">{r.identifier}</span>
           <span className={`rc-status tone-${statusTone(r.statusType)}`}>{r.status ?? '—'}</span>
+          {r.targetDateFrom === 'project' ? (
+            <span className="rc-from" title="The ticket has no target date; this is its project's">
+              project date
+            </span>
+          ) : null}
         </div>
         <div className="rc-name">{r.title}</div>
         {compact ? <div className="rc-proj">{projectOf(r)}</div> : <Facts r={r} brief={brief} />}
@@ -345,6 +350,7 @@ function InfoDialog({ r, onClose }: { r: CalendarRelease; onClose: () => void })
             <div className="rc-dialog-when">
               <span className={`rc-status tone-${statusTone(r.statusType)}`}>{r.status ?? '—'}</span>{' '}
               {r.targetDate ? fmt(r.targetDate, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'No target date yet'}
+              {r.targetDateFrom === 'project' ? <span className="tx-muted rc-from-note"> · the project&apos;s target date; the ticket has none</span> : null}
             </div>
             <Facts r={r} />
           </div>
