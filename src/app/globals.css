@@ -2335,8 +2335,7 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rc-card[role="button"] { cursor: pointer; }
 .rc-card[role="button"]:hover { border-color: color-mix(in srgb, var(--tone) 55%, var(--line)); background: color-mix(in srgb, var(--tone) 5%, var(--raised)); }
 .rc-card[role="button"]:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-.rc-card a:hover { text-decoration: underline; text-underline-offset: 3px; }
-/* The popup's Linear and contact links: bold, the site's link colour, underlined on hover like its other links. */
+/* Every link on the calendar - objective, initiative, project, Linear, contact: bold, the site's link colour, underlined on hover like its other links. */
 .rc-link { font-weight: 700; color: var(--brand); text-decoration: none; }
 .rc-link:hover, .rc-link:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
 .rc-name { font-weight: 700; margin: 2px 0 4px; overflow-wrap: anywhere; }

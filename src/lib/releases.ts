@@ -15,6 +15,8 @@ import { announceFor, announceKey, previousDate, type Announce, type IncomingRel
 
 export interface ReleaseLinks {
   project: { id: string; name: string } | null
+  /** The initiative the project sits under, between it and the objective (Scott, 11 November 2026). */
+  initiative: { id: string; name: string } | null
   objective: { id: string; name: string } | null
 }
 
@@ -29,7 +31,7 @@ export interface ReleaseOutcome {
   links: ReleaseLinks
 }
 
-/** The portfolio project behind a Linear project, and the objective it sits under. */
+/** The portfolio project behind a Linear project, and the initiative and objective it sits under. */
 async function linksFor(linearProjectIds: string[]): Promise<Map<string, ReleaseLinks>> {
   const out = new Map<string, ReleaseLinks>()
   const ids = [...new Set(linearProjectIds)]
@@ -40,7 +42,14 @@ async function linksFor(linearProjectIds: string[]): Promise<Map<string, Release
     .where(and(eq(sourceRecords.system, 'linear'), eq(sourceRecords.entityType, 'project'), inArray(sourceRecords.externalId, ids)))
   if (!recs.length) return out
   const rows = await db
-    .select({ id: projects.id, name: projects.name, objectiveId: initiatives.objectiveId, objectiveName: objectives.name })
+    .select({
+      id: projects.id,
+      name: projects.name,
+      initiativeId: initiatives.id,
+      initiativeName: initiatives.name,
+      objectiveId: initiatives.objectiveId,
+      objectiveName: objectives.name,
+    })
     .from(projects)
     .leftJoin(initiatives, eq(initiatives.id, projects.initiativeId))
     .leftJoin(objectives, eq(objectives.id, initiatives.objectiveId))
@@ -51,13 +60,14 @@ async function linksFor(linearProjectIds: string[]): Promise<Map<string, Release
     if (!p) continue
     out.set(r.externalId, {
       project: { id: p.id, name: p.name },
+      initiative: p.initiativeId && p.initiativeName ? { id: p.initiativeId, name: p.initiativeName } : null,
       objective: p.objectiveId && p.objectiveName ? { id: p.objectiveId, name: p.objectiveName } : null,
     })
   }
   return out
 }
 
-const NO_LINKS: ReleaseLinks = { project: null, objective: null }
+const NO_LINKS: ReleaseLinks = { project: null, initiative: null, objective: null }
 
 /**
  * Store what Yaara read this pass. `complete` says the list is every release

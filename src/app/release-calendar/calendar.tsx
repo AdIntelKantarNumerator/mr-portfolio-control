@@ -206,7 +206,7 @@ function MonthGrid({
  * seven narrow columns made every fact a stacked line, 342px a tile. Day: all
  * of it, across the width. A click anywhere on the tile opens everything
  * (Scott, 11 November 2026: no separate ⓘ - the tile has no other click),
- * except on its project or objective link, which goes where it says.
+ * except on one of its links into the portfolio, which goes where it says.
  */
 function ReleaseCard({
   r,
@@ -266,19 +266,34 @@ function ReleaseCard({
   )
 }
 
-const projectOf = (r: CalendarRelease) =>
-  r.links.project ? <Link href={`/projects/${r.links.project.id}`}>{r.links.project.name}</Link> : (r.projectName ?? '—')
+/** A link into the portfolio, styled like the popup's links: bold, the site's colour, underlined on hover. */
+const portfolioLink = (href: string, name: string) => (
+  <Link className="rc-link" href={href}>
+    {name}
+  </Link>
+)
 
-/** Project and objective, linked into the portfolio; who made it, owns it and has it; who it affects. */
+const projectOf = (r: CalendarRelease) => (r.links.project ? portfolioLink(`/projects/${r.links.project.id}`, r.links.project.name) : (r.projectName ?? '—'))
+
+/**
+ * Where it sits - objective, initiative, project, top down and linked into the
+ * portfolio - then who made it, owns it and has it, and who it affects.
+ */
 function Facts({ r, brief = false }: { r: CalendarRelease; brief?: boolean }) {
   return (
     <dl className="rc-facts">
+      {brief ? null : (
+        <>
+          <dt>Objective</dt>
+          <dd>{r.links.objective ? portfolioLink(`/objectives/${r.links.objective.id}`, r.links.objective.name) : '—'}</dd>
+          <dt>Initiative</dt>
+          <dd>{r.links.initiative ? portfolioLink(`/initiatives/${r.links.initiative.id}`, r.links.initiative.name) : '—'}</dd>
+        </>
+      )}
       <dt>Project</dt>
       <dd>{projectOf(r)}</dd>
       {brief ? null : (
         <>
-          <dt>Objective</dt>
-          <dd>{r.links.objective ? <Link href={`/objectives/${r.links.objective.id}`}>{r.links.objective.name}</Link> : '—'}</dd>
           <dt>Created by</dt>
           <dd>{r.createdBy ?? '—'}</dd>
           <dt>Project owner</dt>
