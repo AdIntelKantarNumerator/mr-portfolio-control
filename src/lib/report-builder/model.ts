@@ -157,18 +157,37 @@ async function loopOpenRouter(input: LoopInput, model: string, post: Post, env: 
         tools,
         tool_choice: 'auto',
         max_tokens: 4000,
-        ...(or.reasoning ? {} : { reasoning: { effort: 'none', exclude: true } }),
+        // Low, not off: Claude on these hosts refuses to have reasoning disabled
+        // (OpenRouter 400, 11 November 2026). Low keeps a turn quick.
+        reasoning: { effort: 'low' },
         // No temperature: Claude on the US Bedrock and Azure hosts does not take one, and with
         // require_parameters an unsupported parameter rules a host out (11 November 2026).
         // The residency rule, as in lib/openrouter.ts, plus: only a provider that can call tools.
         provider: { order: or.providers, allow_fallbacks: false, data_collection: 'deny', zdr: true, require_parameters: true },
       },
       input.signal,
-    )) as { choices?: Array<{ message?: { content?: string | null; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> } }> }
+    )) as {
+      choices?: Array<{
+        message?: {
+          content?: string | null
+          tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>
+          reasoning?: string | null
+          reasoning_details?: unknown[]
+        }
+      }>
+    }
     const msg = reply.choices?.[0]?.message
     const calls = msg?.tool_calls ?? []
     if (!calls.length) return (msg?.content ?? '').trim()
-    messages.push({ role: 'assistant', content: msg?.content ?? '', tool_calls: calls })
+    // The reasoning goes back with the tool calls: Claude needs its own earlier
+    // thinking to continue a tool turn, and OpenRouter carries it as reasoning_details.
+    messages.push({
+      role: 'assistant',
+      content: msg?.content ?? '',
+      tool_calls: calls,
+      ...(msg?.reasoning_details ? { reasoning_details: msg.reasoning_details } : {}),
+      ...(msg?.reasoning ? { reasoning: msg.reasoning } : {}),
+    })
     for (const c of calls) {
       let args: Record<string, unknown> = {}
       try {

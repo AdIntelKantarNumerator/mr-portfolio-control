@@ -163,3 +163,20 @@ test('every header sent to OpenRouter is plain ASCII (an em dash once broke ever
   for (const [k, v] of Object.entries(sent)) assert.match(v, /^[ -~]*$/, k)
   assert.equal('temperature' in body, false, 'the US Claude hosts refuse a temperature')
 })
+
+test('OpenRouter tool turns ask for low reasoning and hand the model its reasoning back', async () => {
+  const bodies: Array<Record<string, unknown>> = []
+  const post: Post = async (_u, _h, b) => {
+    bodies.push(b as Record<string, unknown>)
+    if (bodies.length === 1) {
+      return { ok: true, status: 200, retryAfter: null, json: { choices: [{ message: { content: '', reasoning_details: [{ type: 'reasoning.text', text: 't' }], tool_calls: [{ id: 'c1', function: { name: 'new_report', arguments: '{}' } }] } }] } }
+    }
+    return { ok: true, status: 200, retryAfter: null, json: { choices: [{ message: { content: 'Which kind?' } }] } }
+  }
+  const env = { OPENROUTER_API_KEY: 'k', REPORT_BUILDER_MODEL: 'anthropic/claude-sonnet-5.5', REPORT_BUILDER_PROVIDERS: 'amazon-bedrock/us-east-1' }
+  const text = await runLoop({ system: 's', turns: [{ role: 'user', content: 'hi' }], tools: TOOLS, exec: (n, i) => runTool(context(), n, i) }, { provider: 'openrouter', model: 'm' }, post, env)
+  assert.equal(text, 'Which kind?')
+  assert.deepEqual(bodies[0]!.reasoning, { effort: 'low' })
+  const assistant = (bodies[1]!.messages as Array<Record<string, unknown>>).find((m) => m.role === 'assistant')!
+  assert.deepEqual(assistant.reasoning_details, [{ type: 'reasoning.text', text: 't' }])
+})
