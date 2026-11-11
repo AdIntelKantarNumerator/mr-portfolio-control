@@ -278,3 +278,17 @@ test('the page gets a tree for a report broken out by two things, and a flat tab
   assert.equal(tree?.top.columns.filter((c) => c.type === 'text').length, 1, 'the top level is advertisers alone')
   assert.ok(tree?.colIds?.length, 'with the media types fixed for every level')
 })
+
+test('a report can be narrowed: only advertiser and property, without impressions', async () => {
+  const ctx = context()
+  await call(ctx, 'new_report', { template: 'detail_extract' })
+  const ford = ((await call(ctx, 'search_names', { query: 'Ford', types: ['advertiser'] })).matches as Array<{ id: string }>)[0]!
+  await call(ctx, 'change_report', { names: [ford.id] })
+  assert.ok((ctx.chat.report!.rows as string[]).length > 2)
+  await call(ctx, 'change_report', { set_breakdowns: ['advertiser', 'property'], remove_measures: ['impressions'] })
+  assert.deepEqual(ctx.chat.report!.rows, ['advertiser', 'property'])
+  assert.deepEqual(ctx.chat.report!.measures, ['spend', 'occurrences'])
+  await call(ctx, 'change_report', { remove_breakdowns: ['property'] })
+  assert.deepEqual(ctx.chat.report!.rows, ['advertiser'])
+  await assert.rejects(runTool(ctx, 'change_report', { remove_breakdowns: ['advertiser'] }), /at least one breakdown/)
+})

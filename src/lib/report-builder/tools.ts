@@ -120,9 +120,12 @@ export const TOOLS: ToolDef[] = [
         type: 'object',
         description: 'Rolling: {"mode":"rolling","unit":"month|quarter|year","count":N}. Year to date: {"mode":"ytd"}. Fixed: {"mode":"static","start":"YYYY-MM","end":"YYYY-MM"}.',
       },
-      breakdowns: { type: 'array', items: { type: 'string', enum: NAME_TYPES }, description: 'Extra row breakdowns, such as product or media_type.' },
+      breakdowns: { type: 'array', items: { type: 'string', enum: NAME_TYPES }, description: 'Extra row breakdowns to add, such as product or media_type.' },
+      set_breakdowns: { type: 'array', items: { type: 'string', enum: NAME_TYPES }, description: 'The complete row breakdowns, in order, replacing the current ones. "Only advertiser and property" is ["advertiser","property"].' },
+      remove_breakdowns: { type: 'array', items: { type: 'string', enum: NAME_TYPES }, description: 'Row breakdowns to take out.' },
       columns: { type: 'string', enum: ['month', 'quarter', 'year', 'media_type', 'property', 'none'], description: 'One column per value; "none" removes the column breakdown.' },
-      measures: { type: 'array', items: { type: 'string', enum: ['occurrences', 'impressions'] } },
+      measures: { type: 'array', items: { type: 'string', enum: ['occurrences', 'impressions'] }, description: 'Measures to add alongside spend.' },
+      remove_measures: { type: 'array', items: { type: 'string', enum: ['spend', 'occurrences', 'impressions'] }, description: 'Measures to take out (at least one must stay).' },
       top: { type: 'integer', description: 'Keep only the top N rows.' },
       include_preliminary: { type: 'boolean' },
       prior_year: { type: 'boolean', description: 'Add the change vs the same period a year earlier.' },
@@ -329,6 +332,27 @@ export async function runTool(ctx: ToolContext, name: string, input: Record<stri
       if (input.include_preliminary === false) patch.set['options.final_only'] = true
       if (input.prior_year === false || input.share_of_total === false) {
         patch.remove.calcs = [...(input.prior_year === false ? ['yoy'] : []), ...(input.share_of_total === false ? ['share'] : [])]
+      }
+      // Breakdowns and measures can be set or taken out, not only added.
+      const setRows = strs(input.set_breakdowns).filter((d) => NAME_TYPES.includes(d))
+      if (setRows.length) {
+        delete patch.add?.rows
+        patch.set.rows = Array.from(new Set(setRows))
+      }
+      const dropRows = strs(input.remove_breakdowns).filter((d) => NAME_TYPES.includes(d))
+      if (dropRows.length) {
+        const left = ((patch.set.rows as string[] | undefined) ?? ((report as { rows?: string[] }).rows ?? [])).filter((d) => !dropRows.includes(d))
+        if (!left.length) throw new Error('A report needs at least one breakdown; say which to keep.')
+        delete patch.add?.rows
+        patch.set.rows = left
+      }
+      const dropMeasures = strs(input.remove_measures).filter((m) => ['spend', 'occurrences', 'impressions'].includes(m))
+      if (dropMeasures.length) {
+        const cur = new Set([...(((report as { measures?: string[] }).measures) ?? []), ...((patch.add?.measures as string[] | undefined) ?? [])])
+        const left = [...cur].filter((m) => !dropMeasures.includes(m))
+        if (!left.length) throw new Error('A report needs at least one measure.')
+        delete patch.add?.measures
+        patch.set.measures = left
       }
       for (const id of strs(input.remove_names)) {
         const key = `filters.${id.split(':')[0]}`
