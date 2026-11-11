@@ -157,8 +157,9 @@ async function loopOpenRouter(input: LoopInput, model: string, post: Post, env: 
         tools,
         tool_choice: 'auto',
         max_tokens: 4000,
-        temperature: 0,
         ...(or.reasoning ? {} : { reasoning: { effort: 'none', exclude: true } }),
+        // No temperature: Claude on the US Bedrock and Azure hosts does not take one, and with
+        // require_parameters an unsupported parameter rules a host out (11 November 2026).
         // The residency rule, as in lib/openrouter.ts, plus: only a provider that can call tools.
         provider: { order: or.providers, allow_fallbacks: false, data_collection: 'deny', zdr: true, require_parameters: true },
       },
