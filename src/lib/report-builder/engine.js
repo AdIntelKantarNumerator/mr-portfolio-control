@@ -425,6 +425,7 @@
         else if (z.mode === 'mine') parts.push('Spend on ' + mine + by);
         else if (z.mode === 'theirs') parts.push('Spend on ' + vs + ', not ' + mine + ',' + by);
         else { parts.push('Advertisers spending on ' + vs + ' but nothing on ' + mine); if (rows.length) parts.push('listed by ' + rows.join(', then ')); }
+        if (z.mode !== 'zero' && s.columns && DIMS[s.columns]) parts[parts.length - 1] += ', with a column per ' + DIMS[s.columns].label.toLowerCase();
       } else {
         const m = s.measures.map((k) => (MEASURES[k] ? MEASURES[k].label : k)).join(', ');
         let lead = m + (rows.length ? ' by ' + rows.join(', then ') : '');
@@ -456,7 +457,7 @@
       const R = spec.rows.filter((d) => DIMS[d]);
       const zs = spec.zero_share;
       const wallet = !!zs && zs.mode === 'wallet';
-      const C = !wallet && spec.columns && DIMS[spec.columns] ? spec.columns : null;
+      const C = spec.columns && DIMS[spec.columns] ? spec.columns : null;
       const M = spec.measures.filter((k) => MEASURES[k]);
       const primary = M[0] || 'spend';
       const calcs = C || wallet ? [] : spec.calcs;
@@ -473,10 +474,11 @@
       const groups = new Map();
       const colTotals = new Map(); // value -> primary measure, for ordering
       const colTotalsM = new Map(); // value -> every measure, for the totals row
+      const colMine = new Map(); // value -> your spend, for share of wallet by column
       const grp = (f) => {
         const ids = R.map((d) => DIMS[d].of(f)); const k = ids.join('\u0001');
         let g = groups.get(k);
-        if (!g) { g = { ids, v: { spend: 0, occurrences: 0, impressions: 0 }, imp: false, cols: new Map(), mine: 0, prior: 0 }; groups.set(k, g); }
+        if (!g) { g = { ids, v: { spend: 0, occurrences: 0, impressions: 0 }, imp: false, cols: new Map(), colsMine: new Map(), mine: 0, prior: 0 }; groups.set(k, g); }
         return g;
       };
       for (const f of FACTS) {
@@ -486,7 +488,12 @@
           if (!pass.subject(f) || !onPath(f)) continue;
           const mine = isMine(f);
           if (zs.mode === 'mine') { if (!mine || !pass.where(f)) continue; }
-          else if (mine) { grp(f).mine += f.spend; if (!wallet) continue; }
+          else if (mine) {
+            const g = grp(f); g.mine += f.spend;
+            if (!wallet) continue;
+            // Share of wallet by column: your spend per value, too.
+            if (C) { const c = DIMS[C].of(f); g.colsMine.set(c, (g.colsMine.get(c) || 0) + f.spend); colMine.set(c, (colMine.get(c) || 0) + f.spend); }
+          }
           else { if (isVersus && !isVersus(f)) continue; if (!pass.where(f)) continue; }
         } else if (!pass.all(f) || !onPath(f)) continue;
         const g = grp(f);
@@ -514,7 +521,19 @@
       const mLabel = (k) => (zs && k === 'spend' ? (zs.mode === 'mine' ? 'Spend on your properties' : 'Spend on competing properties') : MEASURES[k].label);
       let colIds = [];
       if (wallet) {
-        columns.push({ key: 'yours', label: 'Spend with you', type: 'money' }, { key: 'theirs', label: 'Spend with competitors', type: 'money' }, { key: 'wallet', label: 'Your share', type: 'pct' });
+        // With a column breakdown, each value gets the three, stacked in one cell on the page.
+        const three = (key, group, colId) => [
+          Object.assign({ key: key + 'yours', label: group ? group + ' · With you' : 'Spend with you', type: 'money' }, group ? { group, measure: 'With you' } : {}, colId ? { colId } : {}),
+          Object.assign({ key: key + 'theirs', label: group ? group + ' · With competitors' : 'Spend with competitors', type: 'money' }, group ? { group, measure: 'With competitors' } : {}, colId ? { colId } : {}),
+          Object.assign({ key: key + 'wallet', label: group ? group + ' · Your share' : 'Your share', type: 'pct' }, group ? { group, measure: 'Your share' } : {}, colId ? { colId } : {}),
+        ];
+        if (C) {
+          colIds = Array.from(colTotals.keys());
+          if (DIMS[C].time) colIds.sort(); else colIds.sort((a, b) => colTotals.get(b) - colTotals.get(a));
+          if (Array.isArray(spec.col_ids)) colIds = spec.col_ids.slice();
+          for (const c of colIds) columns.push(...three('c:' + c + ':', labelOf(C, c), c));
+          columns.push(...three('total:', 'Total'));
+        } else columns.push(...three(''));
       } else if (C) {
         colIds = Array.from(colTotals.keys());
         if (DIMS[C].time) colIds.sort(); else colIds.sort((a, b) => colTotals.get(b) - colTotals.get(a));
@@ -534,6 +553,7 @@
       }
 
       const primaryOf = (g) => g.v[primary] || 0;
+      const colsMineOf = new Map(list.map((g) => [g.ids.join('\u0001'), g.colsMine]));
       if (R.length && DIMS[R[0]].time) list.sort((a, b) => (a.ids.join('\u0001') < b.ids.join('\u0001') ? -1 : 1));
       else list.sort((a, b) => primaryOf(b) - primaryOf(a));
 
@@ -544,6 +564,11 @@
       const cellRow = (ids, v, imp, cols, prior, isTotal, mine) => {
         const row = isTotal ? R.map((d, i) => (i === 0 ? 'Total' : '')) : R.map((d, i) => labelOf(d, ids[i]) + (mineIds.has(String(ids[i])) ? ' (you)' : ''));
         if (wallet) {
+          if (C) for (const c of colIds) {
+            const all = ((isTotal ? colTotalsM.get(c) : cols.get(c)) || { spend: 0 }).spend;
+            const yours = (isTotal ? colMine.get(c) : colsMineOf.get(ids.join('\u0001'))?.get(c)) || 0;
+            row.push(yours, all - yours, pct(yours, all));
+          }
           row.push(mine || 0, v.spend - (mine || 0), pct(mine || 0, v.spend));
         } else if (C) {
           for (const c of colIds) for (const k of M) { const o = isTotal ? colTotalsM.get(c) : cols.get(c); row.push(o ? o[k] || 0 : 0); }

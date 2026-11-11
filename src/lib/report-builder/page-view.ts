@@ -14,7 +14,8 @@ interface ReportSpec extends Spec {
   measures?: string[]
   calcs?: string[]
   filters?: Record<string, string[]>
-  zero_share?: { mine: string[] } | null
+  zero_share?: { mine: string[]; versus?: string[]; all?: boolean; mode?: string } | null
+  compare?: { mine: string[]; rivals: string[] } | null
   time?: { mode?: string; unit?: string; count?: number; start?: string; end?: string } | null
   options?: { final_only?: boolean; top_n?: number | null }
 }
@@ -37,7 +38,7 @@ export async function suggestName(engine: ReportEngine, spec: ReportSpec): Promi
   const tpl = (await engine.catalog()).templates.find((t) => t.id === spec.template)
   const names: string[] = []
   for (const [dim, ids] of Object.entries(spec.filters ?? {})) for (const id of ids) names.push(engine.labelOf(dim, id))
-  for (const id of spec.zero_share?.mine ?? []) names.push(engine.labelOf('property', id))
+  for (const id of [...(spec.zero_share?.mine ?? []), ...(spec.compare?.mine ?? [])]) names.push(engine.labelOf(id.split(':')[0]!, id))
   const subject = names.length ? names.slice(0, 2).join(' & ') + (names.length > 2 ? ` +${names.length - 2}` : '') : 'All advertisers'
   return `${subject} ${tpl ? tpl.label.toLowerCase() : 'report'}`
 }
@@ -57,7 +58,19 @@ export async function describeReport(engine: ReportEngine, chat: ChatState): Pro
   }
   const dim = (k: string) => cat.dimensions.find((d) => d.key === k)?.label ?? k
   const filters = Object.entries(s.filters ?? {}).map(([k, ids]) => ids.map((id) => engine.labelOf(k, id)).join(', '))
-  if (s.zero_share) filters.unshift(`Not buying on: ${s.zero_share.mine.map((id) => engine.labelOf('property', id)).join(', ') || 'not chosen yet'}`)
+  // Whose properties or brands, and who they are set against, in the words of each kind of report.
+  const lab = (ids: string[] | undefined) => (ids ?? []).map((id) => engine.labelOf(id.split(':')[0]!, id)).join(', ')
+  const z = s.zero_share
+  if (z) {
+    const mine = lab(z.mine) || 'not chosen yet'
+    const vs = lab(z.versus) || (z.all ? 'every other property' : 'not chosen yet')
+    const mode = z.mode ?? 'zero'
+    if (mode === 'zero') filters.unshift(`Not buying on: ${mine}`, `Buying on: ${vs}`)
+    else if (mode === 'wallet') filters.unshift(`Yours: ${mine}`, `Against: ${vs}`)
+    else if (mode === 'mine') filters.unshift(`Yours: ${mine}`)
+    else filters.unshift(`Competitors: ${vs}`, `Not on: ${mine}`)
+  }
+  if (s.compare) filters.unshift(`Yours: ${lab(s.compare.mine) || 'not chosen yet'}`, `Competitors: ${lab(s.compare.rivals) || 'not chosen yet'}`)
   const t = s.time
   const period = !t
     ? null

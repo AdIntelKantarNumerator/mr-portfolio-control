@@ -8,7 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { canSee, navSectionsFor, normalise } from '../src/lib/access-rules'
-import { dataSource, sampleEngine } from '../src/lib/report-builder/engines'
+import { csv, dataSource, sampleEngine } from '../src/lib/report-builder/engines'
 import { TOOLS, emptyChat, expandRow, runTool, type CompSet, type ToolContext } from '../src/lib/report-builder/tools'
 import { chooseModel, reportBuilderOpenRouter, runLoop, type Post } from '../src/lib/report-builder/model'
 import { describeReport, suggestName } from '../src/lib/report-builder/page-view'
@@ -403,4 +403,24 @@ test('competitive intel: your brands, then competitors (advertisers or a whole c
   await call(ctx, 'choose', { choice: 'Yes, use it' })
   assert.equal(ctx.view?.kind, 'ready')
   assert.match(String(ctx.view?.title), /Toyota vs all /)
+})
+
+test('share of wallet keeps a column breakout: each column has with you, with competitors and your share', async () => {
+  const ctx = context()
+  await call(ctx, 'new_report', { template: 'share_of_wallet' })
+  await call(ctx, 'choose', { choice: '1' })
+  await call(ctx, 'choose', { choice: 'All other properties' })
+  await call(ctx, 'change_report', { columns: 'month' })
+  assert.equal(ctx.view?.kind, 'ready')
+  const t = ctx.view!.table!
+  const months = t.columns.filter((c) => c.colId)
+  assert.ok(months.length >= 6, 'a column per month and measure')
+  assert.deepEqual(months.slice(0, 3).map((c) => c.measure), ['With you', 'With competitors', 'Your share'])
+  assert.deepEqual(t.columns.slice(-3).map((c) => c.key), ['total:yours', 'total:theirs', 'total:wallet'])
+  // Each row's months add up to its total, for you and for competitors.
+  const yours = t.columns.map((c, i) => (c.colId && c.measure === 'With you' ? i : -1)).filter((i) => i >= 0)
+  const total = t.columns.findIndex((c) => c.key === 'total:yours')
+  for (const r of t.rows) assert.equal(Math.round(yours.reduce((a, i) => a + Number(r[i]), 0)), Math.round(Number(r[total])))
+  const run = await ctx.engine.run(ctx.chat.report!, {})
+  assert.ok(csv(run).split('\n')[0]!.includes(' · With you'), 'and the spreadsheet has them')
 })

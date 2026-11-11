@@ -567,7 +567,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         parts.push(`Advertisers spending on ${vs} but nothing on ${mine}`)
         if (rows.length) parts.push(`listed by ${rows.join(', then ')}`)
       }
-      if (z.mode !== 'zero' && s.columns && DIMS[s.columns] && z.mode !== 'wallet') parts[parts.length - 1] += `, with a column per ${DIMS[s.columns].label.toLowerCase()}`
+      if (z.mode !== 'zero' && s.columns && DIMS[s.columns]) parts[parts.length - 1] += `, with a column per ${DIMS[s.columns].label.toLowerCase()}`
     } else {
       let lead = s.measures.map((k) => MEASURES[k]?.label ?? k).join(', ') + (rows.length ? ` by ${rows.join(', then ')}` : '')
       if (s.columns && DIMS[s.columns]) lead += `, with a column per ${DIMS[s.columns].label.toLowerCase()}`
@@ -653,7 +653,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const zs = s.zero_share
     const wallet = zs?.mode === 'wallet'
     const R = s.rows.filter((d) => DIMS[d])
-    const C = !wallet && s.columns && DIMS[s.columns] ? s.columns : null
+    const C = s.columns && DIMS[s.columns] ? s.columns : null
     const M = s.measures.filter((k) => MEASURES[k])
     const primary: MeasureKey = M[0] ?? 'spend'
     const calcs = C || wallet ? [] : s.calcs
@@ -705,8 +705,15 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     for (const k of M) selects.push(`${agg(k)} AS m_${k}`)
     const withMine = zs && (zs.mode === 'zero' || wallet)
     if (withMine) selects.push(`toFloat64(sumIf(cost_share_v, ${mineSql})) AS mine_spend`)
+    // Share of wallet by column: spend with you and in all, per value, as well as the measures.
+    const walletKeys: string[] = wallet ? ['spend', 'mine'] : M
     colVals.forEach((c, j) => {
-      for (const k of M) selects.push(`toFloat64(sumIf(${MEASURES[k].sql}, (${counted}) AND toString(${DIMS[C!].id}) = '${c.id.replace(/'/g, '')}')) AS c${j}_${k}`)
+      const inCol = `toString(${DIMS[C!].id}) = '${c.id.replace(/'/g, '')}'`
+      for (const k of M) selects.push(`toFloat64(sumIf(${MEASURES[k].sql}, (${counted}) AND ${inCol})) AS c${j}_${k}`)
+      if (wallet) {
+        if (!M.includes('spend')) selects.push(`toFloat64(sumIf(cost_share_v, (${counted}) AND ${inCol})) AS c${j}_spend`)
+        selects.push(`toFloat64(sumIf(cost_share_v, ${mineSql} AND ${inCol})) AS c${j}_mine`)
+      }
     })
     const groupBy = R.length ? ` GROUP BY ${R.map((_, i) => `r${i}`).join(', ')}` : ''
     const having = zs?.mode === 'zero' ? ' HAVING mine_spend = 0 AND m_spend > 0' : ` HAVING m_${primary} != 0`
@@ -720,7 +727,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       chQuery<Row>(config(), `SELECT *, count() OVER () AS __n FROM (${grouped}) ORDER BY ${order} LIMIT ${cap}`, {}, SETTINGS),
       chQuery<Row>(
         config(),
-        `SELECT ${[...M.map((k) => `sum(m_${k}) AS m_${k}`), ...(withMine ? ['sum(mine_spend) AS mine_spend'] : []), ...colVals.flatMap((_, j) => M.map((k) => `sum(c${j}_${k}) AS c${j}_${k}`))].join(', ')}, count() AS n FROM (${grouped})`,
+        `SELECT ${[...M.map((k) => `sum(m_${k}) AS m_${k}`), ...(withMine ? ['sum(mine_spend) AS mine_spend'] : []), ...colVals.flatMap((_, j) => Array.from(new Set([...M, ...(wallet ? walletKeys : [])])).map((k) => `sum(c${j}_${k}) AS c${j}_${k}`))].join(', ')}, count() AS n FROM (${grouped})`,
         {},
         SETTINGS,
       ),
@@ -753,7 +760,17 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const columns: Result['columns'] = R.map((d) => ({ key: d, label: DIMS[d].label, type: 'text' }))
     const mLabel = (k: MeasureKey) => (zs && k === 'spend' ? (zs.mode === 'mine' ? 'Spend on your properties' : 'Spend on competing properties') : MEASURES[k].label)
     if (wallet) {
-      columns.push({ key: 'yours', label: 'Spend with you', type: 'money' }, { key: 'theirs', label: 'Spend with competitors', type: 'money' }, { key: 'wallet', label: 'Your share', type: 'pct' })
+      // With a column breakdown, each value gets the three, stacked in one cell on the page.
+      const three = (key: string, group?: string, colId?: string) => [
+        { key: `${key}yours`, label: group ? `${group} · With you` : 'Spend with you', type: 'money' as const, ...(group ? { group, measure: 'With you', ...(colId ? { colId } : {}) } : {}) },
+        { key: `${key}theirs`, label: group ? `${group} · With competitors` : 'Spend with competitors', type: 'money' as const, ...(group ? { group, measure: 'With competitors', ...(colId ? { colId } : {}) } : {}) },
+        { key: `${key}wallet`, label: group ? `${group} · Your share` : 'Your share', type: 'pct' as const, ...(group ? { group, measure: 'Your share', ...(colId ? { colId } : {}) } : {}) },
+      ]
+      if (C) {
+        colVals.forEach((c) => columns.push(...three(`c:${c.id}:`, c.name, c.id)))
+        columns.push(...three('total:', 'Total'))
+        if (moreCols) notes.push(`Showing the 12 largest ${DIMS[C].plural}; ${moreCols} smaller ones are in the total.`)
+      } else columns.push(...three(''))
     } else if (C) {
       // One column per value and measure. With several measures the page stacks a value's
       // measures in one cell (group); the spreadsheet keeps a column each.
@@ -786,9 +803,9 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
               : String(r![`n${i}`]) + (mineIds.has(`${dim}:${r![`r${i}`]}`) ? ' (you)' : ''),
           )
       if (wallet) {
-        const all = Number(r?.m_spend ?? 0)
-        const yours = Number(r?.mine_spend ?? 0)
-        out.push(tidy('spend', yours), tidy('spend', all - yours), pct(yours, all))
+        const split = (all: number, yours: number) => out.push(tidy('spend', yours), tidy('spend', all - yours), pct(yours, all))
+        if (C) colVals.forEach((_, j) => split(Number(r?.[`c${j}_spend`] ?? 0), Number(r?.[`c${j}_mine`] ?? 0)))
+        split(Number(r?.m_spend ?? 0), Number(r?.mine_spend ?? 0))
       } else if (C) {
         colVals.forEach((_, j) => M.forEach((k) => out.push(tidy(k, Number(r?.[`c${j}_${k}`] ?? 0)))))
         M.forEach((k) => out.push(tidy(k, Number(r?.[`m_${k}`] ?? 0))))
