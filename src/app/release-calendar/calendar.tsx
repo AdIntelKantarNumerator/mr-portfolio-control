@@ -204,7 +204,9 @@ function MonthGrid({
  * 2026). Month views: number, status, title and project - 76px, a day with
  * two still fits its row. Week: adds the assignee and the teams impacted; its
  * seven narrow columns made every fact a stacked line, 342px a tile. Day: all
- * of it, across the width. The ⓘ always has everything.
+ * of it, across the width. A click anywhere on the tile opens everything
+ * (Scott, 11 November 2026: no separate ⓘ - the tile has no other click),
+ * except on its project or objective link, which goes where it says.
  */
 function ReleaseCard({
   r,
@@ -227,24 +229,40 @@ function ReleaseCard({
     if (on) box.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }, [on])
 
+  // A link on the tile goes where it says; anywhere else opens the popup.
+  const open = (e: { target: EventTarget }) => {
+    if (!(e.target as HTMLElement).closest('a')) setInfo(true)
+  }
+
   return (
-    <div
-      ref={box}
-      className={`rc-card tone-${statusTone(r.statusType)} ${on ? 'on' : ''} ${wide ? 'wide' : ''} ${compact ? 'compact' : ''} ${brief ? 'brief' : ''}`}
-      id={`release-${r.identifier}`}
-      title={compact || brief ? `${r.identifier} · ${r.title}` : undefined}
-    >
-      <div className="rc-card-head">
-        <span className="rc-ident">{r.identifier}</span>
-        <span className={`rc-status tone-${statusTone(r.statusType)}`}>{r.status ?? '—'}</span>
-        <button type="button" className="rc-info" onClick={() => setInfo(true)} aria-label={`About ${r.identifier}`} title="Everything about it, and who to ask">
-          ⓘ
-        </button>
+    <>
+      <div
+        ref={box}
+        role="button"
+        tabIndex={0}
+        aria-haspopup="dialog"
+        aria-label={`${r.identifier} ${r.title}: details`}
+        className={`rc-card tone-${statusTone(r.statusType)} ${on ? 'on' : ''} ${wide ? 'wide' : ''} ${compact ? 'compact' : ''} ${brief ? 'brief' : ''}`}
+        id={`release-${r.identifier}`}
+        title={compact || brief ? `${r.identifier} · ${r.title}` : undefined}
+        onClick={open}
+        onKeyDown={(e) => {
+          if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault()
+            setInfo(true)
+          }
+        }}
+      >
+        <div className="rc-card-head">
+          <span className="rc-ident">{r.identifier}</span>
+          <span className={`rc-status tone-${statusTone(r.statusType)}`}>{r.status ?? '—'}</span>
+        </div>
+        <div className="rc-name">{r.title}</div>
+        {compact ? <div className="rc-proj">{projectOf(r)}</div> : <Facts r={r} brief={brief} />}
       </div>
-      <div className="rc-name">{r.title}</div>
-      {compact ? <div className="rc-proj">{projectOf(r)}</div> : <Facts r={r} brief={brief} />}
+      {/* Beside the tile, not in it: a click in the popup must not reach the tile and open it again. */}
       {info ? <InfoDialog r={r} onClose={() => setInfo(false)} /> : null}
-    </div>
+    </>
   )
 }
 
@@ -317,7 +335,7 @@ function InfoDialog({ r, onClose }: { r: CalendarRelease; onClose: () => void })
           <div className="rc-desc">{r.description?.trim() || <span className="tx-muted">No description.</span>}</div>
           {r.url ? (
             <p>
-              <a href={r.url} target="_blank" rel="noreferrer">
+              <a className="rc-link" href={r.url} target="_blank" rel="noreferrer">
                 Open {r.identifier} in Linear ↗
               </a>
             </p>
@@ -326,7 +344,7 @@ function InfoDialog({ r, onClose }: { r: CalendarRelease; onClose: () => void })
             <p className="rc-contact">
               <strong>Questions?</strong>{' '}
               {r.contactSlackUrl ? (
-                <a href={r.contactSlackUrl} target="_blank" rel="noreferrer">
+                <a className="rc-link" href={r.contactSlackUrl} target="_blank" rel="noreferrer">
                   Contact {r.contactName}
                 </a>
               ) : (
