@@ -15,6 +15,7 @@ import {
   monthGrid,
   monthsIn,
   rangeOf,
+  RELEASE_LABELS,
   statusTone,
   step,
   VIEW_LABEL,
@@ -147,7 +148,7 @@ export function ReleaseCalendar({
       {!releases.length ? (
         <div className="blank">
           <h2>No releases yet</h2>
-          <p>Linear tickets labelled “Production Release” or “Production Deployment” appear here with their target dates, read by Yaara each pass.</p>
+          <p>Linear tickets labelled {RELEASE_LABELS.map((l) => `“${l}”`).join(', ').replace(/, ([^,]*)$/, ' or $1')} appear here with their target dates, read by Yaara each pass.</p>
         </div>
       ) : null}
     </div>

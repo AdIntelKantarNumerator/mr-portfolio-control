@@ -15,8 +15,13 @@
  * No database, no network: the route, the page and the tests read these.
  */
 
-/** The labels that make a Linear ticket a release. Scott asked for "Production Release"; the label in use is "Production Deployment". */
-export const RELEASE_LABELS = ['Production Release', 'Production Deployment'] as const
+/**
+ * The labels that make a Linear ticket a release, matched ignoring case. Scott
+ * asked for "Production Release"; the label in use is "Production Deployment";
+ * he added "Production Deployments" (11 November 2026). Yaara reads Linear
+ * with the same list (yaara/src/follow/releases.ts).
+ */
+export const RELEASE_LABELS = ['Production Release', 'Production Deployment', 'Production Deployments'] as const
 
 /** What Yaara sends for one ticket. The agent API contract: yaara/src/publish/portfolio.ts sends the same shape. */
 export interface IncomingRelease {
