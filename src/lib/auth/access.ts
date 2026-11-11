@@ -34,6 +34,6 @@ export function forgetAccess(email: string) {
 export async function currentAccess(): Promise<Access & { email: string; name: string }> {
   if (!getAuthConfig().enabled) return { ...EVERYTHING, email: '', name: 'Local' }
   const user = await getCurrentUser()
-  if (!user.authenticated) return { role: 'commercial', isAdmin: false, canEditDocs: false, email: '', name: '' }
+  if (!user.authenticated) return { role: 'commercial', isAdmin: false, canEditDocs: false, canSeePrototypes: false, email: '', name: '' }
   return { ...(await accessFor(user.email)), email: user.email.toLowerCase(), name: user.name }
 }

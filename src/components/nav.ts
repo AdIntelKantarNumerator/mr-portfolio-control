@@ -45,6 +45,7 @@ import {
   IconTemplates,
   IconTimeline,
   IconProjects,
+  IconReportBuilder,
   IconWorkflow,
 } from './icons'
 
@@ -134,6 +135,21 @@ export const NAV: NavSection[] = [
         label: 'Taxonomy Comparison',
         icon: IconCompare,
         hint: 'Advertiser spend across VX1, VX2, GPC and Classic',
+      },
+    ],
+  },
+  {
+    // Only people with "Sees prototypes" ticked in Admin (lib/access-rules.ts),
+    // whatever their role. Work in trial: what a client experience could be,
+    // shown before it is built for real.
+    id: 'prototypes',
+    label: 'Prototypes',
+    items: [
+      {
+        href: '/prototypes/report-builder',
+        label: 'Report Builder',
+        icon: IconReportBuilder,
+        hint: 'Set up custom reports and data extracts by conversation',
       },
     ],
   },

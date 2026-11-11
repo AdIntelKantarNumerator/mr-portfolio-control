@@ -1,0 +1,19 @@
+{
+  "name": "Report Builder",
+  "description": "Prototype. Set up custom advertising reports and data extracts by conversation, save them, and re-run them on new data. Real advertiser and media names; illustrative figures.",
+  "capabilities": {
+    "vision": false,
+    "file_upload": false,
+    "web_search": false,
+    "image_generation": false,
+    "code_interpreter": false,
+    "citations": false,
+    "usage": false
+  },
+  "suggestion_prompts": [
+    { "title": ["I need a custom report", "and I'll answer a few questions"], "content": "I need a custom report" },
+    { "title": ["Media mix for Toyota and Ford", "last 6 months"], "content": "Media mix for Toyota and Ford, last 6 months" },
+    { "title": ["Who isn't buying on ESPN?", "automotive advertisers"], "content": "Which automotive advertisers aren't buying on ESPN?" },
+    { "title": ["Run a saved report", "on the latest data"], "content": "Run my auto insurance share report" }
+  ]
+}

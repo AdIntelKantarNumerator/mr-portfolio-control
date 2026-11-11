@@ -18,6 +18,7 @@ import {
   doublePrecision,
   index,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -2168,6 +2169,8 @@ export const siteUsers = pgTable('site_users', {
   role: text('role').notNull().default('commercial'),
   isAdmin: boolean('is_admin').notNull().default(false),
   canEditDocs: boolean('can_edit_docs').notNull().default(false),
+  /** Sees the Prototypes section (drizzle/0042_prototypes.sql). Not implied by admin. */
+  canSeePrototypes: boolean('can_see_prototypes').notNull().default(false),
   /** Their Slack title, when the Slack pass found one. */
   title: text('title'),
   /** seed | slack | admin: where this person's access came from. */
@@ -2381,3 +2384,23 @@ export const classicBrandProducts = pgTable(
   },
   (t) => [primaryKey({ columns: [t.advertiserId, t.vxProductId] })],
 )
+
+// ---------------------------------------------------------------------------
+// Report Builder, the first prototype. See drizzle/0042_prototypes.sql and
+// lib/report-builder/.
+// ---------------------------------------------------------------------------
+
+/** A person's saved reports (the report engine's whole per-person state). */
+export const reportBuilderUsers = pgTable('report_builder_users', {
+  email: text('email').primaryKey(),
+  state: jsonb('state').notNull(),
+  updatedAt: updatedAt(),
+})
+
+/** One chat's report in progress and the choices last offered, keyed by Open WebUI's chat id. */
+export const reportBuilderChats = pgTable('report_builder_chats', {
+  chatId: text('chat_id').primaryKey(),
+  email: text('email').notNull(),
+  state: jsonb('state').notNull(),
+  updatedAt: updatedAt(),
+})

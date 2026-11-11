@@ -28,6 +28,8 @@ import {
 } from '@/lib/yaara-chat'
 import { enqueueChat } from '@/lib/yaara-chat-store'
 import { followChat as follow } from '@/lib/yaara-chat-follow'
+import { REPORT_BUILDER_MODEL_ID } from '@/lib/report-builder/agent'
+import { answerReportBuilder } from '@/lib/report-builder/relay'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -51,6 +53,11 @@ export async function POST(req: Request) {
   }
   const conversation = readConversation(body)
   if ('error' in conversation) return chatError(400, conversation.error)
+
+  // The Report Builder prototype is the other model listed: answered here, not queued for Yaara.
+  if ((body as { model?: unknown }).model === REPORT_BUILDER_MODEL_ID) {
+    return answerReportBuilder(req, asker, conversation.turns, (body as { stream?: unknown }).stream === true)
+  }
 
   const id = await enqueueChat(asker, req.headers.get('x-openwebui-chat-id'), conversation.turns)
   const replyId = `chatcmpl-${randomUUID()}`

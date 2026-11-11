@@ -10,6 +10,9 @@
  *                documentation editing.
  *   canEditDocs  A flag: create folders, upload, rename, replace and remove in
  *                Process Documentation. Admins always have it.
+ *   canSeePrototypes  A flag (11 November 2026): the Prototypes section, work
+ *                in trial such as Report Builder. Independent of role, and not
+ *                implied by admin: each person is switched on deliberately.
  */
 
 export type Role = 'product' | 'commercial'
@@ -18,6 +21,7 @@ export interface Access {
   role: Role
   isAdmin: boolean
   canEditDocs: boolean
+  canSeePrototypes: boolean
 }
 
 export const ROLE_LABEL: Record<Role, string> = {
@@ -26,18 +30,21 @@ export const ROLE_LABEL: Record<Role, string> = {
 }
 
 /** Nobody has said what this person is: the least they could need. */
-export const NO_ROLE: Access = { role: 'commercial', isAdmin: false, canEditDocs: false }
+export const NO_ROLE: Access = { role: 'commercial', isAdmin: false, canEditDocs: false, canSeePrototypes: false }
 
 /** Everything, for local development where sign-in is switched off. */
-export const EVERYTHING: Access = { role: 'product', isAdmin: true, canEditDocs: true }
+export const EVERYTHING: Access = { role: 'product', isAdmin: true, canEditDocs: true, canSeePrototypes: true }
 
-export function normalise(row: { role?: string | null; isAdmin?: boolean | null; canEditDocs?: boolean | null } | null | undefined): Access {
+export function normalise(
+  row: { role?: string | null; isAdmin?: boolean | null; canEditDocs?: boolean | null; canSeePrototypes?: boolean | null } | null | undefined,
+): Access {
   if (!row) return NO_ROLE
   const isAdmin = Boolean(row.isAdmin)
   return {
     role: row.role === 'product' ? 'product' : 'commercial',
     isAdmin,
     canEditDocs: isAdmin || Boolean(row.canEditDocs),
+    canSeePrototypes: Boolean(row.canSeePrototypes),
   }
 }
 
@@ -46,6 +53,9 @@ export const REFERENCE_PATHS = ['/process-docs', '/docs-raw', '/templates', '/wo
 
 /** The Admin section. */
 export const ADMIN_PATHS = ['/admin']
+
+/** The Prototypes section: whoever has the flag, whatever their role. */
+export const PROTOTYPE_PATHS = ['/prototypes']
 
 const under = (pathname: string, prefixes: readonly string[]) =>
   prefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`))
@@ -56,6 +66,7 @@ const under = (pathname: string, prefixes: readonly string[]) =>
  */
 export function canSee(access: Access, pathname: string): boolean {
   if (under(pathname, ADMIN_PATHS)) return access.isAdmin
+  if (under(pathname, PROTOTYPE_PATHS)) return access.canSeePrototypes
   if (access.role === 'product') return true
   return under(pathname, REFERENCE_PATHS)
 }
@@ -73,6 +84,7 @@ export function landingFor(access: Access): string {
 /** Which left-nav sections a person sees, by section id (components/nav.ts). */
 export function navSectionsFor(access: Access): Set<string | null> {
   const sections = new Set<string | null>(access.role === 'product' ? [null, 'work', 'decide', 'inbound', 'reference', 'log'] : ['reference'])
+  if (access.canSeePrototypes) sections.add('prototypes')
   if (access.isAdmin) sections.add('admin')
   return sections
 }

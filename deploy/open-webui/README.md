@@ -116,3 +116,51 @@ and its licence forbids removing or altering its branding for deployments
 above 50 users in any 30 days without an enterprise licence. So the
 model is Yaara, with her name, picture and description, and the Open WebUI
 name stays where Open WebUI puts it.
+
+## Report Builder (prototype)
+
+The relay lists a second model, **Report Builder** (`report-builder`), for
+setting up custom advertising reports and data extracts by conversation.
+Questions to it are answered by the portfolio itself
+(`src/lib/report-builder/`), not queued for Yaara: a model with tools runs the
+skill (`skill.ts`) over a report engine on sample data (`engine.js`; real
+advertiser and media names, illustrative figures, nothing read from
+ClickHouse). Saved reports are kept per person in `report_builder_users`, and
+each chat's report in progress in `report_builder_chats`.
+
+Who may use it: people with **Prototypes** ticked in Admin, Roles & access. It
+is its own checkbox, not a role and not implied by Admin. The same flag shows
+the **Prototypes** section in the left nav, whose **Report Builder** page opens
+this chat with the model chosen (`/?model=report-builder`). Open WebUI fetches
+the model list once for everyone, so others can see Report Builder in the model
+picker; if they ask it something, it tells them it is not switched on for them.
+
+To turn it on in Azure:
+
+1. Give Report Builder a model that can call tools. The intended one is
+   Claude through the portfolio's existing OpenRouter key, on the US Bedrock
+   and Azure hosts already on the verified list (the same route Yaara uses for
+   her advanced model). Its own settings, so the everyday and advanced models
+   do not move:
+
+   ```powershell
+   az webapp config appsettings set -g rg-mr-portfolio-control -n mr-portfolio-control --settings `
+     REPORT_BUILDER_MODEL=anthropic/claude-sonnet-5.5 `
+     REPORT_BUILDER_PROVIDERS=amazon-bedrock/us-east-1,azure/us
+   ```
+
+   `anthropic/claude-haiku-5.5` is the cheaper choice (about a twentieth of
+   the price) and follows the interview less reliably. An Anthropic key of its
+   own (`ANTHROPIC_API_KEY`) also works and takes precedence;
+   `REPORT_BUILDER_PROVIDER` forces one or the other. With no model that can
+   run it, Report Builder is not listed.
+2. Deploy the portfolio. Migration `0042_prototypes` runs on start.
+3. Run `configure-model.mjs` again (as in "Deploying to Azure", step 4). It now
+   also saves Report Builder's own name, description and starter questions
+   from `report-builder-model.json`; without that entry Open WebUI would show
+   Yaara's.
+4. Tick **Prototypes** for each person in Admin.
+
+The spreadsheet link in an answer points at
+`/prototypes/report-builder/export` on the portfolio, which recomputes the
+report for whoever opens it, so it needs their portfolio sign-in too.

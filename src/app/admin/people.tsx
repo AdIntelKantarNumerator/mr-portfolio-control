@@ -7,7 +7,7 @@ import { ROLE_LABEL } from '@/lib/access-rules'
 import type { SiteUser } from '@/lib/site-users'
 import { addPerson, changeAccess } from './actions'
 
-type Filter = 'all' | 'product' | 'commercial' | 'admins' | 'editors' | 'review'
+type Filter = 'all' | 'product' | 'commercial' | 'admins' | 'editors' | 'prototypes' | 'review'
 
 const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: 'all', label: 'Everyone' },
@@ -15,6 +15,7 @@ const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: 'commercial', label: 'Commercial' },
   { key: 'admins', label: 'Admins' },
   { key: 'editors', label: 'Doc editors' },
+  { key: 'prototypes', label: 'See prototypes' },
   { key: 'review', label: 'To review' },
 ]
 
@@ -45,11 +46,12 @@ export function PeopleTable({ people: initial, me }: { people: SiteUser[]; me: s
     if (filter === 'commercial') return p.role === 'commercial'
     if (filter === 'admins') return p.isAdmin
     if (filter === 'editors') return p.canEditDocs
+    if (filter === 'prototypes') return p.canSeePrototypes
     if (filter === 'review') return p.source === 'review'
     return true
   })
 
-  async function change(p: SiteUser, patch: { role?: string; isAdmin?: boolean; canEditDocs?: boolean }) {
+  async function change(p: SiteUser, patch: { role?: string; isAdmin?: boolean; canEditDocs?: boolean; canSeePrototypes?: boolean }) {
     setBusy(p.email)
     setError(null)
     const r = await changeAccess({ email: p.email, ...patch })
@@ -117,6 +119,7 @@ export function PeopleTable({ people: initial, me }: { people: SiteUser[]; me: s
               <th>Role</th>
               <th title="Sees the Admin section and can change anyone's access">Admin</th>
               <th title="Can create folders and upload, rename, replace and remove in Process Documentation">Edits docs</th>
+              <th title="Sees the Prototypes section, such as Report Builder. Not implied by Admin.">Prototypes</th>
               <th>From</th>
             </tr>
           </thead>
@@ -165,6 +168,16 @@ export function PeopleTable({ people: initial, me }: { people: SiteUser[]; me: s
                     aria-label={`Edits documentation: ${p.name ?? p.email}`}
                   />
                 </td>
+                <td className="ad-check">
+                  <input
+                    id={`proto-${p.email}`}
+                    type="checkbox"
+                    checked={p.canSeePrototypes}
+                    disabled={busy === p.email}
+                    onChange={(e) => change(p, { canSeePrototypes: e.target.checked })}
+                    aria-label={`Sees prototypes: ${p.name ?? p.email}`}
+                  />
+                </td>
                 <td>
                   <span className={`ad-src ad-src-${p.source}`}>{SOURCE[p.source] ?? p.source}</span>
                 </td>
@@ -195,6 +208,7 @@ function AddPerson({ onClose, onAdded }: { onClose: () => void; onAdded: (u: Sit
   const [role, setRole] = useState('product')
   const [isAdmin, setIsAdmin] = useState(false)
   const [canEditDocs, setCanEditDocs] = useState(false)
+  const [canSeePrototypes, setCanSeePrototypes] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   return (
@@ -204,7 +218,7 @@ function AddPerson({ onClose, onAdded }: { onClose: () => void; onAdded: (u: Sit
         onSubmit={async (e) => {
           e.preventDefault()
           setBusy(true)
-          const r = await addPerson({ email, name, role, isAdmin, canEditDocs })
+          const r = await addPerson({ email, name, role, isAdmin, canEditDocs, canSeePrototypes })
           setBusy(false)
           if (r.error || !r.user) return setError(r.error ?? 'Not saved.')
           onAdded(r.user)
@@ -221,6 +235,9 @@ function AddPerson({ onClose, onAdded }: { onClose: () => void; onAdded: (u: Sit
         </label>
         <label className="ad-tick">
           <input id="add-docs" type="checkbox" checked={canEditDocs || isAdmin} disabled={isAdmin} onChange={(e) => setCanEditDocs(e.target.checked)} /> Edits documentation
+        </label>
+        <label className="ad-tick">
+          <input id="add-proto" type="checkbox" checked={canSeePrototypes} onChange={(e) => setCanSeePrototypes(e.target.checked)} /> Sees prototypes
         </label>
         <div className="pd-actions">
           {error ? <span className="mr-said mr-bad">{error}</span> : null}

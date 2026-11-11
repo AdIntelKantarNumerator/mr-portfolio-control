@@ -1,5 +1,7 @@
-// Gives Yaara her picture in Open WebUI. Run once after the first deploy, and
-// again whenever yaara-model.json or her avatar changes.
+// Gives Yaara her picture in Open WebUI, and Report Builder (the prototype the
+// portfolio also lists) its own name, description and suggested questions.
+// Run once after the first deploy, and again whenever yaara-model.json,
+// report-builder-model.json or her avatar changes.
 //
 //   OPEN_WEBUI_URL=https://<chat>.azurewebsites.net OPEN_WEBUI_TOKEN=<token> \
 //     node deploy/open-webui/configure-model.mjs
@@ -15,6 +17,7 @@
 // same thing can be done by hand in Workspace, Models, Yaara, by uploading
 // public/brand/yaara-128.png.
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -45,14 +48,30 @@ const call = (path, body) =>
     body: JSON.stringify(body),
   })
 
-let res = await call('/api/v1/models/create', form)
-if (!res.ok) {
-  // Already there: update it in place.
-  res = await call('/api/v1/models/model/update', form)
+async function save(entry) {
+  let res = await call('/api/v1/models/create', entry)
+  if (!res.ok) {
+    // Already there: update it in place.
+    res = await call('/api/v1/models/model/update', entry)
+  }
+  const text = await res.text()
+  if (!res.ok) {
+    console.error(`Open WebUI refused ${entry.name} (${res.status}): ${text.slice(0, 300)}`)
+    process.exit(1)
+  }
+  console.log(`${entry.name}'s model entry is set on ${base}.`)
 }
-const text = await res.text()
-if (!res.ok) {
-  console.error(`Open WebUI refused (${res.status}): ${text.slice(0, 300)}`)
-  process.exit(1)
-}
-console.log(`Yaara's model entry is set on ${base}.`)
+
+await save(form)
+
+// Report Builder: without its own entry it would show Yaara's description and
+// suggestions, which DEFAULT_MODEL_METADATA gives every model.
+const rb = JSON.parse(readFileSync(join(here, 'report-builder-model.json'), 'utf8'))
+await save({
+  id: 'report-builder',
+  base_model_id: null,
+  name: rb.name,
+  meta: { description: rb.description, capabilities: rb.capabilities, suggestion_prompts: rb.suggestion_prompts },
+  params: {},
+  is_active: true,
+})

@@ -236,6 +236,15 @@ export const IconCompare = (p: IconProps) => (
   </Glyph>
 )
 
+/** Report Builder — a sheet with rows, and a bar rising out of it. */
+export const IconReportBuilder = (p: IconProps) => (
+  <Glyph {...p}>
+    <rect x="2" y="2" width="12" height="12" rx="1.4" />
+    <path d="M2 6h12M6 6v8" />
+    <path d="M9 12V10M11.5 12V8.5" />
+  </Glyph>
+)
+
 /** The section disclosure caret. */
 export const IconCaret = ({ open = false, ...p }: IconProps & { open?: boolean }) => (
   <Glyph
