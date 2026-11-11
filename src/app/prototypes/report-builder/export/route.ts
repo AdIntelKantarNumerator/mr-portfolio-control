@@ -12,6 +12,7 @@
 import { currentAccess } from '@/lib/auth/access'
 import { getAuthConfig } from '@/lib/auth/config'
 import { engineFor, loadUser } from '@/lib/report-builder/agent'
+import { csv } from '@/lib/report-builder/engines'
 import type { Spec } from '@/lib/report-builder/engine'
 
 export const runtime = 'nodejs'
@@ -30,13 +31,13 @@ export async function GET(req: Request) {
     return new Response('That download link is damaged. Ask Report Builder to run the report again.', { status: 400 })
   }
 
-  const { engine } = engineFor(access.email ? await loadUser(access.email.toLowerCase()) : null)
-  const v = engine.validate(spec)
+  const { engine } = await engineFor(access.email ? await loadUser(access.email.toLowerCase()) : null)
+  const v = await engine.validate(spec)
   if (!v.ok) return new Response('That report is not complete, so there is nothing to download.', { status: 400 })
-  const result = engine.run(v.spec)
+  const result = await engine.run(v.spec)
   const name = (url.searchParams.get('name') ?? 'Report').replace(/[^A-Za-z0-9 &'-]+/g, '').trim().slice(0, 80) || 'Report'
   const file = `${name} (${result.period.label.replace('–', 'to')}).csv`
-  return new Response('﻿' + engine.csv(result), {
+  return new Response('﻿' + csv(result), {
     headers: {
       'content-type': 'text/csv; charset=utf-8',
       'content-disposition': `attachment; filename="${file.replace(/"/g, '')}"`,

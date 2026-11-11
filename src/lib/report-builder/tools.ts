@@ -11,7 +11,8 @@
  * the report or an option's exact change from one turn to the next would lose
  * it. Here "2" or "Last 3 months" is enough; choose() looks it up.
  */
-import type { Engine, Option, Patch, Result, Spec, Understanding, Validation } from './engine'
+import type { Option, Patch, Result, Spec, Understanding, Validation } from './engine'
+import { markdown, type ReportEngine } from './engines'
 
 export interface ChatState {
   /** The report being built in this chat, as the engine last returned it. */
@@ -25,7 +26,7 @@ export interface ChatState {
 export const emptyChat = (): ChatState => ({ report: null, offered: [], editing: null })
 
 export interface ToolContext {
-  engine: Engine
+  engine: ReportEngine
   chat: ChatState
   /** Builds the download link for a report: the portfolio's own address. */
   downloadUrl: (spec: Spec, name: string) => string
@@ -163,7 +164,7 @@ export const TOOLS: ToolDef[] = [
 ]
 
 /** What a tool returns when the report changed: one of question, problem or ready. */
-function status(ctx: ToolContext, v: Validation) {
+async function status(ctx: ToolContext, v: Validation) {
   const { chat, engine } = ctx
   chat.report = v.spec
   const numbered = (opts: Option[]) => {
@@ -182,7 +183,7 @@ function status(ctx: ToolContext, v: Validation) {
     ctx.view = { kind: 'question', question: q.prompt, acceptsName: q.kind === 'entity', choices }
     return { status: 'question', question: q.prompt, accepts_typed_name: q.kind === 'entity', choices }
   }
-  const preview = engine.preview(v.spec, PREVIEW_ROWS)
+  const preview = await engine.preview(v.spec, PREVIEW_ROWS)
   const adjustments = numbered(v.refinements.slice(0, 7))
   const notes = Array.from(new Set(v.warnings.concat(preview.notes)))
   ctx.view = {
@@ -198,7 +199,7 @@ function status(ctx: ToolContext, v: Validation) {
     summary: preview.summary,
     period: `${preview.period.label} (${preview.period.how})`,
     rows_in_report: preview.row_count,
-    table_markdown: engine.markdown(preview, PREVIEW_ROWS),
+    table_markdown: markdown(preview, PREVIEW_ROWS),
     notes,
     large_extract: v.delivery === 'file' ? 'The full report is large; it will be a download.' : undefined,
     adjustments,
@@ -223,7 +224,7 @@ function shown(ctx: ToolContext, result: Result, spec: Spec, name: string) {
     period: `${result.period.label} (${result.period.how})`,
     data_through: result.data_through_label,
     rows_in_report: result.row_count,
-    table_markdown: ctx.engine.markdown(result, RUN_ROWS),
+    table_markdown: markdown(result, RUN_ROWS),
     notes: result.notes,
     download_url: ctx.downloadUrl(spec, name),
   }
@@ -234,8 +235,8 @@ function needReport(ctx: ToolContext): Spec {
   return ctx.chat.report
 }
 
-function readyReport(ctx: ToolContext): Spec {
-  const v = ctx.engine.validate(needReport(ctx))
+async function readyReport(ctx: ToolContext): Promise<Spec> {
+  const v = await ctx.engine.validate(needReport(ctx))
   if (!v.ok) throw new Error('The report is not finished yet: ' + (v.errors[0]?.message ?? v.questions[0]?.prompt) + ' Ask that first.')
   return v.spec
 }
@@ -244,7 +245,7 @@ const str = (x: unknown) => (typeof x === 'string' ? x : '')
 const strs = (x: unknown) => (Array.isArray(x) ? x.filter((s): s is string => typeof s === 'string') : [])
 
 /** Run one tool. Throws Error with a message the model can act on. */
-export function runTool(ctx: ToolContext, name: string, input: Record<string, unknown>): unknown {
+export async function runTool(ctx: ToolContext, name: string, input: Record<string, unknown>): Promise<unknown> {
   const { engine, chat } = ctx
   switch (name) {
     case 'report_options':
@@ -252,13 +253,13 @@ export function runTool(ctx: ToolContext, name: string, input: Record<string, un
 
     case 'search_names': {
       const types = strs(input.types).filter((t) => NAME_TYPES.includes(t))
-      return { matches: engine.search(str(input.query), { types: types.length ? types : undefined, limit: 6 }) }
+      return { matches: await engine.search(str(input.query), { types: types.length ? types : undefined, limit: 6 }) }
     }
 
     case 'new_report': {
-      const tpl = engine.catalog().templates.find((t) => t.id === input.template)
+      const tpl = (await engine.catalog()).templates.find((t) => t.id === input.template)
       chat.editing = null
-      return status(ctx, engine.validate(tpl ? structuredClone(tpl.spec) : {}))
+      return status(ctx, await engine.validate(tpl ? structuredClone(tpl.spec) : {}))
     }
 
     case 'change_report': {
@@ -289,7 +290,7 @@ export function runTool(ctx: ToolContext, name: string, input: Record<string, un
         const key = `filters.${id.split(':')[0]}`
         patch.remove[key] = [...(patch.remove[key] ?? []), id]
       }
-      return status(ctx, engine.validate(report, patch))
+      return status(ctx, await engine.validate(report, patch))
     }
 
     case 'offer_names': {
@@ -298,12 +299,16 @@ export function runTool(ctx: ToolContext, name: string, input: Record<string, un
       if (ids.length < 2) throw new Error('Give at least two ids from search_names.')
       const question = str(input.question).trim() || 'Which do you mean?'
       const add = input.names_mode === 'add'
+      const filters: Record<string, string[]> = {}
+      for (const id of ids) (filters[id.split(':')[0]!] ??= []).push(id)
+      await engine.ensureLabels({ filters })
+      const typeLabel = Object.fromEntries(((await engine.catalog()) as unknown as { dimensions: Array<{ key: string; label: string }> }).dimensions.map((d) => [d.key, d.label]))
       const choices = ids.map((id, i) => {
         const type = id.split(':')[0]!
         const label = engine.labelOf(type, id)
-        const hit = engine.search(label, { types: [type], limit: 10 }).find((h) => h.id === id)
+        const ctxText = engine.contextOf(id)
         chat.offered[i] = { label, patch: engine.patchFromUnderstanding(report, { entities: [{ id, type }], add }) }
-        return { number: i + 1, label, description: hit ? `${hit.type_label}${hit.context && hit.context !== hit.type_label ? ` · ${hit.context}` : ''}` : undefined }
+        return { number: i + 1, label, description: `${typeLabel[type] ?? type}${ctxText && ctxText !== typeLabel[type] ? ` · ${ctxText}` : ''}` }
       })
       chat.offered.length = choices.length
       ctx.view = { kind: 'question', question, acceptsName: true, choices }
@@ -319,19 +324,19 @@ export function runTool(ctx: ToolContext, name: string, input: Record<string, un
           ? chat.offered[n - 1]
           : chat.offered.find((o) => o.label.toLowerCase() === said) ?? chat.offered.find((o) => said && o.label.toLowerCase().includes(said))
       if (!pick) throw new Error(`"${input.choice}" is not one of the choices last shown: ${chat.offered.map((o, i) => `${i + 1}. ${o.label}`).join('; ')}.`)
-      return status(ctx, engine.validate(chat.report ?? {}, pick.patch))
+      return status(ctx, await engine.validate(chat.report ?? {}, pick.patch))
     }
 
     case 'run_report': {
-      const spec = readyReport(ctx)
+      const spec = await readyReport(ctx)
       const name = str(input.name).trim() || chat.editing?.name || 'Report'
-      return shown(ctx, engine.run(spec), spec, name)
+      return shown(ctx, await engine.run(spec, { limit: RUN_ROWS }), spec, name)
     }
 
     case 'save_report': {
-      const spec = readyReport(ctx)
+      const spec = await readyReport(ctx)
       const replace = input.replace_saved === true && chat.editing
-      const saved = engine.saveReport(str(input.name).trim() || chat.editing?.name || 'Untitled report', spec, replace ? chat.editing!.id : undefined)
+      const saved = await engine.saveReport(str(input.name).trim() || chat.editing?.name || 'Untitled report', spec, replace ? chat.editing!.id : undefined)
       chat.editing = { id: saved.id, name: saved.name }
       ctx.view = { kind: 'saved', savedName: saved.name, title: saved.summary, picksUpNewData: saved.moves_with_new_data }
       return { saved: saved.name, replaced: Boolean(replace), summary: saved.summary, picks_up_new_data: saved.moves_with_new_data }
@@ -339,23 +344,23 @@ export function runTool(ctx: ToolContext, name: string, input: Record<string, un
 
     case 'list_saved_reports':
       return {
-        data_through: engine.availability().final_through_label,
-        reports: engine.listSaved().map((r) => ({ name: r.name, summary: r.summary, picks_up_new_data: r.moves_with_new_data, last_run: r.last_run?.period_label ?? 'never' })),
+        data_through: (await engine.availability()).final_through_label,
+        reports: (await engine.listSaved()).map((r) => ({ name: r.name, summary: r.summary, picks_up_new_data: r.moves_with_new_data, last_run: r.last_run?.period_label ?? 'never' })),
       }
 
     case 'open_saved_report': {
       const found = engine.findSaved(str(input.report))
       if (!found) throw new Error(`No saved report matches "${input.report}". list_saved_reports shows what there is.`)
-      const rec = engine.getSaved(found.id)
+      const rec = await engine.getSaved(found.id)
       chat.editing = { id: rec.id, name: rec.name }
-      return { opened: rec.name, ...status(ctx, engine.validate(rec.spec)) }
+      return { opened: rec.name, ...(await status(ctx, await engine.validate(rec.spec))) }
     }
 
     case 'run_saved_report': {
       const found = engine.findSaved(str(input.report))
       if (!found) throw new Error(`No saved report matches "${input.report}". list_saved_reports shows what there is.`)
-      const r = engine.runSaved(found.id)
-      const spec = engine.getSaved(found.id).spec
+      const r = await engine.runSaved(found.id, { limit: RUN_ROWS })
+      const spec = (await engine.getSaved(found.id)).spec
       const out = { report: r.saved_report.name, since_last_run: r.since_last_run.text, ...shown(ctx, r, spec, r.saved_report.name) }
       ctx.view = { ...ctx.view!, savedName: r.saved_report.name, sinceLastRun: r.since_last_run.text }
       return out
@@ -372,7 +377,8 @@ export function runTool(ctx: ToolContext, name: string, input: Record<string, un
     }
 
     case 'demo_load_next_month': {
-      const through = engine.advanceData(1).final_through_label
+      if (!engine.advanceData) throw new Error('This report reads live GPC data, which moves on when the nightly load runs; there is no demo month to load.')
+      const through = engine.advanceData().final_through_label
       ctx.view = { kind: 'data', message: `New data arrived. Final data now runs through ${through}.` }
       return { final_data_through: through }
     }

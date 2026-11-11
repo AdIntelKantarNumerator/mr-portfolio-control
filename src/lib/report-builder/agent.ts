@@ -8,11 +8,16 @@
  * Saved reports belong to the person (report_builder_users, by email); the
  * report in progress belongs to the chat (report_builder_chats, by Open
  * WebUI's chat id), so two chats can build two reports at once.
+ *
+ * Each is stamped with the data it was built on (source: gpc or sample). Ids
+ * mean different things in the two, so a saved report or chat from the other
+ * source is set aside rather than run against the wrong data.
  */
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { reportBuilderChats, reportBuilderUsers } from '@/db/schema'
-import ReportEngine, { type Engine, type EngineState, type Spec } from './engine.js'
+import type { EngineState, Spec } from './engine'
+import { dataSource, engineFor as pickEngine, type ReportEngine } from './engines'
 import { chooseModel, runLoop, ReportModelError, type Post, type Turn } from './model'
 import { describeReport, savedList } from './page-view'
 import { REPORT_BUILDER_PAGE_SKILL, REPORT_BUILDER_SKILL } from './skill'
@@ -21,18 +26,31 @@ import { TOOLS, emptyChat, progressNote, runTool, type ChatState, type ToolConte
 export const REPORT_BUILDER_MODEL_ID = 'report-builder'
 export const REPORT_BUILDER_MODEL_NAME = 'Report Builder'
 
+type StampedState = EngineState & { source?: string }
+
 /** A saved report, as the person's examples start out: one to re-run on the first day. */
-function starterState(engine: Engine): void {
-  const sub = engine.search('Auto Insurance', { types: ['subcategory'], limit: 1 })[0]
-  if (sub) engine.saveReport('Auto insurance share', { template: 'category_share', rows: ['advertiser'], measures: ['spend'], calcs: ['share'], filters: { subcategory: [sub.id] }, time: { mode: 'rolling', unit: 'month', count: 12 } })
+async function starterState(engine: ReportEngine): Promise<void> {
+  const name = engine.live ? 'Vehicle Insurance' : 'Auto Insurance'
+  const sub = (await engine.search(name, { types: ['subcategory'], limit: 1 }))[0]
+  if (!sub) return
+  const months = engine.live ? 3 : 12
+  await engine.saveReport(engine.live ? 'Vehicle insurance share' : 'Auto insurance share', { template: 'category_share', rows: ['advertiser'], measures: ['spend'], calcs: ['share'], filters: { subcategory: [sub.id] }, time: { mode: 'rolling', unit: 'month', count: months } })
 }
 
 /** An engine over one person's saved reports, held in memory for the turn. */
-export function engineFor(state: EngineState | null): { engine: Engine; state: () => EngineState } {
-  let mem: EngineState = state ?? { saved: [], offset: 0, seq: 0 }
-  const engine = ReportEngine.create({ store: { load: () => mem, save: (s) => (mem = s) } })
-  if (!state) starterState(engine)
-  return { engine, state: () => mem }
+export async function engineFor(state: StampedState | null): Promise<{ engine: ReportEngine; state: () => StampedState; fresh: boolean }> {
+  const source = dataSource()
+  const usable = state && (state.source ?? 'sample') === source
+  let mem: StampedState = usable ? state : { saved: [], offset: 0, seq: 0, source }
+  const engine = pickEngine({ load: () => mem, save: (s) => (mem = { ...s, source }) })
+  if (!usable) {
+    try {
+      await starterState(engine)
+    } catch {
+      // No starter on a bad day for the data; the person starts with none.
+    }
+  }
+  return { engine, state: () => mem, fresh: !usable }
 }
 
 export async function loadUser(email: string): Promise<EngineState | null> {
@@ -48,11 +66,14 @@ async function loadChat(chatId: string, email: string): Promise<ChatState> {
   const [row] = await db.select().from(reportBuilderChats).where(eq(reportBuilderChats.chatId, chatId)).limit(1)
   // A chat id is Open WebUI's; it is honoured only for the person who owns it.
   if (!row || row.email !== email) return emptyChat()
-  return { ...emptyChat(), ...(row.state as Partial<ChatState>) }
+  const s = row.state as Partial<ChatState> & { source?: string }
+  if ((s.source ?? 'sample') !== dataSource()) return emptyChat()
+  return { ...emptyChat(), ...s }
 }
 
 async function saveChat(chatId: string, email: string, state: ChatState) {
-  await db.insert(reportBuilderChats).values({ chatId, email, state }).onConflictDoUpdate({ target: reportBuilderChats.chatId, set: { email, state, updatedAt: new Date() } })
+  const stamped = { ...state, source: dataSource() }
+  await db.insert(reportBuilderChats).values({ chatId, email, state: stamped }).onConflictDoUpdate({ target: reportBuilderChats.chatId, set: { email, state: stamped, updatedAt: new Date() } })
 }
 
 /** The download link for a report: the spec rides in the link, and is recomputed for whoever opens it. */
@@ -81,7 +102,7 @@ async function withSession<T>(email: string, chatId: string | null, appUrl: stri
   const who = email.trim().toLowerCase()
   const chatKey = chatId?.trim() || `default:${who}`
   const before = await loadUser(who)
-  const { engine, state } = engineFor(before)
+  const { engine, state, fresh } = await engineFor(before)
   const chat = await loadChat(chatKey, who)
   const chatBefore = JSON.stringify(chat)
   const userBefore = JSON.stringify(state())
@@ -89,7 +110,7 @@ async function withSession<T>(email: string, chatId: string | null, appUrl: stri
 
   const out = await work(ctx)
 
-  if (!before || JSON.stringify(state()) !== userBefore) await saveUser(who, state())
+  if (fresh || JSON.stringify(state()) !== userBefore) await saveUser(who, state())
   if (JSON.stringify(chat) !== chatBefore) await saveChat(chatKey, who, chat)
   return out
 }
@@ -189,21 +210,29 @@ function cannedText(view: View | undefined): string {
 export interface PageReply {
   text: string
   view: View | null
-  panel: ReturnType<typeof describeReport>
-  saved: ReturnType<typeof savedList>
+  panel: Awaited<ReturnType<typeof describeReport>>
+  saved: Awaited<ReturnType<typeof savedList>>
   dataThrough: string
+  live: boolean
 }
 
-function reply(ctx: ToolContext, text: string): PageReply {
-  return { text, view: ctx.view ?? null, panel: describeReport(ctx.engine, ctx.chat), saved: savedList(ctx.engine), dataThrough: ctx.engine.availability().final_through_label }
+async function reply(ctx: ToolContext, text: string): Promise<PageReply> {
+  return {
+    text,
+    view: ctx.view ?? null,
+    panel: await describeReport(ctx.engine, ctx.chat),
+    saved: await savedList(ctx.engine),
+    dataThrough: (await ctx.engine.availability()).final_through_label,
+    live: ctx.engine.live,
+  }
 }
 
 /** A click on the page: applied directly. Errors come back as the assistant's words. */
 export function reportBuilderAction(email: string, chatId: string, appUrl: string, action: PageAction): Promise<PageReply> {
-  return withSession(email, chatId, appUrl, (ctx) => {
+  return withSession(email, chatId, appUrl, async (ctx) => {
     try {
-      runTool(ctx, ACTION_TOOL[action.type], actionInput(action))
-      return reply(ctx, cannedText(ctx.view))
+      await runTool(ctx, ACTION_TOOL[action.type], actionInput(action))
+      return await reply(ctx, cannedText(ctx.view))
     } catch (err) {
       return reply(ctx, (err as Error).message)
     }
@@ -219,7 +248,8 @@ export function reportBuilderPageTurn(input: TurnInput & { chatId: string }): Pr
 }
 
 /** The page's first look: saved reports and data freshness, with no chat yet. */
-export async function reportBuilderOverview(email: string): Promise<Pick<PageReply, 'saved' | 'dataThrough'>> {
-  const { engine } = engineFor(await loadUser(email.trim().toLowerCase()))
-  return { saved: savedList(engine), dataThrough: engine.availability().final_through_label }
+export async function reportBuilderOverview(email: string): Promise<Pick<PageReply, 'saved' | 'dataThrough' | 'live'> & { allMediaFrom: string }> {
+  const { engine } = await engineFor(await loadUser(email.trim().toLowerCase()))
+  const a = await engine.availability()
+  return { saved: await savedList(engine), dataThrough: a.final_through_label, live: engine.live, allMediaFrom: a.earliest_label }
 }

@@ -203,9 +203,33 @@ function Table({ table, max }: { table: ViewTable; max: number }) {
   )
 }
 
+// ---------------------------------------------------------------- the text box hint
+
+/**
+ * What the text box suggests, from where the conversation is: the buttons
+ * cover the usual answers, so the hint shows what else can be typed.
+ */
+function hintFor(view: View | null | undefined, editing: boolean): string {
+  if (!view) return 'Describe a report, for example "media mix for Toyota, last 3 months"'
+  if (view.kind === 'question') {
+    const q = (view.question ?? '').toLowerCase()
+    if (q.includes('kind of report')) return 'Or describe it: "spend trend for fast food" or "who isn\'t buying on ESPN?"'
+    if (q.includes('properties are yours')) return 'Or type your networks: "NBC", "Hulu" or "ESPN and ESPN2"'
+    if (q.includes('time period')) return 'Or type a period: "last month", "August to October" or "year to date"'
+    if (q.includes('category')) return 'Or type a category: "fast food", "car insurance" or "pizza restaurants"'
+    if (view.acceptsName) return 'Or type a name: an advertiser ("Toyota"), a brand ("Big Mac") or a category ("fast food")'
+    return 'Pick one above, or say what you want instead'
+  }
+  if (view.kind === 'problem') return 'Pick a fix above, or say what you want instead: "drop the columns"'
+  if (view.kind === 'ready') return 'Change it in your own words: "add Ford", "only CTV", "by network", "top 10" or "run it"'
+  if (view.kind === 'run') return editing ? 'Say "save changes", or keep adjusting: "by product", "latest month only"' : 'Say "save it as Toyota mix", or keep adjusting: "by network", "add impressions"'
+  if (view.kind === 'saved') return 'Start another: "category share for pizza restaurants", or "run my saved reports"'
+  return 'Describe a report, or ask to run a saved one'
+}
+
 // ---------------------------------------------------------------- the page
 
-export function ReportBuilderChat({ initialSaved, initialThrough, modelReady }: { initialSaved: SavedItem[]; initialThrough: string; modelReady: boolean }) {
+export function ReportBuilderChat({ initialSaved, initialThrough, modelReady, live }: { initialSaved: SavedItem[]; initialThrough: string; modelReady: boolean; live: boolean }) {
   const [chatId, setChatId] = useState(newId)
   const [messages, setMessages] = useState<Message[]>([])
   const [panel, setPanel] = useState<PageReply['panel'] | null>(null)
@@ -356,7 +380,7 @@ export function ReportBuilderChat({ initialSaved, initialThrough, modelReady }: 
             id="rb-ask"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={modelReady ? 'Describe a report, or type a name, for example "Toyota" or "auto insurance"' : 'Typing needs a model to be configured; the buttons work without one'}
+            placeholder={modelReady ? hintFor(lastAssistant?.view, Boolean(panel?.editing)) : 'Typing needs a model to be configured; the buttons work without one'}
             aria-label="Message"
             disabled={!modelReady}
           />
@@ -448,10 +472,12 @@ export function ReportBuilderChat({ initialSaved, initialThrough, modelReady }: 
           </div>
         )}
         <div className="rb-railfoot">
-          <span className="rb-muted">Final data through {through}</span>
-          <button type="button" className="btn rb-small" disabled={!!busy} title="For demonstrations: pretend next month's data has arrived" onClick={() => act({ type: 'demo_month' }, 'Demo: load next month of data')}>
-            Demo: load next month
-          </button>
+          <span className="rb-muted">{live ? `GPC data, complete through ${through}` : `Final data through ${through}`}</span>
+          {live ? null : (
+            <button type="button" className="btn rb-small" disabled={!!busy} title="For demonstrations: pretend next month's data has arrived" onClick={() => act({ type: 'demo_month' }, 'Demo: load next month of data')}>
+              Demo: load next month
+            </button>
+          )}
         </div>
       </aside>
     </div>

@@ -8,12 +8,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { canSee, navSectionsFor, normalise } from '../src/lib/access-rules'
-import ReportEngine from '../src/lib/report-builder/engine.js'
+import { dataSource, sampleEngine } from '../src/lib/report-builder/engines'
 import { TOOLS, emptyChat, runTool, type ToolContext } from '../src/lib/report-builder/tools'
 import { chooseModel, reportBuilderOpenRouter, runLoop, type Post } from '../src/lib/report-builder/model'
 import { describeReport, suggestName } from '../src/lib/report-builder/page-view'
 
-test('the Prototypes section needs its own flag, whatever the role, and admin does not imply it', () => {
+test('the Prototypes section needs its own flag, whatever the role, and admin does not imply it', async () => {
   const product = normalise({ role: 'product' })
   const admin = normalise({ role: 'product', isAdmin: true })
   const tester = normalise({ role: 'commercial', canSeePrototypes: true })
@@ -30,97 +30,97 @@ test('the Prototypes section needs its own flag, whatever the role, and admin do
 
 function context(): ToolContext {
   const mem = { saved: [], offset: 0, seq: 0 }
-  const engine = ReportEngine.create({ store: { load: () => mem, save: () => {} } })
+  const engine = sampleEngine({ load: () => mem, save: () => {} })
   return { engine, chat: emptyChat(), downloadUrl: (spec, name) => `https://portfolio/prototypes/report-builder/export?name=${name}&n=${Object.keys(spec).length}` }
 }
 
-const call = (ctx: ToolContext, name: string, input: Record<string, unknown> = {}) => runTool(ctx, name, input) as Record<string, unknown>
+const call = async (ctx: ToolContext, name: string, input: Record<string, unknown> = {}) => (await runTool(ctx, name, input)) as Record<string, unknown>
 
-test('an interview from nothing: a question with numbered choices, answered by number', () => {
+test('an interview from nothing: a question with numbered choices, answered by number', async () => {
   const ctx = context()
-  const q = call(ctx, 'new_report')
+  const q = await call(ctx, 'new_report')
   assert.equal(q.status, 'question')
   const choices = q.choices as Array<{ number: number; label: string }>
   const mix = choices.find((c) => c.label === 'Media mix')!
-  const who = call(ctx, 'choose', { choice: String(mix.number) })
+  const who = await call(ctx, 'choose', { choice: String(mix.number) })
   assert.equal(who.status, 'question')
-  const toyota = (call(ctx, 'search_names', { query: 'Toyota', types: ['advertiser'] }).matches as Array<{ id: string }>)[0]!
-  const ready = call(ctx, 'change_report', { names: [toyota.id] })
+  const toyota = ((await call(ctx, 'search_names', { query: 'Toyota', types: ['advertiser'] })).matches as Array<{ id: string }>)[0]!
+  const ready = await call(ctx, 'change_report', { names: [toyota.id] })
   assert.equal(ready.status, 'ready')
   assert.match(String(ready.table_markdown), /\| Toyota \|/)
   const adj = ready.adjustments as Array<{ number: number; label: string }>
-  const three = call(ctx, 'choose', { choice: 'last 3 months' })
+  const three = await call(ctx, 'choose', { choice: 'last 3 months' })
   assert.match(String(three.summary), /last 3 complete months/)
   assert.ok(adj.length > 0)
 })
 
-test('naming a new category switches the report; "add" keeps both', () => {
+test('naming a new category switches the report; "add" keeps both', async () => {
   const ctx = context()
-  call(ctx, 'new_report', { template: 'category_share' })
-  const ins = (call(ctx, 'search_names', { query: 'Auto Insurance', types: ['subcategory'] }).matches as Array<{ id: string }>)[0]!
-  const qsr = (call(ctx, 'search_names', { query: 'Quick Service Restaurants', types: ['subcategory'] }).matches as Array<{ id: string }>)[0]!
-  call(ctx, 'change_report', { names: [ins.id] })
-  const switched = call(ctx, 'change_report', { names: [qsr.id] })
+  await call(ctx, 'new_report', { template: 'category_share' })
+  const ins = ((await call(ctx, 'search_names', { query: 'Auto Insurance', types: ['subcategory'] })).matches as Array<{ id: string }>)[0]!
+  const qsr = ((await call(ctx, 'search_names', { query: 'Quick Service Restaurants', types: ['subcategory'] })).matches as Array<{ id: string }>)[0]!
+  await call(ctx, 'change_report', { names: [ins.id] })
+  const switched = await call(ctx, 'change_report', { names: [qsr.id] })
   assert.ok(!/Progressive|GEICO/.test(String(switched.table_markdown)))
-  const both = call(ctx, 'change_report', { names: [ins.id], names_mode: 'add' })
+  const both = await call(ctx, 'change_report', { names: [ins.id], names_mode: 'add' })
   assert.match(String(both.table_markdown), /Progressive/)
   assert.match(String(both.table_markdown), /Burger King/)
 })
 
-test('asking for share of total on a column breakdown drops the columns rather than failing', () => {
+test('asking for share of total on a column breakdown drops the columns rather than failing', async () => {
   const ctx = context()
-  call(ctx, 'new_report', { template: 'media_mix' })
-  const ford = (call(ctx, 'search_names', { query: 'Ford', types: ['advertiser'] }).matches as Array<{ id: string }>)[0]!
-  call(ctx, 'change_report', { names: [ford.id] })
-  const share = call(ctx, 'change_report', { share_of_total: true })
+  await call(ctx, 'new_report', { template: 'media_mix' })
+  const ford = ((await call(ctx, 'search_names', { query: 'Ford', types: ['advertiser'] })).matches as Array<{ id: string }>)[0]!
+  await call(ctx, 'change_report', { names: [ford.id] })
+  const share = await call(ctx, 'change_report', { share_of_total: true })
   assert.equal(share.status, 'ready')
   assert.match(String(share.table_markdown), /Share of total/)
   assert.doesNotMatch(String(share.table_markdown), /Linear TV/, 'the media-type columns are gone')
 })
 
-test('a choice that was never offered is refused with the choices that were', () => {
+test('a choice that was never offered is refused with the choices that were', async () => {
   const ctx = context()
-  call(ctx, 'new_report')
-  assert.throws(() => call(ctx, 'choose', { choice: '9' }), /Spend trend/)
+  await call(ctx, 'new_report')
+  await assert.rejects(() => call(ctx, 'choose', { choice: '9' }), /Spend trend/)
 })
 
-test('run gives a table and a download link; save, open and replace keep one saved report', () => {
+test('run gives a table and a download link; save, open and replace keep one saved report', async () => {
   const ctx = context()
-  call(ctx, 'new_report', { template: 'advertiser_trend' })
-  const t = (call(ctx, 'search_names', { query: 'T-Mobile', types: ['advertiser'] }).matches as Array<{ id: string }>)[0]!
-  call(ctx, 'change_report', { names: [t.id] })
-  const run = call(ctx, 'run_report', { name: 'T-Mobile trend' })
+  await call(ctx, 'new_report', { template: 'advertiser_trend' })
+  const t = ((await call(ctx, 'search_names', { query: 'T-Mobile', types: ['advertiser'] })).matches as Array<{ id: string }>)[0]!
+  await call(ctx, 'change_report', { names: [t.id] })
+  const run = await call(ctx, 'run_report', { name: 'T-Mobile trend' })
   assert.match(String(run.download_url), /export\?name=T-Mobile trend/)
-  call(ctx, 'save_report', { name: 'T-Mobile trend' })
-  call(ctx, 'new_report')
-  const opened = call(ctx, 'open_saved_report', { report: 't-mobile' })
+  await call(ctx, 'save_report', { name: 'T-Mobile trend' })
+  await call(ctx, 'new_report')
+  const opened = await call(ctx, 'open_saved_report', { report: 't-mobile' })
   assert.equal(opened.opened, 'T-Mobile trend')
-  call(ctx, 'change_report', { period: { mode: 'ytd' } })
-  const replaced = call(ctx, 'save_report', { name: 'T-Mobile trend', replace_saved: true })
+  await call(ctx, 'change_report', { period: { mode: 'ytd' } })
+  const replaced = await call(ctx, 'save_report', { name: 'T-Mobile trend', replace_saved: true })
   assert.equal(replaced.replaced, true)
-  assert.equal((call(ctx, 'list_saved_reports').reports as unknown[]).length, 1)
-  assert.throws(() => call(ctx, 'delete_saved_report', { report: 't-mobile', confirmed: false }), /confirm/)
+  assert.equal(((await call(ctx, 'list_saved_reports')).reports as unknown[]).length, 1)
+  await assert.rejects(() => call(ctx, 'delete_saved_report', { report: 't-mobile', confirmed: false }), /confirm/)
 })
 
-test('every tool the model is offered is one runTool knows', () => {
+test('every tool the model is offered is one runTool knows', async () => {
   const ctx = context()
   for (const t of TOOLS) {
     try {
-      runTool(ctx, t.name, {})
+      await runTool(ctx, t.name, {})
     } catch (err) {
       assert.doesNotMatch((err as Error).message, /Unknown tool/, t.name)
     }
   }
 })
 
-test('the model is Claude when an Anthropic key is set, OpenRouter only with pinned providers', () => {
+test('the model is Claude when an Anthropic key is set, OpenRouter only with pinned providers', async () => {
   assert.equal(chooseModel({})?.provider, undefined)
   assert.equal(chooseModel({ ANTHROPIC_API_KEY: 'k' })?.provider, 'anthropic')
   assert.equal(chooseModel({ OPENROUTER_API_KEY: 'k' }), null, 'no pinned providers: refused, not routed by price')
   assert.equal(chooseModel({ OPENROUTER_API_KEY: 'k', OPENROUTER_PROVIDERS: 'DeepInfra' })?.provider, 'openrouter')
 })
 
-test('Report Builder can run Claude through OpenRouter on its own US hosts, without moving the everyday model', () => {
+test('Report Builder can run Claude through OpenRouter on its own US hosts, without moving the everyday model', async () => {
   const env = {
     OPENROUTER_API_KEY: 'k',
     OPENROUTER_PROVIDERS: 'CoreWeave,DeepInfra',
@@ -182,41 +182,48 @@ test('OpenRouter tool turns ask for low reasoning and hand the model its reasoni
   assert.deepEqual(assistant.reasoning_details, [{ type: 'reasoning.text', text: 't' }])
 })
 
-test('the page gets what to draw: choices, then a table it can chart, and the report in plain words', () => {
+test('the page gets what to draw: choices, then a table it can chart, and the report in plain words', async () => {
   const ctx = context()
-  call(ctx, 'new_report', { template: 'media_mix' })
+  await call(ctx, 'new_report', { template: 'media_mix' })
   assert.equal(ctx.view?.kind, 'question')
   assert.ok((ctx.view?.choices ?? []).length > 1)
-  const ford = (call(ctx, 'search_names', { query: 'Ford', types: ['advertiser'] }).matches as Array<{ id: string }>)[0]!
-  call(ctx, 'change_report', { names: [ford.id] })
+  const ford = ((await call(ctx, 'search_names', { query: 'Ford', types: ['advertiser'] })).matches as Array<{ id: string }>)[0]!
+  await call(ctx, 'change_report', { names: [ford.id] })
   assert.equal(ctx.view?.kind, 'ready')
   assert.ok(ctx.view?.table?.columns.some((c) => c.type === 'money'))
-  call(ctx, 'run_report', {})
+  await call(ctx, 'run_report', {})
   assert.equal(ctx.view?.kind, 'run')
   assert.match(String(ctx.view?.downloadUrl), /export/)
-  const panel = describeReport(ctx.engine, ctx.chat)
+  const panel = await describeReport(ctx.engine, ctx.chat)
   assert.equal(panel.status, 'ready')
   assert.equal(panel.name, 'Ford media mix')
-  assert.equal(suggestName(ctx.engine, ctx.chat.report!), 'Ford media mix')
+  assert.equal(await suggestName(ctx.engine, ctx.chat.report!), 'Ford media mix')
   assert.ok(panel.rows.some((r) => r.label === 'Limited to' && r.value === 'Ford'))
 })
 
-test('everyday words find the right thing: fast food is Quick Service Restaurants', () => {
+test('everyday words find the right thing: fast food is Quick Service Restaurants', async () => {
   const ctx = context()
-  const hits = call(ctx, 'search_names', { query: 'Fast Food' }).matches as Array<{ label: string }>
+  const hits = (await call(ctx, 'search_names', { query: 'Fast Food' })).matches as Array<{ label: string }>
   assert.equal(hits[0]!.label, 'Quick Service Restaurants')
 })
 
-test('the model can put its own which-one choices on the buttons, and picking one applies it', () => {
+test('the model can put its own which-one choices on the buttons, and picking one applies it', async () => {
   const ctx = context()
-  call(ctx, 'new_report', { template: 'advertiser_trend' })
-  const qsr = (call(ctx, 'search_names', { query: 'Quick Service Restaurants', types: ['subcategory'] }).matches as Array<{ id: string }>)[0]!
-  const rest = (call(ctx, 'search_names', { query: 'Restaurants', types: ['category'] }).matches as Array<{ id: string }>)[0]!
-  const asked = call(ctx, 'offer_names', { question: 'Which one?', ids: [qsr.id, rest.id] })
+  await call(ctx, 'new_report', { template: 'advertiser_trend' })
+  const qsr = ((await call(ctx, 'search_names', { query: 'Quick Service Restaurants', types: ['subcategory'] })).matches as Array<{ id: string }>)[0]!
+  const rest = ((await call(ctx, 'search_names', { query: 'Restaurants', types: ['category'] })).matches as Array<{ id: string }>)[0]!
+  const asked = await call(ctx, 'offer_names', { question: 'Which one?', ids: [qsr.id, rest.id] })
   assert.equal(asked.status, 'question')
   assert.deepEqual(ctx.view?.choices?.map((c) => c.label), ['Quick Service Restaurants', 'Restaurants'])
   assert.match(String(ctx.view?.choices?.[1]?.description), /Category/)
-  const picked = call(ctx, 'choose', { choice: '1' })
+  const picked = await call(ctx, 'choose', { choice: '1' })
   assert.equal(picked.status, 'ready')
   assert.match(String(picked.summary), /Quick Service Restaurants/)
+})
+
+test('live GPC data only when asked for and Dev ClickHouse is configured; the sample otherwise', () => {
+  assert.equal(dataSource({}), 'sample')
+  assert.equal(dataSource({ REPORT_BUILDER_DATA: 'gpc' }), 'sample', 'no ClickHouse: stays on the sample')
+  assert.equal(dataSource({ CLICKHOUSE_DEV_URL: 'http://ch:8123' }), 'sample', 'ClickHouse alone does not switch it')
+  assert.equal(dataSource({ REPORT_BUILDER_DATA: 'gpc', CLICKHOUSE_DEV_URL: 'http://ch:8123' }), 'gpc')
 })

@@ -3,7 +3,8 @@
  * in plain words, and the person's saved reports. Pure, from the engine and
  * the chat's state, so it is the same whatever produced the last change.
  */
-import type { Engine, Spec } from './engine'
+import type { Spec } from './engine'
+import type { ReportEngine } from './engines'
 import type { ChatState } from './tools'
 
 interface ReportSpec extends Spec {
@@ -31,8 +32,9 @@ export interface ReportPanel {
 }
 
 /** "Toyota & Ford media mix", from the report's subject and template. */
-export function suggestName(engine: Engine, spec: ReportSpec): string {
-  const tpl = engine.catalog().templates.find((t) => t.id === spec.template)
+export async function suggestName(engine: ReportEngine, spec: ReportSpec): Promise<string> {
+  await engine.ensureLabels(spec)
+  const tpl = (await engine.catalog()).templates.find((t) => t.id === spec.template)
   const names: string[] = []
   for (const [dim, ids] of Object.entries(spec.filters ?? {})) for (const id of ids) names.push(engine.labelOf(dim, id))
   for (const id of spec.zero_share?.mine ?? []) names.push(engine.labelOf('property', id))
@@ -40,14 +42,15 @@ export function suggestName(engine: Engine, spec: ReportSpec): string {
   return `${subject} ${tpl ? tpl.label.toLowerCase() : 'report'}`
 }
 
-export function describeReport(engine: Engine, chat: ChatState): ReportPanel {
+export async function describeReport(engine: ReportEngine, chat: ChatState): Promise<ReportPanel> {
   const spec = (chat.report ?? {}) as ReportSpec
   if (!chat.report || !spec.rows?.length) {
     return { name: '', editing: chat.editing?.name ?? null, status: 'empty', statusText: 'Nothing chosen yet', rows: [], period: null, picksUpNewData: false }
   }
-  const v = engine.validate(spec)
+  const v = await engine.validate(spec)
   const s = v.spec as ReportSpec
-  const cat = engine.catalog() as unknown as {
+  await engine.ensureLabels(s)
+  const cat = (await engine.catalog()) as unknown as {
     dimensions: Array<{ key: string; label: string }>
     measures: Array<{ key: string; label: string }>
     calcs: Array<{ key: string; label: string }>
@@ -75,7 +78,7 @@ export function describeReport(engine: Engine, chat: ChatState): ReportPanel {
   ]
   if (s.options?.top_n) rows.push({ label: 'Rows kept', value: `Top ${s.options.top_n}` })
   return {
-    name: chat.editing?.name ?? suggestName(engine, s),
+    name: chat.editing?.name ?? (await suggestName(engine, s)),
     editing: chat.editing?.name ?? null,
     status,
     statusText: status === 'problem' ? 'Needs a fix' : status === 'waiting' ? 'Waiting on your answer' : `Ready · ${(v.row_count ?? 0).toLocaleString('en-US')} ${v.row_count === 1 ? 'row' : 'rows'}`,
@@ -93,6 +96,6 @@ export interface SavedItem {
   lastRun: string | null
 }
 
-export function savedList(engine: Engine): SavedItem[] {
-  return engine.listSaved().map((r) => ({ id: r.id, name: r.name, summary: r.summary, picksUpNewData: r.moves_with_new_data, lastRun: r.last_run?.period_label ?? null }))
+export async function savedList(engine: ReportEngine): Promise<SavedItem[]> {
+  return (await engine.listSaved()).map((r) => ({ id: r.id, name: r.name, summary: r.summary, picksUpNewData: r.moves_with_new_data, lastRun: r.last_run?.period_label ?? null }))
 }

@@ -72,7 +72,7 @@ export interface LoopInput {
   turns: Turn[]
   tools: ToolDef[]
   /** Runs a tool; a thrown error goes back to the model as the tool's result. */
-  exec: (name: string, input: Record<string, unknown>) => unknown
+  exec: (name: string, input: Record<string, unknown>) => unknown | Promise<unknown>
   onTool?: (name: string) => void
   signal?: AbortSignal
 }
@@ -112,10 +112,10 @@ async function postWithRetry(post: Post, url: string, headers: Record<string, st
   }
 }
 
-function safeExec(input: LoopInput, name: string, args: Record<string, unknown>): string {
+async function safeExec(input: LoopInput, name: string, args: Record<string, unknown>): Promise<string> {
   input.onTool?.(name)
   try {
-    return JSON.stringify(input.exec(name, args) ?? { ok: true })
+    return JSON.stringify((await input.exec(name, args)) ?? { ok: true })
   } catch (err) {
     return JSON.stringify({ error: (err as Error).message })
   }
@@ -134,7 +134,7 @@ async function loopAnthropic(input: LoopInput, model: string, post: Post, env: R
     const uses = blocks.filter((b) => b.type === 'tool_use')
     if (reply.stop_reason !== 'tool_use' || !uses.length) return blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('').trim()
     messages.push({ role: 'assistant', content: blocks })
-    messages.push({ role: 'user', content: uses.map((u) => ({ type: 'tool_result', tool_use_id: u.id, content: safeExec(input, u.name ?? '', u.input ?? {}) })) })
+    messages.push({ role: 'user', content: await Promise.all(uses.map(async (u) => ({ type: 'tool_result', tool_use_id: u.id, content: await safeExec(input, u.name ?? '', u.input ?? {}) }))) })
   }
   throw new ReportModelError('The model kept calling tools without answering.')
 }
@@ -195,7 +195,7 @@ async function loopOpenRouter(input: LoopInput, model: string, post: Post, env: 
       } catch {
         args = {}
       }
-      messages.push({ role: 'tool', tool_call_id: c.id, content: safeExec(input, c.function.name, args) })
+      messages.push({ role: 'tool', tool_call_id: c.id, content: await safeExec(input, c.function.name, args) })
     }
   }
   throw new ReportModelError('The model kept calling tools without answering.')
