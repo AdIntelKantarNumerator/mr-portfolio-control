@@ -142,7 +142,7 @@ async function loopAnthropic(input: LoopInput, model: string, post: Post, env: R
 async function loopOpenRouter(input: LoopInput, model: string, post: Post, env: Record<string, string | undefined>): Promise<string> {
   const or = reportBuilderOpenRouter(env)
   if (!or) throw new ReportModelError('OPENROUTER_API_KEY is not set.')
-  const headers: Record<string, string> = { authorization: `Bearer ${or.apiKey}`, 'X-Title': 'MR Portfolio Control — Report Builder' }
+  const headers: Record<string, string> = { authorization: `Bearer ${or.apiKey}`, 'X-Title': 'MR Portfolio Control - Report Builder' }
   if (or.appUrl) headers['HTTP-Referer'] = or.appUrl
   const tools = input.tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }))
   const messages: Array<Record<string, unknown>> = [{ role: 'system', content: input.system }, ...input.turns.map((t) => ({ role: t.role, content: t.content }))]

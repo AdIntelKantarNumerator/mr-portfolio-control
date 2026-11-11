@@ -153,3 +153,11 @@ test('the loop runs the tools the model asks for and returns its final answer', 
   assert.equal(text, 'What kind of report do you want?')
   assert.deepEqual(ran, ['new_report'])
 })
+
+test('every header sent to OpenRouter is plain ASCII (an em dash once broke every request)', async () => {
+  let sent: Record<string, string> = {}
+  const post: Post = async (_u, headers) => ((sent = headers), { ok: true, status: 200, retryAfter: null, json: { choices: [{ message: { content: 'Hi' } }] } })
+  const env = { OPENROUTER_API_KEY: 'k', REPORT_BUILDER_MODEL: 'anthropic/claude-sonnet-5.5', REPORT_BUILDER_PROVIDERS: 'amazon-bedrock/us-east-1', APP_URL: 'https://x' }
+  await runLoop({ system: 's', turns: [{ role: 'user', content: 'hi' }], tools: TOOLS, exec: () => ({}) }, { provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5' }, post, env)
+  for (const [k, v] of Object.entries(sent)) assert.match(v, /^[ -~]*$/, k)
+})
