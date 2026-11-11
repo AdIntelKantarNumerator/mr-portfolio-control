@@ -13,13 +13,13 @@
  */
 import { currentAccess } from '@/lib/auth/access'
 import { getAuthConfig } from '@/lib/auth/config'
-import { reportBuilderAction, reportBuilderExpand, reportBuilderPageTurn, type PageAction } from '@/lib/report-builder/agent'
+import { reportBuilderAction, reportBuilderCompEdit, reportBuilderCompSearch, reportBuilderExpand, reportBuilderPageTurn, type CompEdit, type PageAction } from '@/lib/report-builder/agent'
 import { ReportModelError, type Turn } from '@/lib/report-builder/model'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const ACTIONS = new Set(['start', 'choose', 'run', 'save', 'open_saved', 'run_saved', 'delete_saved', 'demo_month'])
+const ACTIONS = new Set(['start', 'choose', 'run', 'save', 'open_saved', 'run_saved', 'delete_saved', 'demo_month', 'save_comp_set'])
 const MAX_TURNS = 30
 const MAX_CHARS = 4000
 
@@ -51,7 +51,7 @@ function readAction(raw: unknown): PageAction | null {
     case 'delete_saved':
       return { type: a.type, report: str('report') }
     default:
-      return { type: a.type as 'start' | 'demo_month' }
+      return { type: a.type as 'start' | 'demo_month' | 'save_comp_set' }
   }
 }
 
@@ -75,6 +75,33 @@ export async function POST(req: Request) {
     if (!e.spec || typeof e.spec !== 'object' || !path.length) return Response.json({ error: 'Nothing to expand.' }, { status: 400 })
     try {
       return Response.json(await reportBuilderExpand(email, e.spec as Record<string, unknown>, path, colIds))
+    } catch (err) {
+      return Response.json({ error: (err as Error).message }, { status: 400 })
+    }
+  }
+
+  // The competitive-set panel: a search for names, and edits to the stored set.
+  if (body.compSearch && typeof body.compSearch === 'object') {
+    const s = body.compSearch as { q?: unknown; side?: unknown }
+    const q = typeof s.q === 'string' ? s.q.trim().slice(0, 80) : ''
+    if (!q) return Response.json([])
+    try {
+      return Response.json(await reportBuilderCompSearch(email, q, s.side === 'mine' ? 'mine' : 'versus'))
+    } catch (err) {
+      return Response.json({ error: (err as Error).message }, { status: 400 })
+    }
+  }
+  if (body.compEdit && typeof body.compEdit === 'object') {
+    const e = body.compEdit as Record<string, unknown>
+    const s = (k: string) => (typeof e[k] === 'string' ? (e[k] as string).slice(0, 120) : '')
+    let edit: CompEdit | null = null
+    if (e.op === 'add' && s('id')) edit = { op: 'add', side: e.side === 'mine' ? 'mine' : 'versus', id: s('id'), label: s('label') || s('id') }
+    else if (e.op === 'remove' && s('id')) edit = { op: 'remove', id: s('id') }
+    else if (e.op === 'all') edit = { op: 'all', value: e.value === true }
+    else if (e.op === 'clear') edit = { op: 'clear' }
+    if (!edit) return Response.json({ error: 'Unknown edit.' }, { status: 400 })
+    try {
+      return Response.json({ compSet: await reportBuilderCompEdit(email, edit) })
     } catch (err) {
       return Response.json({ error: (err as Error).message }, { status: 400 })
     }

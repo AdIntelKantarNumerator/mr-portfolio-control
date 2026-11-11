@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { canSee, navSectionsFor, normalise } from '../src/lib/access-rules'
 import { dataSource, sampleEngine } from '../src/lib/report-builder/engines'
-import { TOOLS, emptyChat, expandRow, runTool, type ToolContext } from '../src/lib/report-builder/tools'
+import { TOOLS, emptyChat, expandRow, runTool, type CompSet, type ToolContext } from '../src/lib/report-builder/tools'
 import { chooseModel, reportBuilderOpenRouter, runLoop, type Post } from '../src/lib/report-builder/model'
 import { describeReport, suggestName } from '../src/lib/report-builder/page-view'
 
@@ -291,4 +291,53 @@ test('a report can be narrowed: only advertiser and property, without impression
   await call(ctx, 'change_report', { remove_breakdowns: ['property'] })
   assert.deepEqual(ctx.chat.report!.rows, ['advertiser'])
   await assert.rejects(runTool(ctx, 'change_report', { remove_breakdowns: ['advertiser'] }), /at least one breakdown/)
+})
+
+test('zero share asks for competitors, keeps them as the usual set, and offers that set next time', async () => {
+  const ctx = context()
+  let stored: CompSet | null = null
+  ctx.comp = { get: () => stored, set: (c) => (stored = c) }
+  const choose = (label: string) => call(ctx, 'choose', { choice: label })
+
+  await call(ctx, 'new_report', { template: 'zero_share' })
+  assert.equal(ctx.view?.question, 'Which properties are yours?')
+  await choose(ctx.view!.choices![0]!.label)
+  assert.equal(ctx.view?.question, 'Which properties do you compete with?')
+  const labels = ctx.view!.choices!.map((c) => c.label)
+  assert.ok(labels.includes('All other properties'))
+  const sameMedia = labels.find((l) => l.startsWith('All other ') && l !== 'All other properties')!
+  assert.ok(sameMedia, 'and all of the same media as yours')
+  await choose(sameMedia)
+  assert.equal(ctx.view?.kind, 'ready')
+  assert.match(String(ctx.view?.title), new RegExp(sameMedia.replace('All other ', 'all ')))
+  assert.equal(ctx.view?.compSetOffer?.kind, 'save')
+
+  await call(ctx, 'competitive_set', { action: 'save_from_report' })
+  assert.ok(stored)
+  assert.match(String((await call(ctx, 'competitive_set', { action: 'show' })).competitive_set), / vs all /)
+
+  await call(ctx, 'new_report', { template: 'zero_share' })
+  assert.equal(ctx.view?.question, 'Use your usual competitive set?')
+  await choose('Yes, use it')
+  assert.equal(ctx.view?.kind, 'ready')
+  assert.equal(ctx.view?.compSetOffer, undefined, 'already the usual set')
+
+  await call(ctx, 'new_report', { template: 'zero_share' })
+  await choose('Choose different properties')
+  assert.equal(ctx.view?.question, 'Which properties are yours?')
+})
+
+test('competitors can be named: properties, a media type or everything, and the report follows', async () => {
+  const ctx = context()
+  await call(ctx, 'new_report', { template: 'zero_share' })
+  const nbc = ((await call(ctx, 'search_names', { query: 'NBC', types: ['property'] })).matches as Array<{ id: string }>)[0]!
+  const cbs = ((await call(ctx, 'search_names', { query: 'CBS', types: ['property'] })).matches as Array<{ id: string }>)[0]!
+  await call(ctx, 'change_report', { my_properties: [nbc.id], competitors: [cbs.id] })
+  assert.equal(ctx.view?.kind, 'ready')
+  assert.deepEqual((ctx.chat.report as { zero_share: { versus: string[] } }).zero_share.versus, [cbs.id])
+  const narrow = (await ctx.engine.run(ctx.chat.report!, {})).row_count
+  await call(ctx, 'change_report', { compare_with_all: true })
+  const wide = (await ctx.engine.run(ctx.chat.report!, {})).row_count
+  assert.ok(wide >= narrow && wide > 0, `everything (${wide}) finds at least as many as one competitor (${narrow})`)
+  await assert.rejects(runTool(ctx, 'change_report', { use_competitive_set: true }), /no stored competitive set/)
 })

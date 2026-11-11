@@ -270,7 +270,7 @@
     s.filters = s.filters && typeof s.filters === 'object' ? s.filters : {};
     for (const k of Object.keys(s.filters)) { if (!Array.isArray(s.filters[k]) || !s.filters[k].length) delete s.filters[k]; }
     s.options = Object.assign({ final_only: true, top_n: null }, s.options || {});
-    if (s.zero_share) s.zero_share = { mine: s.zero_share.mine || [], versus: s.zero_share.versus || [] };
+    if (s.zero_share) s.zero_share = { mine: s.zero_share.mine || [], versus: s.zero_share.versus || [], all: !!s.zero_share.all, own: !!s.zero_share.own };
     return s;
   }
 
@@ -405,8 +405,9 @@
       const who = filterLabels(s.filters, ['who']), what = filterLabels(s.filters, ['what']), where = filterLabels(s.filters, ['where']);
       const rows = s.rows.map((d) => (DIMS[d] ? DIMS[d].label.toLowerCase() : d));
       if (s.zero_share) {
-        const mine = s.zero_share.mine.map((id) => labelOf('property', id)), vs = s.zero_share.versus.map((id) => labelOf('property', id));
-        parts.push('Advertisers spending on ' + (vs.length ? listText(vs) : 'other properties') + ' but nothing on ' + (mine.length ? listText(mine) : 'your properties'));
+        const dimOf = (id) => String(id).split(':')[0];
+        const mine = s.zero_share.mine.map((id) => labelOf(dimOf(id), id)), vs = s.zero_share.versus.map((id) => (dimOf(id) === 'property' ? '' : 'all ') + labelOf(dimOf(id), id));
+        parts.push('Advertisers spending on ' + (vs.length ? listText(vs) : s.zero_share.all ? 'any other property' : 'other properties') + ' but nothing on ' + (mine.length ? listText(mine) : 'your properties'));
         if (rows.length) parts.push('listed by ' + rows.join(', then '));
       } else {
         const m = s.measures.map((k) => (MEASURES[k] ? MEASURES[k].label : k)).join(', ');
@@ -445,7 +446,9 @@
       // A drill-down path (the tree view): only rows under these values, AND-ed, whatever the filters say.
       const pathEntries = Object.entries(spec.path || {}).filter(([d]) => DIMS[d]);
       const onPath = (f) => pathEntries.every(([d, id]) => String(DIMS[d].of(f)) === String(id));
-      const mine = new Set(zs ? zs.mine : []), versus = new Set(zs ? zs.versus : []);
+      // Yours and theirs: ids of properties, media types or media owners.
+      const matcher = (ids) => { const by = ids.map((id) => [String(id).split(':')[0], String(id)]).filter(([d]) => DIMS[d]); return (f) => by.some(([d, id]) => String(DIMS[d].of(f)) === id); };
+      const isMine = matcher(zs ? zs.mine : []), isVersus = zs && zs.versus.length ? matcher(zs.versus) : null;
       const groups = new Map();
       const colTotals = new Map(); // value -> primary measure, for ordering
       const colTotalsM = new Map(); // value -> every measure, for the totals row
@@ -459,9 +462,8 @@
         if (f.t < per.start || f.t > per.end) continue;
         if (zs) {
           if (!pass.subject(f) || !onPath(f)) continue;
-          const pid = PROPS[f.m].id;
-          if (mine.has(pid)) { grp(f).mine += f.spend; continue; }
-          if (versus.size && !versus.has(pid)) continue;
+          if (isMine(f)) { grp(f).mine += f.spend; continue; }
+          if (isVersus && !isVersus(f)) continue;
           if (!pass.where(f)) continue;
         } else if (!pass.all(f) || !onPath(f)) continue;
         const g = grp(f);
@@ -578,6 +580,20 @@
       return search('', { types, limit: n }).map((h) => ({ label: h.label, description: h.type_label + (h.context && h.type !== 'top_parent' && h.type !== 'industry' ? ' · ' + h.context : ''), patch: toPatch(h) }));
     }
 
+    // Choices for "who do you compete with": the biggest properties in your media, all of your media, or everything.
+    function competitorOptions(mine) {
+      const ours = PROPS.filter((p) => mine.includes(p.id) || mine.includes(p.media_owner));
+      const out = [];
+      const media = ours.length ? ours[0].media_type : null;
+      if (media) {
+        PROPS.filter((p) => p.media_type === media && !ours.includes(p)).sort((x, y) => y.weight - x.weight).slice(0, 4)
+          .forEach((p) => out.push({ label: labelOf('property', p.id), description: 'Property · ' + labelOf('media_type', media), patch: { add: { 'zero_share.versus': [p.id] } } }));
+        out.push({ label: 'All other ' + labelOf('media_type', media), description: 'Every ' + labelOf('media_type', media) + ' property but yours', patch: { set: { 'zero_share.versus': [media] } } });
+      }
+      out.push({ label: 'All other properties', description: 'Any media, any property but yours', patch: { set: { 'zero_share.all': true } } });
+      return out;
+    }
+
     function validate(specIn, patch) {
       const spec = normalize(applyPatch(specIn || {}, patch));
       const errors = [], warnings = [], questions = [];
@@ -600,7 +616,9 @@
       if (!spec.rows.length) {
         questions.push({ id: 'template', prompt: 'What kind of report do you want?', kind: 'choice', options: TEMPLATES.map((t) => ({ label: t.label, description: t.description, patch: { set: clone(t.spec) } })) });
       } else if (spec.zero_share && !spec.zero_share.mine.length) {
-        questions.push({ id: 'my_properties', prompt: 'Which properties are yours?', kind: 'entity', multi: true, entity_types: ['property'], patch_path: 'zero_share.mine', options: topOptions(['property'], 6, (h) => ({ add: { 'zero_share.mine': [h.id] } })) });
+        questions.push({ id: 'my_properties', prompt: 'Which properties are yours?', kind: 'entity', multi: true, entity_types: ['property', 'media_owner'], patch_path: 'zero_share.mine', options: topOptions(['property'], 6, (h) => ({ add: { 'zero_share.mine': [h.id] } })) });
+      } else if (spec.zero_share && !spec.zero_share.versus.length && !spec.zero_share.all) {
+        questions.push({ id: 'competitors', prompt: 'Which properties do you compete with?', kind: 'entity', multi: true, entity_types: ['property', 'media_type', 'media_owner'], patch_path: 'zero_share.versus', options: competitorOptions(spec.zero_share.mine) });
       } else if (spec.template === 'category_share' && !hasWhat && spec.scope !== 'all') {
         questions.push({ id: 'category', prompt: 'Which category should the shares be measured in?', kind: 'entity', multi: true, entity_types: ['industry', 'category', 'subcategory'], options: topOptions(['category'], 5, addFilter).concat([{ label: 'All categories', description: 'Share of total spend', patch: { set: { scope: 'all' } } }]) });
       } else if (!spec.zero_share && !hasSubject && spec.scope !== 'all') {
@@ -637,6 +655,7 @@
         if (tm.mode !== 'ytd') add('Year to date', { set: { time: { mode: 'ytd' } } });
         if (!spec.columns && !spec.zero_share && !spec.calcs.includes('yoy')) add('Compare with prior year', { add: { calcs: ['yoy'] } });
         if (!spec.columns && !spec.zero_share && !spec.calcs.includes('share')) add('Add share of total', { add: { calcs: ['share'] } });
+        if (spec.zero_share && spec.zero_share.versus.length) add('Compare with all other properties', { set: { 'zero_share.versus': [], 'zero_share.all': true } });
         if (!spec.measures.includes('occurrences')) add('Add occurrences', { add: { measures: ['occurrences'] } });
         if (!spec.measures.includes('impressions')) add('Add impressions', { add: { measures: ['impressions'] } });
         if (!spec.options.top_n && rowCount > 25) add('Top 25 only', { set: { 'options.top_n': 25 } });

@@ -2454,3 +2454,18 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rb-twist:hover { color: var(--ink, inherit); }
 .rb-twig { display: inline-block; width: 22px; }
 .rb-tree tr.rb-sub td { background: color-mix(in srgb, var(--canvas) 55%, transparent); font-size: 12.5px; }
+
+/* Report Builder: the competitive set */
+.rb-compchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; }
+.rb-compchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--canvas); font-size: 13px; }
+.rb-compchip small { color: var(--muted); font-size: 11px; }
+.rb-compchip button { border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; padding: 0 4px; }
+.rb-compchip button:hover { color: var(--red); }
+.rb-compadd { margin-bottom: 14px; }
+.rb-compadd input { flex: 1; min-width: 0; padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 13px; background: var(--surface); color: inherit; }
+.rb-hits { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.rb-hit { text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 5px 9px; cursor: pointer; display: flex; flex-direction: column; color: inherit; font: inherit; font-size: 13px; }
+.rb-hit:hover { border-color: var(--c1); }
+.rb-hit small { color: var(--muted); font-size: 11.5px; }
+.rb-check { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-top: 4px; }
+.rb-compoffer { margin-top: 6px; align-items: center; }

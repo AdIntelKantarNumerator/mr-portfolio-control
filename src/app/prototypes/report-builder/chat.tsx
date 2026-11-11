@@ -15,7 +15,7 @@
  */
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { MarkdownView } from '@/components/markdown-view'
-import type { PageReply } from '@/lib/report-builder/agent'
+import type { CompSetView, PageReply } from '@/lib/report-builder/agent'
 import type { SavedItem } from '@/lib/report-builder/page-view'
 import type { View, ViewTable, ViewTree } from '@/lib/report-builder/tools'
 
@@ -35,6 +35,7 @@ type Action =
   | { type: 'run_saved'; report: string }
   | { type: 'delete_saved'; report: string }
   | { type: 'demo_month' }
+  | { type: 'save_comp_set' }
 
 const EXAMPLES = ['Media mix for Toyota and Ford, last 6 months', "Which automotive advertisers aren't buying on ESPN?", 'Spend trend for Verizon, AT&T and T-Mobile', 'Run my auto insurance share report']
 
@@ -271,6 +272,111 @@ function Table({ table, max }: { table: ViewTable; max: number }) {
   )
 }
 
+// ---------------------------------------------------------------- the competitive set
+
+type Hit = { id: string; label: string; kind: string; context: string }
+
+async function post<T>(body: unknown): Promise<T> {
+  const res = await fetch('/prototypes/report-builder/api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const json = (await res.json().catch(() => ({}))) as T & { error?: string }
+  if (!res.ok) throw new Error(json.error ?? `The server said ${res.status}.`)
+  return json
+}
+
+/** Adds a name to one side of the set: type, pick from what matches. */
+function CompAdd({ side, onAdd }: { side: 'mine' | 'versus'; onAdd: (h: Hit) => void }) {
+  const [q, setQ] = useState('')
+  const [hits, setHits] = useState<Hit[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  async function look(e: FormEvent) {
+    e.preventDefault()
+    if (!q.trim()) return
+    setBusy(true)
+    try {
+      setHits(await post<Hit[]>({ compSearch: { q, side } }))
+    } catch {
+      setHits([])
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="rb-compadd">
+      <form className="rb-row" onSubmit={look}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={side === 'mine' ? 'Add a property or owner' : 'Add a property, media, owner or market'} aria-label={side === 'mine' ? 'Add one of your properties' : 'Add a competitor'} />
+        <button type="submit" className="btn rb-small" disabled={busy || !q.trim()}>
+          {busy ? '…' : 'Find'}
+        </button>
+      </form>
+      {hits ? (
+        <div className="rb-hits">
+          {!hits.length ? <span className="rb-muted">Nothing matches.</span> : null}
+          {hits.map((h) => (
+            <button
+              key={h.id}
+              type="button"
+              className="rb-hit"
+              onClick={() => {
+                onAdd(h)
+                setHits(null)
+                setQ('')
+              }}
+            >
+              <b>{h.label}</b>
+              <small>
+                {h.kind}
+                {h.context && h.context !== h.kind ? ` · ${h.context}` : ''}
+              </small>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** The person's competitive set: kept for every zero-share report, edited here. */
+function CompPanel({ comp, setComp }: { comp: CompSetView | null; setComp: (c: CompSetView | null) => void }) {
+  const [err, setErr] = useState<string | null>(null)
+  async function change(edit: Record<string, unknown>) {
+    setErr(null)
+    try {
+      setComp((await post<{ compSet: CompSetView | null }>({ compEdit: edit })).compSet)
+    } catch (e) {
+      setErr((e as Error).message)
+    }
+  }
+  const chip = (x: { id: string; label: string; kind: string }) => (
+    <span key={x.id} className="rb-compchip" title={x.kind}>
+      {x.kind === 'Property' ? '' : <small>{x.kind}</small>}
+      {x.label}
+      <button type="button" aria-label={`Remove ${x.label}`} onClick={() => void change({ op: 'remove', id: x.id })}>
+        ×
+      </button>
+    </span>
+  )
+  return (
+    <div className="rb-panel">
+      <p className="rb-muted">Used by every zero-share report. You&apos;ll be asked to confirm it each time.</p>
+      <div className="rb-eyebrow">Your properties</div>
+      <div className="rb-compchips">{comp?.mine.length ? comp.mine.map(chip) : <span className="rb-muted">None yet</span>}</div>
+      <CompAdd side="mine" onAdd={(h) => void change({ op: 'add', side: 'mine', id: h.id, label: h.label })} />
+      <div className="rb-eyebrow">Competitors</div>
+      <label className="rb-check">
+        <input type="checkbox" checked={comp ? comp.all : true} onChange={(e) => void change({ op: 'all', value: e.target.checked })} /> Every other property
+      </label>
+      <div className="rb-compchips">{comp?.versus.map(chip)}</div>
+      <CompAdd side="versus" onAdd={(h) => void change({ op: 'add', side: 'versus', id: h.id, label: h.label })} />
+      {err ? <p className="rb-notes">{err}</p> : null}
+      {comp ? (
+        <button type="button" className="btn rb-small rb-danger" onClick={() => void change({ op: 'clear' })}>
+          Clear the set
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------- the tree
 
 type Branch = { state: 'loading' } | { state: 'error'; message: string } | { state: 'done'; table: ViewTable }
@@ -427,6 +533,8 @@ function hintFor(view: View | null | undefined, editing: boolean): string {
   if (view.kind === 'question') {
     const q = (view.question ?? '').toLowerCase()
     if (q.includes('kind of report')) return 'Or describe it: "spend trend for fast food" or "who isn\'t buying on ESPN?"'
+    if (q.includes('compete with')) return 'Or type them: "CBS and Fox", "all Cable TV", "everything in the New York market"'
+    if (q.includes('usual competitive set')) return 'Or say what to change: "add Hulu to my competitors", "compare with everything"'
     if (q.includes('properties are yours')) return 'Or type your networks: "NBC", "Hulu" or "ESPN and ESPN2"'
     if (q.includes('time period')) return 'Or type a period: "last month", "August to October" or "year to date"'
     if (q.includes('category')) return 'Or type a category: "fast food", "car insurance" or "pizza restaurants"'
@@ -442,7 +550,8 @@ function hintFor(view: View | null | undefined, editing: boolean): string {
 
 // ---------------------------------------------------------------- the page
 
-export function ReportBuilderChat({ initialSaved, initialThrough, modelReady, live }: { initialSaved: SavedItem[]; initialThrough: string; modelReady: boolean; live: boolean }) {
+export function ReportBuilderChat({ initialSaved, initialThrough, initialComp, modelReady, live }: { initialSaved: SavedItem[]; initialThrough: string; initialComp: CompSetView | null; modelReady: boolean; live: boolean }) {
+  const [comp, setComp] = useState<CompSetView | null>(initialComp)
   const [chatId, setChatId] = useState(newId)
   const [messages, setMessages] = useState<Message[]>([])
   const [panel, setPanel] = useState<PageReply['panel'] | null>(null)
@@ -450,7 +559,7 @@ export function ReportBuilderChat({ initialSaved, initialThrough, modelReady, li
   const [through, setThrough] = useState(initialThrough)
   const [busy, setBusy] = useState<string | null>(null)
   const [input, setInput] = useState('')
-  const [tab, setTab] = useState<'report' | 'saved'>('report')
+  const [tab, setTab] = useState<'report' | 'saved' | 'comp'>('report')
   const [naming, setNaming] = useState<string | null>(null)
   const [arming, setArming] = useState<string | null>(null)
   const seq = useRef(0)
@@ -468,6 +577,7 @@ export function ReportBuilderChat({ initialSaved, initialThrough, modelReady, li
     if (r.panel) setPanel(r.panel)
     if (r.saved) setSaved(r.saved)
     if (r.dataThrough) setThrough(r.dataThrough)
+    if (r.compSet !== undefined) setComp(r.compSet)
   }
 
   async function send(body: { action?: Action; turns?: Array<{ role: string; content: string }> }, id = chatId) {
@@ -556,6 +666,7 @@ export function ReportBuilderChat({ initialSaved, initialThrough, modelReady, li
               onRun={() => act({ type: 'run', name: panel?.name }, 'Run the full report')}
               onSave={() => setNaming(panel?.name || 'My report')}
               onNew={startOver}
+              onSaveComp={(label) => act({ type: 'save_comp_set' }, label)}
             />
           ))}
           {messages.length <= 1 && !busy ? (
@@ -617,8 +728,13 @@ export function ReportBuilderChat({ initialSaved, initialThrough, modelReady, li
           <button type="button" role="tab" aria-selected={tab === 'saved'} onClick={() => setTab('saved')}>
             Saved reports{saved.length ? ` (${saved.length})` : ''}
           </button>
+          <button type="button" role="tab" aria-selected={tab === 'comp'} onClick={() => setTab('comp')}>
+            Competitive set
+          </button>
         </div>
-        {tab === 'report' ? (
+        {tab === 'comp' ? (
+          <CompPanel comp={comp} setComp={setComp} />
+        ) : tab === 'report' ? (
           <div className="rb-panel">
             {!panel || panel.status === 'empty' ? (
               <p className="rb-muted">Your report takes shape here as you answer. When it looks right, run it, download it, or save it to run again whenever new data arrives.</p>
@@ -711,6 +827,7 @@ function MessageView({
   onRun,
   onSave,
   onNew,
+  onSaveComp,
 }: {
   m: Message
   live: boolean
@@ -719,6 +836,7 @@ function MessageView({
   onRun: () => void
   onSave: () => void
   onNew: () => void
+  onSaveComp: (label: string) => void
 }) {
   if (m.role === 'user') {
     return (
@@ -779,6 +897,14 @@ function MessageView({
               Start a new report
             </button>
           </div>
+          {v.compSetOffer ? (
+            <div className="rb-row rb-compoffer">
+              <span className="rb-muted">{v.compSetOffer.text}</span>
+              <button type="button" className="btn rb-small" onClick={() => onSaveComp(v.compSetOffer!.kind === 'save' ? 'Save as my competitive set' : 'Make this my usual competitive set')}>
+                {v.compSetOffer.kind === 'save' ? 'Save as my competitive set' : 'Make this my usual set'}
+              </button>
+            </div>
+          ) : null}
           {v.kind === 'ready' && choices.length ? (
             <>
               <span className="rb-label">Or adjust it:</span>

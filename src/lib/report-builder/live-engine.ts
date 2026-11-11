@@ -30,7 +30,7 @@ const INLINE_ROW_LIMIT = 2000
 const DOWNLOAD_ROW_LIMIT = 50_000
 const SETTINGS = { max_execution_time: '20', max_bytes_before_external_group_by: '1000000000' }
 
-type Dim = 'industry' | 'category' | 'subcategory' | 'top_parent' | 'advertiser' | 'product' | 'media_type' | 'media_owner' | 'property' | 'month' | 'quarter' | 'year'
+type Dim = 'industry' | 'category' | 'subcategory' | 'top_parent' | 'advertiser' | 'product' | 'media_type' | 'media_owner' | 'property' | 'market' | 'month' | 'quarter' | 'year'
 type Group = 'who' | 'what' | 'where' | 'when'
 
 interface DimDef {
@@ -53,6 +53,7 @@ const DIMS: Record<Dim, DimDef> = {
   media_type: { label: 'Media type', plural: 'media types', group: 'where', id: 'coalesce(media_id, 0)', name: 'media_name', context: "'Media type'" },
   media_owner: { label: 'Media owner', plural: 'media owners', group: 'where', id: 'coalesce(media_root_entity_id, 0)', name: 'media_root_entity_name', context: "'Media owner'" },
   property: { label: 'Property', plural: 'properties', group: 'where', id: 'coalesce(media_entity_id, 0)', name: 'media_entity_name', context: "concat(media_name, ' · ', media_root_entity_name)" },
+  market: { label: 'Market', plural: 'markets', group: 'where', id: 'coalesce(property_market_id, 0)', name: 'initcapUTF8(property_market_name)', context: "'Market'" },
   month: { label: 'Month', plural: 'months', group: 'when', time: true, id: 'year_month', name: 'toString(year_month)', context: "''" },
   quarter: { label: 'Quarter', plural: 'quarters', group: 'when', time: true, id: "concat(toString(intDiv(year_month, 100)), '-Q', toString(intDiv(year_month % 100 + 2, 3)))", name: "''", context: "''" },
   year: { label: 'Year', plural: 'years', group: 'when', time: true, id: 'toString(intDiv(year_month, 100))', name: "''", context: "''" },
@@ -164,7 +165,8 @@ interface NSpec {
   calcs: Array<'share' | 'yoy'>
   filters: Record<string, string[]>
   options: { final_only: boolean; top_n: number | null }
-  zero_share?: { mine: string[]; versus: string[] } | null
+  /** mine and versus hold ids of properties, media types, media owners or markets; all: compare with everything else; own: the person chose not to use their usual set. */
+  zero_share?: { mine: string[]; versus: string[]; all?: boolean; own?: boolean } | null
   /** Drill-down (the tree view): only rows under these values, AND-ed with everything else. */
   path?: Record<string, string>
   /** Fixed column values, so a tree's lower levels line up with the top. */
@@ -183,9 +185,23 @@ function normalize(specIn: Spec): NSpec {
   s.filters = s.filters && typeof s.filters === 'object' ? s.filters : {}
   for (const k of Object.keys(s.filters)) if (!Array.isArray(s.filters[k]) || !s.filters[k]!.length) delete s.filters[k]
   s.options = Object.assign({ final_only: true, top_n: null }, s.options ?? {})
-  if (s.zero_share) s.zero_share = { mine: s.zero_share.mine ?? [], versus: s.zero_share.versus ?? [] }
+  if (s.zero_share) s.zero_share = { mine: s.zero_share.mine ?? [], versus: s.zero_share.versus ?? [], all: Boolean(s.zero_share.all), own: Boolean(s.zero_share.own) }
   return s
 }
+
+/** Ids of properties, media types, owners or markets as one SQL condition ('0' when none). */
+function idSql(ids: string[]): string {
+  const by = new Map<Dim, number[]>()
+  for (const id of ids) {
+    const d = String(id).split(':')[0] as Dim
+    const n = num(id)
+    if (!DIMS[d] || DIMS[d].time || n === null) continue
+    by.set(d, [...(by.get(d) ?? []), n])
+  }
+  const parts = [...by].map(([d, ns]) => `${DIMS[d].id} IN (${ns.join(',')})`)
+  return parts.length ? `(${parts.join(' OR ')})` : '0'
+}
+const dimOf = (id: string) => String(id).split(':')[0]!
 
 const num = (id: string) => {
   const n = Number(String(id).split(':')[1])
@@ -267,7 +283,11 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const s = normalize(specIn)
     const want = new Map<Dim, string[]>()
     for (const [dim, ids] of Object.entries(s.filters)) if (DIMS[dim as Dim] && !DIMS[dim as Dim].time) want.set(dim as Dim, ids.filter((id) => !labels.has(id)))
-    if (s.zero_share) want.set('property', [...(want.get('property') ?? []), ...[...s.zero_share.mine, ...s.zero_share.versus].filter((id) => !labels.has(id))])
+    if (s.zero_share)
+      for (const id of [...s.zero_share.mine, ...s.zero_share.versus]) {
+        const d = dimOf(id) as Dim
+        if (DIMS[d] && !labels.has(id)) want.set(d, [...(want.get(d) ?? []), id])
+      }
     const parts: string[] = []
     for (const [dim, ids] of want) {
       const nums = idsOf(ids)
@@ -384,9 +404,9 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const where = filterLabels(s.filters, ['where'])
     const rows = s.rows.map((d) => (DIMS[d] ? DIMS[d].label.toLowerCase() : d))
     if (s.zero_share) {
-      const mine = s.zero_share.mine.map((id) => labelOf('property', id))
-      const vs = s.zero_share.versus.map((id) => labelOf('property', id))
-      parts.push(`Advertisers spending on ${vs.length ? listText(vs) : 'other properties'} but nothing on ${mine.length ? listText(mine) : 'your properties'}`)
+      const mine = s.zero_share.mine.map((id) => labelOf(dimOf(id), id))
+      const vs = s.zero_share.versus.map((id) => (dimOf(id) === 'property' ? labelOf('property', id) : dimOf(id) === 'market' ? `the ${labelOf('market', id)} market` : `all ${labelOf(dimOf(id), id)}`))
+      parts.push(`Advertisers spending on ${vs.length ? listText(vs) : s.zero_share.all ? 'any other property' : 'other properties'} but nothing on ${mine.length ? listText(mine) : 'your properties'}`)
       if (rows.length) parts.push(`listed by ${rows.join(', then ')}`)
     } else {
       let lead = s.measures.map((k) => MEASURES[k]?.label ?? k).join(', ') + (rows.length ? ` by ${rows.join(', then ')}` : '')
@@ -478,12 +498,9 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     let counted: string
     let mineSql = ''
     if (zs) {
-      const mine = idsOf(zs.mine)
-      const versus = idsOf(zs.versus)
-      const prop = DIMS.property.id
-      mineSql = mine.length ? `${prop} IN (${mine.join(',')})` : '0'
+      mineSql = idSql(zs.mine)
       scope = [w.time, BASE, ...subject].join(' AND ')
-      counted = [`NOT (${mineSql})`, versus.length ? `${prop} IN (${versus.join(',')})` : '', w.where].filter(Boolean).join(' AND ')
+      counted = [`NOT (${mineSql})`, zs.versus.length ? idSql(zs.versus) : '', w.where].filter(Boolean).join(' AND ')
     } else {
       scope = [w.time, BASE, ...subject, w.where].filter(Boolean).join(' AND ')
       counted = '1'
@@ -638,6 +655,35 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     return hits.map((h) => ({ label: h.label, description: h.type_label + (h.context && h.type !== 'top_parent' && h.type !== 'industry' ? ` · ${h.context}` : ''), patch: toPatch(h) }))
   }
 
+  /** Choices for "who do you compete with": the biggest properties in your media, all of your media, or everything. */
+  async function competitorOptions(mine: string[]): Promise<Option[]> {
+    const a = await availability()
+    const ym = toYm(a.through)
+    const mineSql = idSql(mine)
+    const out: Option[] = []
+    const [media] = await chQuery<{ id: string; name: string }>(config(), `SELECT toString(coalesce(media_id, 0)) AS id, any(media_name) AS name FROM ${TABLE} WHERE year_month = ${ym} AND ${mineSql} GROUP BY id ORDER BY sum(cost_share_v) DESC LIMIT 1`, {}, SETTINGS)
+    if (media) {
+      const P = DIMS.property
+      const props = await chQuery<{ id: string; name: string; ctx: string }>(
+        config(),
+        `SELECT toString(${P.id}) AS id, any(${P.name}) AS name, any(${P.context}) AS ctx FROM ${TABLE} WHERE year_month = ${ym} AND coalesce(media_id, 0) = ${Number(media.id)} AND NOT ${mineSql} AND ${P.name} != '' GROUP BY id ORDER BY sum(cost_share_v) DESC LIMIT 4`,
+        {},
+        SETTINGS,
+      )
+      for (const p of props) {
+        const id = `property:${p.id}`
+        labels.set(id, p.name)
+        contexts.set(id, p.ctx)
+        out.push({ label: p.name, description: `Property · ${p.ctx}`, patch: { add: { 'zero_share.versus': [id] } } })
+      }
+      const mid = `media_type:${media.id}`
+      labels.set(mid, media.name)
+      out.push({ label: `All other ${media.name}`, description: `Every ${media.name} property but yours`, patch: { set: { 'zero_share.versus': [mid] } } })
+    }
+    out.push({ label: 'All other properties', description: 'Any media, any property but yours', patch: { set: { 'zero_share.all': true } } })
+    return out
+  }
+
   async function validate(specIn: Spec, patch?: Patch | null): Promise<Validation> {
     const spec = normalize(applyPatch(specIn ?? {}, patch))
     await ensureLabels(spec)
@@ -675,7 +721,9 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     if (!spec.rows.length) {
       questions.push({ id: 'template', prompt: 'What kind of report do you want?', kind: 'choice', options: TEMPLATES.map((t) => ({ label: t.label, description: t.description, patch: { set: clone(t.spec) } })) })
     } else if (spec.zero_share && !spec.zero_share.mine.length) {
-      questions.push({ id: 'my_properties', prompt: 'Which properties are yours?', kind: 'entity', entity_types: ['property'], patch_path: 'zero_share.mine', options: await topOptions(['property'], 6, (h) => ({ add: { 'zero_share.mine': [h.id] } })) })
+      questions.push({ id: 'my_properties', prompt: 'Which properties are yours?', kind: 'entity', entity_types: ['property', 'media_owner'], patch_path: 'zero_share.mine', options: await topOptions(['property'], 6, (h) => ({ add: { 'zero_share.mine': [h.id] } })) })
+    } else if (spec.zero_share && !spec.zero_share.versus.length && !spec.zero_share.all) {
+      questions.push({ id: 'competitors', prompt: 'Which properties do you compete with?', kind: 'entity', entity_types: ['property', 'media_type', 'media_owner', 'market'], patch_path: 'zero_share.versus', options: await competitorOptions(spec.zero_share.mine) })
     } else if (spec.template === 'category_share' && !hasWhat && spec.scope !== 'all') {
       questions.push({
         id: 'category',
@@ -724,6 +772,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       if (!isRolling('month', 3)) add('Last 3 months', { set: { time: RECENT } })
       if (!isRolling('month', 1)) add('Latest month', { set: { time: { mode: 'rolling', unit: 'month', count: 1 } } })
       if (!spec.columns && !spec.zero_share && !spec.calcs.includes('share')) add('Add share of total', { add: { calcs: ['share'] } })
+      if (spec.zero_share?.versus.length) add('Compare with all other properties', { set: { 'zero_share.versus': [], 'zero_share.all': true } })
       if (!spec.measures.includes('occurrences')) add('Add occurrences', { add: { measures: ['occurrences'] } })
         if (!spec.measures.includes('impressions')) add('Add impressions', { add: { measures: ['impressions'] } })
       if (!spec.options.top_n && rowCount > 25) add('Top 25 only', { set: { 'options.top_n': 25 } })

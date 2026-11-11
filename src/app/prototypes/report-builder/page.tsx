@@ -35,7 +35,7 @@ export default async function ReportBuilderPage() {
           </a>
         ) : null}
       </div>
-      <ReportBuilderChat initialSaved={overview.saved} initialThrough={overview.dataThrough} modelReady={Boolean(chooseModel())} live={overview.live} />
+      <ReportBuilderChat initialSaved={overview.saved} initialThrough={overview.dataThrough} initialComp={overview.compSet} modelReady={Boolean(chooseModel())} live={overview.live} />
       <p className="rb-muted rb-cap">
         {overview.live
           ? `A prototype on live data from the development data server. All media are covered from ${overview.allMediaFrom}; earlier months hold only some media, and development figures can change while the data team works.`
