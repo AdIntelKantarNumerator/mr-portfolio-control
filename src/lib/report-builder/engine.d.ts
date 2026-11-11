@@ -13,10 +13,17 @@ export interface Column {
   key: string
   label: string
   type: 'text' | 'money' | 'int' | 'pct' | 'change'
+  /** With a column breakdown: the value this column belongs to (a month, a media type). */
+  colId?: string
+  /** The heading several measures share; the page stacks them in one cell. */
+  group?: string
+  measure?: string
 }
 export interface Result {
   columns: Column[]
   rows: unknown[][]
+  /** Each row's ids (dimension:id, or the period), for drilling into it. */
+  keys?: string[][]
   totals: unknown[] | null
   row_count: number
   rows_shown: number

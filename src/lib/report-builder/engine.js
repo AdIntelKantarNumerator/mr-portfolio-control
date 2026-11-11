@@ -442,9 +442,13 @@
       const calcs = C ? [] : spec.calcs;
       const zs = spec.zero_share;
       const pass = makeFilter(spec.filters);
+      // A drill-down path (the tree view): only rows under these values, AND-ed, whatever the filters say.
+      const pathEntries = Object.entries(spec.path || {}).filter(([d]) => DIMS[d]);
+      const onPath = (f) => pathEntries.every(([d, id]) => String(DIMS[d].of(f)) === String(id));
       const mine = new Set(zs ? zs.mine : []), versus = new Set(zs ? zs.versus : []);
       const groups = new Map();
-      const colTotals = new Map();
+      const colTotals = new Map(); // value -> primary measure, for ordering
+      const colTotalsM = new Map(); // value -> every measure, for the totals row
       const grp = (f) => {
         const ids = R.map((d) => DIMS[d].of(f)); const k = ids.join('\u0001');
         let g = groups.get(k);
@@ -454,16 +458,24 @@
       for (const f of FACTS) {
         if (f.t < per.start || f.t > per.end) continue;
         if (zs) {
-          if (!pass.subject(f)) continue;
+          if (!pass.subject(f) || !onPath(f)) continue;
           const pid = PROPS[f.m].id;
           if (mine.has(pid)) { grp(f).mine += f.spend; continue; }
           if (versus.size && !versus.has(pid)) continue;
           if (!pass.where(f)) continue;
-        } else if (!pass.all(f)) continue;
+        } else if (!pass.all(f) || !onPath(f)) continue;
         const g = grp(f);
         g.v.spend += f.spend; g.v.occurrences += f.occurrences;
         if (f.impressions != null) { g.v.impressions += f.impressions; g.imp = true; }
-        if (C) { const c = DIMS[C].of(f); const val = f[primary] || 0; g.cols.set(c, (g.cols.get(c) || 0) + val); colTotals.set(c, (colTotals.get(c) || 0) + val); }
+        if (C) {
+          const c = DIMS[C].of(f);
+          for (const target of [g.cols, colTotalsM]) {
+            let o = target.get(c);
+            if (!o) { o = { spend: 0, occurrences: 0, impressions: 0 }; target.set(c, o); }
+            o.spend += f.spend; o.occurrences += f.occurrences; if (f.impressions != null) o.impressions += f.impressions;
+          }
+          colTotals.set(c, (colTotals.get(c) || 0) + (f[primary] || 0));
+        }
       }
       if (calcs.includes('yoy')) {
         if (per.start - 12 < 0) notes.push('There is no data a full year before this period, so prior-year figures are partial.');
@@ -478,9 +490,13 @@
       if (C) {
         colIds = Array.from(colTotals.keys());
         if (DIMS[C].time) colIds.sort(); else colIds.sort((a, b) => colTotals.get(b) - colTotals.get(a));
-        for (const c of colIds) columns.push({ key: 'c:' + c, label: labelOf(C, c), type: MEASURES[primary].type });
-        columns.push({ key: 'total', label: 'Total ' + MEASURES[primary].label.toLowerCase(), type: MEASURES[primary].type });
-        if (M.length > 1) notes.push('The columns show ' + MEASURES[primary].label.toLowerCase() + '. Remove the column breakdown to see ' + M.slice(1).map((k) => MEASURES[k].label.toLowerCase()).join(' and ') + ' as well.');
+        // Fixed columns (a tree's lower levels keep the top level's columns).
+        if (Array.isArray(spec.col_ids)) colIds = spec.col_ids.slice();
+        // One column per value and measure. With several measures, the page stacks a value's
+        // measures in one cell (group); the spreadsheet keeps a column each.
+        const many = M.length > 1;
+        for (const c of colIds) for (const k of M) columns.push({ key: 'c:' + c + (many ? ':' + k : ''), label: labelOf(C, c) + (many ? ' · ' + MEASURES[k].label : ''), type: MEASURES[k].type, colId: c, group: labelOf(C, c), measure: MEASURES[k].label });
+        for (const k of M) columns.push({ key: many ? 'total:' + k : 'total', label: 'Total ' + MEASURES[k].label.toLowerCase(), type: MEASURES[k].type, group: 'Total', measure: MEASURES[k].label });
       } else {
         M.forEach((k, i) => {
           columns.push({ key: k, label: mLabel(k), type: MEASURES[k].type });
@@ -499,7 +515,10 @@
       const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
       const cellRow = (ids, v, imp, cols, prior, isTotal) => {
         const row = isTotal ? R.map((d, i) => (i === 0 ? 'Total' : '')) : R.map((d, i) => labelOf(d, ids[i]));
-        if (C) { for (const c of colIds) row.push(isTotal ? colTotals.get(c) || 0 : cols.get(c) || 0); row.push(v[primary] || 0); }
+        if (C) {
+          for (const c of colIds) for (const k of M) { const o = isTotal ? colTotalsM.get(c) : cols.get(c); row.push(o ? o[k] || 0 : 0); }
+          for (const k of M) row.push(v[k] || 0);
+        }
         else M.forEach((k, i) => {
           row.push(k === 'impressions' && !imp ? null : v[k]);
           if (i === 0 && calcs.includes('share')) row.push(pct(v[k], totalPrimary));
@@ -511,14 +530,15 @@
       const matched = list.length;
       if (spec.options.top_n && matched > spec.options.top_n) { list = list.slice(0, spec.options.top_n); notes.push('Showing the top ' + spec.options.top_n + ' of ' + matched + ' rows; the total covers all ' + matched + '.'); }
       let rows = list.map((g) => cellRow(g.ids, g.v, g.imp, g.cols, g.prior, false));
+      let keys = list.map((g) => g.ids.map(String));
       const totals = R.length ? cellRow([], tot, tot.imp, null, tot.prior, true) : null;
       const rowCount = rows.length;
       let truncated = false;
-      if (opts.limit && rows.length > opts.limit) { rows = rows.slice(0, opts.limit); truncated = true; }
+      if (opts.limit && rows.length > opts.limit) { rows = rows.slice(0, opts.limit); keys = keys.slice(0, opts.limit); truncated = true; }
       if (!spec.options.final_only) notes.push('Figures for ' + monthLabel(through) + ' are preliminary and can still change.');
       if (!matched) notes.push(zs ? 'No advertisers matched: everyone in scope who spent on the competing properties also spent on yours.' : 'No spend matched these selections in this period.');
       return {
-        columns, rows, totals, row_count: rowCount, rows_shown: rows.length, truncated,
+        columns, rows, keys, totals, row_count: rowCount, rows_shown: rows.length, truncated,
         total: totalPrimary, total_measure: MEASURES[primary].label,
         period: { start: monthId(per.start), end: monthId(per.end), label: per.label, how: per.how, moves_with_new_data: per.moves },
         data_through: monthId(through), data_through_label: monthLabel(through),
@@ -617,7 +637,8 @@
         if (tm.mode !== 'ytd') add('Year to date', { set: { time: { mode: 'ytd' } } });
         if (!spec.columns && !spec.zero_share && !spec.calcs.includes('yoy')) add('Compare with prior year', { add: { calcs: ['yoy'] } });
         if (!spec.columns && !spec.zero_share && !spec.calcs.includes('share')) add('Add share of total', { add: { calcs: ['share'] } });
-        if (!spec.columns && !spec.measures.includes('occurrences')) add('Add occurrences', { add: { measures: ['occurrences'] } });
+        if (!spec.measures.includes('occurrences')) add('Add occurrences', { add: { measures: ['occurrences'] } });
+        if (!spec.measures.includes('impressions')) add('Add impressions', { add: { measures: ['impressions'] } });
         if (!spec.options.top_n && rowCount > 25) add('Top 25 only', { set: { 'options.top_n': 25 } });
         add(spec.options.final_only ? 'Include preliminary data' : 'Final data only', { set: { 'options.final_only': !spec.options.final_only } });
       }

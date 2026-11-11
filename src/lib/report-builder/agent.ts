@@ -21,7 +21,7 @@ import { dataSource, engineFor as pickEngine, type ReportEngine } from './engine
 import { chooseModel, runLoop, ReportModelError, type Post, type Turn } from './model'
 import { describeReport, savedList } from './page-view'
 import { REPORT_BUILDER_PAGE_SKILL, REPORT_BUILDER_SKILL } from './skill'
-import { TOOLS, emptyChat, progressNote, runTool, type ChatState, type ToolContext, type View } from './tools'
+import { TOOLS, emptyChat, expandRow, progressNote, runTool, type ChatState, type ToolContext, type View, type ViewTable } from './tools'
 
 export const REPORT_BUILDER_MODEL_ID = 'report-builder'
 export const REPORT_BUILDER_MODEL_NAME = 'Report Builder'
@@ -245,6 +245,14 @@ export function reportBuilderPageTurn(input: TurnInput & { chatId: string }): Pr
     const text = await modelTurn(ctx, input, REPORT_BUILDER_PAGE_SKILL)
     return reply(ctx, text)
   })
+}
+
+/** One row's children in the page's tree view. Reads only; nothing is saved. */
+export async function reportBuilderExpand(email: string, spec: Spec, path: string[], colIds: string[] | null): Promise<ViewTable> {
+  const { engine } = await engineFor(await loadUser(email.trim().toLowerCase()))
+  const v = await engine.validate(spec)
+  if (!v.ok) throw new Error('That report is not complete.')
+  return expandRow(engine, v.spec, path, colIds)
 }
 
 /** The page's first look: saved reports and data freshness, with no chat yet. */

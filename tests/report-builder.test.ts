@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { canSee, navSectionsFor, normalise } from '../src/lib/access-rules'
 import { dataSource, sampleEngine } from '../src/lib/report-builder/engines'
-import { TOOLS, emptyChat, runTool, type ToolContext } from '../src/lib/report-builder/tools'
+import { TOOLS, emptyChat, expandRow, runTool, type ToolContext } from '../src/lib/report-builder/tools'
 import { chooseModel, reportBuilderOpenRouter, runLoop, type Post } from '../src/lib/report-builder/model'
 import { describeReport, suggestName } from '../src/lib/report-builder/page-view'
 
@@ -226,4 +226,55 @@ test('live GPC data only when asked for and Dev ClickHouse is configured; the sa
   assert.equal(dataSource({ REPORT_BUILDER_DATA: 'gpc' }), 'sample', 'no ClickHouse: stays on the sample')
   assert.equal(dataSource({ CLICKHOUSE_DEV_URL: 'http://ch:8123' }), 'sample', 'ClickHouse alone does not switch it')
   assert.equal(dataSource({ REPORT_BUILDER_DATA: 'gpc', CLICKHOUSE_DEV_URL: 'http://ch:8123' }), 'gpc')
+})
+
+test('several measures by month: a column per month and measure, sharing the month as a group', async () => {
+  const { engine } = context()
+  const ford = (await engine.search('Ford', { types: ['advertiser'] }))[0]!
+  const v = await engine.validate({ template: 'advertiser_trend', rows: ['advertiser'], columns: 'month', measures: ['spend', 'occurrences', 'impressions'], filters: { advertiser: [ford.id] }, time: { mode: 'rolling', unit: 'month', count: 3 } })
+  const r = await engine.run(v.spec, { limit: 5 })
+  const months = r.columns.filter((c) => c.colId && c.group !== 'Total')
+  assert.equal(months.length, 9, 'three months, three measures each')
+  assert.deepEqual(months.slice(0, 3).map((c) => c.measure), ['Spend', 'Occurrences', 'Impressions'])
+  assert.equal(new Set(months.slice(0, 3).map((c) => c.group)).size, 1)
+  assert.deepEqual(r.columns.filter((c) => c.group === 'Total').map((c) => c.key), ['total:spend', 'total:occurrences', 'total:impressions'])
+  assert.ok(!r.notes.some((n) => /only spend|columns show/i.test(n)), 'no note that the other measures were dropped')
+  const spendCols = r.columns.map((c, i) => (c.measure === 'Spend' && c.group !== 'Total' ? i : -1)).filter((i) => i >= 0)
+  const total = r.columns.findIndex((c) => c.key === 'total:spend')
+  for (const row of r.rows) assert.equal(Math.round(spendCols.reduce((a, i) => a + Number(row[i]), 0)), Math.round(Number(row[total])))
+})
+
+test('a two-level report opens as a tree: each advertiser adds up to the properties under it', async () => {
+  const { engine } = context()
+  const auto = (await engine.search('Automotive', { types: ['industry'] }))[0]!
+  const v = await engine.validate({ template: 'media_mix', rows: ['advertiser', 'property'], columns: 'month', measures: ['spend', 'occurrences'], filters: { industry: [auto.id] }, time: { mode: 'rolling', unit: 'month', count: 3 } })
+  assert.ok(v.ok)
+  const top = await engine.run({ ...v.spec, rows: ['advertiser'] }, { limit: 5 })
+  const colIds = Array.from(new Set(top.columns.map((c) => c.colId).filter(Boolean))) as string[]
+  const first = top.keys![0]!
+  assert.match(first[0]!, /^advertiser:/)
+  const kids = await expandRow(engine, v.spec, [first[0]!], colIds, 1000)
+  assert.ok(kids.rows.length > 1)
+  assert.equal(kids.columns.length, top.columns.length + 1, 'the same number columns, plus the property name')
+  assert.ok(kids.rows.every((r) => r[0] === top.rows[0]![0]), 'only that advertiser')
+  const ti = top.columns.findIndex((c) => c.key === 'total:spend')
+  const sum = kids.rows.reduce((a, r) => a + Number(r[ti + 1]), 0)
+  assert.equal(Math.round(sum), Math.round(Number(top.rows[0]![ti])))
+  await assert.rejects(expandRow(engine, v.spec, [first[0]!, kids.keys![0]![1]!], colIds), /Nothing below/)
+})
+
+test('the page gets a tree for a report broken out by two things, and a flat table for one', async () => {
+  const ctx = context()
+  await call(ctx, 'new_report', { template: 'media_mix' })
+  const ford = ((await call(ctx, 'search_names', { query: 'Ford', types: ['advertiser'] })).matches as Array<{ id: string }>)[0]!
+  await call(ctx, 'change_report', { names: [ford.id] })
+  assert.equal(ctx.view?.kind, 'ready')
+  assert.equal(ctx.view?.tree, undefined, 'one breakdown: a flat table')
+  ctx.chat.report = { ...ctx.chat.report!, rows: ['advertiser', 'property'] }
+  await call(ctx, 'change_report', {})
+  assert.equal(ctx.view?.kind, 'ready')
+  const tree = ((): ToolContext['view'] => ctx.view)()?.tree
+  assert.deepEqual(tree?.dims.map((d) => d.key), ['advertiser', 'property'])
+  assert.equal(tree?.top.columns.filter((c) => c.type === 'text').length, 1, 'the top level is advertisers alone')
+  assert.ok(tree?.colIds?.length, 'with the media types fixed for every level')
 })

@@ -38,8 +38,24 @@ export interface ToolContext {
 export interface ViewTable {
   columns: Result['columns']
   rows: unknown[][]
+  /** Each row's ids, for expanding it in the tree. */
+  keys?: string[][]
   totals: unknown[] | null
   rowCount: number
+}
+
+/**
+ * The tree view of a report broken out by more than one thing: the top level
+ * (each advertiser, say) with true totals, and what the page needs to ask for
+ * a row's children (expandRow). The flat table stays for the model and the
+ * spreadsheet.
+ */
+export interface ViewTree {
+  spec: Spec
+  dims: Array<{ key: string; label: string }>
+  /** The column values, fixed, so every level lines up with the top. */
+  colIds: string[] | null
+  top: ViewTable
 }
 
 /** The last thing a tool produced, in a shape a page can draw without parsing text. */
@@ -53,6 +69,7 @@ export interface View {
   /** The numbered choices offered: a question's options, a problem's fixes, or a preview's adjustments. */
   choices?: Array<{ number: number; label: string; description?: string }>
   table?: ViewTable
+  tree?: ViewTree
   period?: string
   dataThrough?: string
   notes?: string[]
@@ -190,6 +207,7 @@ async function status(ctx: ToolContext, v: Validation) {
     kind: 'ready',
     title: preview.summary,
     table: tableOf(preview),
+    tree: await treeOf(engine, v.spec, preview, PREVIEW_ROWS),
     period: `${preview.period.label} (${preview.period.how})`,
     notes,
     choices: adjustments,
@@ -207,13 +225,39 @@ async function status(ctx: ToolContext, v: Validation) {
   }
 }
 
-const tableOf = (r: Result): ViewTable => ({ columns: r.columns, rows: r.rows, totals: r.totals, rowCount: r.row_count })
+const tableOf = (r: Result): ViewTable => ({ columns: r.columns, rows: r.rows, keys: r.keys, totals: r.totals, rowCount: r.row_count })
 
-function shown(ctx: ToolContext, result: Result, spec: Spec, name: string) {
+/** The column values a result used, in order (null when it has no column breakdown). */
+const colIdsOf = (r: Result): string[] | null => {
+  const ids = r.columns.map((c) => c.colId).filter((id): id is string => typeof id === 'string')
+  return ids.length ? Array.from(new Set(ids)) : null
+}
+
+/** The tree's top level, when the report is broken out by more than one thing. */
+async function treeOf(engine: ReportEngine, spec: Spec, flat: Result, limit: number): Promise<ViewTree | undefined> {
+  const rows = ((spec as { rows?: string[] }).rows ?? []) as string[]
+  if (rows.length < 2) return undefined
+  const colIds = colIdsOf(flat)
+  const top = await engine.run({ ...spec, rows: [rows[0]], ...(colIds ? { col_ids: colIds } : {}) }, { limit })
+  const cat = (await engine.catalog()) as unknown as { dimensions: Array<{ key: string; label: string }> }
+  const label = (k: string) => cat.dimensions.find((d) => d.key === k)?.label ?? k
+  return { spec, dims: rows.map((k) => ({ key: k, label: label(k) })), colIds, top: tableOf(top) }
+}
+
+/** A row's children in the tree: the next level down, under the path of ids above it. */
+export async function expandRow(engine: ReportEngine, spec: Spec, path: string[], colIds: string[] | null, limit = 100): Promise<ViewTable> {
+  const rows = ((spec as { rows?: string[] }).rows ?? []) as string[]
+  if (!path.length || path.length >= rows.length) throw new Error('Nothing below that row.')
+  const level = { ...spec, rows: rows.slice(0, path.length + 1), path: Object.fromEntries(path.map((id, i) => [rows[i]!, id])), ...(colIds ? { col_ids: colIds } : {}) }
+  return tableOf(await engine.run(level, { limit }))
+}
+
+async function shown(ctx: ToolContext, result: Result, spec: Spec, name: string) {
   ctx.view = {
     kind: 'run',
     title: result.summary,
-    table: { ...tableOf(result), rows: result.rows.slice(0, RUN_ROWS) },
+    table: { ...tableOf(result), rows: result.rows.slice(0, RUN_ROWS), keys: result.keys?.slice(0, RUN_ROWS) },
+    tree: await treeOf(ctx.engine, spec, result, RUN_ROWS),
     period: `${result.period.label} (${result.period.how})`,
     dataThrough: result.data_through_label,
     notes: result.notes,
@@ -361,7 +405,7 @@ export async function runTool(ctx: ToolContext, name: string, input: Record<stri
       if (!found) throw new Error(`No saved report matches "${input.report}". list_saved_reports shows what there is.`)
       const r = await engine.runSaved(found.id, { limit: RUN_ROWS })
       const spec = (await engine.getSaved(found.id)).spec
-      const out = { report: r.saved_report.name, since_last_run: r.since_last_run.text, ...shown(ctx, r, spec, r.saved_report.name) }
+      const out = { report: r.saved_report.name, since_last_run: r.since_last_run.text, ...(await shown(ctx, r, spec, r.saved_report.name)) }
       ctx.view = { ...ctx.view!, savedName: r.saved_report.name, sinceLastRun: r.since_last_run.text }
       return out
     }
@@ -377,7 +421,7 @@ export async function runTool(ctx: ToolContext, name: string, input: Record<stri
     }
 
     case 'demo_load_next_month': {
-      if (!engine.advanceData) throw new Error('This report reads live GPC data, which moves on when the nightly load runs; there is no demo month to load.')
+      if (!engine.advanceData) throw new Error('This report reads live data, which moves on when the nightly load runs; there is no demo month to load.')
       const through = engine.advanceData().final_through_label
       ctx.view = { kind: 'data', message: `New data arrived. Final data now runs through ${through}.` }
       return { final_data_through: through }

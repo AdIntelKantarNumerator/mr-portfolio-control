@@ -2439,3 +2439,18 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rb-danger { color: var(--red); }
 .rb-small { padding: 3px 10px; font-size: 12.5px; }
 .rb-railfoot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 10px 16px; border-top: 1px solid var(--line); font-size: 12.5px; }
+
+/* Report Builder: header with New report, stacked measures, tree rows */
+.rb-chathead { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--line); }
+.rb-chathead .rb-muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.rb-stack { display: inline-flex; flex-direction: column; align-items: flex-end; line-height: 1.35; }
+.rb-m1 { color: var(--c1); }
+.rb-m2 { color: var(--muted); }
+.rb-stacklegend { font-size: 12px; color: var(--muted); margin: 0 0 6px; display: flex; gap: 10px; flex-wrap: wrap; }
+.rb-stacklegend .rb-m0 { color: var(--ink, inherit); font-weight: 600; }
+.rb-stacklegend .rb-m1, .rb-stacklegend .rb-m2 { font-weight: 600; }
+.rb-tree .rb-treecell { white-space: nowrap; }
+.rb-twist { border: 0; background: none; cursor: pointer; color: var(--muted); width: 18px; padding: 0; margin-right: 4px; font-size: 12px; }
+.rb-twist:hover { color: var(--ink, inherit); }
+.rb-twig { display: inline-block; width: 22px; }
+.rb-tree tr.rb-sub td { background: color-mix(in srgb, var(--canvas) 55%, transparent); font-size: 12.5px; }

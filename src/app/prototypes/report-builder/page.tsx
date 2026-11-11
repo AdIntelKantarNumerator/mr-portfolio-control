@@ -38,7 +38,7 @@ export default async function ReportBuilderPage() {
       <ReportBuilderChat initialSaved={overview.saved} initialThrough={overview.dataThrough} modelReady={Boolean(chooseModel())} live={overview.live} />
       <p className="rb-muted rb-cap">
         {overview.live
-          ? `A prototype on live GPC data from the development ClickHouse server. All media are covered from ${overview.allMediaFrom}; earlier months hold only some media, and development figures can change while the data team works.`
+          ? `A prototype on live data from the development data server. All media are covered from ${overview.allMediaFrom}; earlier months hold only some media, and development figures can change while the data team works.`
           : 'A prototype. Advertiser and media names are real; the figures are illustrative sample data, not measured spend.'}
       </p>
     </div>

@@ -13,11 +13,11 @@
  * instant. A typed message goes to the model. Either way it is added to the
  * conversation the model sees next time.
  */
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { MarkdownView } from '@/components/markdown-view'
 import type { PageReply } from '@/lib/report-builder/agent'
 import type { SavedItem } from '@/lib/report-builder/page-view'
-import type { View, ViewTable } from '@/lib/report-builder/tools'
+import type { View, ViewTable, ViewTree } from '@/lib/report-builder/tools'
 
 interface Message {
   id: number
@@ -59,6 +59,73 @@ function short(n: number): string {
 
 const SERIES = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c5)', 'var(--c4)']
 
+type Col = ViewTable['columns'][number]
+
+/**
+ * The columns as the page shows them: a column value's measures (spend,
+ * occurrences, impressions for one month) share one cell, a line each. The
+ * spreadsheet keeps them as separate columns.
+ */
+interface DCol {
+  label: string
+  idx: number[]
+  text: boolean
+}
+function displayCols(cols: Col[], from = 0): DCol[] {
+  const out: DCol[] = []
+  for (let i = from; i < cols.length; i++) {
+    const c = cols[i]!
+    const last = out[out.length - 1]
+    const prev = i > from ? cols[i - 1] : undefined
+    if (c.group && c.measure && last && prev?.group === c.group && prev.measure) {
+      last.idx.push(i)
+      last.label = c.group
+    } else out.push({ label: c.label, idx: [i], text: c.type === 'text' })
+  }
+  return out
+}
+
+/** The measures stacked in each cell, in order, when there are several. */
+function stackedMeasures(cols: Col[], dcols: DCol[]): string[] {
+  const d = dcols.find((x) => x.idx.length > 1)
+  return d ? d.idx.map((i) => cols[i]!.measure ?? cols[i]!.label) : []
+}
+
+const numCls = (type: string, v: unknown) => 'rb-n' + (type === 'change' && v != null ? (Number(v) >= 0 ? ' rb-up' : ' rb-down') : '')
+
+function Cell({ cols, d, row }: { cols: Col[]; d: DCol; row: unknown[] }) {
+  if (d.idx.length === 1) {
+    const i = d.idx[0]!
+    const t = cols[i]!.type
+    return <td className={t === 'text' ? '' : numCls(t, row[i])}>{cell(t, row[i])}</td>
+  }
+  return (
+    <td className="rb-n">
+      <span className="rb-stack">
+        {d.idx.map((i, k) => (
+          <span key={i} className={`rb-m${k}`}>
+            {cell(cols[i]!.type, row[i])}
+          </span>
+        ))}
+      </span>
+    </td>
+  )
+}
+
+function StackLegend({ measures }: { measures: string[] }) {
+  if (measures.length < 2) return null
+  return (
+    <p className="rb-stacklegend">
+      Each cell:{' '}
+      {measures.map((m, k) => (
+        <span key={m} className={`rb-m${k}`}>
+          {m}
+        </span>
+      ))}
+    </p>
+  )
+}
+
 /** A trend line when the columns are periods; bars of each row's total otherwise. */
 function Chart({ table }: { table: ViewTable }) {
   const text = table.columns.filter((c) => c.type === 'text').length
@@ -68,7 +135,11 @@ function Chart({ table }: { table: ViewTable }) {
       .filter(Boolean)
       .map(String)
       .join(' · ')
-  const timeIdx = table.columns.map((c, i) => (/^c:(\d{4}(-\d{2}|-Q\d)?)$/.test(c.key) ? i : -1)).filter((i) => i >= 0)
+  // The period columns of the first measure (with several, each period has one per measure).
+  const firstMeasure = table.columns.find((c) => c.colId && c.measure)?.measure
+  const timeIdx = table.columns
+    .map((c, i) => (c.colId && /^\d{4}(-?\d{2}|-Q\d)?$/.test(c.colId) && c.type === 'money' && (!firstMeasure || c.measure === firstMeasure) ? i : -1))
+    .filter((i) => i >= 0)
   if (!table.rows.length || !table.columns.some((c) => c.type === 'money')) return null
   const W = 640
   const H = 190
@@ -119,7 +190,7 @@ function Chart({ table }: { table: ViewTable }) {
     )
   }
 
-  const vi = table.columns.findIndex((c) => c.type === 'money' && (c.key === 'spend' || c.key === 'total'))
+  const vi = table.columns.findIndex((c) => c.type === 'money' && (c.key === 'spend' || c.key === 'total' || c.key === 'total:spend'))
   const rows = table.rows.slice(0, 8)
   if (vi < 0 || rows.length < 2) return null
   const max = Math.max(1, ...rows.map((r) => Number(r[vi]) || 0))
@@ -158,16 +229,17 @@ function Chart({ table }: { table: ViewTable }) {
 
 function Table({ table, max }: { table: ViewTable; max: number }) {
   const rows = table.rows.slice(0, max)
-  const cls = (type: string, v: unknown) => (type === 'text' ? '' : 'rb-n') + (type === 'change' && v != null ? (Number(v) >= 0 ? ' rb-up' : ' rb-down') : '')
+  const dcols = displayCols(table.columns)
   return (
     <div>
+      <StackLegend measures={stackedMeasures(table.columns, dcols)} />
       <div className="rb-tablewrap">
         <table className="rb-table">
           <thead>
             <tr>
-              {table.columns.map((c) => (
-                <th key={c.key} className={c.type === 'text' ? '' : 'rb-n'}>
-                  {c.label}
+              {dcols.map((d) => (
+                <th key={d.idx[0]} className={d.text ? '' : 'rb-n'}>
+                  {d.label}
                 </th>
               ))}
             </tr>
@@ -175,19 +247,15 @@ function Table({ table, max }: { table: ViewTable; max: number }) {
           <tbody>
             {rows.map((r, i) => (
               <tr key={i}>
-                {r.map((v, j) => (
-                  <td key={j} className={cls(table.columns[j]!.type, v)}>
-                    {cell(table.columns[j]!.type, v)}
-                  </td>
+                {dcols.map((d) => (
+                  <Cell key={d.idx[0]} cols={table.columns} d={d} row={r} />
                 ))}
               </tr>
             ))}
             {table.totals ? (
               <tr className="rb-total">
-                {table.totals.map((v, j) => (
-                  <td key={j} className={cls(table.columns[j]!.type, v)}>
-                    {cell(table.columns[j]!.type, v)}
-                  </td>
+                {dcols.map((d) => (
+                  <Cell key={d.idx[0]} cols={table.columns} d={d} row={table.totals!} />
                 ))}
               </tr>
             ) : null}
@@ -199,6 +267,151 @@ function Table({ table, max }: { table: ViewTable; max: number }) {
           Showing {rows.length} of {table.rowCount.toLocaleString('en-US')} rows. Totals cover every row; the download has them all.
         </p>
       ) : null}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- the tree
+
+type Branch = { state: 'loading' } | { state: 'error'; message: string } | { state: 'done'; table: ViewTable }
+
+/**
+ * A report broken out by more than one thing (advertiser, then property), as
+ * a tree: the top level first, with each row's next level fetched when it is
+ * opened. Every level uses the same columns as the top, so they line up.
+ */
+function TreeTable({ tree, max }: { tree: ViewTree; max: number }) {
+  const [open, setOpen] = useState<Set<string>>(new Set())
+  const [branches, setBranches] = useState<Map<string, Branch>>(new Map())
+  const top = tree.top
+  const depth = tree.dims.length
+  // Number columns, as the top level has them (its one name column dropped).
+  const dcols = displayCols(top.columns, 1)
+  const measures = stackedMeasures(top.columns, dcols)
+  const numCols = (level: number) => displayCols(top.columns, 1).map((d) => ({ ...d, idx: d.idx.map((i) => i + level) }))
+
+  async function toggle(path: string[]) {
+    const k = path.join('|')
+    const next = new Set(open)
+    if (next.has(k)) {
+      next.delete(k)
+      setOpen(next)
+      return
+    }
+    next.add(k)
+    setOpen(next)
+    if (branches.has(k) && branches.get(k)!.state !== 'error') return
+    setBranches((m) => new Map(m).set(k, { state: 'loading' }))
+    try {
+      const res = await fetch('/prototypes/report-builder/api', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ expand: { spec: tree.spec, path, colIds: tree.colIds } }),
+      })
+      const json = (await res.json().catch(() => ({}))) as ViewTable & { error?: string }
+      if (!res.ok) throw new Error(json.error ?? `The server said ${res.status}.`)
+      setBranches((m) => new Map(m).set(k, { state: 'done', table: json }))
+    } catch (err) {
+      setBranches((m) => new Map(m).set(k, { state: 'error', message: (err as Error).message }))
+    }
+  }
+
+  const span = dcols.length + 1
+  function rowsOf(table: ViewTable, level: number, parent: string[], limit: number): ReactNode[] {
+    const out: ReactNode[] = []
+    const cols = numCols(level)
+    table.rows.slice(0, limit).forEach((r, i) => {
+      const key = table.keys?.[i]?.[level]
+      const path = key ? [...parent, key] : null
+      const k = path?.join('|') ?? `${parent.join('|')}#${i}`
+      const leaf = level >= depth - 1 || !path
+      const isOpen = !leaf && open.has(k)
+      out.push(
+        <tr key={k} className={level ? 'rb-sub' : undefined}>
+          <td className="rb-treecell" style={{ paddingLeft: 12 + level * 20 }}>
+            {leaf ? (
+              <span className="rb-twig" />
+            ) : (
+              <button type="button" className="rb-twist" aria-expanded={isOpen} aria-label={isOpen ? 'Collapse' : 'Expand'} onClick={() => void toggle(path!)}>
+                {isOpen ? '▾' : '▸'}
+              </button>
+            )}
+            {String(r[level] ?? '').trim() || <span className="rb-muted">Not named</span>}
+          </td>
+          {cols.map((d) => (
+            <Cell key={d.idx[0]} cols={table.columns} d={d} row={r} />
+          ))}
+        </tr>,
+      )
+      if (isOpen) {
+        const b = branches.get(k)
+        if (!b || b.state === 'loading')
+          out.push(
+            <tr key={`${k}:wait`} className="rb-sub">
+              <td colSpan={span} className="rb-muted" style={{ paddingLeft: 32 + level * 20 }}>
+                Loading…
+              </td>
+            </tr>,
+          )
+        else if (b.state === 'error')
+          out.push(
+            <tr key={`${k}:err`} className="rb-sub">
+              <td colSpan={span} className="rb-muted" style={{ paddingLeft: 32 + level * 20 }}>
+                {b.message}
+              </td>
+            </tr>,
+          )
+        else {
+          out.push(...rowsOf(b.table, level + 1, path!, 100))
+          if (b.table.rowCount > Math.min(100, b.table.rows.length))
+            out.push(
+              <tr key={`${k}:more`} className="rb-sub">
+                <td colSpan={span} className="rb-muted" style={{ paddingLeft: 32 + level * 20 }}>
+                  Top {Math.min(100, b.table.rows.length)} of {b.table.rowCount.toLocaleString('en-US')} shown; the download has them all.
+                </td>
+              </tr>,
+            )
+        }
+      }
+    })
+    return out
+  }
+
+  return (
+    <div>
+      <StackLegend measures={measures} />
+      <div className="rb-tablewrap">
+        <table className="rb-table rb-tree">
+          <thead>
+            <tr>
+              <th>{tree.dims.map((d) => d.label).join(' › ')}</th>
+              {dcols.map((d) => (
+                <th key={d.idx[0]} className="rb-n">
+                  {d.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rowsOf(top, 0, [], max)}
+            {top.totals ? (
+              <tr className="rb-total">
+                <td>Total</td>
+                {dcols.map((d) => (
+                  <Cell key={d.idx[0]} cols={top.columns} d={d} row={top.totals!} />
+                ))}
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+      {top.rowCount > Math.min(max, top.rows.length) ? (
+        <p className="rb-muted rb-cap">
+          Showing {Math.min(max, top.rows.length)} of {top.rowCount.toLocaleString('en-US')} {tree.dims[0]!.label.toLowerCase()} rows. Open a row to see what is under it; the download lists every combination.
+        </p>
+      ) : (
+        <p className="rb-muted rb-cap">Open a row to see what is under it; the download lists every combination.</p>
+      )}
     </div>
   )
 }
@@ -323,6 +536,12 @@ export function ReportBuilderChat({ initialSaved, initialThrough, modelReady, li
   return (
     <div className="rb-frame">
       <section className="rb-chatcard" aria-label="Conversation">
+        <div className="rb-chathead">
+          <span className="rb-muted">{panel?.editing ? `Editing ${panel.editing}` : panel && panel.status !== 'empty' ? panel.name : 'New report'}</span>
+          <button type="button" className="btn rb-small" disabled={!!busy} onClick={startOver}>
+            + New report
+          </button>
+        </div>
         <div className="rb-log" ref={logRef} aria-live="polite">
           <div className="rb-msg rb-bot">
             <p>Hi! I can set up a custom report or data extract for you. Pick a starting point, or just tell me what you need.</p>
@@ -472,7 +691,7 @@ export function ReportBuilderChat({ initialSaved, initialThrough, modelReady, li
           </div>
         )}
         <div className="rb-railfoot">
-          <span className="rb-muted">{live ? `GPC data, complete through ${through}` : `Final data through ${through}`}</span>
+          <span className="rb-muted">{live ? `Live data, complete through ${through}` : `Final data through ${through}`}</span>
           {live ? null : (
             <button type="button" className="btn rb-small" disabled={!!busy} title="For demonstrations: pretend next month's data has arrived" onClick={() => act({ type: 'demo_month' }, 'Demo: load next month of data')}>
               Demo: load next month
@@ -517,8 +736,8 @@ function MessageView({
       <MarkdownView text={m.text} />
       {v?.table && (v.kind === 'ready' || v.kind === 'run') ? (
         <div className="rb-result">
-          <Chart table={v.table} />
-          <Table table={v.table} max={v.kind === 'run' ? 25 : 10} />
+          <Chart table={v.tree ? v.tree.top : v.table} />
+          {v.tree ? <TreeTable tree={v.tree} max={v.kind === 'run' ? 25 : 10} /> : <Table table={v.table} max={v.kind === 'run' ? 25 : 10} />}
           {v.downloadUrl ? (
             <div className="rb-row">
               <a className="btn" href={v.downloadUrl}>

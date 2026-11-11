@@ -58,7 +58,7 @@ const DIMS: Record<Dim, DimDef> = {
   year: { label: 'Year', plural: 'years', group: 'when', time: true, id: 'toString(intDiv(year_month, 100))', name: "''", context: "''" },
 }
 const NAME_DIMS = Object.keys(DIMS).filter((d) => !DIMS[d as Dim].time) as Dim[]
-const GROUP_LABEL: Record<Group, string> = { who: 'Who is advertising', what: 'What is advertised (GPC taxonomy)', where: 'Where it runs', when: 'When' }
+const GROUP_LABEL: Record<Group, string> = { who: 'Who is advertising', what: 'What is advertised', where: 'Where it runs', when: 'When' }
 
 const MEASURES = {
   spend: { label: 'Spend', type: 'money' as const, sql: 'cost_share_v' },
@@ -68,7 +68,7 @@ const MEASURES = {
 type MeasureKey = keyof typeof MEASURES
 const CALCS = {
   share: { label: 'Share of total', note: 'Each row as a percent of the report total. Not available with a column breakdown.' },
-  yoy: { label: 'Change vs prior year', note: 'Same period one year earlier. GPC data before August 2026 covers only some media.' },
+  yoy: { label: 'Change vs prior year', note: 'Same period one year earlier. Data before August 2026 covers only some media.' },
 }
 
 type TimeSpec = { mode?: string; unit?: string; count?: number; start?: string; end?: string }
@@ -76,7 +76,7 @@ const RECENT: TimeSpec = { mode: 'rolling', unit: 'month', count: 3 }
 const TEMPLATES = [
   { id: 'advertiser_trend', label: 'Spend trend', description: 'How spend moves month by month', spec: { template: 'advertiser_trend', rows: ['advertiser'], columns: 'month', measures: ['spend'], time: RECENT } },
   { id: 'media_mix', label: 'Media mix', description: 'How spend splits across media types', spec: { template: 'media_mix', rows: ['advertiser'], columns: 'media_type', measures: ['spend'], time: RECENT } },
-  { id: 'category_share', label: 'Category share', description: 'Who holds what share of a GPC category', spec: { template: 'category_share', rows: ['advertiser'], measures: ['spend'], calcs: ['share'], time: RECENT } },
+  { id: 'category_share', label: 'Category share', description: 'Who holds what share of a category', spec: { template: 'category_share', rows: ['advertiser'], measures: ['spend'], calcs: ['share'], time: RECENT } },
   { id: 'zero_share', label: 'Zero share', description: 'Advertisers buying elsewhere but not on your properties', spec: { template: 'zero_share', rows: ['top_parent', 'advertiser'], measures: ['spend'], zero_share: { mine: [], versus: [] }, time: RECENT } },
   { id: 'detail_extract', label: 'Detailed extract', description: 'Product-level rows by property and month, for a spreadsheet', spec: { template: 'detail_extract', rows: ['top_parent', 'advertiser', 'product', 'subcategory', 'media_type', 'property', 'month'], measures: ['spend', 'occurrences', 'impressions'], time: { mode: 'rolling', unit: 'month', count: 1 }, output: 'csv' } },
 ]
@@ -165,6 +165,10 @@ interface NSpec {
   filters: Record<string, string[]>
   options: { final_only: boolean; top_n: number | null }
   zero_share?: { mine: string[]; versus: string[] } | null
+  /** Drill-down (the tree view): only rows under these values, AND-ed with everything else. */
+  path?: Record<string, string>
+  /** Fixed column values, so a tree's lower levels line up with the top. */
+  col_ids?: string[]
   time?: { mode?: string; unit?: string; count?: number; start?: string; end?: string } | null
   scope?: string
   [k: string]: unknown
@@ -357,7 +361,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         how = n === 1 ? 'latest complete month' : `last ${n} complete months`
       }
     }
-    if (start < firstComplete) notes.push(`GPC data before ${monthLabel(firstComplete)} covers only some media (mostly streaming), so earlier months look smaller than they were.`)
+    if (start < firstComplete) notes.push(`Data before ${monthLabel(firstComplete)} covers only some media (mostly streaming), so earlier months look smaller than they were.`)
     const label = start === end ? monthLabel(start) : `${monthLabel(start)} – ${monthLabel(end)}`
     return { start, end, label, how, moves, notes }
   }
@@ -419,7 +423,21 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       groups[d.group as 'who' | 'what' | 'where'].push(`${d.id} IN (${nums.join(',')})`)
     }
     const or = (xs: string[]) => (xs.length ? `(${xs.join(' OR ')})` : '')
+    const path: string[] = []
+    for (const [dim, id] of Object.entries(s.path ?? {})) {
+      const d = DIMS[dim as Dim]
+      if (!d) continue
+      if (dim === 'month') {
+        const t = parseMonth(id)
+        if (t != null) path.push(`year_month = ${toYm(t)}`)
+      } else if (d.time) path.push(`${d.id} = '${String(id).replace(/[^0-9Q-]/g, '')}'`)
+      else {
+        const n = num(id)
+        if (n !== null) path.push(`${d.id} = ${n}`)
+      }
+    }
     return {
+      path: path.join(' AND '),
       time: `year_month BETWEEN ${toYm(start)} AND ${toYm(end)}`,
       who: or(groups.who),
       what: or(groups.what),
@@ -455,7 +473,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const w = whereParts(s, per.start, per.end)
 
     // Rows in scope, and which of their spend counts.
-    const subject = [w.who, w.what].filter(Boolean)
+    const subject = [w.who, w.what, w.path].filter(Boolean)
     let scope: string
     let counted: string
     let mineSql = ''
@@ -475,7 +493,10 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     // Column breakdown: its values first (every month in the period; the 12 largest otherwise).
     let colVals: Array<{ id: string; name: string }> = []
     let moreCols = 0
-    if (C) {
+    if (C && Array.isArray(s.col_ids)) {
+      const d = DIMS[C]
+      colVals = s.col_ids.map((id) => ({ id, name: d.time ? (C === 'month' ? monthLabel(toIdx(Number(id))) : labelOf(C, id)) : (labels.get(`${C}:${id}`) ?? id) }))
+    } else if (C) {
       const d = DIMS[C]
       const vals = await chQuery<{ id: string; name: string; v: number; n: number }>(
         config(),
@@ -495,7 +516,9 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     })
     for (const k of M) selects.push(`${agg(k)} AS m_${k}`)
     if (zs) selects.push(`toFloat64(sumIf(cost_share_v, ${mineSql})) AS mine_spend`)
-    colVals.forEach((c, j) => selects.push(`toFloat64(sumIf(${MEASURES[primary].sql}, (${counted}) AND toString(${DIMS[C!].id}) = '${c.id.replace(/'/g, '')}')) AS c${j}`))
+    colVals.forEach((c, j) => {
+      for (const k of M) selects.push(`toFloat64(sumIf(${MEASURES[k].sql}, (${counted}) AND toString(${DIMS[C!].id}) = '${c.id.replace(/'/g, '')}')) AS c${j}_${k}`)
+    })
     const groupBy = R.length ? ` GROUP BY ${R.map((_, i) => `r${i}`).join(', ')}` : ''
     const having = zs ? ' HAVING mine_spend = 0 AND m_spend > 0' : ` HAVING m_${primary} != 0`
     const grouped = `SELECT ${selects.join(', ')} FROM ${TABLE} WHERE ${scope}${groupBy}${having}`
@@ -508,7 +531,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       chQuery<Row>(config(), `SELECT *, count() OVER () AS __n FROM (${grouped}) ORDER BY ${order} LIMIT ${cap}`, {}, SETTINGS),
       chQuery<Row>(
         config(),
-        `SELECT ${[...M.map((k) => `sum(m_${k}) AS m_${k}`), ...colVals.map((_, j) => `sum(c${j}) AS c${j}`)].join(', ')}, count() AS n FROM (${grouped})`,
+        `SELECT ${[...M.map((k) => `sum(m_${k}) AS m_${k}`), ...colVals.flatMap((_, j) => M.map((k) => `sum(c${j}_${k}) AS c${j}_${k}`))].join(', ')}, count() AS n FROM (${grouped})`,
         {},
         SETTINGS,
       ),
@@ -522,7 +545,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     if (calcs.includes('yoy')) {
       const ps = per.start - 12
       const pe = per.end - 12
-      if (pe < a.firstComplete) notes.push(`A year earlier, GPC data covers only some media (all media start in ${monthLabel(a.firstComplete)}), so the change is not like for like.`)
+      if (pe < a.firstComplete) notes.push(`A year earlier, the data covers only some media (all media start in ${monthLabel(a.firstComplete)}), so the change is not like for like.`)
       const pw = whereParts(s, ps, pe)
       const pscope = [pw.time, BASE, pw.who, pw.what, pw.where].filter(Boolean).join(' AND ')
       const keys = R.length ? rows.map((r) => `(${R.map((_, i) => `'${String(r[`r${i}`]).replace(/'/g, '')}'`).join(',')})`) : []
@@ -541,9 +564,11 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const columns: Result['columns'] = R.map((d) => ({ key: d, label: DIMS[d].label, type: 'text' }))
     const mLabel = (k: MeasureKey) => (zs && k === 'spend' ? 'Spend on competing properties' : MEASURES[k].label)
     if (C) {
-      colVals.forEach((c) => columns.push({ key: `c:${c.id}`, label: c.name, type: MEASURES[primary].type }))
-      columns.push({ key: 'total', label: `Total ${MEASURES[primary].label.toLowerCase()}`, type: MEASURES[primary].type })
-      if (M.length > 1) notes.push(`The columns show ${MEASURES[primary].label.toLowerCase()}. Remove the column breakdown to see ${M.slice(1).map((k) => MEASURES[k].label.toLowerCase()).join(' and ')} as well.`)
+      // One column per value and measure. With several measures the page stacks a value's
+      // measures in one cell (group); the spreadsheet keeps a column each.
+      const many = M.length > 1
+      colVals.forEach((c) => M.forEach((k) => columns.push({ key: `c:${c.id}${many ? `:${k}` : ''}`, label: `${c.name}${many ? ` · ${MEASURES[k].label}` : ''}`, type: MEASURES[k].type, colId: c.id, group: c.name, measure: MEASURES[k].label })))
+      M.forEach((k) => columns.push({ key: many ? `total:${k}` : 'total', label: `Total ${MEASURES[k].label.toLowerCase()}`, type: MEASURES[k].type, group: 'Total', measure: MEASURES[k].label }))
       if (moreCols) notes.push(`Showing the 12 largest ${DIMS[C].plural}; ${moreCols} smaller ones are in the total.`)
     } else {
       M.forEach((k, i) => {
@@ -564,8 +589,8 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         ? R.map((_, i) => (i === 0 ? 'Total' : ''))
         : R.map((dim, i) => (DIMS[dim].time ? (dim === 'month' ? monthLabel(toIdx(Number(r![`r${i}`]))) : labelOf(dim, String(r![`r${i}`]))) : String(r![`n${i}`])))
       if (C) {
-        colVals.forEach((_, j) => out.push(tidy(primary, Number(r?.[`c${j}`] ?? 0))))
-        out.push(tidy(primary, Number(r?.[`m_${primary}`] ?? 0)))
+        colVals.forEach((_, j) => M.forEach((k) => out.push(tidy(k, Number(r?.[`c${j}_${k}`] ?? 0)))))
+        M.forEach((k) => out.push(tidy(k, Number(r?.[`m_${k}`] ?? 0))))
       } else {
         M.forEach((k, i) => {
           const v = Number(r?.[`m_${k}`] ?? 0)
@@ -587,9 +612,12 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     if (!s.options.final_only) notes.push(`Figures for ${monthLabel(through)} are preliminary and still loading.`)
     if (!matched) notes.push(zs ? 'No advertisers matched: everyone in scope who spent on the competing properties also spent on yours.' : 'No spend matched these selections in this period.')
     const outRows = rows.map((r) => cells(r, false))
+    // Each row's ids, as filters and paths use them, for drilling into it.
+    const keys = rows.map((r) => R.map((dim, i) => (dim === 'month' ? monthId(toIdx(Number(r[`r${i}`]))) : DIMS[dim].time ? String(r[`r${i}`]) : `${dim}:${r[`r${i}`]}`)))
     return {
       columns,
       rows: outRows,
+      keys,
       totals: R.length ? cells(totals[0], true) : null,
       row_count: rowCount,
       rows_shown: outRows.length,
@@ -627,7 +655,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     for (const [dim, ids] of Object.entries(spec.filters)) {
       if (!isDim(dim) || DIMS[dim as Dim].time) continue
       const bad = ids.filter((id) => !labels.has(id))
-      if (bad.length) errors.push({ code: 'unknown_value', message: `These ${DIMS[dim as Dim].plural} are not in the GPC data: ${bad.join(', ')}. Look names up with search_names.`, fixes: [{ label: 'Remove them', patch: { remove: { [`filters.${dim}`]: bad } } }] })
+      if (bad.length) errors.push({ code: 'unknown_value', message: `These ${DIMS[dim as Dim].plural} are not in the data: ${bad.join(', ')}. Look names up with search_names.`, fixes: [{ label: 'Remove them', patch: { remove: { [`filters.${dim}`]: bad } } }] })
     }
     if (spec.columns && spec.rows.includes(spec.columns))
       errors.push({ code: 'dimension_twice', message: `${DIMS[spec.columns]?.label ?? 'A dimension'} is used for both rows and columns.`, fixes: [{ label: 'Keep it as columns', patch: { remove: { rows: [spec.columns] } } }, { label: 'Keep it as rows', patch: { set: { columns: null } } }] })
@@ -651,7 +679,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     } else if (spec.template === 'category_share' && !hasWhat && spec.scope !== 'all') {
       questions.push({
         id: 'category',
-        prompt: 'Which GPC category should the shares be measured in?',
+        prompt: 'Which category should the shares be measured in?',
         kind: 'entity',
         entity_types: ['industry', 'category', 'subcategory'],
         options: [...(await topOptions(['category'], 5, addFilter)), { label: 'All categories', description: 'Share of total spend', patch: { set: { scope: 'all' } } }],
@@ -696,7 +724,8 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       if (!isRolling('month', 3)) add('Last 3 months', { set: { time: RECENT } })
       if (!isRolling('month', 1)) add('Latest month', { set: { time: { mode: 'rolling', unit: 'month', count: 1 } } })
       if (!spec.columns && !spec.zero_share && !spec.calcs.includes('share')) add('Add share of total', { add: { calcs: ['share'] } })
-      if (!spec.columns && !spec.measures.includes('occurrences')) add('Add occurrences', { add: { measures: ['occurrences'] } })
+      if (!spec.measures.includes('occurrences')) add('Add occurrences', { add: { measures: ['occurrences'] } })
+        if (!spec.measures.includes('impressions')) add('Add impressions', { add: { measures: ['impressions'] } })
       if (!spec.options.top_n && rowCount > 25) add('Top 25 only', { set: { 'options.top_n': 25 } })
       add(spec.options.final_only ? 'Include the current month' : 'Complete months only', { set: { 'options.final_only': !spec.options.final_only } })
     }
@@ -860,7 +889,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const a = await availability()
     return {
       data: {
-        source: 'GPC, Dev ClickHouse (live)',
+        source: 'Live data (development server)',
         all_media_from: monthLabel(a.firstComplete),
         final_through: monthLabel(a.through),
         current_month_loading: monthLabel(a.prelim),
@@ -877,8 +906,8 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       rules: [
         'Filters inside one group (who, what, where) are combined with OR; the groups are combined with AND.',
         'Share of total and change vs prior year cannot be combined with a column breakdown.',
-        `GPC covers all media from ${monthLabel(a.firstComplete)}; earlier months hold only some media, so default to the last 3 complete months.`,
-        'Spend is GPC spend for the paying advertiser and product (promos and PSAs excluded).',
+        `The data covers all media from ${monthLabel(a.firstComplete)}; earlier months hold only some media, so default to the last 3 complete months.`,
+        'Spend is the spend for the paying advertiser and product (promos and PSAs excluded).',
       ],
     }
   }

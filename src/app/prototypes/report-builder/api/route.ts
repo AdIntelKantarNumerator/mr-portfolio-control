@@ -13,7 +13,7 @@
  */
 import { currentAccess } from '@/lib/auth/access'
 import { getAuthConfig } from '@/lib/auth/config'
-import { reportBuilderAction, reportBuilderPageTurn, type PageAction } from '@/lib/report-builder/agent'
+import { reportBuilderAction, reportBuilderExpand, reportBuilderPageTurn, type PageAction } from '@/lib/report-builder/agent'
 import { ReportModelError, type Turn } from '@/lib/report-builder/model'
 
 export const runtime = 'nodejs'
@@ -67,6 +67,19 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: 'The body must be JSON.' }, { status: 400 })
   }
+  // Expanding a row in the tree view: a read, keyed by the report itself, not the chat.
+  if (body.expand && typeof body.expand === 'object') {
+    const e = body.expand as { spec?: unknown; path?: unknown; colIds?: unknown }
+    const path = Array.isArray(e.path) ? e.path.filter((p): p is string => typeof p === 'string').slice(0, 8) : []
+    const colIds = Array.isArray(e.colIds) ? e.colIds.filter((c): c is string => typeof c === 'string').slice(0, 60) : null
+    if (!e.spec || typeof e.spec !== 'object' || !path.length) return Response.json({ error: 'Nothing to expand.' }, { status: 400 })
+    try {
+      return Response.json(await reportBuilderExpand(email, e.spec as Record<string, unknown>, path, colIds))
+    } catch (err) {
+      return Response.json({ error: (err as Error).message }, { status: 400 })
+    }
+  }
+
   const id = typeof body.chatId === 'string' && /^[a-z0-9-]{8,64}$/i.test(body.chatId) ? `page:${body.chatId}` : null
   if (!id) return Response.json({ error: 'A chatId is needed.' }, { status: 400 })
   const appUrl = process.env.APP_URL?.trim() || new URL(req.url).origin
