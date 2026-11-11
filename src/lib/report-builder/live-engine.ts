@@ -74,7 +74,8 @@ const MEASURES = {
 }
 type MeasureKey = keyof typeof MEASURES
 const CALCS = {
-  share: { label: 'Share of total', note: 'Each row as a percent of the report total. Not available with a column breakdown.' },
+  share: { label: 'Share of total', note: 'Each row as a percent of the report total. With a column breakdown: each cell as a percent of its column total (% down), shown in the cell under the value.' },
+  share_across: { label: 'Share across', note: 'With a column breakdown only: each cell as a percent of its row total (% across), shown in the cell under the value.' },
   yoy: { label: 'Change vs prior year', note: 'Same period one year earlier. Data before August 2026 covers only some media.' },
 }
 
@@ -214,7 +215,7 @@ interface NSpec {
   rows: Dim[]
   columns: Dim | null
   measures: MeasureKey[]
-  calcs: Array<'share' | 'yoy'>
+  calcs: Array<'share' | 'share_across' | 'yoy'>
   filters: Record<string, string[]>
   options: { final_only: boolean; top_n: number | null }
   /** mine and versus hold ids of properties, media types, media owners or markets; all: compare with everything else; own: the person chose not to use their usual set. */
@@ -582,7 +583,8 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const per = periodOf(s, a)
     if (!('error' in per)) parts.push(`${per.label} (${per.how})`)
     parts.push(s.options.final_only ? 'final data only' : 'including preliminary data')
-    if (s.calcs.includes('share')) parts.push('with share of total')
+    if (s.calcs.includes('share')) parts.push(s.columns ? 'with % down' : 'with share of total')
+    if (s.calcs.includes('share_across') && s.columns) parts.push('with % across')
     if (s.calcs.includes('yoy')) parts.push('with change vs prior year')
     if (s.options.top_n) parts.push(`top ${s.options.top_n} rows`)
     return parts.join(' · ')
@@ -656,7 +658,10 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const C = s.columns && DIMS[s.columns] ? s.columns : null
     const M = s.measures.filter((k) => MEASURES[k])
     const primary: MeasureKey = M[0] ?? 'spend'
-    const calcs = C || wallet ? [] : s.calcs
+    // With a column breakdown only the percents work (in each cell); prior year needs rows alone.
+    const calcs: NSpec['calcs'] = wallet ? [] : C ? s.calcs.filter((c) => c === 'share' || c === 'share_across') : s.calcs.filter((c) => c !== 'share_across')
+    const down = Boolean(C) && calcs.includes('share')
+    const across = Boolean(C) && calcs.includes('share_across')
     const w = whereParts(s, per.start, per.end, daily ? per : undefined)
     const mineIds = new Set(s.compare?.mine ?? [])
 
@@ -774,9 +779,19 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     } else if (C) {
       // One column per value and measure. With several measures the page stacks a value's
       // measures in one cell (group); the spreadsheet keeps a column each.
-      const many = M.length > 1
-      colVals.forEach((c) => M.forEach((k) => columns.push({ key: `c:${c.id}${many ? `:${k}` : ''}`, label: `${c.name}${many ? ` · ${MEASURES[k].label}` : ''}`, type: MEASURES[k].type, colId: c.id, group: c.name, measure: MEASURES[k].label })))
-      M.forEach((k) => columns.push({ key: many ? `total:${k}` : 'total', label: `Total ${MEASURES[k].label.toLowerCase()}`, type: MEASURES[k].type, group: 'Total', measure: MEASURES[k].label }))
+      // The percents sit right after the first measure, in the same cell.
+      const many = M.length > 1 || down || across
+      const pcts = [...(down ? [{ key: 'down', label: '% of column' }] : []), ...(across ? [{ key: 'across', label: '% of row' }] : [])]
+      colVals.forEach((c) =>
+        M.forEach((k, i) => {
+          columns.push({ key: `c:${c.id}${many ? `:${k}` : ''}`, label: `${c.name}${many ? ` · ${MEASURES[k].label}` : ''}`, type: MEASURES[k].type, colId: c.id, group: c.name, measure: MEASURES[k].label })
+          if (i === 0) for (const p of pcts) columns.push({ key: `c:${c.id}:${p.key}`, label: `${c.name} · ${p.label}`, type: 'pct', colId: c.id, group: c.name, measure: p.label })
+        }),
+      )
+      M.forEach((k, i) => {
+        columns.push({ key: many ? `total:${k}` : 'total', label: `Total ${MEASURES[k].label.toLowerCase()}`, type: MEASURES[k].type, group: 'Total', measure: MEASURES[k].label })
+        if (i === 0 && down) columns.push({ key: 'total:down', label: 'Total · % of column', type: 'pct', group: 'Total', measure: '% of column' })
+      })
       if (moreCols) notes.push(`Showing the 12 largest ${DIMS[C].plural}; ${moreCols} smaller ones are in the total.`)
     } else {
       M.forEach((k, i) => {
@@ -807,8 +822,19 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         if (C) colVals.forEach((_, j) => split(Number(r?.[`c${j}_spend`] ?? 0), Number(r?.[`c${j}_mine`] ?? 0)))
         split(Number(r?.m_spend ?? 0), Number(r?.mine_spend ?? 0))
       } else if (C) {
-        colVals.forEach((_, j) => M.forEach((k) => out.push(tidy(k, Number(r?.[`c${j}_${k}`] ?? 0)))))
-        M.forEach((k) => out.push(tidy(k, Number(r?.[`m_${k}`] ?? 0))))
+        const rowTotal = Number(r?.[`m_${primary}`] ?? 0)
+        colVals.forEach((_, j) =>
+          M.forEach((k, i) => {
+            const v = Number(r?.[`c${j}_${k}`] ?? 0)
+            out.push(tidy(k, v))
+            if (i === 0 && down) out.push(pct(v, Number(totals[0]?.[`c${j}_${primary}`] ?? 0)))
+            if (i === 0 && across) out.push(pct(v, rowTotal))
+          }),
+        )
+        M.forEach((k, i) => {
+          out.push(tidy(k, Number(r?.[`m_${k}`] ?? 0)))
+          if (i === 0 && down) out.push(pct(rowTotal, totalPrimary))
+        })
       } else {
         M.forEach((k, i) => {
           const v = Number(r?.[`m_${k}`] ?? 0)
@@ -939,11 +965,17 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     }
     if (spec.columns && spec.rows.includes(spec.columns))
       errors.push({ code: 'dimension_twice', message: `${DIMS[spec.columns]?.label ?? 'A dimension'} is used for both rows and columns.`, fixes: [{ label: 'Keep it as columns', patch: { remove: { rows: [spec.columns] } } }, { label: 'Keep it as rows', patch: { set: { columns: null } } }] })
-    if (spec.columns && spec.calcs.length)
+    if (spec.columns && spec.calcs.includes('yoy'))
       errors.push({
         code: 'calc_with_columns',
-        message: `Share of total and change vs prior year cannot be combined with a column per ${DIMS[spec.columns]?.label.toLowerCase() ?? 'value'}.`,
-        fixes: [{ label: 'Drop the column breakdown', patch: { set: { columns: null } } }, { label: 'Drop the calculation', patch: { set: { calcs: [] } } }],
+        message: `Change vs prior year cannot be combined with a column per ${DIMS[spec.columns]?.label.toLowerCase() ?? 'value'}.`,
+        fixes: [{ label: 'Drop the column breakdown', patch: { set: { columns: null } } }, { label: 'Drop the prior-year change', patch: { remove: { calcs: ['yoy'] } } }],
+      })
+    if (!spec.columns && spec.calcs.includes('share_across'))
+      errors.push({
+        code: 'across_without_columns',
+        message: '% across needs a column breakdown to go across.',
+        fixes: [{ label: 'Add a column per month', patch: { set: { columns: 'month' } } }, { label: 'Use share of total instead', patch: { remove: { calcs: ['share_across'] }, add: { calcs: ['share'] } } }],
       })
     const per = spec.time ? periodOf(spec, a) : null
     if (per && 'error' in per) errors.push({ code: 'bad_period', message: per.error!, fixes: [{ label: 'Use the last 3 complete months', patch: { set: { time: RECENT } } }] })
@@ -1017,7 +1049,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       const tm = spec.time ?? {}
       const isRolling = (u: string, c: number) => tm.mode === 'rolling' && (tm.unit ?? 'month') === u && Number(tm.count) === c
       const add = (label: string, p: Patch) => refinements.push({ label, patch: p })
-      if (!spec.columns && !spec.rows.some((d) => DIMS[d]?.time)) add('Add a column per month', { set: { columns: 'month', calcs: [] } })
+      if (!spec.columns && !spec.rows.some((d) => DIMS[d]?.time)) add('Add a column per month', { set: { columns: 'month' }, remove: { calcs: ['yoy'] } })
       if (spec.columns) add('Remove the column breakdown', { set: { columns: null } })
       if (!spec.rows.includes('product')) add('Break out by product', { add: { rows: ['product'] } })
       if (!spec.rows.includes('media_type') && spec.columns !== 'media_type') add('Break out by media type', { add: { rows: ['media_type'] } })
@@ -1027,6 +1059,8 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       if (!isRolling('week', 4)) add('Last 4 weeks', { set: { time: WEEKS } })
       if (spec.columns === 'month') add('By broadcast week', { set: { columns: 'broadcast_week', time: QUARTER_OF_WEEKS } })
       if (!spec.columns && !spec.zero_share && !spec.calcs.includes('share')) add('Add share of total', { add: { calcs: ['share'] } })
+      if (spec.columns && spec.zero_share?.mode !== 'wallet' && !spec.calcs.includes('share')) add('Add % down', { add: { calcs: ['share'] } })
+      if (spec.columns && spec.zero_share?.mode !== 'wallet' && !spec.calcs.includes('share_across')) add('Add % across', { add: { calcs: ['share_across'] } })
       if (spec.zero_share?.versus.length) add('Compare with all other properties', { set: { 'zero_share.versus': [], 'zero_share.all': true } })
       if (!spec.measures.includes('occurrences')) add('Add occurrences', { add: { measures: ['occurrences'] } })
         if (!spec.measures.includes('impressions')) add('Add impressions', { add: { measures: ['impressions'] } })
@@ -1197,10 +1231,9 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     if (u.measures?.length) p.add.measures = [...(cur.measures.length ? [] : ['spend']), ...u.measures]
     if (u.top_n) p.set['options.top_n'] = u.top_n
     if (u.preliminary) p.set['options.final_only'] = false
-    if (u.yoy || u.share) {
-      p.add.calcs = [...(u.yoy ? ['yoy'] : []), ...(u.share ? ['share'] : [])]
-      p.set.columns = null
-    }
+    // A share keeps the columns (it shows in each cell); prior year needs them gone.
+    if (u.yoy || u.share) p.add.calcs = [...(u.yoy ? ['yoy'] : []), ...(u.share ? ['share'] : [])]
+    if (u.yoy) p.set.columns = null
     return p
   }
 
@@ -1225,7 +1258,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       templates: TEMPLATES.map((t) => ({ id: t.id, label: t.label, description: t.description, spec: clone(t.spec) as Spec })),
       rules: [
         'Filters inside one group (who, what, where) are combined with OR; the groups are combined with AND.',
-        'Share of total and change vs prior year cannot be combined with a column breakdown.',
+        'Change vs prior year cannot be combined with a column breakdown. Share of total can: with columns it is % down (of each column), and share_across adds % across (of each row); both show inside each cell.',
         'Day breakdowns cover up to 3 months; week and broadcast week up to a year. "week" starts on Sunday; "broadcast_week" on Monday.',
         `The data covers all media from ${monthLabel(a.firstComplete)}; earlier months hold only some media, so default to the last 3 complete months.`,
         'Spend is the spend for the paying advertiser and product (promos and PSAs excluded).',

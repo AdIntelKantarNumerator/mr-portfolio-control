@@ -248,7 +248,8 @@ export const TOOLS: ToolDef[] = [
       top: { type: 'integer', description: 'Keep only the top N rows.' },
       include_preliminary: { type: 'boolean' },
       prior_year: { type: 'boolean', description: 'Add the change vs the same period a year earlier.' },
-      share_of_total: { type: 'boolean' },
+      share_of_total: { type: 'boolean', description: 'Share of total. With a column breakdown it is % down (each cell as a percent of its column), shown inside each cell; the columns stay.' },
+      share_across: { type: 'boolean', description: 'With a column breakdown: % across (each cell as a percent of its row total), shown inside each cell.' },
     }),
   },
   {
@@ -527,8 +528,9 @@ export async function runTool(ctx: ToolContext, name: string, input: Record<stri
       patch.remove ??= {}
       if (input.columns === 'none') patch.set.columns = null
       if (input.include_preliminary === false) patch.set['options.final_only'] = true
-      if (input.prior_year === false || input.share_of_total === false) {
-        patch.remove.calcs = [...(input.prior_year === false ? ['yoy'] : []), ...(input.share_of_total === false ? ['share'] : [])]
+      if (input.share_across === true) (patch.add ??= {}).calcs = [...((patch.add.calcs as string[] | undefined) ?? []), 'share_across']
+      if (input.prior_year === false || input.share_of_total === false || input.share_across === false) {
+        patch.remove.calcs = [...(input.prior_year === false ? ['yoy'] : []), ...(input.share_of_total === false ? ['share'] : []), ...(input.share_across === false ? ['share_across'] : [])]
       }
       // Zero share: whose properties, and who they compete with.
       if (zeroOf(report)) {

@@ -67,15 +67,26 @@ test('naming a new category switches the report; "add" keeps both', async () => 
   assert.match(String(both.table_markdown), /Burger King/)
 })
 
-test('asking for share of total on a column breakdown drops the columns rather than failing', async () => {
+test('share on a column breakdown keeps the columns: % down and % across sit in each cell under the value', async () => {
   const ctx = context()
-  await call(ctx, 'new_report', { template: 'media_mix' })
-  const ford = ((await call(ctx, 'search_names', { query: 'Ford', types: ['advertiser'] })).matches as Array<{ id: string }>)[0]!
-  await call(ctx, 'change_report', { names: [ford.id] })
-  const share = await call(ctx, 'change_report', { share_of_total: true })
+  await call(ctx, 'new_report', { template: 'advertiser_trend' })
+  const auto = ((await call(ctx, 'search_names', { query: 'Automotive', types: ['industry'] })).matches as Array<{ id: string }>)[0]!
+  await call(ctx, 'change_report', { names: [auto.id] })
+  const share = await call(ctx, 'change_report', { share_of_total: true, share_across: true })
   assert.equal(share.status, 'ready')
-  assert.match(String(share.table_markdown), /Share of total/)
-  assert.doesNotMatch(String(share.table_markdown), /Linear TV/, 'the media-type columns are gone')
+  const t = ctx.view!.table!
+  const months = Array.from(new Set(t.columns.filter((c) => c.colId).map((c) => c.colId)))
+  assert.ok(months.length >= 3, 'the monthly columns stay')
+  assert.deepEqual(t.columns.filter((c) => c.colId === months[0]).map((c) => c.measure), ['Spend', '% of column', '% of row'])
+  // % down adds to 100 down each month; % across adds to 100 across each row.
+  const down = t.columns.findIndex((c) => c.colId === months[0] && c.measure === '% of column')
+  const all = await ctx.engine.run(ctx.chat.report!, {})
+  const downAll = all.columns.findIndex((c) => c.colId === months[0] && c.measure === '% of column')
+  assert.ok(down > 0)
+  assert.ok(Math.abs(all.rows.reduce((a, r) => a + Number(r[downAll] ?? 0), 0) - 100) < 1)
+  const across = all.columns.map((c, i) => (c.measure === '% of row' ? i : -1)).filter((i) => i >= 0)
+  for (const r of all.rows.slice(0, 5)) assert.ok(Math.abs(across.reduce((a, i) => a + Number(r[i] ?? 0), 0) - 100) < 1)
+  assert.match(String(ctx.view?.title), /with % down · with % across/)
 })
 
 test('a choice that was never offered is refused with the choices that were', async () => {
