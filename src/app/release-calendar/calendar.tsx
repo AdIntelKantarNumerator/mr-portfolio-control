@@ -116,7 +116,7 @@ export function ReleaseCalendar({
                 {fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}
               </button>
               {(byDay.get(d) ?? []).map((r) => (
-                <ReleaseCard key={r.linearId} r={r} highlight={highlight} />
+                <ReleaseCard key={r.linearId} r={r} highlight={highlight} brief />
               ))}
             </div>
           ))}
@@ -139,7 +139,7 @@ export function ReleaseCalendar({
           </div>
           <div className="rc-undated-list">
             {undated.map((r) => (
-              <ReleaseCard key={r.linearId} r={r} highlight={highlight} />
+              <ReleaseCard key={r.linearId} r={r} highlight={highlight} compact />
             ))}
           </div>
         </div>
@@ -187,7 +187,7 @@ function MonthGrid({
                   {Number(d.slice(8))}
                 </button>
                 {(byDay.get(d) ?? []).map((r) => (
-                  <ReleaseCard key={r.linearId} r={r} highlight={highlight} />
+                  <ReleaseCard key={r.linearId} r={r} highlight={highlight} compact />
                 ))}
               </div>
             ) : (
@@ -199,8 +199,27 @@ function MonthGrid({
   )
 }
 
-/** One release: what it is, its status, where it sits in the portfolio, who is on it, and who it affects. */
-function ReleaseCard({ r, highlight, wide = false }: { r: CalendarRelease; highlight: string | null; wide?: boolean }) {
+/**
+ * One release, at three sizes, so no tile is very tall (Scott, 11 November
+ * 2026). Month views: number, status, title and project - 76px, a day with
+ * two still fits its row. Week: adds the assignee and the teams impacted; its
+ * seven narrow columns made every fact a stacked line, 342px a tile. Day: all
+ * of it, across the width. The ⓘ always has everything.
+ */
+function ReleaseCard({
+  r,
+  highlight,
+  wide = false,
+  compact = false,
+  brief = false,
+}: {
+  r: CalendarRelease
+  highlight: string | null
+  wide?: boolean
+  compact?: boolean
+  /** The week view's size: project, assignee and teams. */
+  brief?: boolean
+}) {
   const [info, setInfo] = useState(false)
   const box = useRef<HTMLDivElement>(null)
   const on = highlight === r.identifier
@@ -209,43 +228,62 @@ function ReleaseCard({ r, highlight, wide = false }: { r: CalendarRelease; highl
   }, [on])
 
   return (
-    <div ref={box} className={`rc-card tone-${statusTone(r.statusType)} ${on ? 'on' : ''} ${wide ? 'wide' : ''}`} id={`release-${r.identifier}`}>
+    <div
+      ref={box}
+      className={`rc-card tone-${statusTone(r.statusType)} ${on ? 'on' : ''} ${wide ? 'wide' : ''} ${compact ? 'compact' : ''} ${brief ? 'brief' : ''}`}
+      id={`release-${r.identifier}`}
+      title={compact || brief ? `${r.identifier} · ${r.title}` : undefined}
+    >
       <div className="rc-card-head">
         <span className="rc-ident">{r.identifier}</span>
         <span className={`rc-status tone-${statusTone(r.statusType)}`}>{r.status ?? '—'}</span>
-        <button type="button" className="rc-info" onClick={() => setInfo(true)} aria-label={`About ${r.identifier}`} title="The ticket, and who to ask">
+        <button type="button" className="rc-info" onClick={() => setInfo(true)} aria-label={`About ${r.identifier}`} title="Everything about it, and who to ask">
           ⓘ
         </button>
       </div>
       <div className="rc-name">{r.title}</div>
-      <dl className="rc-facts">
-        <dt>Project</dt>
-        <dd>{r.links.project ? <Link href={`/projects/${r.links.project.id}`}>{r.links.project.name}</Link> : (r.projectName ?? '—')}</dd>
-        <dt>Objective</dt>
-        <dd>{r.links.objective ? <Link href={`/objectives/${r.links.objective.id}`}>{r.links.objective.name}</Link> : '—'}</dd>
-        <dt>Created by</dt>
-        <dd>{r.createdBy ?? '—'}</dd>
-        <dt>Project owner</dt>
-        <dd>{r.projectLead ?? '—'}</dd>
-        <dt>Assignee</dt>
-        <dd>{r.assignee ?? 'Unassigned'}</dd>
-        <dt>Teams impacted</dt>
-        <dd>
-          {r.teamsImpacted.length ? (
-            <span className="rc-teams">
-              {r.teamsImpacted.map((t) => (
-                <span key={t} className="rc-team">
-                  {t}
-                </span>
-              ))}
-            </span>
-          ) : (
-            <span className="tx-muted">None named</span>
-          )}
-        </dd>
-      </dl>
+      {compact ? <div className="rc-proj">{projectOf(r)}</div> : <Facts r={r} brief={brief} />}
       {info ? <InfoDialog r={r} onClose={() => setInfo(false)} /> : null}
     </div>
+  )
+}
+
+const projectOf = (r: CalendarRelease) =>
+  r.links.project ? <Link href={`/projects/${r.links.project.id}`}>{r.links.project.name}</Link> : (r.projectName ?? '—')
+
+/** Project and objective, linked into the portfolio; who made it, owns it and has it; who it affects. */
+function Facts({ r, brief = false }: { r: CalendarRelease; brief?: boolean }) {
+  return (
+    <dl className="rc-facts">
+      <dt>Project</dt>
+      <dd>{projectOf(r)}</dd>
+      {brief ? null : (
+        <>
+          <dt>Objective</dt>
+          <dd>{r.links.objective ? <Link href={`/objectives/${r.links.objective.id}`}>{r.links.objective.name}</Link> : '—'}</dd>
+          <dt>Created by</dt>
+          <dd>{r.createdBy ?? '—'}</dd>
+          <dt>Project owner</dt>
+          <dd>{r.projectLead ?? '—'}</dd>
+        </>
+      )}
+      <dt>Assignee</dt>
+      <dd>{r.assignee ?? 'Unassigned'}</dd>
+      <dt>Teams impacted</dt>
+      <dd>
+        {r.teamsImpacted.length ? (
+          <span className="rc-teams">
+            {r.teamsImpacted.map((t) => (
+              <span key={t} className="rc-team">
+                {t}
+              </span>
+            ))}
+          </span>
+        ) : (
+          <span className="tx-muted">None named</span>
+        )}
+      </dd>
+    </dl>
   )
 }
 
@@ -269,6 +307,13 @@ function InfoDialog({ r, onClose }: { r: CalendarRelease; onClose: () => void })
           </button>
         </div>
         <div className="rc-dialog-body">
+          <div className="rc-dialog-facts">
+            <div className="rc-dialog-when">
+              <span className={`rc-status tone-${statusTone(r.statusType)}`}>{r.status ?? '—'}</span>{' '}
+              {r.targetDate ? fmt(r.targetDate, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'No target date yet'}
+            </div>
+            <Facts r={r} />
+          </div>
           <div className="rc-desc">{r.description?.trim() || <span className="tx-muted">No description.</span>}</div>
           {r.url ? (
             <p>
