@@ -238,6 +238,15 @@
     { id: 'category_share', label: 'Category share', description: 'Who holds what share of a category', spec: { template: 'category_share', rows: ['advertiser'], measures: ['spend'], calcs: ['share'], time: { mode: 'rolling', unit: 'month', count: 12 } } },
     { id: 'zero_share', label: 'Zero share', description: 'Advertisers buying elsewhere but not on your properties', spec: { template: 'zero_share', rows: ['top_parent', 'advertiser'], measures: ['spend'], zero_share: { mine: [], versus: [] }, time: { mode: 'rolling', unit: 'month', count: 6 } } },
     { id: 'detail_extract', label: 'Detailed extract', description: 'Product-level rows by property and month, for a spreadsheet', spec: { template: 'detail_extract', rows: ['top_parent', 'advertiser', 'product', 'subcategory', 'media_type', 'property', 'month'], measures: ['spend', 'occurrences', 'impressions'], time: { mode: 'rolling', unit: 'month', count: 3 }, output: 'csv' } },
+    // Publisher Intel: a media owner's view, around their properties and competitors.
+    { id: 'share_of_wallet', label: 'Share of wallet', description: "Your share of each advertiser's spend against your competitors", spec: { template: 'share_of_wallet', rows: ['advertiser'], measures: ['spend'], zero_share: { mine: [], versus: [], mode: 'wallet' }, time: { mode: 'rolling', unit: 'month', count: 6 } } },
+    { id: 'my_advertisers', label: 'Your advertisers', description: 'Who is buying your properties, month by month', spec: { template: 'my_advertisers', rows: ['advertiser'], columns: 'month', measures: ['spend'], zero_share: { mine: [], versus: [], mode: 'mine' }, time: { mode: 'rolling', unit: 'month', count: 6 } } },
+    { id: 'competitor_categories', label: 'Categories on competitors', description: 'Which categories spend with your competitors', spec: { template: 'competitor_categories', rows: ['category'], columns: 'month', measures: ['spend'], zero_share: { mine: [], versus: [], mode: 'theirs' }, time: { mode: 'rolling', unit: 'month', count: 6 } } },
+    // Competitive Intel: a brand's or buyer's view, around their brands and competitors.
+    { id: 'competitive_mix', label: 'Media mix', description: 'How you and your competitors split spend across media', spec: { template: 'competitive_mix', rows: ['advertiser'], columns: 'media_type', measures: ['spend'], compare: { mine: [], rivals: [] }, time: { mode: 'rolling', unit: 'month', count: 12 } } },
+    { id: 'share_of_voice', label: 'Share of voice', description: 'Your share of spend against your competitors', spec: { template: 'share_of_voice', rows: ['advertiser'], measures: ['spend'], calcs: ['share'], compare: { mine: [], rivals: [] }, time: { mode: 'rolling', unit: 'month', count: 12 } } },
+    { id: 'competitive_trend', label: 'Competitive trend', description: 'Month by month: you against your competitors', spec: { template: 'competitive_trend', rows: ['advertiser'], columns: 'month', measures: ['spend'], compare: { mine: [], rivals: [] }, time: { mode: 'rolling', unit: 'month', count: 12 } } },
+    { id: 'competitor_placements', label: 'Where competitors run', description: 'Spend by property, for you and your competitors', spec: { template: 'competitor_placements', rows: ['advertiser', 'property'], measures: ['spend'], compare: { mine: [], rivals: [] }, time: { mode: 'rolling', unit: 'month', count: 6 } } },
   ];
 
   const INLINE_ROW_LIMIT = 2000;
@@ -270,7 +279,8 @@
     s.filters = s.filters && typeof s.filters === 'object' ? s.filters : {};
     for (const k of Object.keys(s.filters)) { if (!Array.isArray(s.filters[k]) || !s.filters[k].length) delete s.filters[k]; }
     s.options = Object.assign({ final_only: true, top_n: null }, s.options || {});
-    if (s.zero_share) s.zero_share = { mine: s.zero_share.mine || [], versus: s.zero_share.versus || [], all: !!s.zero_share.all, own: !!s.zero_share.own };
+    if (s.zero_share) s.zero_share = { mine: s.zero_share.mine || [], versus: s.zero_share.versus || [], all: !!s.zero_share.all, own: !!s.zero_share.own, mode: s.zero_share.mode || 'zero' };
+    if (s.compare) s.compare = { mine: s.compare.mine || [], rivals: s.compare.rivals || [], own: !!s.compare.own };
     return s;
   }
 
@@ -404,11 +414,17 @@
       const parts = [];
       const who = filterLabels(s.filters, ['who']), what = filterLabels(s.filters, ['what']), where = filterLabels(s.filters, ['where']);
       const rows = s.rows.map((d) => (DIMS[d] ? DIMS[d].label.toLowerCase() : d));
+      const dimOf = (id) => String(id).split(':')[0];
+      const named = (id) => (['property', 'advertiser', 'top_parent', 'product'].includes(dimOf(id)) ? '' : 'all ') + labelOf(dimOf(id), id);
       if (s.zero_share) {
-        const dimOf = (id) => String(id).split(':')[0];
-        const mine = s.zero_share.mine.map((id) => labelOf(dimOf(id), id)), vs = s.zero_share.versus.map((id) => (dimOf(id) === 'property' ? '' : 'all ') + labelOf(dimOf(id), id));
-        parts.push('Advertisers spending on ' + (vs.length ? listText(vs) : s.zero_share.all ? 'any other property' : 'other properties') + ' but nothing on ' + (mine.length ? listText(mine) : 'your properties'));
-        if (rows.length) parts.push('listed by ' + rows.join(', then '));
+        const z = s.zero_share;
+        const mine = z.mine.length ? listText(z.mine.map((id) => labelOf(dimOf(id), id))) : 'your properties';
+        const vs = z.versus.length ? listText(z.versus.map(named)) : z.all ? 'any other property' : 'other properties';
+        const by = rows.length ? ' by ' + rows.join(', then ') : '';
+        if (z.mode === 'wallet') parts.push('Share of wallet: ' + mine + ' against ' + vs + by);
+        else if (z.mode === 'mine') parts.push('Spend on ' + mine + by);
+        else if (z.mode === 'theirs') parts.push('Spend on ' + vs + ', not ' + mine + ',' + by);
+        else { parts.push('Advertisers spending on ' + vs + ' but nothing on ' + mine); if (rows.length) parts.push('listed by ' + rows.join(', then ')); }
       } else {
         const m = s.measures.map((k) => (MEASURES[k] ? MEASURES[k].label : k)).join(', ');
         let lead = m + (rows.length ? ' by ' + rows.join(', then ') : '');
@@ -416,10 +432,11 @@
         parts.push(lead);
       }
       const scope = [];
+      if (s.compare) scope.push((s.compare.mine.length ? listText(s.compare.mine.map(named)) : 'your brands') + ' vs ' + (s.compare.rivals.length ? listText(s.compare.rivals.map(named)) : 'competitors'));
       if (who.length) scope.push(listText(who));
       if (what.length) scope.push(listText(what));
       if (where.length) scope.push((s.zero_share ? 'competing media limited to ' : 'on ') + listText(where));
-      parts.push(scope.length ? scope.join(' · ') : 'all advertisers');
+      if (scope.length || !s.zero_share) parts.push(scope.length ? scope.join(' · ') : 'all advertisers');
       const per = resolveTime(s.time, throughIdx(s));
       if (!per.error) parts.push(per.label + ' (' + per.how + ')');
       parts.push(s.options.final_only ? 'final data only' : 'including preliminary data');
@@ -437,11 +454,12 @@
       if (per.error) throw new Error(per.error);
       const notes = per.notes.slice();
       const R = spec.rows.filter((d) => DIMS[d]);
-      const C = spec.columns && DIMS[spec.columns] ? spec.columns : null;
+      const zs = spec.zero_share;
+      const wallet = !!zs && zs.mode === 'wallet';
+      const C = !wallet && spec.columns && DIMS[spec.columns] ? spec.columns : null;
       const M = spec.measures.filter((k) => MEASURES[k]);
       const primary = M[0] || 'spend';
-      const calcs = C ? [] : spec.calcs;
-      const zs = spec.zero_share;
+      const calcs = C || wallet ? [] : spec.calcs;
       const pass = makeFilter(spec.filters);
       // A drill-down path (the tree view): only rows under these values, AND-ed, whatever the filters say.
       const pathEntries = Object.entries(spec.path || {}).filter(([d]) => DIMS[d]);
@@ -449,6 +467,9 @@
       // Yours and theirs: ids of properties, media types or media owners.
       const matcher = (ids) => { const by = ids.map((id) => [String(id).split(':')[0], String(id)]).filter(([d]) => DIMS[d]); return (f) => by.some(([d, id]) => String(DIMS[d].of(f)) === id); };
       const isMine = matcher(zs ? zs.mine : []), isVersus = zs && zs.versus.length ? matcher(zs.versus) : null;
+      // Competitive Intel: only the person's brands and their competitors.
+      const inCompare = spec.compare ? matcher(spec.compare.mine.concat(spec.compare.rivals)) : () => true;
+      const mineIds = new Set(spec.compare ? spec.compare.mine : []);
       const groups = new Map();
       const colTotals = new Map(); // value -> primary measure, for ordering
       const colTotalsM = new Map(); // value -> every measure, for the totals row
@@ -460,11 +481,13 @@
       };
       for (const f of FACTS) {
         if (f.t < per.start || f.t > per.end) continue;
+        if (!inCompare(f)) continue;
         if (zs) {
           if (!pass.subject(f) || !onPath(f)) continue;
-          if (isMine(f)) { grp(f).mine += f.spend; continue; }
-          if (isVersus && !isVersus(f)) continue;
-          if (!pass.where(f)) continue;
+          const mine = isMine(f);
+          if (zs.mode === 'mine') { if (!mine || !pass.where(f)) continue; }
+          else if (mine) { grp(f).mine += f.spend; if (!wallet) continue; }
+          else { if (isVersus && !isVersus(f)) continue; if (!pass.where(f)) continue; }
         } else if (!pass.all(f) || !onPath(f)) continue;
         const g = grp(f);
         g.v.spend += f.spend; g.v.occurrences += f.occurrences;
@@ -484,12 +507,15 @@
         for (const f of FACTS) { if (f.t < per.start - 12 || f.t > per.end - 12 || !pass.all(f)) continue; grp(f).prior += f[primary] || 0; }
       }
       let list = Array.from(groups.values());
-      if (zs) list = list.filter((g) => g.mine === 0 && g.v.spend > 0);
+      if (zs && zs.mode === 'zero') list = list.filter((g) => g.mine === 0 && g.v.spend > 0);
+      else list = list.filter((g) => g.v[primary] !== 0);
 
       const columns = R.map((d) => ({ key: d, label: DIMS[d].label, type: 'text' }));
-      const mLabel = (k) => (zs && k === 'spend' ? 'Spend on competing properties' : MEASURES[k].label);
+      const mLabel = (k) => (zs && k === 'spend' ? (zs.mode === 'mine' ? 'Spend on your properties' : 'Spend on competing properties') : MEASURES[k].label);
       let colIds = [];
-      if (C) {
+      if (wallet) {
+        columns.push({ key: 'yours', label: 'Spend with you', type: 'money' }, { key: 'theirs', label: 'Spend with competitors', type: 'money' }, { key: 'wallet', label: 'Your share', type: 'pct' });
+      } else if (C) {
         colIds = Array.from(colTotals.keys());
         if (DIMS[C].time) colIds.sort(); else colIds.sort((a, b) => colTotals.get(b) - colTotals.get(a));
         // Fixed columns (a tree's lower levels keep the top level's columns).
@@ -512,12 +538,14 @@
       else list.sort((a, b) => primaryOf(b) - primaryOf(a));
 
       const tot = { spend: 0, occurrences: 0, impressions: 0, imp: false, prior: 0 };
-      for (const g of list) { tot.spend += g.v.spend; tot.occurrences += g.v.occurrences; tot.impressions += g.v.impressions; tot.imp = tot.imp || g.imp; tot.prior += g.prior; }
+      for (const g of list) { tot.spend += g.v.spend; tot.occurrences += g.v.occurrences; tot.impressions += g.v.impressions; tot.imp = tot.imp || g.imp; tot.prior += g.prior; tot.mine = (tot.mine || 0) + g.mine; }
       const totalPrimary = tot[primary] || 0;
       const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
-      const cellRow = (ids, v, imp, cols, prior, isTotal) => {
-        const row = isTotal ? R.map((d, i) => (i === 0 ? 'Total' : '')) : R.map((d, i) => labelOf(d, ids[i]));
-        if (C) {
+      const cellRow = (ids, v, imp, cols, prior, isTotal, mine) => {
+        const row = isTotal ? R.map((d, i) => (i === 0 ? 'Total' : '')) : R.map((d, i) => labelOf(d, ids[i]) + (mineIds.has(String(ids[i])) ? ' (you)' : ''));
+        if (wallet) {
+          row.push(mine || 0, v.spend - (mine || 0), pct(mine || 0, v.spend));
+        } else if (C) {
           for (const c of colIds) for (const k of M) { const o = isTotal ? colTotalsM.get(c) : cols.get(c); row.push(o ? o[k] || 0 : 0); }
           for (const k of M) row.push(v[k] || 0);
         }
@@ -531,14 +559,14 @@
 
       const matched = list.length;
       if (spec.options.top_n && matched > spec.options.top_n) { list = list.slice(0, spec.options.top_n); notes.push('Showing the top ' + spec.options.top_n + ' of ' + matched + ' rows; the total covers all ' + matched + '.'); }
-      let rows = list.map((g) => cellRow(g.ids, g.v, g.imp, g.cols, g.prior, false));
+      let rows = list.map((g) => cellRow(g.ids, g.v, g.imp, g.cols, g.prior, false, g.mine));
       let keys = list.map((g) => g.ids.map(String));
-      const totals = R.length ? cellRow([], tot, tot.imp, null, tot.prior, true) : null;
+      const totals = R.length ? cellRow([], tot, tot.imp, null, tot.prior, true, tot.mine) : null;
       const rowCount = rows.length;
       let truncated = false;
       if (opts.limit && rows.length > opts.limit) { rows = rows.slice(0, opts.limit); keys = keys.slice(0, opts.limit); truncated = true; }
       if (!spec.options.final_only) notes.push('Figures for ' + monthLabel(through) + ' are preliminary and can still change.');
-      if (!matched) notes.push(zs ? 'No advertisers matched: everyone in scope who spent on the competing properties also spent on yours.' : 'No spend matched these selections in this period.');
+      if (!matched) notes.push(zs && zs.mode === 'zero' ? 'No advertisers matched: everyone in scope who spent on the competing properties also spent on yours.' : 'No spend matched these selections in this period.');
       return {
         columns, rows, keys, totals, row_count: rowCount, rows_shown: rows.length, truncated,
         total: totalPrimary, total_measure: MEASURES[primary].label,
@@ -594,6 +622,18 @@
       return out;
     }
 
+    // Choices for a brand's competitors: the biggest advertisers in its subcategory, the subcategory, or the category.
+    function rivalOptions(mine) {
+      const own = PRODUCTS.filter((p) => mine.includes(p.advertiser) || mine.includes(p.top_parent) || mine.includes(p.product));
+      if (!own.length) return [];
+      const sub = own[0].subcategory, cat = own[0].category;
+      const advs = Array.from(new Set(PRODUCTS.filter((p) => p.subcategory === sub && !own.includes(p)).map((p) => p.advertiser))).sort((a, b) => (SPEND12[b] || 0) - (SPEND12[a] || 0)).slice(0, 4);
+      const out = advs.map((id) => ({ label: labelOf('advertiser', id), description: 'Advertiser', patch: { add: { 'compare.rivals': [id] } } }));
+      out.push({ label: 'All of ' + labelOf('subcategory', sub), description: 'Every advertiser in your subcategory', patch: { set: { 'compare.rivals': [sub] } } });
+      out.push({ label: 'All of ' + labelOf('category', cat), description: 'Every advertiser in your category', patch: { set: { 'compare.rivals': [cat] } } });
+      return out;
+    }
+
     function validate(specIn, patch) {
       const spec = normalize(applyPatch(specIn || {}, patch));
       const errors = [], warnings = [], questions = [];
@@ -617,11 +657,15 @@
         questions.push({ id: 'template', prompt: 'What kind of report do you want?', kind: 'choice', options: TEMPLATES.map((t) => ({ label: t.label, description: t.description, patch: { set: clone(t.spec) } })) });
       } else if (spec.zero_share && !spec.zero_share.mine.length) {
         questions.push({ id: 'my_properties', prompt: 'Which properties are yours?', kind: 'entity', multi: true, entity_types: ['property', 'media_owner'], patch_path: 'zero_share.mine', options: topOptions(['property'], 6, (h) => ({ add: { 'zero_share.mine': [h.id] } })) });
-      } else if (spec.zero_share && !spec.zero_share.versus.length && !spec.zero_share.all) {
+      } else if (spec.zero_share && spec.zero_share.mode !== 'mine' && !spec.zero_share.versus.length && !spec.zero_share.all) {
         questions.push({ id: 'competitors', prompt: 'Which properties do you compete with?', kind: 'entity', multi: true, entity_types: ['property', 'media_type', 'media_owner'], patch_path: 'zero_share.versus', options: competitorOptions(spec.zero_share.mine) });
+      } else if (spec.compare && !spec.compare.mine.length) {
+        questions.push({ id: 'my_brands', prompt: 'Which brands are yours?', kind: 'entity', multi: true, entity_types: ['advertiser', 'top_parent', 'product'], patch_path: 'compare.mine', options: topOptions(['advertiser'], 6, (h) => ({ add: { 'compare.mine': [h.id] } })) });
+      } else if (spec.compare && !spec.compare.rivals.length) {
+        questions.push({ id: 'rivals', prompt: 'Who do you compete with?', kind: 'entity', multi: true, entity_types: ['advertiser', 'top_parent', 'product', 'industry', 'category', 'subcategory'], patch_path: 'compare.rivals', options: rivalOptions(spec.compare.mine) });
       } else if (spec.template === 'category_share' && !hasWhat && spec.scope !== 'all') {
         questions.push({ id: 'category', prompt: 'Which category should the shares be measured in?', kind: 'entity', multi: true, entity_types: ['industry', 'category', 'subcategory'], options: topOptions(['category'], 5, addFilter).concat([{ label: 'All categories', description: 'Share of total spend', patch: { set: { scope: 'all' } } }]) });
-      } else if (!spec.zero_share && !hasSubject && spec.scope !== 'all') {
+      } else if (!spec.zero_share && !spec.compare && !hasSubject && spec.scope !== 'all') {
         questions.push({ id: 'subject', prompt: 'Which advertisers, products or categories?', kind: 'entity', multi: true, entity_types: ['top_parent', 'advertiser', 'product', 'industry', 'category', 'subcategory'], options: topOptions(['advertiser'], 5, addFilter).concat([{ label: 'Everything', description: 'No filter', patch: { set: { scope: 'all' } } }]) });
       } else if (!spec.time) {
         questions.push({ id: 'time', prompt: 'What time period?', kind: 'choice', options: [
@@ -771,8 +815,9 @@
       const cur = normalize(spec);
       const p = { set: {}, add: {}, remove: {} };
       const tpl = u.template && TEMPLATES.find((t) => t.id === u.template);
-      if (tpl && cur.template !== tpl.id) { Object.assign(p.set, clone(tpl.spec)); if (!tpl.spec.columns) p.set.columns = null; if (!tpl.spec.calcs) p.set.calcs = []; if (!tpl.spec.zero_share) p.set.zero_share = null; }
-      const zero = tpl ? tpl.id === 'zero_share' : !!cur.zero_share;
+      if (tpl && cur.template !== tpl.id) { Object.assign(p.set, clone(tpl.spec)); if (!tpl.spec.columns) p.set.columns = null; if (!tpl.spec.calcs) p.set.calcs = []; if (!tpl.spec.zero_share) p.set.zero_share = null; if (!tpl.spec.compare) p.set.compare = null; }
+      const zero = tpl ? !!tpl.spec.zero_share : !!cur.zero_share;
+      const comparing = tpl ? !!tpl.spec.compare : !!cur.compare;
       // Naming a new advertiser, category or property switches the report to it,
       // replacing what was there of the same kind (who / what / where), unless the
       // request says to add it ("add Nissan", "also include KFC").
@@ -780,6 +825,8 @@
       for (const e of u.entities || []) {
         if (zero && e.type === 'property') { (p.add['zero_share.mine'] = p.add['zero_share.mine'] || []).push(e.id); continue; }
         if (!DIMS[e.type] || DIMS[e.type].time) continue;
+        // Comparing: brands named are the person's own; categories are who they compete with.
+        if (comparing && (DIMS[e.type].group === 'who' || DIMS[e.type].group === 'what')) { const k = DIMS[e.type].group === 'who' ? 'compare.mine' : 'compare.rivals'; (p.add[k] = p.add[k] || []).push(e.id); continue; }
         (p.add['filters.' + e.type] = p.add['filters.' + e.type] || []).push(e.id);
         named.add(DIMS[e.type].group);
       }
@@ -788,7 +835,12 @@
         if (zero && p.add['zero_share.mine'] && cur.zero_share && !tpl) p.set['zero_share.mine'] = [];
         if (named.size && cur.scope === 'all') p.set.scope = null;
       }
-      if (tpl && tpl.spec.zero_share && p.add['zero_share.mine']) { p.set.zero_share = { mine: p.add['zero_share.mine'], versus: [] }; delete p.add['zero_share.mine']; }
+      if (tpl && tpl.spec.zero_share && p.add['zero_share.mine']) { p.set.zero_share = Object.assign({}, tpl.spec.zero_share, { mine: p.add['zero_share.mine'], versus: [] }); delete p.add['zero_share.mine']; }
+      if (comparing && (p.add['compare.mine'] || p.add['compare.rivals']) && (tpl || !u.add)) {
+        const base = tpl ? { mine: [], rivals: [] } : cur.compare || { mine: [], rivals: [] };
+        p.set.compare = { mine: p.add['compare.mine'] || base.mine, rivals: p.add['compare.rivals'] || base.rivals };
+        delete p.add['compare.mine']; delete p.add['compare.rivals'];
+      }
       if (u.time) p.set.time = u.time;
       if (u.rows && u.rows.length) { const base = tpl ? tpl.spec.rows : cur.rows; if (base.length || tpl) p.add.rows = u.rows; else p.set.rows = u.rows; }
       if (u.columns !== undefined && u.columns !== null) { p.set.columns = u.columns; p.set.calcs = []; }

@@ -24,13 +24,14 @@
 import { chQuery, clickhouseConfig, ClickHouseError, type ClickHouseConfig } from '@/lib/clickhouse'
 import type { EngineState, Option, Patch, Result, SavedSummary, Spec, Understanding, Validation } from './engine'
 
-const TABLE = 'gpc_summary.property_product_summary_month'
+const MONTH_TABLE = 'gpc_summary.property_product_summary_month'
+const TABLE = MONTH_TABLE
 const BASE = 'coalesce(is_promo, 0) = 0 AND coalesce(is_psa, 0) = 0'
 const INLINE_ROW_LIMIT = 2000
 const DOWNLOAD_ROW_LIMIT = 50_000
 const SETTINGS = { max_execution_time: '20', max_bytes_before_external_group_by: '1000000000' }
 
-type Dim = 'industry' | 'category' | 'subcategory' | 'top_parent' | 'advertiser' | 'product' | 'media_type' | 'media_owner' | 'property' | 'market' | 'month' | 'quarter' | 'year'
+type Dim = 'industry' | 'category' | 'subcategory' | 'top_parent' | 'advertiser' | 'product' | 'media_type' | 'media_owner' | 'property' | 'market' | 'month' | 'quarter' | 'year' | 'day' | 'week' | 'broadcast_week'
 type Group = 'who' | 'what' | 'where' | 'when'
 
 interface DimDef {
@@ -38,6 +39,8 @@ interface DimDef {
   plural: string
   group: Group
   time?: boolean
+  /** Needs the daily tables (day and week breakdowns). */
+  daily?: boolean
   id: string
   name: string
   context: string
@@ -57,6 +60,9 @@ const DIMS: Record<Dim, DimDef> = {
   month: { label: 'Month', plural: 'months', group: 'when', time: true, id: 'year_month', name: 'toString(year_month)', context: "''" },
   quarter: { label: 'Quarter', plural: 'quarters', group: 'when', time: true, id: "concat(toString(intDiv(year_month, 100)), '-Q', toString(intDiv(year_month % 100 + 2, 3)))", name: "''", context: "''" },
   year: { label: 'Year', plural: 'years', group: 'when', time: true, id: 'toString(intDiv(year_month, 100))', name: "''", context: "''" },
+  day: { label: 'Day', plural: 'days', group: 'when', time: true, daily: true, id: 'toString(start_date)', name: "''", context: "''" },
+  week: { label: 'Week', plural: 'weeks', group: 'when', time: true, daily: true, id: 'toString(toStartOfWeek(start_date, 0))', name: "''", context: "''" },
+  broadcast_week: { label: 'Broadcast week', plural: 'broadcast weeks', group: 'when', time: true, daily: true, id: 'toString(toMonday(start_date))', name: "''", context: "''" },
 }
 const NAME_DIMS = Object.keys(DIMS).filter((d) => !DIMS[d as Dim].time) as Dim[]
 const GROUP_LABEL: Record<Group, string> = { who: 'Who is advertising', what: 'What is advertised', where: 'Where it runs', when: 'When' }
@@ -74,11 +80,24 @@ const CALCS = {
 
 type TimeSpec = { mode?: string; unit?: string; count?: number; start?: string; end?: string }
 const RECENT: TimeSpec = { mode: 'rolling', unit: 'month', count: 3 }
+const WEEKS: TimeSpec = { mode: 'rolling', unit: 'week', count: 4 }
+const QUARTER_OF_WEEKS: TimeSpec = { mode: 'rolling', unit: 'week', count: 13 }
+const NO_ZERO = { mine: [], versus: [] }
+const NO_COMPARE = { mine: [], rivals: [] }
 const TEMPLATES = [
   { id: 'advertiser_trend', label: 'Spend trend', description: 'How spend moves month by month', spec: { template: 'advertiser_trend', rows: ['advertiser'], columns: 'month', measures: ['spend'], time: RECENT } },
   { id: 'media_mix', label: 'Media mix', description: 'How spend splits across media types', spec: { template: 'media_mix', rows: ['advertiser'], columns: 'media_type', measures: ['spend'], time: RECENT } },
   { id: 'category_share', label: 'Category share', description: 'Who holds what share of a category', spec: { template: 'category_share', rows: ['advertiser'], measures: ['spend'], calcs: ['share'], time: RECENT } },
-  { id: 'zero_share', label: 'Zero share', description: 'Advertisers buying elsewhere but not on your properties', spec: { template: 'zero_share', rows: ['top_parent', 'advertiser'], measures: ['spend'], zero_share: { mine: [], versus: [] }, time: RECENT } },
+  { id: 'zero_share', label: 'Zero share', description: 'Advertisers buying elsewhere but not on your properties', spec: { template: 'zero_share', rows: ['top_parent', 'advertiser'], measures: ['spend'], zero_share: { ...NO_ZERO, mode: 'zero' }, time: RECENT } },
+  // Publisher Intel: a media owner's view, around their properties and competitors.
+  { id: 'share_of_wallet', label: 'Share of wallet', description: "Your share of each advertiser's spend against your competitors", spec: { template: 'share_of_wallet', rows: ['advertiser'], measures: ['spend'], zero_share: { ...NO_ZERO, mode: 'wallet' }, time: RECENT } },
+  { id: 'my_advertisers', label: 'Your advertisers', description: 'Who is buying your properties, week by week', spec: { template: 'my_advertisers', rows: ['advertiser'], columns: 'broadcast_week', measures: ['spend'], zero_share: { ...NO_ZERO, mode: 'mine' }, time: WEEKS } },
+  { id: 'competitor_categories', label: 'Categories on competitors', description: 'Which categories spend with your competitors', spec: { template: 'competitor_categories', rows: ['category'], columns: 'month', measures: ['spend'], zero_share: { ...NO_ZERO, mode: 'theirs' }, time: RECENT } },
+  // Competitive Intel: a brand's or buyer's view, around their brands and competitors.
+  { id: 'competitive_mix', label: 'Media mix', description: 'How you and your competitors split spend across media', spec: { template: 'competitive_mix', rows: ['advertiser'], columns: 'media_type', measures: ['spend'], compare: NO_COMPARE, time: RECENT } },
+  { id: 'share_of_voice', label: 'Share of voice', description: 'Your share of spend against your competitors', spec: { template: 'share_of_voice', rows: ['advertiser'], measures: ['spend'], calcs: ['share'], compare: NO_COMPARE, time: RECENT } },
+  { id: 'competitive_trend', label: 'Competitive trend', description: 'Week by week: you against your competitors', spec: { template: 'competitive_trend', rows: ['advertiser'], columns: 'broadcast_week', measures: ['spend'], compare: NO_COMPARE, time: QUARTER_OF_WEEKS } },
+  { id: 'competitor_placements', label: 'Where competitors run', description: 'Spend by property, for you and your competitors', spec: { template: 'competitor_placements', rows: ['advertiser', 'property'], measures: ['spend'], compare: NO_COMPARE, time: RECENT } },
   { id: 'detail_extract', label: 'Detailed extract', description: 'Product-level rows by property and month, for a spreadsheet', spec: { template: 'detail_extract', rows: ['top_parent', 'advertiser', 'product', 'subcategory', 'media_type', 'property', 'month'], measures: ['spend', 'occurrences', 'impressions'], time: { mode: 'rolling', unit: 'month', count: 1 }, output: 'csv' } },
 ]
 
@@ -122,6 +141,39 @@ function parseMonth(id: unknown): number | null {
   const mm = Number(m[2])
   return mm >= 1 && mm <= 12 ? Number(m[1]) * 12 + mm - 1 : null
 }
+interface Period {
+  start: number
+  end: number
+  d0: number
+  d1: number
+  label: string
+  how: string
+  moves: boolean
+  notes: string[]
+}
+
+// Days as whole numbers since 1970-01-01 (UTC), for day and week periods.
+const DAY_MS = 86_400_000
+const dParse = (s: unknown): number | null => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s ?? ''))
+  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / DAY_MS : null
+}
+const dStr = (n: number) => new Date(n * DAY_MS).toISOString().slice(0, 10)
+const dShort = (n: number) => {
+  const d = new Date(n * DAY_MS)
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`
+}
+const dLabel = (n: number) => `${dShort(n)}, ${new Date(n * DAY_MS).getUTCFullYear()}`
+const monthFirstDay = (idx: number) => Date.UTC(Math.floor(idx / 12), idx % 12, 1) / DAY_MS
+const monthLastDay = (idx: number) => monthFirstDay(idx + 1) - 1
+const dayToIdx = (n: number) => {
+  const d = new Date(n * DAY_MS)
+  return d.getUTCFullYear() * 12 + d.getUTCMonth()
+}
+const weekday = (n: number) => new Date(n * DAY_MS).getUTCDay()
+/** The longest period each day or week breakdown may cover, in days. */
+const DAILY_LIMIT: Partial<Record<Dim, number>> = { day: 92, week: 371, broadcast_week: 371 }
+
 function listText(items: string[], max = 4) {
   return items.length <= max ? items.join(', ') : `${items.slice(0, max).join(', ')} and ${items.length - max} more`
 }
@@ -166,7 +218,9 @@ interface NSpec {
   filters: Record<string, string[]>
   options: { final_only: boolean; top_n: number | null }
   /** mine and versus hold ids of properties, media types, media owners or markets; all: compare with everything else; own: the person chose not to use their usual set. */
-  zero_share?: { mine: string[]; versus: string[]; all?: boolean; own?: boolean } | null
+  zero_share?: { mine: string[]; versus: string[]; all?: boolean; own?: boolean; mode?: 'zero' | 'wallet' | 'mine' | 'theirs' } | null
+  /** Competitive Intel: the person's brands and who they compete with (advertisers, products or categories). */
+  compare?: { mine: string[]; rivals: string[]; own?: boolean } | null
   /** Drill-down (the tree view): only rows under these values, AND-ed with everything else. */
   path?: Record<string, string>
   /** Fixed column values, so a tree's lower levels line up with the top. */
@@ -185,7 +239,8 @@ function normalize(specIn: Spec): NSpec {
   s.filters = s.filters && typeof s.filters === 'object' ? s.filters : {}
   for (const k of Object.keys(s.filters)) if (!Array.isArray(s.filters[k]) || !s.filters[k]!.length) delete s.filters[k]
   s.options = Object.assign({ final_only: true, top_n: null }, s.options ?? {})
-  if (s.zero_share) s.zero_share = { mine: s.zero_share.mine ?? [], versus: s.zero_share.versus ?? [], all: Boolean(s.zero_share.all), own: Boolean(s.zero_share.own) }
+  if (s.zero_share) s.zero_share = { mine: s.zero_share.mine ?? [], versus: s.zero_share.versus ?? [], all: Boolean(s.zero_share.all), own: Boolean(s.zero_share.own), mode: s.zero_share.mode ?? 'zero' }
+  if (s.compare) s.compare = { mine: s.compare.mine ?? [], rivals: s.compare.rivals ?? [], own: Boolean(s.compare.own) }
   return s
 }
 
@@ -215,6 +270,8 @@ interface Availability {
   firstComplete: number
   through: number
   prelim: number
+  /** The last day loaded in the daily tables. */
+  prelimDay: number
   at: number
 }
 let availCache: Availability | null = null
@@ -243,8 +300,61 @@ async function availability(): Promise<Availability> {
   const through = done.length ? done[done.length - 1]! : prelim
   let first = through
   for (let i = done.length - 1; i > 0 && toIdx(done[i - 1]!) === toIdx(done[i]!) - 1; i--) first = done[i - 1]!
-  availCache = { firstComplete: toIdx(first), through: toIdx(through), prelim: toIdx(prelim), at: Date.now() }
+  const [last] = await chQuery<{ d: string }>(config(), `SELECT toString(max(start_date)) AS d FROM gpc_summary.video_product_summary_daily WHERE year_month >= ${prelim}`, {}, SETTINGS)
+  const prelimDay = Math.min(dParse(last?.d) ?? monthLastDay(toIdx(prelim)), monthLastDay(toIdx(prelim)))
+  availCache = { firstComplete: toIdx(first), through: toIdx(through), prelim: toIdx(prelim), prelimDay, at: Date.now() }
   return availCache
+}
+
+// ---------------------------------------------------------------- the daily source
+
+/**
+ * Day and week breakdowns read the daily tables, one per media family. Together
+ * they hold exactly what the monthly table does (checked for October 2026,
+ * medium by medium), so a report by week adds up to the same months. Their
+ * columns differ a little, so each is read into the monthly table's shape:
+ * a missing column is empty, and a different type is cast.
+ */
+const DAILY_TABLES = ['tv', 'video', 'avod', 'display', 'social', 'print', 'live_stream'].map((t) => `${t}_product_summary_daily`)
+const DAILY_COLS = [
+  'year_month', 'start_date', 'industry_id', 'industry_name', 'category_id', 'category_name', 'subcategory_id', 'subcategory_name',
+  'entity_id', 'entity_name', 'entity_parent_id', 'entity_parent_name', 'product_id', 'product_name',
+  'media_id', 'media_name', 'media_root_entity_id', 'media_root_entity_name', 'media_entity_id', 'media_entity_name',
+  'property_market_id', 'property_market_name', 'cost_share_v', 'occurrences', 'impressions_share_v', 'is_promo', 'is_psa',
+]
+let dailySql: Promise<string> | null = null
+function dailySource(): Promise<string> {
+  dailySql ??= (async () => {
+    const tables = ['property_product_summary_month', ...DAILY_TABLES]
+    const cols = await chQuery<{ table: string; name: string; type: string }>(
+      config(),
+      `SELECT table, name, type FROM system.columns WHERE database = 'gpc_summary' AND table IN (${tables.map((t) => `'${t}'`).join(',')}) AND name IN (${DAILY_COLS.map((c) => `'${c}'`).join(',')})`,
+      {},
+      SETTINGS,
+    )
+    const want = new Map(cols.filter((c) => c.table === 'property_product_summary_month').map((c) => [c.name, c.type]))
+    const parts = DAILY_TABLES.map((t) => {
+      const have = new Map(cols.filter((c) => c.table === t).map((c) => [c.name, c.type]))
+      const sel = DAILY_COLS.map((c) => {
+        const ty = want.get(c) ?? 'String'
+        const got = have.get(c)
+        if (got === ty) return c
+        if (got) return `CAST(${c} AS ${ty}) AS ${c}`
+        const empty = ty.includes('Nullable') ? 'NULL' : ty.includes('String') ? "''" : '0'
+        return `CAST(${empty} AS ${ty}) AS ${c}`
+      })
+      return `SELECT ${sel.join(', ')} FROM gpc_summary.${t}`
+    })
+    return `(${parts.join(' UNION ALL ')})`
+  })()
+  dailySql.catch(() => (dailySql = null))
+  return dailySql
+}
+
+/** Whether a report needs the daily tables: a day or week breakdown, or a period in weeks or days. */
+function needsDaily(s: NSpec): boolean {
+  const t = s.time ?? {}
+  return [...s.rows, ...(s.columns ? [s.columns] : [])].some((d) => DIMS[d]?.daily) || t.unit === 'week' || t.unit === 'day' || dParse(t.start) !== null
 }
 
 // ---------------------------------------------------------------- the engine
@@ -276,6 +386,10 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       return m ? `Q${m[2]} ${m[1]}` : id
     }
     if (dim === 'year') return id
+    if (dim === 'day' || dim === 'week' || dim === 'broadcast_week') {
+      const n = dParse(id)
+      return n === null ? id : dim === 'day' ? dShort(n) : `${dim === 'week' ? 'Wk' : 'Bcst wk'} ${dShort(n)}`
+    }
     return labels.get(id) ?? id
   }
 
@@ -283,8 +397,9 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const s = normalize(specIn)
     const want = new Map<Dim, string[]>()
     for (const [dim, ids] of Object.entries(s.filters)) if (DIMS[dim as Dim] && !DIMS[dim as Dim].time) want.set(dim as Dim, ids.filter((id) => !labels.has(id)))
-    if (s.zero_share)
-      for (const id of [...s.zero_share.mine, ...s.zero_share.versus]) {
+    const extra = [...(s.zero_share ? [...s.zero_share.mine, ...s.zero_share.versus] : []), ...(s.compare ? [...s.compare.mine, ...s.compare.rivals] : [])]
+    if (extra.length)
+      for (const id of extra) {
         const d = dimOf(id) as Dim
         if (DIMS[d] && !labels.has(id)) want.set(d, [...(want.get(d) ?? []), id])
       }
@@ -341,9 +456,43 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       .map((h) => ({ id: h.id, type: h.type, type_label: h.type_label, label: h.label, context: h.context, spend_last_month: h.spend_last_month }))
   }
 
-  function resolveTime(time: NSpec['time'], through: number, firstComplete: number) {
-    const notes: string[] = []
+  /**
+   * The period: months (start, end) and days (d0, d1). Weeks are broadcast
+   * weeks, Monday to Sunday, and only whole ones: "last 4 weeks" ends on the
+   * last Sunday the data covers.
+   */
+  function resolveTime(time: NSpec['time'], through: number, firstComplete: number, throughDay: number = monthLastDay(through)): Period | { error: string } {
     const t: TimeSpec = time ?? RECENT
+    if (t.mode === 'rolling' && (t.unit === 'week' || t.unit === 'day')) {
+      const n = Math.max(1, Math.min(t.unit === 'week' ? 104 : 366, Number(t.count) || 1))
+      let d1 = throughDay
+      if (t.unit === 'week') while (weekday(d1) !== 0) d1--
+      const d0 = t.unit === 'week' ? d1 - 7 * n + 1 : d1 - n + 1
+      const how = t.unit === 'week' ? (n === 1 ? 'latest complete week' : `last ${n} complete weeks`) : n === 1 ? 'latest day' : `last ${n} days`
+      const notes: string[] = []
+      if (dayToIdx(d0) < firstComplete) notes.push(`Data before ${monthLabel(firstComplete)} covers only some media (mostly streaming), so earlier weeks look smaller than they were.`)
+      return { start: dayToIdx(d0), end: dayToIdx(d1), d0, d1, label: `${dLabel(d0)} – ${dLabel(d1)}`, how, moves: true, notes }
+    }
+    if (t.mode === 'static' && dParse(t.start) !== null) {
+      const d0 = dParse(t.start)!
+      let d1 = dParse(t.end) ?? d0
+      const notes: string[] = []
+      if (d1 < d0) return { error: 'The fixed period needs an end on or after its start, written like 2026-10-05.' }
+      if (d0 > throughDay) return { error: `That period starts after the latest available data (${dLabel(throughDay)}).` }
+      if (d1 > throughDay) {
+        notes.push(`Data runs through ${dLabel(throughDay)}, so the period stops there.`)
+        d1 = throughDay
+      }
+      return { start: dayToIdx(d0), end: dayToIdx(d1), d0, d1, label: d0 === d1 ? dLabel(d0) : `${dLabel(d0)} – ${dLabel(d1)}`, how: 'fixed period', moves: false, notes }
+    }
+    const m = resolveMonths(t, through, firstComplete)
+    if (m.error !== undefined) return { error: m.error }
+    const ok = m as Omit<Period, 'd0' | 'd1'>
+    return { ...ok, d0: monthFirstDay(ok.start), d1: monthLastDay(ok.end) }
+  }
+
+  function resolveMonths(t: TimeSpec, through: number, firstComplete: number) {
+    const notes: string[] = []
     let start: number
     let end: number
     let how: string
@@ -387,6 +536,8 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
   }
 
   const throughOf = (s: NSpec, a: Availability) => (s.options.final_only ? a.through : a.prelim)
+  const throughDayOf = (s: NSpec, a: Availability) => (s.options.final_only ? monthLastDay(a.through) : a.prelimDay)
+  const periodOf = (s: NSpec, a: Availability) => resolveTime(s.time, throughOf(s, a), a.firstComplete, throughDayOf(s, a))
 
   function filterLabels(filters: Record<string, string[]>, groups: Group[]) {
     const out: string[] = []
@@ -403,22 +554,32 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const what = filterLabels(s.filters, ['what'])
     const where = filterLabels(s.filters, ['where'])
     const rows = s.rows.map((d) => (DIMS[d] ? DIMS[d].label.toLowerCase() : d))
+    const named = (id: string) => (['property', 'advertiser', 'top_parent', 'product'].includes(dimOf(id)) ? labelOf(dimOf(id), id) : dimOf(id) === 'market' ? `the ${labelOf('market', id)} market` : `all ${labelOf(dimOf(id), id)}`)
     if (s.zero_share) {
-      const mine = s.zero_share.mine.map((id) => labelOf(dimOf(id), id))
-      const vs = s.zero_share.versus.map((id) => (dimOf(id) === 'property' ? labelOf('property', id) : dimOf(id) === 'market' ? `the ${labelOf('market', id)} market` : `all ${labelOf(dimOf(id), id)}`))
-      parts.push(`Advertisers spending on ${vs.length ? listText(vs) : s.zero_share.all ? 'any other property' : 'other properties'} but nothing on ${mine.length ? listText(mine) : 'your properties'}`)
-      if (rows.length) parts.push(`listed by ${rows.join(', then ')}`)
+      const z = s.zero_share
+      const mine = z.mine.length ? listText(z.mine.map((id) => labelOf(dimOf(id), id))) : 'your properties'
+      const vs = z.versus.length ? listText(z.versus.map(named)) : z.all ? 'any other property' : 'other properties'
+      const by = rows.length ? ` by ${rows.join(', then ')}` : ''
+      if (z.mode === 'wallet') parts.push(`Share of wallet: ${mine} against ${vs}${by}`)
+      else if (z.mode === 'mine') parts.push(`Spend on ${mine}${by}`)
+      else if (z.mode === 'theirs') parts.push(`Spend on ${vs}, not ${mine},${by}`)
+      else {
+        parts.push(`Advertisers spending on ${vs} but nothing on ${mine}`)
+        if (rows.length) parts.push(`listed by ${rows.join(', then ')}`)
+      }
+      if (z.mode !== 'zero' && s.columns && DIMS[s.columns] && z.mode !== 'wallet') parts[parts.length - 1] += `, with a column per ${DIMS[s.columns].label.toLowerCase()}`
     } else {
       let lead = s.measures.map((k) => MEASURES[k]?.label ?? k).join(', ') + (rows.length ? ` by ${rows.join(', then ')}` : '')
       if (s.columns && DIMS[s.columns]) lead += `, with a column per ${DIMS[s.columns].label.toLowerCase()}`
       parts.push(lead)
     }
     const scope: string[] = []
+    if (s.compare) scope.push(`${s.compare.mine.length ? listText(s.compare.mine.map(named)) : 'your brands'} vs ${s.compare.rivals.length ? listText(s.compare.rivals.map(named)) : 'competitors'}`)
     if (who.length) scope.push(listText(who))
     if (what.length) scope.push(listText(what))
     if (where.length) scope.push(`${s.zero_share ? 'competing media limited to ' : 'on '}${listText(where)}`)
-    parts.push(scope.length ? scope.join(' · ') : 'all advertisers')
-    const per = resolveTime(s.time, throughOf(s, a), a.firstComplete)
+    if (scope.length || !s.zero_share) parts.push(scope.length ? scope.join(' · ') : 'all advertisers')
+    const per = periodOf(s, a)
     if (!('error' in per)) parts.push(`${per.label} (${per.how})`)
     parts.push(s.options.final_only ? 'final data only' : 'including preliminary data')
     if (s.calcs.includes('share')) parts.push('with share of total')
@@ -434,7 +595,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
 
   // ---- the query
 
-  function whereParts(s: NSpec, start: number, end: number) {
+  function whereParts(s: NSpec, start: number, end: number, days?: { d0: number; d1: number }) {
     const groups: Record<'who' | 'what' | 'where', string[]> = { who: [], what: [], where: [] }
     for (const [dim, ids] of Object.entries(s.filters)) {
       const d = DIMS[dim as Dim]
@@ -458,7 +619,10 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     }
     return {
       path: path.join(' AND '),
-      time: `year_month BETWEEN ${toYm(start)} AND ${toYm(end)}`,
+      // The daily tables: the days, and a month either side for the sort key (TV files a few days under the next or last broadcast month).
+      time: days
+        ? `year_month BETWEEN ${toYm(start - 1)} AND ${toYm(end + 1)} AND start_date BETWEEN '${dStr(days.d0)}' AND '${dStr(days.d1)}'`
+        : `year_month BETWEEN ${toYm(start)} AND ${toYm(end)}`,
       who: or(groups.who),
       what: or(groups.what),
       where: or(groups.where),
@@ -481,26 +645,32 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     await ensureLabels(s)
     const a = await availability()
     const through = throughOf(s, a)
-    const per = resolveTime(s.time, through, a.firstComplete)
+    const per = periodOf(s, a)
     if ('error' in per) throw new Error(per.error)
     const notes = [...per.notes]
+    const daily = needsDaily(s)
+    const TABLE = daily ? await dailySource() : MONTH_TABLE
+    const zs = s.zero_share
+    const wallet = zs?.mode === 'wallet'
     const R = s.rows.filter((d) => DIMS[d])
-    const C = s.columns && DIMS[s.columns] ? s.columns : null
+    const C = !wallet && s.columns && DIMS[s.columns] ? s.columns : null
     const M = s.measures.filter((k) => MEASURES[k])
     const primary: MeasureKey = M[0] ?? 'spend'
-    const calcs = C ? [] : s.calcs
-    const zs = s.zero_share
-    const w = whereParts(s, per.start, per.end)
+    const calcs = C || wallet ? [] : s.calcs
+    const w = whereParts(s, per.start, per.end, daily ? per : undefined)
+    const mineIds = new Set(s.compare?.mine ?? [])
 
     // Rows in scope, and which of their spend counts.
-    const subject = [w.who, w.what, w.path].filter(Boolean)
+    const subject = [w.who, w.what, w.path, s.compare ? idSql([...s.compare.mine, ...s.compare.rivals]) : ''].filter(Boolean)
     let scope: string
     let counted: string
     let mineSql = ''
     if (zs) {
+      // Publisher Intel: zero (competitors, not you), wallet (you and competitors), mine (only you), theirs (only competitors).
       mineSql = idSql(zs.mine)
       scope = [w.time, BASE, ...subject].join(' AND ')
-      counted = [`NOT (${mineSql})`, zs.versus.length ? idSql(zs.versus) : '', w.where].filter(Boolean).join(' AND ')
+      const theirs = [`NOT ${mineSql}`, zs.versus.length ? idSql(zs.versus) : '', w.where].filter(Boolean).join(' AND ')
+      counted = zs.mode === 'mine' ? [mineSql, w.where].filter(Boolean).join(' AND ') : wallet ? `(${mineSql} OR (${theirs}))` : theirs
     } else {
       scope = [w.time, BASE, ...subject, w.where].filter(Boolean).join(' AND ')
       counted = '1'
@@ -513,11 +683,12 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     if (C && Array.isArray(s.col_ids)) {
       const d = DIMS[C]
       colVals = s.col_ids.map((id) => ({ id, name: d.time ? (C === 'month' ? monthLabel(toIdx(Number(id))) : labelOf(C, id)) : (labels.get(`${C}:${id}`) ?? id) }))
+      void d
     } else if (C) {
       const d = DIMS[C]
       const vals = await chQuery<{ id: string; name: string; v: number; n: number }>(
         config(),
-        `SELECT toString(${d.id}) AS id, any(${d.name}) AS name, ${agg(primary)} AS v, count() OVER () AS n FROM ${TABLE} WHERE ${scope} GROUP BY id HAVING v != 0 ORDER BY ${d.time ? 'id ASC' : 'v DESC'} LIMIT ${d.time ? 60 : 12}`,
+        `SELECT toString(${d.id}) AS id, any(${d.name}) AS name, ${agg(primary)} AS v, count() OVER () AS n FROM ${TABLE} WHERE ${scope} GROUP BY id HAVING v != 0 ORDER BY ${d.time ? 'id ASC' : 'v DESC'} LIMIT ${d.time ? 100 : 12}`,
         {},
         SETTINGS,
       )
@@ -532,12 +703,13 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       selects.push(`toString(${d.id}) AS r${i}`, `any(${d.name}) AS n${i}`)
     })
     for (const k of M) selects.push(`${agg(k)} AS m_${k}`)
-    if (zs) selects.push(`toFloat64(sumIf(cost_share_v, ${mineSql})) AS mine_spend`)
+    const withMine = zs && (zs.mode === 'zero' || wallet)
+    if (withMine) selects.push(`toFloat64(sumIf(cost_share_v, ${mineSql})) AS mine_spend`)
     colVals.forEach((c, j) => {
       for (const k of M) selects.push(`toFloat64(sumIf(${MEASURES[k].sql}, (${counted}) AND toString(${DIMS[C!].id}) = '${c.id.replace(/'/g, '')}')) AS c${j}_${k}`)
     })
     const groupBy = R.length ? ` GROUP BY ${R.map((_, i) => `r${i}`).join(', ')}` : ''
-    const having = zs ? ' HAVING mine_spend = 0 AND m_spend > 0' : ` HAVING m_${primary} != 0`
+    const having = zs?.mode === 'zero' ? ' HAVING mine_spend = 0 AND m_spend > 0' : ` HAVING m_${primary} != 0`
     const grouped = `SELECT ${selects.join(', ')} FROM ${TABLE} WHERE ${scope}${groupBy}${having}`
     const firstTime = R.length && DIMS[R[0]!].time
     const order = firstTime ? 'r0 ASC' : `m_${primary} DESC`
@@ -548,7 +720,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       chQuery<Row>(config(), `SELECT *, count() OVER () AS __n FROM (${grouped}) ORDER BY ${order} LIMIT ${cap}`, {}, SETTINGS),
       chQuery<Row>(
         config(),
-        `SELECT ${[...M.map((k) => `sum(m_${k}) AS m_${k}`), ...colVals.flatMap((_, j) => M.map((k) => `sum(c${j}_${k}) AS c${j}_${k}`))].join(', ')}, count() AS n FROM (${grouped})`,
+        `SELECT ${[...M.map((k) => `sum(m_${k}) AS m_${k}`), ...(withMine ? ['sum(mine_spend) AS mine_spend'] : []), ...colVals.flatMap((_, j) => M.map((k) => `sum(c${j}_${k}) AS c${j}_${k}`))].join(', ')}, count() AS n FROM (${grouped})`,
         {},
         SETTINGS,
       ),
@@ -579,8 +751,10 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     }
 
     const columns: Result['columns'] = R.map((d) => ({ key: d, label: DIMS[d].label, type: 'text' }))
-    const mLabel = (k: MeasureKey) => (zs && k === 'spend' ? 'Spend on competing properties' : MEASURES[k].label)
-    if (C) {
+    const mLabel = (k: MeasureKey) => (zs && k === 'spend' ? (zs.mode === 'mine' ? 'Spend on your properties' : 'Spend on competing properties') : MEASURES[k].label)
+    if (wallet) {
+      columns.push({ key: 'yours', label: 'Spend with you', type: 'money' }, { key: 'theirs', label: 'Spend with competitors', type: 'money' }, { key: 'wallet', label: 'Your share', type: 'pct' })
+    } else if (C) {
       // One column per value and measure. With several measures the page stacks a value's
       // measures in one cell (group); the spreadsheet keeps a column each.
       const many = M.length > 1
@@ -604,8 +778,18 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const cells = (r: Row | undefined, isTotal: boolean): unknown[] => {
       const out: unknown[] = isTotal
         ? R.map((_, i) => (i === 0 ? 'Total' : ''))
-        : R.map((dim, i) => (DIMS[dim].time ? (dim === 'month' ? monthLabel(toIdx(Number(r![`r${i}`]))) : labelOf(dim, String(r![`r${i}`]))) : String(r![`n${i}`])))
-      if (C) {
+        : R.map((dim, i) =>
+            DIMS[dim].time
+              ? dim === 'month'
+                ? monthLabel(toIdx(Number(r![`r${i}`])))
+                : labelOf(dim, String(r![`r${i}`]))
+              : String(r![`n${i}`]) + (mineIds.has(`${dim}:${r![`r${i}`]}`) ? ' (you)' : ''),
+          )
+      if (wallet) {
+        const all = Number(r?.m_spend ?? 0)
+        const yours = Number(r?.mine_spend ?? 0)
+        out.push(tidy('spend', yours), tidy('spend', all - yours), pct(yours, all))
+      } else if (C) {
         colVals.forEach((_, j) => M.forEach((k) => out.push(tidy(k, Number(r?.[`c${j}_${k}`] ?? 0)))))
         M.forEach((k) => out.push(tidy(k, Number(r?.[`m_${k}`] ?? 0))))
       } else {
@@ -627,7 +811,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     if (s.options.top_n && matched > s.options.top_n) notes.push(`Showing the top ${s.options.top_n} of ${matched.toLocaleString('en-US')} rows; the total covers all of them.`)
     if (!opts.limit && matched > DOWNLOAD_ROW_LIMIT) notes.push(`The spreadsheet holds the first ${DOWNLOAD_ROW_LIMIT.toLocaleString('en-US')} rows of ${matched.toLocaleString('en-US')}. Narrow the report for the rest.`)
     if (!s.options.final_only) notes.push(`Figures for ${monthLabel(through)} are preliminary and still loading.`)
-    if (!matched) notes.push(zs ? 'No advertisers matched: everyone in scope who spent on the competing properties also spent on yours.' : 'No spend matched these selections in this period.')
+    if (!matched) notes.push(zs?.mode === 'zero' ? 'No advertisers matched: everyone in scope who spent on the competing properties also spent on yours.' : 'No spend matched these selections in this period.')
     const outRows = rows.map((r) => cells(r, false))
     // Each row's ids, as filters and paths use them, for drilling into it.
     const keys = rows.map((r) => R.map((dim, i) => (dim === 'month' ? monthId(toIdx(Number(r[`r${i}`]))) : DIMS[dim].time ? String(r[`r${i}`]) : `${dim}:${r[`r${i}`]}`)))
@@ -640,7 +824,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       rows_shown: outRows.length,
       total: totalPrimary,
       total_measure: MEASURES[primary].label,
-      period: { start: monthId(per.start), end: monthId(per.end), label: per.label, how: per.how, moves_with_new_data: per.moves },
+      period: { start: daily ? dStr(per.d0) : monthId(per.start), end: daily ? dStr(per.d1) : monthId(per.end), label: per.label, how: per.how, moves_with_new_data: per.moves },
       data_through: monthId(through),
       data_through_label: monthLabel(through),
       summary: summarizeSync(s, a),
@@ -684,6 +868,39 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     return out
   }
 
+  /** Choices for a brand's competitors: the biggest advertisers in its subcategory, the subcategory, or the category. */
+  async function rivalOptions(mine: string[]): Promise<Option[]> {
+    const a = await availability()
+    const ym = toYm(a.through)
+    const mineSql = idSql(mine)
+    const out: Option[] = []
+    const [sub] = await chQuery<{ id: string; name: string; cid: string; cname: string }>(
+      config(),
+      `SELECT toString(coalesce(subcategory_id, 0)) AS id, any(subcategory_name) AS name, toString(any(coalesce(category_id, 0))) AS cid, any(category_name) AS cname FROM ${TABLE} WHERE year_month = ${ym} AND ${BASE} AND ${mineSql} GROUP BY id ORDER BY sum(cost_share_v) DESC LIMIT 1`,
+      {},
+      SETTINGS,
+    )
+    if (sub) {
+      const A = DIMS.advertiser
+      const top = await chQuery<{ id: string; name: string; ctx: string }>(
+        config(),
+        `SELECT toString(${A.id}) AS id, any(${A.name}) AS name, any(${A.context}) AS ctx FROM ${TABLE} WHERE year_month = ${ym} AND ${BASE} AND coalesce(subcategory_id, 0) = ${Number(sub.id)} AND NOT ${mineSql} GROUP BY id ORDER BY sum(cost_share_v) DESC LIMIT 4`,
+        {},
+        SETTINGS,
+      )
+      for (const r of top) {
+        const id = `advertiser:${r.id}`
+        labels.set(id, r.name)
+        out.push({ label: r.name, description: `Advertiser${r.ctx ? ` · ${r.ctx}` : ''}`, patch: { add: { 'compare.rivals': [id] } } })
+      }
+      labels.set(`subcategory:${sub.id}`, sub.name)
+      labels.set(`category:${sub.cid}`, sub.cname)
+      out.push({ label: `All of ${sub.name}`, description: 'Every advertiser in your subcategory', patch: { set: { 'compare.rivals': [`subcategory:${sub.id}`] } } })
+      if (sub.cname && sub.cname !== sub.name) out.push({ label: `All of ${sub.cname}`, description: 'Every advertiser in your category', patch: { set: { 'compare.rivals': [`category:${sub.cid}`] } } })
+    }
+    return out
+  }
+
   async function validate(specIn: Spec, patch?: Patch | null): Promise<Validation> {
     const spec = normalize(applyPatch(specIn ?? {}, patch))
     await ensureLabels(spec)
@@ -711,8 +928,22 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         message: `Share of total and change vs prior year cannot be combined with a column per ${DIMS[spec.columns]?.label.toLowerCase() ?? 'value'}.`,
         fixes: [{ label: 'Drop the column breakdown', patch: { set: { columns: null } } }, { label: 'Drop the calculation', patch: { set: { calcs: [] } } }],
       })
-    const per = spec.time ? resolveTime(spec.time, throughOf(spec, a), a.firstComplete) : null
+    const per = spec.time ? periodOf(spec, a) : null
     if (per && 'error' in per) errors.push({ code: 'bad_period', message: per.error!, fixes: [{ label: 'Use the last 3 complete months', patch: { set: { time: RECENT } } }] })
+    if (per && !('error' in per)) {
+      const span = per.d1 - per.d0 + 1
+      for (const d of [...spec.rows, ...(spec.columns ? [spec.columns] : [])]) {
+        const max = DAILY_LIMIT[d]
+        if (max && span > max)
+          errors.push({
+            code: 'period_too_long',
+            message: `A breakdown by ${DIMS[d].label.toLowerCase()} covers at most ${d === 'day' ? '3 months' : 'a year'}; this period is ${span} days.`,
+            fixes: d === 'day' ? [{ label: 'Last 4 weeks', patch: { set: { time: WEEKS } } }, { label: 'By broadcast week instead', patch: { set: spec.columns === 'day' ? { columns: 'broadcast_week' } : { rows: spec.rows.map((r) => (r === 'day' ? 'broadcast_week' : r)) } } }] : [{ label: 'Last 13 weeks', patch: { set: { time: QUARTER_OF_WEEKS } } }],
+          })
+      }
+    }
+    if (needsDaily(spec) && spec.calcs.includes('yoy'))
+      errors.push({ code: 'yoy_daily', message: 'Change vs prior year works with months, not days or weeks.', fixes: [{ label: 'Drop the prior-year change', patch: { remove: { calcs: ['yoy'] } } }, { label: 'Use the last 3 complete months', patch: { set: { time: RECENT, columns: null } } }] })
 
     const hasSubject = Object.keys(spec.filters).some((d) => isDim(d) && (DIMS[d as Dim].group === 'who' || DIMS[d as Dim].group === 'what'))
     const hasWhat = Object.keys(spec.filters).some((d) => isDim(d) && DIMS[d as Dim].group === 'what')
@@ -722,8 +953,12 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       questions.push({ id: 'template', prompt: 'What kind of report do you want?', kind: 'choice', options: TEMPLATES.map((t) => ({ label: t.label, description: t.description, patch: { set: clone(t.spec) } })) })
     } else if (spec.zero_share && !spec.zero_share.mine.length) {
       questions.push({ id: 'my_properties', prompt: 'Which properties are yours?', kind: 'entity', entity_types: ['property', 'media_owner'], patch_path: 'zero_share.mine', options: await topOptions(['property'], 6, (h) => ({ add: { 'zero_share.mine': [h.id] } })) })
-    } else if (spec.zero_share && !spec.zero_share.versus.length && !spec.zero_share.all) {
+    } else if (spec.zero_share && spec.zero_share.mode !== 'mine' && !spec.zero_share.versus.length && !spec.zero_share.all) {
       questions.push({ id: 'competitors', prompt: 'Which properties do you compete with?', kind: 'entity', entity_types: ['property', 'media_type', 'media_owner', 'market'], patch_path: 'zero_share.versus', options: await competitorOptions(spec.zero_share.mine) })
+    } else if (spec.compare && !spec.compare.mine.length) {
+      questions.push({ id: 'my_brands', prompt: 'Which brands are yours?', kind: 'entity', entity_types: ['advertiser', 'top_parent', 'product'], patch_path: 'compare.mine', options: await topOptions(['advertiser'], 6, (h) => ({ add: { 'compare.mine': [h.id] } })) })
+    } else if (spec.compare && !spec.compare.rivals.length) {
+      questions.push({ id: 'rivals', prompt: 'Who do you compete with?', kind: 'entity', entity_types: ['advertiser', 'top_parent', 'product', 'industry', 'category', 'subcategory'], patch_path: 'compare.rivals', options: await rivalOptions(spec.compare.mine) })
     } else if (spec.template === 'category_share' && !hasWhat && spec.scope !== 'all') {
       questions.push({
         id: 'category',
@@ -732,7 +967,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         entity_types: ['industry', 'category', 'subcategory'],
         options: [...(await topOptions(['category'], 5, addFilter)), { label: 'All categories', description: 'Share of total spend', patch: { set: { scope: 'all' } } }],
       })
-    } else if (!spec.zero_share && !hasSubject && spec.scope !== 'all') {
+    } else if (!spec.zero_share && !spec.compare && !hasSubject && spec.scope !== 'all') {
       questions.push({
         id: 'subject',
         prompt: 'Which advertisers, products or categories?',
@@ -747,6 +982,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         kind: 'choice',
         options: [
           { label: 'Last 3 months', patch: { set: { time: RECENT } } },
+          { label: 'Last 4 weeks', patch: { set: { time: WEEKS } } },
           { label: 'Latest month', patch: { set: { time: { mode: 'rolling', unit: 'month', count: 1 } } } },
           { label: 'Year to date', patch: { set: { time: { mode: 'ytd' } } } },
         ],
@@ -771,6 +1007,8 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       if (!spec.rows.includes('property') && spec.columns !== 'property') add('Break out by property', { add: { rows: ['property'] } })
       if (!isRolling('month', 3)) add('Last 3 months', { set: { time: RECENT } })
       if (!isRolling('month', 1)) add('Latest month', { set: { time: { mode: 'rolling', unit: 'month', count: 1 } } })
+      if (!isRolling('week', 4)) add('Last 4 weeks', { set: { time: WEEKS } })
+      if (spec.columns === 'month') add('By broadcast week', { set: { columns: 'broadcast_week', time: QUARTER_OF_WEEKS } })
       if (!spec.columns && !spec.zero_share && !spec.calcs.includes('share')) add('Add share of total', { add: { calcs: ['share'] } })
       if (spec.zero_share?.versus.length) add('Compare with all other properties', { set: { 'zero_share.versus': [], 'zero_share.all': true } })
       if (!spec.measures.includes('occurrences')) add('Add occurrences', { add: { measures: ['occurrences'] } })
@@ -892,8 +1130,10 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       if (!('columns' in tpl.spec)) p.set.columns = null
       if (!('calcs' in tpl.spec)) p.set.calcs = []
       if (!('zero_share' in tpl.spec)) p.set.zero_share = null
+      if (!('compare' in tpl.spec)) p.set.compare = null
     }
-    const zero = tpl ? tpl.id === 'zero_share' : Boolean(cur.zero_share)
+    const zero = tpl ? 'zero_share' in tpl.spec : Boolean(cur.zero_share)
+    const comparing = tpl ? 'compare' in tpl.spec : Boolean(cur.compare)
     const named = new Set<Group>()
     for (const e of u.entities ?? []) {
       if (zero && e.type === 'property') {
@@ -902,6 +1142,11 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       }
       const d = DIMS[e.type as Dim]
       if (!d || d.time) continue
+      // Comparing: brands named are the person's own; categories are who they compete with.
+      if (comparing && (d.group === 'who' || d.group === 'what')) {
+        ;(p.add[d.group === 'who' ? 'compare.mine' : 'compare.rivals'] ??= []).push(e.id)
+        continue
+      }
       ;(p.add[`filters.${e.type}`] ??= []).push(e.id)
       named.add(d.group)
     }
@@ -911,8 +1156,16 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       if (named.size && cur.scope === 'all') p.set.scope = null
     }
     if (tpl && 'zero_share' in tpl.spec && p.add['zero_share.mine']) {
-      p.set.zero_share = { mine: p.add['zero_share.mine'], versus: [] }
+      p.set.zero_share = { ...(tpl.spec.zero_share as object), mine: p.add['zero_share.mine'], versus: [] }
       delete p.add['zero_share.mine']
+    }
+    if (comparing && (p.add['compare.mine'] || p.add['compare.rivals'])) {
+      const base = tpl ? { mine: [], rivals: [] } : (cur.compare ?? { mine: [], rivals: [] })
+      if (tpl || !u.add) {
+        p.set.compare = { ...base, mine: p.add['compare.mine'] ?? base.mine, rivals: p.add['compare.rivals'] ?? base.rivals }
+        delete p.add['compare.mine']
+        delete p.add['compare.rivals']
+      }
     }
     if (u.time) p.set.time = u.time
     if (u.rows?.length) {
@@ -943,18 +1196,20 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         final_through: monthLabel(a.through),
         current_month_loading: monthLabel(a.prelim),
       },
-      dimensions: (Object.keys(DIMS) as Dim[]).map((key) => ({ key, label: DIMS[key].label, group: DIMS[key].group, group_label: GROUP_LABEL[DIMS[key].group], can_filter: !DIMS[key].time, can_be_columns: ['month', 'quarter', 'year', 'media_type', 'property', 'industry', 'category'].includes(key) })),
+      dimensions: (Object.keys(DIMS) as Dim[]).map((key) => ({ key, label: DIMS[key].label, group: DIMS[key].group, group_label: GROUP_LABEL[DIMS[key].group], can_filter: !DIMS[key].time, can_be_columns: ['month', 'quarter', 'year', 'day', 'week', 'broadcast_week', 'media_type', 'property', 'industry', 'category'].includes(key) })),
       measures: (Object.keys(MEASURES) as MeasureKey[]).map((key) => ({ key, label: MEASURES[key].label })),
       calcs: Object.entries(CALCS).map(([key, c]) => ({ key, label: c.label, note: c.note })),
       time: [
         { mode: 'rolling', example: RECENT, note: 'Last N complete months. Moves forward when new data loads, so it suits saved reports. All media start in ' + monthLabel(a.firstComplete) + '.' },
+        { mode: 'rolling', example: WEEKS, note: 'Last N complete broadcast weeks (Monday to Sunday), or unit "day" for the last N days. Moves forward with new data.' },
         { mode: 'ytd', example: { mode: 'ytd' }, note: 'January through the latest complete month.' },
-        { mode: 'static', example: { mode: 'static', start: monthId(a.firstComplete), end: monthId(a.through) }, note: 'A fixed range of months. Does not move.' },
+        { mode: 'static', example: { mode: 'static', start: monthId(a.firstComplete), end: monthId(a.through) }, note: 'A fixed range of months (YYYY-MM), or of days (YYYY-MM-DD). Does not move.' },
       ],
       templates: TEMPLATES.map((t) => ({ id: t.id, label: t.label, description: t.description, spec: clone(t.spec) as Spec })),
       rules: [
         'Filters inside one group (who, what, where) are combined with OR; the groups are combined with AND.',
         'Share of total and change vs prior year cannot be combined with a column breakdown.',
+        'Day breakdowns cover up to 3 months; week and broadcast week up to a year. "week" starts on Sunday; "broadcast_week" on Monday.',
         `The data covers all media from ${monthLabel(a.firstComplete)}; earlier months hold only some media, so default to the last 3 complete months.`,
         'Spend is the spend for the paying advertiser and product (promos and PSAs excluded).',
       ],

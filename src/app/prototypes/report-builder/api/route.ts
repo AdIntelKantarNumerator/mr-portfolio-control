@@ -50,8 +50,10 @@ function readAction(raw: unknown): PageAction | null {
     case 'run_saved':
     case 'delete_saved':
       return { type: a.type, report: str('report') }
+    case 'start':
+      return { type: 'start', mode: a.mode === 'buyer' || a.mode === 'publisher' ? a.mode : undefined }
     default:
-      return { type: a.type as 'start' | 'demo_month' | 'save_comp_set' }
+      return { type: a.type as 'demo_month' | 'save_comp_set' }
   }
 }
 
@@ -82,11 +84,11 @@ export async function POST(req: Request) {
 
   // The competitive-set panel: a search for names, and edits to the stored set.
   if (body.compSearch && typeof body.compSearch === 'object') {
-    const s = body.compSearch as { q?: unknown; side?: unknown }
+    const s = body.compSearch as { q?: unknown; side?: unknown; set?: unknown }
     const q = typeof s.q === 'string' ? s.q.trim().slice(0, 80) : ''
     if (!q) return Response.json([])
     try {
-      return Response.json(await reportBuilderCompSearch(email, q, s.side === 'mine' ? 'mine' : 'versus'))
+      return Response.json(await reportBuilderCompSearch(email, q, s.side === 'mine' ? 'mine' : 'versus', s.set === 'brands' ? 'brands' : 'properties'))
     } catch (err) {
       return Response.json({ error: (err as Error).message }, { status: 400 })
     }
@@ -101,7 +103,7 @@ export async function POST(req: Request) {
     else if (e.op === 'clear') edit = { op: 'clear' }
     if (!edit) return Response.json({ error: 'Unknown edit.' }, { status: 400 })
     try {
-      return Response.json({ compSet: await reportBuilderCompEdit(email, edit) })
+      return Response.json({ compSet: await reportBuilderCompEdit(email, edit, e.set === 'brands' ? 'brands' : 'properties') })
     } catch (err) {
       return Response.json({ error: (err as Error).message }, { status: 400 })
     }

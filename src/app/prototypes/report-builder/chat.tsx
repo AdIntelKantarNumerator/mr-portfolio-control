@@ -15,9 +15,10 @@
  */
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { MarkdownView } from '@/components/markdown-view'
+import { Kicker } from '@/components/ui'
 import type { CompSetView, PageReply } from '@/lib/report-builder/agent'
 import type { SavedItem } from '@/lib/report-builder/page-view'
-import type { View, ViewTable, ViewTree } from '@/lib/report-builder/tools'
+import type { IntelMode, SetKind, View, ViewTable, ViewTree } from '@/lib/report-builder/tools'
 
 interface Message {
   id: number
@@ -27,7 +28,7 @@ interface Message {
 }
 
 type Action =
-  | { type: 'start' }
+  | { type: 'start'; mode?: IntelMode }
   | { type: 'choose'; choice: string }
   | { type: 'run'; name?: string }
   | { type: 'save'; name: string; replace?: boolean }
@@ -37,7 +38,46 @@ type Action =
   | { type: 'demo_month' }
   | { type: 'save_comp_set' }
 
-const EXAMPLES = ['Media mix for Toyota and Ford, last 6 months', "Which automotive advertisers aren't buying on ESPN?", 'Spend trend for Verizon, AT&T and T-Mobile', 'Run my auto insurance share report']
+/** The two kinds of client the prototype shows: a media owner selling, and a brand or buyer watching competitors. */
+const MODES: Record<IntelMode, { label: string; hello: string; examples: string[] }> = {
+  publisher: {
+    label: 'Publisher Intel',
+    hello: 'Hi! I can find advertisers for your properties: who buys your competitors but not you, your share of their spend, and who is buying you now. Pick a starting point, or tell me what you need.',
+    examples: ["Who's buying Network TV but not Fox, last 4 weeks?", 'Share of wallet for CBS against NBC and ABC', 'Top advertisers on ESPN by broadcast week', 'Which categories spend on Cable TV but not with us?'],
+  },
+  buyer: {
+    label: 'Competitive Intel',
+    hello: 'Hi! I can show what your competitors are doing: their media mix, share of voice, weekly spend and where they run. Pick a starting point, or tell me what you need.',
+    examples: ['Media mix for Toyota vs Honda and Ford, last 3 months', 'Share of voice for Progressive in vehicle insurance', 'Weekly spend for Verizon vs AT&T and T-Mobile', "Where are Nike's competitors advertising?"],
+  },
+}
+
+/** A small line icon for each kind of report. */
+const ICON_PATHS: Record<string, string[]> = {
+  advertiser_trend: ['M3 17l6-6 4 4 8-8', 'M15 7h6v6'],
+  competitive_trend: ['M3 16l5-5 5 2 8-7', 'M3 20l6-3 5 1 7-4'],
+  media_mix: ['M12 3a9 9 0 1 0 9 9h-9z', 'M15 3.5A9 9 0 0 1 20.5 9H15z'],
+  competitive_mix: ['M12 3a9 9 0 1 0 9 9h-9z', 'M15 3.5A9 9 0 0 1 20.5 9H15z'],
+  category_share: ['M4 20V10', 'M10 20V4', 'M16 20v-7', 'M22 20H2'],
+  share_of_voice: ['M3 10v4h4l6 4V6l-6 4z', 'M17 9a4 4 0 0 1 0 6', 'M19.5 6.5a8 8 0 0 1 0 11'],
+  zero_share: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z', 'M5.6 18.4L18.4 5.6'],
+  share_of_wallet: ['M3 7h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z', 'M3 7l12-4v4', 'M16 13.5h2'],
+  my_advertisers: ['M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z', 'M2.5 20a6.5 6.5 0 0 1 13 0', 'M16 4.5a3.5 3.5 0 0 1 0 6.5', 'M18 14a6.5 6.5 0 0 1 3.5 6'],
+  competitor_categories: ['M4 4h7v7H4z', 'M13 4h7v7h-7z', 'M4 13h7v7H4z', 'M13 13h7v7h-7z'],
+  competitor_placements: ['M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z', 'M12 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z'],
+  detail_extract: ['M3 5h18v14H3z', 'M3 10h18', 'M3 14.5h18', 'M9 5v14'],
+}
+function ReportIcon({ id }: { id: string }) {
+  const paths = ICON_PATHS[id]
+  if (!paths) return null
+  return (
+    <svg className="rb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {paths.map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
+  )
+}
 
 const newId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`)
 
@@ -139,7 +179,7 @@ function Chart({ table }: { table: ViewTable }) {
   // The period columns of the first measure (with several, each period has one per measure).
   const firstMeasure = table.columns.find((c) => c.colId && c.measure)?.measure
   const timeIdx = table.columns
-    .map((c, i) => (c.colId && /^\d{4}(-?\d{2}|-Q\d)?$/.test(c.colId) && c.type === 'money' && (!firstMeasure || c.measure === firstMeasure) ? i : -1))
+    .map((c, i) => (c.colId && /^\d{4}(-?\d{2}(-\d{2})?|-Q\d)?$/.test(c.colId) && c.type === 'money' && (!firstMeasure || c.measure === firstMeasure) ? i : -1))
     .filter((i) => i >= 0)
   if (!table.rows.length || !table.columns.some((c) => c.type === 'money')) return null
   const W = 640
@@ -284,7 +324,7 @@ async function post<T>(body: unknown): Promise<T> {
 }
 
 /** Adds a name to one side of the set: type, pick from what matches. */
-function CompAdd({ side, onAdd }: { side: 'mine' | 'versus'; onAdd: (h: Hit) => void }) {
+function CompAdd({ side, set, onAdd }: { side: 'mine' | 'versus'; set: SetKind; onAdd: (h: Hit) => void }) {
   const [q, setQ] = useState('')
   const [hits, setHits] = useState<Hit[] | null>(null)
   const [busy, setBusy] = useState(false)
@@ -293,7 +333,7 @@ function CompAdd({ side, onAdd }: { side: 'mine' | 'versus'; onAdd: (h: Hit) => 
     if (!q.trim()) return
     setBusy(true)
     try {
-      setHits(await post<Hit[]>({ compSearch: { q, side } }))
+      setHits(await post<Hit[]>({ compSearch: { q, side, set } }))
     } catch {
       setHits([])
     } finally {
@@ -303,7 +343,12 @@ function CompAdd({ side, onAdd }: { side: 'mine' | 'versus'; onAdd: (h: Hit) => 
   return (
     <div className="rb-compadd">
       <form className="rb-row" onSubmit={look}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={side === 'mine' ? 'Add a property or owner' : 'Add a property, media, owner or market'} aria-label={side === 'mine' ? 'Add one of your properties' : 'Add a competitor'} />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={set === 'brands' ? (side === 'mine' ? 'Add a brand or advertiser' : 'Add an advertiser or category') : side === 'mine' ? 'Add a property or owner' : 'Add a property, media, owner or market'}
+          aria-label={side === 'mine' ? 'Add one of yours' : 'Add a competitor'}
+        />
         <button type="submit" className="btn rb-small" disabled={busy || !q.trim()}>
           {busy ? '…' : 'Find'}
         </button>
@@ -335,20 +380,24 @@ function CompAdd({ side, onAdd }: { side: 'mine' | 'versus'; onAdd: (h: Hit) => 
   )
 }
 
-/** The person's competitive set: kept for every zero-share report, edited here. */
-function CompPanel({ comp, setComp }: { comp: CompSetView | null; setComp: (c: CompSetView | null) => void }) {
+/**
+ * The person's competitive set, edited here. Publisher Intel: their properties
+ * and the competing ones. Competitive Intel: their brands and competitors.
+ */
+function CompPanel({ comp, setComp, set }: { comp: CompSetView | null; setComp: (c: CompSetView | null) => void; set: SetKind }) {
   const [err, setErr] = useState<string | null>(null)
+  const brands = set === 'brands'
   async function change(edit: Record<string, unknown>) {
     setErr(null)
     try {
-      setComp((await post<{ compSet: CompSetView | null }>({ compEdit: edit })).compSet)
+      setComp((await post<{ compSet: CompSetView | null }>({ compEdit: { ...edit, set } })).compSet)
     } catch (e) {
       setErr((e as Error).message)
     }
   }
   const chip = (x: { id: string; label: string; kind: string }) => (
     <span key={x.id} className="rb-compchip" title={x.kind}>
-      {x.kind === 'Property' ? '' : <small>{x.kind}</small>}
+      {x.kind === 'Property' || x.kind === 'Advertiser' ? '' : <small>{x.kind}</small>}
       {x.label}
       <button type="button" aria-label={`Remove ${x.label}`} onClick={() => void change({ op: 'remove', id: x.id })}>
         ×
@@ -357,16 +406,18 @@ function CompPanel({ comp, setComp }: { comp: CompSetView | null; setComp: (c: C
   )
   return (
     <div className="rb-panel">
-      <p className="rb-muted">Used by every zero-share report. You&apos;ll be asked to confirm it each time.</p>
-      <div className="rb-eyebrow">Your properties</div>
+      <p className="rb-muted">{brands ? 'Used by every competitive report.' : 'Used by every publisher report.'} You&apos;ll be asked to confirm it each time.</p>
+      <div className="rb-eyebrow">{brands ? 'Your brands' : 'Your properties'}</div>
       <div className="rb-compchips">{comp?.mine.length ? comp.mine.map(chip) : <span className="rb-muted">None yet</span>}</div>
-      <CompAdd side="mine" onAdd={(h) => void change({ op: 'add', side: 'mine', id: h.id, label: h.label })} />
+      <CompAdd side="mine" set={set} onAdd={(h) => void change({ op: 'add', side: 'mine', id: h.id, label: h.label })} />
       <div className="rb-eyebrow">Competitors</div>
-      <label className="rb-check">
-        <input type="checkbox" checked={comp ? comp.all : true} onChange={(e) => void change({ op: 'all', value: e.target.checked })} /> Every other property
-      </label>
-      <div className="rb-compchips">{comp?.versus.map(chip)}</div>
-      <CompAdd side="versus" onAdd={(h) => void change({ op: 'add', side: 'versus', id: h.id, label: h.label })} />
+      {brands ? null : (
+        <label className="rb-check">
+          <input type="checkbox" checked={comp ? comp.all : true} onChange={(e) => void change({ op: 'all', value: e.target.checked })} /> Every other property
+        </label>
+      )}
+      <div className="rb-compchips">{comp?.versus.length ? comp.versus.map(chip) : brands ? <span className="rb-muted">None yet</span> : null}</div>
+      <CompAdd side="versus" set={set} onAdd={(h) => void change({ op: 'add', side: 'versus', id: h.id, label: h.label })} />
       {err ? <p className="rb-notes">{err}</p> : null}
       {comp ? (
         <button type="button" className="btn rb-small rb-danger" onClick={() => void change({ op: 'clear' })}>
@@ -533,16 +584,18 @@ function hintFor(view: View | null | undefined, editing: boolean): string {
   if (view.kind === 'question') {
     const q = (view.question ?? '').toLowerCase()
     if (q.includes('kind of report')) return 'Or describe it: "spend trend for fast food" or "who isn\'t buying on ESPN?"'
+    if (q.includes('who do you compete with')) return 'Or type them: "Honda and Ford", "all of vehicle insurance" or "the cars category"'
+    if (q.includes('brands are yours')) return 'Or type yours: "Toyota", "Progressive" or "Big Mac"'
     if (q.includes('compete with')) return 'Or type them: "CBS and Fox", "all Cable TV", "everything in the New York market"'
     if (q.includes('usual competitive set')) return 'Or say what to change: "add Hulu to my competitors", "compare with everything"'
     if (q.includes('properties are yours')) return 'Or type your networks: "NBC", "Hulu" or "ESPN and ESPN2"'
-    if (q.includes('time period')) return 'Or type a period: "last month", "August to October" or "year to date"'
+    if (q.includes('time period')) return 'Or type a period: "last 4 weeks", "August to October" or "year to date"'
     if (q.includes('category')) return 'Or type a category: "fast food", "car insurance" or "pizza restaurants"'
     if (view.acceptsName) return 'Or type a name: an advertiser ("Toyota"), a brand ("Big Mac") or a category ("fast food")'
     return 'Pick one above, or say what you want instead'
   }
   if (view.kind === 'problem') return 'Pick a fix above, or say what you want instead: "drop the columns"'
-  if (view.kind === 'ready') return 'Change it in your own words: "add Ford", "only CTV", "by network", "top 10" or "run it"'
+  if (view.kind === 'ready') return 'Change it in your own words: "by broadcast week", "only CTV", "last 4 weeks", "top 10" or "run it"'
   if (view.kind === 'run') return editing ? 'Say "save changes", or keep adjusting: "by product", "latest month only"' : 'Say "save it as Toyota mix", or keep adjusting: "by network", "add impressions"'
   if (view.kind === 'saved') return 'Start another: "category share for pizza restaurants", or "run my saved reports"'
   return 'Describe a report, or ask to run a saved one'
@@ -550,8 +603,28 @@ function hintFor(view: View | null | undefined, editing: boolean): string {
 
 // ---------------------------------------------------------------- the page
 
-export function ReportBuilderChat({ initialSaved, initialThrough, initialComp, modelReady, live }: { initialSaved: SavedItem[]; initialThrough: string; initialComp: CompSetView | null; modelReady: boolean; live: boolean }) {
+export function ReportBuilderChat({
+  initialSaved,
+  initialThrough,
+  initialComp,
+  initialBrands,
+  initialMode,
+  chatLink,
+  modelReady,
+  live,
+}: {
+  initialSaved: SavedItem[]
+  initialThrough: string
+  initialComp: CompSetView | null
+  initialBrands: CompSetView | null
+  initialMode: IntelMode
+  chatLink: string | null
+  modelReady: boolean
+  live: boolean
+}) {
+  const [mode, setMode] = useState<IntelMode>(initialMode)
   const [comp, setComp] = useState<CompSetView | null>(initialComp)
+  const [brandSet, setBrandSet] = useState<CompSetView | null>(initialBrands)
   const [chatId, setChatId] = useState(newId)
   const [messages, setMessages] = useState<Message[]>([])
   const [panel, setPanel] = useState<PageReply['panel'] | null>(null)
@@ -578,6 +651,7 @@ export function ReportBuilderChat({ initialSaved, initialThrough, initialComp, m
     if (r.saved) setSaved(r.saved)
     if (r.dataThrough) setThrough(r.dataThrough)
     if (r.compSet !== undefined) setComp(r.compSet)
+    if (r.brandSet !== undefined) setBrandSet(r.brandSet)
   }
 
   async function send(body: { action?: Action; turns?: Array<{ role: string; content: string }> }, id = chatId) {
@@ -621,19 +695,26 @@ export function ReportBuilderChat({ initialSaved, initialThrough, initialComp, m
     }
   }
 
-  function startOver() {
+  function startOver(next: IntelMode = mode) {
     const id = newId()
     setChatId(id)
     setMessages([])
     setPanel(null)
     setNaming(null)
-    void act({ type: 'start' }, null, id)
+    void act({ type: 'start', mode: next }, null, id)
+  }
+
+  /** Switching between Publisher and Competitive Intel starts a new report in that mode. */
+  function switchMode(next: IntelMode) {
+    if (next === mode || busy) return
+    setMode(next)
+    startOver(next)
   }
 
   useEffect(() => {
     if (started.current) return
     started.current = true
-    void act({ type: 'start' }, null)
+    void act({ type: 'start', mode }, null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -644,178 +725,200 @@ export function ReportBuilderChat({ initialSaved, initialThrough, initialComp, m
   }
 
   return (
-    <div className="rb-frame">
-      <section className="rb-chatcard" aria-label="Conversation">
-        <div className="rb-chathead">
-          <span className="rb-muted">{panel?.editing ? `Editing ${panel.editing}` : panel && panel.status !== 'empty' ? panel.name : 'New report'}</span>
-          <button type="button" className="btn rb-small" disabled={!!busy} onClick={startOver}>
-            + New report
-          </button>
-        </div>
-        <div className="rb-log" ref={logRef} aria-live="polite">
-          <div className="rb-msg rb-bot">
-            <p>Hi! I can set up a custom report or data extract for you. Pick a starting point, or just tell me what you need.</p>
-          </div>
-          {messages.map((m) => (
-            <MessageView
-              key={m.id}
-              m={m}
-              live={m === lastAssistant && !busy}
-              panel={panel}
-              onChoose={(label) => act({ type: 'choose', choice: label }, label)}
-              onRun={() => act({ type: 'run', name: panel?.name }, 'Run the full report')}
-              onSave={() => setNaming(panel?.name || 'My report')}
-              onNew={startOver}
-              onSaveComp={(label) => act({ type: 'save_comp_set' }, label)}
-            />
-          ))}
-          {messages.length <= 1 && !busy ? (
-            <div className="rb-msg rb-bot">
-              <span className="rb-label">Or try asking:</span>
-              <div className="rb-grid">
-                {EXAMPLES.map((e) => (
-                  <button key={e} type="button" className="rb-choice rb-quiet" disabled={!modelReady} title={modelReady ? undefined : 'Needs a model to be configured'} onClick={() => ask(e)}>
-                    {e}
-                  </button>
-                ))}
-              </div>
+    <>
+      <div className="titlerow rb-titlerow">
+        <div>
+          <Kicker>Prototypes</Kicker>
+          <div className="rb-titleline">
+            <h1>Report Builder</h1>
+            <div className="rb-modes" role="group" aria-label="Kind of client">
+              {(Object.keys(MODES) as IntelMode[]).map((m) => (
+                <button key={m} type="button" aria-pressed={mode === m} disabled={!!busy && mode !== m} onClick={() => switchMode(m)}>
+                  {MODES[m].label}
+                </button>
+              ))}
             </div>
-          ) : null}
-          {naming !== null ? (
-            <form
-              className="rb-msg rb-bot rb-naming"
-              onSubmit={(e) => {
-                e.preventDefault()
-                const name = naming.trim() || 'My report'
-                setNaming(null)
-                void act({ type: 'save', name, replace: Boolean(panel?.editing) }, `Save it as "${name}"`)
-              }}
-            >
-              <label htmlFor="rb-name">{panel?.editing ? `Save changes to "${panel.editing}", or rename to save a copy:` : 'Name this report:'}</label>
-              <div className="rb-row">
-                <input id="rb-name" value={naming} onChange={(e) => setNaming(e.target.value)} autoFocus />
-                <button type="submit" className="btn btn-primary">
-                  Save
-                </button>
-                <button type="button" className="btn" onClick={() => setNaming(null)}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          ) : null}
-          {busy ? <div className="rb-msg rb-bot rb-thinking">{busy}…</div> : null}
+          </div>
         </div>
-        <form className="rb-compose" onSubmit={submit}>
-          <input
-            id="rb-ask"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={modelReady ? hintFor(lastAssistant?.view, Boolean(panel?.editing)) : 'Typing needs a model to be configured; the buttons work without one'}
-            aria-label="Message"
-            disabled={!modelReady}
-          />
-          <button type="submit" className="btn btn-primary" disabled={!modelReady || !!busy || !input.trim()}>
-            Send
-          </button>
-        </form>
-      </section>
-
-      <aside className="rb-rail" aria-label="Report details">
-        <div className="rb-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={tab === 'report'} onClick={() => setTab('report')}>
-            Your report
-          </button>
-          <button type="button" role="tab" aria-selected={tab === 'saved'} onClick={() => setTab('saved')}>
-            Saved reports{saved.length ? ` (${saved.length})` : ''}
-          </button>
-          <button type="button" role="tab" aria-selected={tab === 'comp'} onClick={() => setTab('comp')}>
-            Competitive set
-          </button>
-        </div>
-        {tab === 'comp' ? (
-          <CompPanel comp={comp} setComp={setComp} />
-        ) : tab === 'report' ? (
-          <div className="rb-panel">
-            {!panel || panel.status === 'empty' ? (
-              <p className="rb-muted">Your report takes shape here as you answer. When it looks right, run it, download it, or save it to run again whenever new data arrives.</p>
-            ) : (
-              <>
-                <div className="rb-eyebrow">{panel.editing ? 'Editing saved report' : 'Report being built'}</div>
-                <div className="rb-name">{panel.editing ?? panel.name}</div>
-                <dl className="rb-dl">
-                  <dt>Status</dt>
-                  <dd>
-                    <span className={`rb-status rb-${panel.status}`}>{panel.statusText}</span>
-                  </dd>
-                  {panel.rows.map((r) => (
-                    <div key={r.label} className="rb-dlrow">
-                      <dt>{r.label}</dt>
-                      <dd>{r.value}</dd>
-                    </div>
+        {chatLink ? (
+          <a className="rb-muted rb-cap" href={chatLink} target="report-builder" rel="noopener">
+            Also in the chat window, as text
+          </a>
+        ) : null}
+      </div>
+      <div className="rb-frame">
+        <section className="rb-chatcard" aria-label="Conversation">
+          <div className="rb-chathead">
+            <span className="rb-muted">{panel?.editing ? `Editing ${panel.editing}` : panel && panel.status !== 'empty' ? panel.name : 'New report'}</span>
+            <button type="button" className="btn rb-small" disabled={!!busy} onClick={() => startOver()}>
+              + New report
+            </button>
+          </div>
+          <div className="rb-log" ref={logRef} aria-live="polite">
+            <div className="rb-msg rb-bot">
+              <p>{MODES[mode].hello}</p>
+            </div>
+            {messages.map((m) => (
+              <MessageView
+                key={m.id}
+                m={m}
+                live={m === lastAssistant && !busy}
+                panel={panel}
+                onChoose={(label) => act({ type: 'choose', choice: label }, label)}
+                onRun={() => act({ type: 'run', name: panel?.name }, 'Run the full report')}
+                onSave={() => setNaming(panel?.name || 'My report')}
+                onNew={() => startOver()}
+                onSaveComp={(label) => act({ type: 'save_comp_set' }, label)}
+              />
+            ))}
+            {messages.length <= 1 && !busy ? (
+              <div className="rb-msg rb-bot">
+                <span className="rb-label">Or try asking:</span>
+                <div className="rb-grid">
+                  {MODES[mode].examples.map((e) => (
+                    <button key={e} type="button" className="rb-choice rb-quiet" disabled={!modelReady} title={modelReady ? undefined : 'Needs a model to be configured'} onClick={() => ask(e)}>
+                      {e}
+                    </button>
                   ))}
-                  <dt>Period</dt>
-                  <dd>
-                    {panel.period ?? 'Not chosen yet'}{' '}
-                    {panel.period ? <span className={`rb-pill${panel.picksUpNewData ? ' rb-live' : ''}`}>{panel.picksUpNewData ? 'updates with new data' : 'fixed'}</span> : null}
-                  </dd>
-                </dl>
-              </>
+                </div>
+              </div>
+            ) : null}
+            {naming !== null ? (
+              <form
+                className="rb-msg rb-bot rb-naming"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  const name = naming.trim() || 'My report'
+                  setNaming(null)
+                  void act({ type: 'save', name, replace: Boolean(panel?.editing) }, `Save it as "${name}"`)
+                }}
+              >
+                <label htmlFor="rb-name">{panel?.editing ? `Save changes to "${panel.editing}", or rename to save a copy:` : 'Name this report:'}</label>
+                <div className="rb-row">
+                  <input id="rb-name" value={naming} onChange={(e) => setNaming(e.target.value)} autoFocus />
+                  <button type="submit" className="btn btn-primary">
+                    Save
+                  </button>
+                  <button type="button" className="btn" onClick={() => setNaming(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : null}
+            {busy ? <div className="rb-msg rb-bot rb-thinking">{busy}…</div> : null}
+          </div>
+          <form className="rb-compose" onSubmit={submit}>
+            <input
+              id="rb-ask"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={modelReady ? hintFor(lastAssistant?.view, Boolean(panel?.editing)) : 'Typing needs a model to be configured; the buttons work without one'}
+              aria-label="Message"
+              disabled={!modelReady}
+            />
+            <button type="submit" className="btn btn-primary" disabled={!modelReady || !!busy || !input.trim()}>
+              Send
+            </button>
+          </form>
+        </section>
+
+        <aside className="rb-rail" aria-label="Report details">
+          <div className="rb-tabs" role="tablist">
+            <button type="button" role="tab" aria-selected={tab === 'report'} onClick={() => setTab('report')}>
+              Your report
+            </button>
+            <button type="button" role="tab" aria-selected={tab === 'saved'} onClick={() => setTab('saved')}>
+              Saved reports{saved.length ? ` (${saved.length})` : ''}
+            </button>
+            <button type="button" role="tab" aria-selected={tab === 'comp'} onClick={() => setTab('comp')}>
+              Competitive set
+            </button>
+          </div>
+          {tab === 'comp' ? (
+            mode === 'buyer' ? <CompPanel key="brands" set="brands" comp={brandSet} setComp={setBrandSet} /> : <CompPanel key="properties" set="properties" comp={comp} setComp={setComp} />
+          ) : tab === 'report' ? (
+            <div className="rb-panel">
+              {!panel || panel.status === 'empty' ? (
+                <p className="rb-muted">Your report takes shape here as you answer. When it looks right, run it, download it, or save it to run again whenever new data arrives.</p>
+              ) : (
+                <>
+                  <div className="rb-eyebrow">{panel.editing ? 'Editing saved report' : 'Report being built'}</div>
+                  <div className="rb-name">{panel.editing ?? panel.name}</div>
+                  <dl className="rb-dl">
+                    <dt>Status</dt>
+                    <dd>
+                      <span className={`rb-status rb-${panel.status}`}>{panel.statusText}</span>
+                    </dd>
+                    {panel.rows.map((r) => (
+                      <div key={r.label} className="rb-dlrow">
+                        <dt>{r.label}</dt>
+                        <dd>{r.value}</dd>
+                      </div>
+                    ))}
+                    <dt>Period</dt>
+                    <dd>
+                      {panel.period ?? 'Not chosen yet'}{' '}
+                      {panel.period ? <span className={`rb-pill${panel.picksUpNewData ? ' rb-live' : ''}`}>{panel.picksUpNewData ? 'updates with new data' : 'fixed'}</span> : null}
+                    </dd>
+                  </dl>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="rb-panel">
+              <p className="rb-muted">Run a saved report any time to get it on the newest data.</p>
+              {!saved.length ? <p className="rb-muted">None yet. Build a report and choose Save report.</p> : null}
+              {saved.map((s) => (
+                <div key={s.id} className="rb-saved">
+                  <div className="rb-row">
+                    <b>{s.name}</b>
+                    <span className={`rb-pill${s.picksUpNewData ? ' rb-live' : ''}`}>{s.picksUpNewData ? 'updates with new data' : 'fixed period'}</span>
+                  </div>
+                  <p className="rb-muted">{s.summary}</p>
+                  <p className="rb-muted rb-cap">{s.lastRun ? `Last run: ${s.lastRun}` : 'Not run yet'}</p>
+                  <div className="rb-row">
+                    <button type="button" className="btn" disabled={!!busy} onClick={() => act({ type: 'run_saved', report: s.id }, `Run ${s.name}`)}>
+                      Run
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={!!busy}
+                      onClick={() => {
+                        setTab('report')
+                        void act({ type: 'open_saved', report: s.id }, `Change ${s.name}`)
+                      }}
+                    >
+                      Change
+                    </button>
+                    <button
+                      type="button"
+                      className="btn rb-danger"
+                      disabled={!!busy}
+                      onClick={() => {
+                        if (arming !== s.id) return setArming(s.id)
+                        setArming(null)
+                        void act({ type: 'delete_saved', report: s.id }, `Delete ${s.name}`)
+                      }}
+                    >
+                      {arming === s.id ? 'Confirm delete' : 'Delete'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="rb-railfoot">
+            <span className="rb-muted">{live ? `Live data, complete through ${through}` : `Final data through ${through}`}</span>
+            {live ? null : (
+              <button type="button" className="btn rb-small" disabled={!!busy} title="For demonstrations: pretend next month's data has arrived" onClick={() => act({ type: 'demo_month' }, 'Demo: load next month of data')}>
+                Demo: load next month
+              </button>
             )}
           </div>
-        ) : (
-          <div className="rb-panel">
-            <p className="rb-muted">Run a saved report any time to get it on the newest data.</p>
-            {!saved.length ? <p className="rb-muted">None yet. Build a report and choose Save report.</p> : null}
-            {saved.map((s) => (
-              <div key={s.id} className="rb-saved">
-                <div className="rb-row">
-                  <b>{s.name}</b>
-                  <span className={`rb-pill${s.picksUpNewData ? ' rb-live' : ''}`}>{s.picksUpNewData ? 'updates with new data' : 'fixed period'}</span>
-                </div>
-                <p className="rb-muted">{s.summary}</p>
-                <p className="rb-muted rb-cap">{s.lastRun ? `Last run: ${s.lastRun}` : 'Not run yet'}</p>
-                <div className="rb-row">
-                  <button type="button" className="btn" disabled={!!busy} onClick={() => act({ type: 'run_saved', report: s.id }, `Run ${s.name}`)}>
-                    Run
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={!!busy}
-                    onClick={() => {
-                      setTab('report')
-                      void act({ type: 'open_saved', report: s.id }, `Change ${s.name}`)
-                    }}
-                  >
-                    Change
-                  </button>
-                  <button
-                    type="button"
-                    className="btn rb-danger"
-                    disabled={!!busy}
-                    onClick={() => {
-                      if (arming !== s.id) return setArming(s.id)
-                      setArming(null)
-                      void act({ type: 'delete_saved', report: s.id }, `Delete ${s.name}`)
-                    }}
-                  >
-                    {arming === s.id ? 'Confirm delete' : 'Delete'}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="rb-railfoot">
-          <span className="rb-muted">{live ? `Live data, complete through ${through}` : `Final data through ${through}`}</span>
-          {live ? null : (
-            <button type="button" className="btn rb-small" disabled={!!busy} title="For demonstrations: pretend next month's data has arrived" onClick={() => act({ type: 'demo_month' }, 'Demo: load next month of data')}>
-              Demo: load next month
-            </button>
-          )}
-        </div>
-      </aside>
-    </div>
+        </aside>
+      </div>
+    </>
   )
 }
 
@@ -872,9 +975,12 @@ function MessageView({
       {live && (v?.kind === 'question' || v?.kind === 'problem') && choices.length ? (
         <div className="rb-grid">
           {choices.map((c) => (
-            <button key={c.number} type="button" className="rb-choice" onClick={() => onChoose(c.label)}>
-              <b>{c.label}</b>
-              {c.description ? <small>{c.description}</small> : null}
+            <button key={c.number} type="button" className={`rb-choice${c.icon ? ' rb-withicon' : ''}`} onClick={() => onChoose(c.label)}>
+              {c.icon ? <ReportIcon id={c.icon} /> : null}
+              <span className="rb-choicetext">
+                <b>{c.label}</b>
+                {c.description ? <small>{c.description}</small> : null}
+              </span>
             </button>
           ))}
         </div>

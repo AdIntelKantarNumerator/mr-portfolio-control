@@ -8,7 +8,6 @@
  *
  * Only people with "Sees prototypes" reach it (lib/access-rules.ts).
  */
-import { Kicker } from '@/components/ui'
 import { currentAccess } from '@/lib/auth/access'
 import { REPORT_BUILDER_MODEL_ID, reportBuilderOverview } from '@/lib/report-builder/agent'
 import { chooseModel } from '@/lib/report-builder/model'
@@ -24,18 +23,16 @@ export default async function ReportBuilderPage() {
 
   return (
     <div className="stack">
-      <div className="titlerow">
-        <div>
-          <Kicker>Prototypes</Kicker>
-          <h1>Report Builder</h1>
-        </div>
-        {chatUrl ? (
-          <a className="rb-muted rb-cap" href={`${chatUrl}/?model=${REPORT_BUILDER_MODEL_ID}`} target="report-builder" rel="noopener">
-            Also in the chat window, as text
-          </a>
-        ) : null}
-      </div>
-      <ReportBuilderChat initialSaved={overview.saved} initialThrough={overview.dataThrough} initialComp={overview.compSet} modelReady={Boolean(chooseModel())} live={overview.live} />
+      <ReportBuilderChat
+        initialSaved={overview.saved}
+        initialThrough={overview.dataThrough}
+        initialComp={overview.compSet}
+        initialBrands={overview.brandSet}
+        initialMode={overview.mode}
+        chatLink={chatUrl ? `${chatUrl}/?model=${REPORT_BUILDER_MODEL_ID}` : null}
+        modelReady={Boolean(chooseModel())}
+        live={overview.live}
+      />
       <p className="rb-muted rb-cap">
         {overview.live
           ? `A prototype on live data from the development data server. All media are covered from ${overview.allMediaFrom}; earlier months hold only some media, and development figures can change while the data team works.`

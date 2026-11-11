@@ -341,3 +341,66 @@ test('competitors can be named: properties, a media type or everything, and the 
   assert.ok(wide >= narrow && wide > 0, `everything (${wide}) finds at least as many as one competitor (${narrow})`)
   await assert.rejects(runTool(ctx, 'change_report', { use_competitive_set: true }), /no stored competitive set/)
 })
+
+test('each mode offers its own report types, in order, with an icon each; chat hosts keep the classic five', async () => {
+  const ids = async (mode?: 'publisher' | 'buyer') => {
+    const ctx = context()
+    if (mode) ctx.chat.mode = mode
+    await call(ctx, 'new_report')
+    return ctx.view!.choices!.map((c) => c.icon)
+  }
+  assert.deepEqual(await ids('publisher'), ['zero_share', 'share_of_wallet', 'my_advertisers', 'competitor_categories', 'advertiser_trend', 'detail_extract'])
+  assert.deepEqual(await ids('buyer'), ['competitive_mix', 'share_of_voice', 'competitive_trend', 'competitor_placements', 'category_share', 'detail_extract'])
+  assert.deepEqual(await ids(), ['advertiser_trend', 'media_mix', 'category_share', 'zero_share', 'detail_extract'])
+})
+
+test('share of wallet splits each advertiser between you and your competitors', async () => {
+  const ctx = context()
+  ctx.chat.mode = 'publisher'
+  await call(ctx, 'new_report', { template: 'share_of_wallet' })
+  await call(ctx, 'choose', { choice: '1' })
+  await call(ctx, 'choose', { choice: 'All other properties' })
+  assert.equal(ctx.view?.kind, 'ready')
+  const t = ctx.view!.table!
+  assert.deepEqual(t.columns.slice(1).map((c) => c.label), ['Spend with you', 'Spend with competitors', 'Your share'])
+  for (const r of t.rows) assert.ok(Number(r[3]) >= 0 && Number(r[3]) <= 100)
+  assert.match(String(ctx.view?.title), /^Share of wallet: /)
+})
+
+test('"your advertisers" asks only for your properties', async () => {
+  const ctx = context()
+  await call(ctx, 'new_report', { template: 'my_advertisers' })
+  assert.equal(ctx.view?.question, 'Which properties are yours?')
+  await call(ctx, 'choose', { choice: '1' })
+  assert.equal(ctx.view?.kind, 'ready')
+  assert.equal(ctx.view?.table?.columns.at(-1)?.label, 'Total spend')
+})
+
+test('competitive intel: your brands, then competitors (advertisers or a whole category); kept and offered next time', async () => {
+  const ctx = context()
+  let stored: CompSet | null = null
+  ctx.brands = { get: () => stored, set: (c) => void (stored = c) }
+  ctx.chat.mode = 'buyer'
+  await call(ctx, 'new_report', { template: 'share_of_voice' })
+  assert.equal(ctx.view?.question, 'Which brands are yours?')
+  const toyota = ((await call(ctx, 'search_names', { query: 'Toyota', types: ['advertiser'] })).matches as Array<{ id: string }>)[0]!
+  await call(ctx, 'change_report', { my_brands: [toyota.id] })
+  assert.equal(ctx.view?.question, 'Who do you compete with?')
+  const labels = ctx.view!.choices!.map((c) => c.label)
+  assert.ok(labels.some((l) => l.startsWith('All of ')), 'a whole category is a choice')
+  await call(ctx, 'choose', { choice: labels.find((l) => l.startsWith('All of '))! })
+  assert.equal(ctx.view?.kind, 'ready')
+  const rows = ctx.view!.table!.rows
+  assert.ok(rows.some((r) => String(r[0]).endsWith('(you)')), 'your brand is marked')
+  const shares = rows.map((r) => Number(r[2]))
+  assert.ok(shares.every((s) => s >= 0 && s <= 100))
+  assert.equal(ctx.view?.compSetOffer?.set, 'brands')
+  await call(ctx, 'competitive_set', { action: 'save_from_report' })
+  assert.ok(stored)
+
+  await call(ctx, 'new_report', { template: 'competitive_mix' })
+  assert.equal(ctx.view?.question, 'Use your usual competitive set?')
+  await call(ctx, 'choose', { choice: 'Yes, use it' })
+  assert.equal(ctx.view?.kind, 'ready')
+  assert.match(String(ctx.view?.title), /Toyota vs all /)
+})

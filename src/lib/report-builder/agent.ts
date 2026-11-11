@@ -21,12 +21,12 @@ import { dataSource, engineFor as pickEngine, type ReportEngine } from './engine
 import { chooseModel, runLoop, ReportModelError, type Post, type Turn } from './model'
 import { describeReport, savedList } from './page-view'
 import { REPORT_BUILDER_PAGE_SKILL, REPORT_BUILDER_SKILL } from './skill'
-import { TOOLS, compText, emptyChat, expandRow, progressNote, runTool, type ChatState, type CompSet, type ToolContext, type View, type ViewTable } from './tools'
+import { MODE_LABEL, TOOLS, compText, emptyChat, expandRow, progressNote, runTool, type ChatState, type CompSet, type IntelMode, type SetKind, type SetStore, type ToolContext, type View, type ViewTable } from './tools'
 
 export const REPORT_BUILDER_MODEL_ID = 'report-builder'
 export const REPORT_BUILDER_MODEL_NAME = 'Report Builder'
 
-type StampedState = EngineState & { source?: string; competitive?: CompSet | null }
+type StampedState = EngineState & { source?: string; competitive?: CompSet | null; brandSet?: CompSet | null; mode?: IntelMode }
 
 /** A saved report, as the person's examples start out: one to re-run on the first day. */
 async function starterState(engine: ReportEngine): Promise<void> {
@@ -38,13 +38,22 @@ async function starterState(engine: ReportEngine): Promise<void> {
 }
 
 /** An engine over one person's saved reports, held in memory for the turn. */
-export async function engineFor(state: StampedState | null): Promise<{ engine: ReportEngine; state: () => StampedState; fresh: boolean; comp: NonNullable<ToolContext['comp']> }> {
+export async function engineFor(state: StampedState | null): Promise<{
+  engine: ReportEngine
+  state: () => StampedState
+  fresh: boolean
+  comp: SetStore
+  brands: SetStore
+  mode: { get(): IntelMode; set(m: IntelMode): void }
+}> {
   const source = dataSource()
   const usable = state && (state.source ?? 'sample') === source
   let mem: StampedState = usable ? state : { saved: [], offset: 0, seq: 0, source }
-  // The engine keeps saved reports; the competitive set rides alongside, untouched by it.
-  const engine = pickEngine({ load: () => mem, save: (s) => (mem = { ...s, source, competitive: mem.competitive ?? null }) })
-  const comp = { get: () => mem.competitive ?? null, set: (c: CompSet | null) => (mem = { ...mem, competitive: c }) }
+  // The engine keeps saved reports; the competitive sets and the mode ride alongside, untouched by it.
+  const engine = pickEngine({ load: () => mem, save: (s) => (mem = { ...s, source, competitive: mem.competitive ?? null, brandSet: mem.brandSet ?? null, mode: mem.mode }) })
+  const comp = { get: () => mem.competitive ?? null, set: (c: CompSet | null) => void (mem = { ...mem, competitive: c }) }
+  const brands = { get: () => mem.brandSet ?? null, set: (c: CompSet | null) => void (mem = { ...mem, brandSet: c }) }
+  const mode = { get: (): IntelMode => mem.mode ?? 'publisher', set: (m: IntelMode) => void (mem = { ...mem, mode: m }) }
   if (!usable) {
     try {
       await starterState(engine)
@@ -52,7 +61,7 @@ export async function engineFor(state: StampedState | null): Promise<{ engine: R
       // No starter on a bad day for the data; the person starts with none.
     }
   }
-  return { engine, state: () => mem, fresh: !usable, comp }
+  return { engine, state: () => mem, fresh: !usable, comp, brands, mode }
 }
 
 export async function loadUser(email: string): Promise<EngineState | null> {
@@ -104,11 +113,15 @@ async function withSession<T>(email: string, chatId: string | null, appUrl: stri
   const who = email.trim().toLowerCase()
   const chatKey = chatId?.trim() || `default:${who}`
   const before = await loadUser(who)
-  const { engine, state, fresh, comp } = await engineFor(before)
+  const { engine, state, fresh, comp, brands, mode } = await engineFor(before)
   const chat = await loadChat(chatKey, who)
   const chatBefore = JSON.stringify(chat)
   const userBefore = JSON.stringify(state())
-  const ctx: ToolContext = { engine, chat, comp, downloadUrl: (spec, n) => downloadUrl(appUrl, spec, n) }
+  const ctx: ToolContext = { engine, chat, comp, brands, downloadUrl: (spec, n) => downloadUrl(appUrl, spec, n) }
+  ctx.setMode = (m) => {
+    chat.mode = m
+    mode.set(m)
+  }
 
   const out = await work(ctx)
 
@@ -121,9 +134,12 @@ async function modelTurn(ctx: ToolContext, input: TurnInput, system: string): Pr
   const choice = chooseModel()
   if (!choice) throw new ReportModelError('No model is configured for Report Builder. Set REPORT_BUILDER_MODEL and REPORT_BUILDER_PROVIDERS (OpenRouter), or ANTHROPIC_API_KEY.')
   let last = ''
+  const intel = ctx.chat.mode
+    ? `\n\nThis conversation is in ${MODE_LABEL[ctx.chat.mode]} mode: the user is ${ctx.chat.mode === 'publisher' ? 'a media owner (publisher) selling advertising on their properties' : 'a brand, agency or media buyer watching competitors'}. Offer that mode's report types (report_options lists them) and use its competitive set: ${ctx.chat.mode === 'publisher' ? 'their properties and competing properties' : 'their brands and competing brands or categories'}.`
+    : ''
   return runLoop(
     {
-      system,
+      system: system + intel,
       turns: input.turns,
       tools: TOOLS,
       exec: (name, args) => runTool(ctx, name, args),
@@ -150,7 +166,7 @@ export async function reportBuilderTurn(input: TurnInput): Promise<string> {
 // ---------------------------------------------------------------------------
 
 export type PageAction =
-  | { type: 'start' }
+  | { type: 'start'; mode?: IntelMode }
   | { type: 'choose'; choice: string }
   | { type: 'run'; name?: string }
   | { type: 'save'; name: string; replace?: boolean }
@@ -236,12 +252,14 @@ export interface PageReply {
   dataThrough: string
   live: boolean
   compSet: CompSetView | null
+  brandSet: CompSetView | null
 }
 
 async function reply(ctx: ToolContext, text: string): Promise<PageReply> {
   return {
     text,
     compSet: compView(ctx.comp?.get() ?? null),
+    brandSet: compView(ctx.brands?.get() ?? null),
     view: ctx.view ?? null,
     panel: await describeReport(ctx.engine, ctx.chat),
     saved: await savedList(ctx.engine),
@@ -254,8 +272,9 @@ async function reply(ctx: ToolContext, text: string): Promise<PageReply> {
 export function reportBuilderAction(email: string, chatId: string, appUrl: string, action: PageAction): Promise<PageReply> {
   return withSession(email, chatId, appUrl, async (ctx) => {
     try {
+      if (action.type === 'start' && action.mode) ctx.setMode?.(action.mode)
       const out = (await runTool(ctx, ACTION_TOOL[action.type], actionInput(action))) as { competitive_set?: string }
-      if (action.type === 'save_comp_set') return await reply(ctx, `Saved as your competitive set: ${out.competitive_set}. Zero-share reports will offer it from now on; change it under Competitive set.`)
+      if (action.type === 'save_comp_set') return await reply(ctx, `Saved as your competitive set: ${out.competitive_set}. Reports like this will offer it from now on; change it under Competitive set.`)
       return await reply(ctx, cannedText(ctx.view))
     } catch (err) {
       return reply(ctx, (err as Error).message)
@@ -280,10 +299,10 @@ export async function reportBuilderExpand(email: string, spec: Spec, path: strin
 }
 
 /** The page's first look: saved reports and data freshness, with no chat yet. */
-export async function reportBuilderOverview(email: string): Promise<Pick<PageReply, 'saved' | 'dataThrough' | 'live' | 'compSet'> & { allMediaFrom: string }> {
-  const { engine, comp } = await engineFor(await loadUser(email.trim().toLowerCase()))
+export async function reportBuilderOverview(email: string): Promise<Pick<PageReply, 'saved' | 'dataThrough' | 'live' | 'compSet' | 'brandSet'> & { allMediaFrom: string; mode: IntelMode }> {
+  const { engine, comp, brands, mode } = await engineFor(await loadUser(email.trim().toLowerCase()))
   const a = await engine.availability()
-  return { saved: await savedList(engine), dataThrough: a.final_through_label, live: engine.live, allMediaFrom: a.earliest_label, compSet: compView(comp.get()) }
+  return { saved: await savedList(engine), dataThrough: a.final_through_label, live: engine.live, allMediaFrom: a.earliest_label, compSet: compView(comp.get()), brandSet: compView(brands.get()), mode: mode.get() }
 }
 
 export type CompEdit =
@@ -293,17 +312,23 @@ export type CompEdit =
   | { op: 'clear' }
 
 const COMP_KINDS = ['property', 'media_type', 'media_owner', 'market']
+const KINDS_FOR: Record<SetKind, { mine: string[]; versus: string[] }> = {
+  properties: { mine: ['property', 'media_owner'], versus: COMP_KINDS },
+  brands: { mine: ['advertiser', 'top_parent', 'product'], versus: ['advertiser', 'top_parent', 'product', 'industry', 'category', 'subcategory'] },
+}
 
 /** An edit to the competitive set from the page's panel. Returns the set as it now stands. */
-export async function reportBuilderCompEdit(email: string, edit: CompEdit): Promise<CompSetView | null> {
+export async function reportBuilderCompEdit(email: string, edit: CompEdit, set: SetKind = 'properties'): Promise<CompSetView | null> {
   const who = email.trim().toLowerCase()
-  const { state, comp } = await engineFor(await loadUser(who))
-  const c: CompSet = structuredClone(comp.get() ?? { mine: [], versus: [], all: true, labels: {} })
+  const sets = await engineFor(await loadUser(who))
+  const { state } = sets
+  const comp = set === 'brands' ? sets.brands : sets.comp
+  const c: CompSet = structuredClone(comp.get() ?? { mine: [], versus: [], all: set === 'properties', labels: {} })
   if (edit.op === 'clear') comp.set(null)
   else {
     if (edit.op === 'add') {
       const kind = edit.id.split(':')[0]!
-      if (!COMP_KINDS.includes(kind) || (edit.side === 'mine' && !['property', 'media_owner'].includes(kind))) throw new Error('That cannot go in a competitive set.')
+      if (!KINDS_FOR[set][edit.side].includes(kind)) throw new Error('That cannot go in this competitive set.')
       const list = edit.side === 'mine' ? c.mine : c.versus
       if (!list.includes(edit.id)) list.push(edit.id)
       c.labels[edit.id] = edit.label.slice(0, 120)
@@ -311,7 +336,7 @@ export async function reportBuilderCompEdit(email: string, edit: CompEdit): Prom
     } else if (edit.op === 'remove') {
       c.mine = c.mine.filter((id) => id !== edit.id)
       c.versus = c.versus.filter((id) => id !== edit.id)
-      if (!c.versus.length) c.all = true
+      if (!c.versus.length) c.all = set === 'properties'
     } else if (edit.op === 'all') {
       c.all = edit.value
       if (edit.value) c.versus = []
@@ -323,9 +348,9 @@ export async function reportBuilderCompEdit(email: string, edit: CompEdit): Prom
 }
 
 /** Names for the competitive-set panel's search box. */
-export async function reportBuilderCompSearch(email: string, q: string, side: 'mine' | 'versus') {
+export async function reportBuilderCompSearch(email: string, q: string, side: 'mine' | 'versus', set: SetKind = 'properties') {
   const { engine } = await engineFor(await loadUser(email.trim().toLowerCase()))
-  const types = side === 'mine' ? ['property', 'media_owner'] : COMP_KINDS
+  const types = KINDS_FOR[set][side]
   const hits = await engine.search(q, { types, limit: 8 })
   return hits.map((h) => ({ id: h.id, label: h.label, kind: h.type_label, context: h.context }))
 }

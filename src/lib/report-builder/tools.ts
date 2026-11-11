@@ -21,7 +21,20 @@ export interface ChatState {
   offered: Array<{ label: string; patch: Patch }>
   /** Set while a saved report is open for changes. */
   editing: { id: string; name: string } | null
+  /** Publisher Intel (a media owner) or Competitive Intel (a brand or buyer); unset in chat hosts, which offer the classic set. */
+  mode?: IntelMode
 }
+
+export type IntelMode = 'publisher' | 'buyer'
+
+/** The report types each mode offers, in order. */
+export const MODE_TEMPLATES: Record<IntelMode | 'all', string[]> = {
+  publisher: ['zero_share', 'share_of_wallet', 'my_advertisers', 'competitor_categories', 'advertiser_trend', 'detail_extract'],
+  buyer: ['competitive_mix', 'share_of_voice', 'competitive_trend', 'competitor_placements', 'category_share', 'detail_extract'],
+  all: ['advertiser_trend', 'media_mix', 'category_share', 'zero_share', 'detail_extract'],
+}
+const ALL_TEMPLATES = Array.from(new Set(Object.values(MODE_TEMPLATES).flat()))
+export const MODE_LABEL: Record<IntelMode, string> = { publisher: 'Publisher Intel', buyer: 'Competitive Intel' }
 
 export const emptyChat = (): ChatState => ({ report: null, offered: [], editing: null })
 
@@ -39,11 +52,20 @@ export interface CompSet {
   labels: Record<string, string>
 }
 
+export interface SetStore {
+  get(): CompSet | null
+  set(c: CompSet | null): void
+}
+
 export interface ToolContext {
   engine: ReportEngine
   chat: ChatState
-  /** The person's stored competitive set, where the host keeps one. */
-  comp?: { get(): CompSet | null; set(c: CompSet | null): void }
+  /** The person's stored competitive set of properties (Publisher Intel), where the host keeps one. */
+  comp?: SetStore
+  /** The person's stored brands and competitors (Competitive Intel). */
+  brands?: SetStore
+  /** Switches this chat, and the person's default, to a mode. */
+  setMode?: (m: IntelMode) => void
   /** Builds the download link for a report: the portfolio's own address. */
   downloadUrl: (spec: Spec, name: string) => string
   /** What the last tool produced, for a page to draw (the Prototypes page). Chat hosts ignore it. */
@@ -83,7 +105,7 @@ export interface View {
   problem?: string
   acceptsName?: boolean
   /** The numbered choices offered: a question's options, a problem's fixes, or a preview's adjustments. */
-  choices?: Array<{ number: number; label: string; description?: string }>
+  choices?: Array<{ number: number; label: string; description?: string; icon?: string }>
   table?: ViewTable
   tree?: ViewTree
   period?: string
@@ -95,7 +117,7 @@ export interface View {
   picksUpNewData?: boolean
   message?: string
   /** A zero-share report whose properties differ from the stored competitive set: offer to keep them. */
-  compSetOffer?: { kind: 'save' | 'update'; text: string }
+  compSetOffer?: { kind: 'save' | 'update'; text: string; set: SetKind }
 }
 
 export interface ToolDef {
@@ -111,7 +133,12 @@ const COMP_TYPES = ['property', 'media_type', 'media_owner', 'market']
 const USE_USUAL = 'Yes, use it'
 
 const dimOf = (id: string) => id.split(':')[0]!
-const kindWord: Record<string, string> = { media_type: 'all ', media_owner: 'all of ', market: 'all of the ' }
+const kindWord: Record<string, string> = { media_type: 'all ', media_owner: 'all of ', market: 'all of the ', industry: 'all of ', category: 'all of ', subcategory: 'all of ' }
+const BRAND_TYPES = ['advertiser', 'top_parent', 'product']
+const RIVAL_TYPES = ['advertiser', 'top_parent', 'product', 'industry', 'category', 'subcategory']
+
+/** Which stored set a report uses: properties (zero share and the other publisher reports) or brands (comparisons). */
+export type SetKind = 'properties' | 'brands'
 
 /** "NBC vs CBS, Fox and all Cable TV", from a set's labels. */
 export function compText(c: Pick<CompSet, 'mine' | 'versus' | 'all' | 'labels'>): string {
@@ -127,6 +154,26 @@ const sameSet = (a: CompSet | null, z: { mine: string[]; versus: string[]; all?:
 
 type ZeroShare = { mine: string[]; versus: string[]; all?: boolean; own?: boolean }
 const zeroOf = (spec: Spec | null): ZeroShare | null => ((spec as { zero_share?: ZeroShare | null } | null)?.zero_share ?? null)
+
+type Compare = { mine: string[]; rivals: string[]; own?: boolean }
+const compareOf = (spec: Spec | null): Compare | null => ((spec as { compare?: Compare | null } | null)?.compare ?? null)
+const kindOf = (spec: Spec | null): SetKind | null => (zeroOf(spec) ? 'properties' : compareOf(spec) ? 'brands' : null)
+const storeOf = (ctx: ToolContext, kind: SetKind | null) => (kind === 'brands' ? ctx.brands : kind === 'properties' ? ctx.comp : undefined)
+
+/** A report's own set, in the stored shape. */
+function reportSet(spec: Spec | null): { mine: string[]; versus: string[]; all: boolean; mineOnly: boolean } | null {
+  const z = zeroOf(spec)
+  if (z) return { mine: z.mine, versus: z.versus, all: Boolean(z.all) || !z.versus.length, mineOnly: (z as { mode?: string }).mode === 'mine' }
+  const c = compareOf(spec)
+  return c ? { mine: c.mine, versus: c.rivals, all: false, mineOnly: false } : null
+}
+
+/** The patch that puts a stored set into a report, keeping the report's own kind (zero share, wallet...). */
+function usualPatch(kind: SetKind, s: CompSet): Patch {
+  return kind === 'brands'
+    ? { set: { 'compare.mine': s.mine, 'compare.rivals': s.versus, 'compare.own': false } }
+    : { set: { 'zero_share.mine': s.mine, 'zero_share.versus': s.versus, 'zero_share.all': s.all, 'zero_share.own': false } }
+}
 
 /** A set from a report's properties, labelled by the engine. */
 function compFrom(engine: ReportEngine, z: { mine: string[]; versus: string[]; all?: boolean }): CompSet {
@@ -151,11 +198,13 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'competitive_set',
     description:
-      'The user\'s stored competitive set (their properties and the ones they compete with), used by every zero-share report. action "show" returns it; "save_from_report" keeps the current report\'s; "set" stores my_properties and competitors (ids from search_names) or compare_with_all; "clear" removes it.',
+      'The user\'s stored competitive sets: "properties" (their properties and competing ones, for publisher reports) and "brands" (their brands and competitors, for competitive reports). action "show" returns it; "save_from_report" keeps the current report\'s; "set" stores my_properties or my_brands and competitors (ids from search_names) or compare_with_all; "clear" removes it. set defaults to the current report\'s kind, or the chat\'s mode.',
     parameters: obj(
       {
         action: { type: 'string', enum: ['show', 'save_from_report', 'set', 'clear'] },
+        set: { type: 'string', enum: ['properties', 'brands'] },
         my_properties: { type: 'array', items: { type: 'string' } },
+        my_brands: { type: 'array', items: { type: 'string' } },
         competitors: { type: 'array', items: { type: 'string' } },
         compare_with_all: { type: 'boolean' },
       },
@@ -164,8 +213,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'new_report',
-    description: 'Start a new report in this chat, replacing any report in progress. template: advertiser_trend (spend trend), media_mix, category_share, zero_share (who is not buying on our properties) or detail_extract. Omit it to ask the user what kind of report. Returns a question, a problem or a ready preview.',
-    parameters: obj({ template: { type: 'string', enum: ['advertiser_trend', 'media_mix', 'category_share', 'zero_share', 'detail_extract'] } }),
+    description:
+      'Start a new report in this chat, replacing any report in progress. Publisher Intel (a media owner): zero_share (who buys competitors but not you), share_of_wallet, my_advertisers (who buys your properties), competitor_categories, advertiser_trend, detail_extract. Competitive Intel (a brand or buyer): competitive_mix (media mix, you vs competitors), share_of_voice, competitive_trend (weekly), competitor_placements (where competitors run), category_share, detail_extract. Also media_mix (one advertiser). Omit template to ask the user. Returns a question, a problem or a ready preview.',
+    parameters: obj({ template: { type: 'string', enum: ALL_TEMPLATES.concat(['media_mix']).filter((t, i, a) => a.indexOf(t) === i) } }),
   },
   {
     name: 'change_report',
@@ -182,10 +232,15 @@ export const TOOLS: ToolDef[] = [
       breakdowns: { type: 'array', items: { type: 'string', enum: NAME_TYPES }, description: 'Extra row breakdowns to add, such as product or media_type.' },
       set_breakdowns: { type: 'array', items: { type: 'string', enum: NAME_TYPES }, description: 'The complete row breakdowns, in order, replacing the current ones. "Only advertiser and property" is ["advertiser","property"].' },
       remove_breakdowns: { type: 'array', items: { type: 'string', enum: NAME_TYPES }, description: 'Row breakdowns to take out.' },
-      columns: { type: 'string', enum: ['month', 'quarter', 'year', 'media_type', 'property', 'none'], description: 'One column per value; "none" removes the column breakdown.' },
+      columns: { type: 'string', enum: ['month', 'quarter', 'year', 'day', 'week', 'broadcast_week', 'media_type', 'property', 'none'], description: 'One column per value; "none" removes the column breakdown.' },
       measures: { type: 'array', items: { type: 'string', enum: ['occurrences', 'impressions'] }, description: 'Measures to add alongside spend.' },
-      my_properties: { type: 'array', items: { type: 'string' }, description: 'Zero share: the user\'s own properties (or media owner), ids from search_names. Replaces the earlier ones.' },
-      competitors: { type: 'array', items: { type: 'string' }, description: 'Zero share: what the user competes with: ids of properties, media types ("all Cable TV"), media owners or markets ("everything in the New York market"), from search_names.' },
+      my_properties: { type: 'array', items: { type: 'string' }, description: 'Publisher reports: the user\'s own properties (or media owner), ids from search_names. Replaces the earlier ones.' },
+      my_brands: { type: 'array', items: { type: 'string' }, description: 'Competitive reports: the user\'s own advertisers, parent companies or products, ids from search_names.' },
+      competitors: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'What the user competes with, ids from search_names. Publisher reports: properties, media types ("all Cable TV"), media owners or markets ("everything in the New York market"). Competitive reports: advertisers, parent companies, products, or a whole category or subcategory.',
+      },
       competitors_mode: { type: 'string', enum: ['replace', 'add'] },
       compare_with_all: { type: 'boolean', description: 'Zero share: compare with every other property.' },
       use_competitive_set: { type: 'boolean', description: 'Zero share: use the user\'s stored competitive set.' },
@@ -251,9 +306,13 @@ export const TOOLS: ToolDef[] = [
 async function status(ctx: ToolContext, v: Validation) {
   const { chat, engine } = ctx
   chat.report = v.spec
+  const templateOf = (o: Option) => {
+    const t = (o.patch.set as { template?: unknown } | undefined)?.template
+    return typeof t === 'string' ? t : undefined
+  }
   const numbered = (opts: Option[]) => {
     chat.offered = opts.map((o) => ({ label: o.label, patch: o.patch }))
-    return opts.map((o, i) => ({ number: i + 1, label: o.label, ...(o.description ? { description: o.description } : {}) }))
+    return opts.map((o, i) => ({ number: i + 1, label: o.label, ...(o.description ? { description: o.description } : {}), ...(templateOf(o) ? { icon: templateOf(o) } : {}) }))
   }
   if (v.errors.length) {
     const e = v.errors[0]!
@@ -263,17 +322,25 @@ async function status(ctx: ToolContext, v: Validation) {
   }
   if (v.questions.length) {
     let q = v.questions[0]!
-    const stored = ctx.comp?.get() ?? null
-    const z = zeroOf(v.spec)
-    // With a stored competitive set, confirm it instead of asking from scratch.
-    if (q.id === 'my_properties' && stored && stored.mine.length && z && !z.own) {
+    // The kinds of report this mode offers, in its order.
+    if (q.id === 'template') {
+      const ids = MODE_TEMPLATES[chat.mode ?? 'all']
+      q = { ...q, options: ids.map((id) => q.options.find((o) => templateOf(o) === id)).filter((o): o is Option => Boolean(o)) }
+    }
+    // With a stored set, confirm it instead of asking from scratch.
+    const kind: SetKind | null = q.id === 'my_properties' ? 'properties' : q.id === 'my_brands' ? 'brands' : null
+    const stored = storeOf(ctx, kind)?.get() ?? null
+    const own = kind === 'brands' ? compareOf(v.spec)?.own : zeroOf(v.spec)?.own
+    if (kind && stored && stored.mine.length && !own) {
       q = {
         id: 'use_comp_set',
         prompt: 'Use your usual competitive set?',
         kind: 'choice',
         options: [
-          { label: USE_USUAL, description: compText(stored), patch: { set: { zero_share: { mine: stored.mine, versus: stored.versus, all: stored.all, own: false } } } },
-          { label: 'Choose different properties', description: 'Pick yours and your competitors for this report', patch: { set: { 'zero_share.own': true } } },
+          { label: USE_USUAL, description: compText(stored), patch: usualPatch(kind, stored) },
+          kind === 'brands'
+            ? { label: 'Choose different brands', description: 'Pick yours and your competitors for this report', patch: { set: { 'compare.own': true } } }
+            : { label: 'Choose different properties', description: 'Pick yours and your competitors for this report', patch: { set: { 'zero_share.own': true } } },
         ],
       }
     }
@@ -305,18 +372,21 @@ async function status(ctx: ToolContext, v: Validation) {
     large_extract: v.delivery === 'file' ? 'The full report is large; it will be a download.' : undefined,
     adjustments,
     editing_saved_report: chat.editing?.name,
-    competitive_set: compSetOffer ? `These properties (${compSetOffer.text}) are not the user's stored competitive set. Offer to ${compSetOffer.kind === 'save' ? 'save them as' : 'make them'} their usual set (competitive_set save_from_report).` : undefined,
+    competitive_set: compSetOffer ? `These ${compSetOffer.set} (${compSetOffer.text}) are not the user's stored competitive set. Offer to ${compSetOffer.kind === 'save' ? 'save them as' : 'make them'} their usual set (competitive_set save_from_report).` : undefined,
   }
 }
 
 /** When a zero-share report's properties are not the stored set, what to offer. */
 function compOffer(ctx: ToolContext, spec: Spec): View['compSetOffer'] {
-  if (!ctx.comp) return undefined
-  const z = zeroOf(spec)
-  if (!z || !z.mine.length) return undefined
-  const stored = ctx.comp.get()
-  if (sameSet(stored, { ...z, all: z.all || !z.versus.length })) return undefined
-  return { kind: stored ? 'update' : 'save', text: compText(compFrom(ctx.engine, z)) }
+  const kind = kindOf(spec)
+  const store = storeOf(ctx, kind)
+  const rs = reportSet(spec)
+  if (!kind || !store || !rs || !rs.mine.length) return undefined
+  const stored = store.get()
+  // "Your advertisers" names only your properties: the set matches if they do.
+  if (rs.mineOnly ? stored && JSON.stringify([...stored.mine].sort()) === JSON.stringify([...rs.mine].sort()) : sameSet(stored, rs)) return undefined
+  const c = compFrom(ctx.engine, rs.mineOnly && stored ? { ...stored, mine: rs.mine } : rs)
+  return { kind: stored ? 'update' : 'save', text: compText(c), set: kind }
 }
 
 const tableOf = (r: Result): ViewTable => ({ columns: r.columns, rows: r.rows, keys: r.keys, totals: r.totals, rowCount: r.row_count })
@@ -386,8 +456,12 @@ const strs = (x: unknown) => (Array.isArray(x) ? x.filter((s): s is string => ty
 export async function runTool(ctx: ToolContext, name: string, input: Record<string, unknown>): Promise<unknown> {
   const { engine, chat } = ctx
   switch (name) {
-    case 'report_options':
-      return engine.catalog()
+    case 'report_options': {
+      const c = await engine.catalog()
+      if (!chat.mode) return c
+      const ids = MODE_TEMPLATES[chat.mode]
+      return { ...c, intel: MODE_LABEL[chat.mode], templates: ids.map((id) => c.templates.find((t) => t.id === id)).filter(Boolean) }
+    }
 
     case 'search_names': {
       const types = strs(input.types).filter((t) => NAME_TYPES.includes(t))
@@ -395,32 +469,35 @@ export async function runTool(ctx: ToolContext, name: string, input: Record<stri
     }
 
     case 'competitive_set': {
-      if (!ctx.comp) throw new Error('Competitive sets are not kept here.')
+      const kind: SetKind = input.set === 'brands' || input.set === 'properties' ? input.set : (kindOf(chat.report) ?? (chat.mode === 'buyer' ? 'brands' : 'properties'))
+      const store = storeOf(ctx, kind)
+      if (!store) throw new Error('Competitive sets are not kept here.')
       const action = str(input.action)
-      const stored = ctx.comp.get()
+      const stored = store.get()
       if (action === 'clear') {
-        ctx.comp.set(null)
-        return { competitive_set: null }
+        store.set(null)
+        return { competitive_set: null, set: kind }
       }
       if (action === 'save_from_report') {
-        const z = zeroOf(chat.report)
-        if (!z || !z.mine.length) throw new Error('The report in progress has no properties of yours to keep.')
-        const c = compFrom(engine, z)
-        ctx.comp.set(c)
+        const rs = reportSet(chat.report)
+        if (!rs || !rs.mine.length) throw new Error(`The report in progress has no ${kind} of yours to keep.`)
+        const c = compFrom(engine, rs.mineOnly && stored ? { ...stored, mine: rs.mine } : rs)
+        store.set(c)
         if (ctx.view?.compSetOffer) ctx.view = { ...ctx.view, compSetOffer: undefined }
-        return { competitive_set: compText(c) }
+        return { competitive_set: compText(c), set: kind }
       }
       if (action === 'set') {
-        const base = stored ?? { mine: [], versus: [], all: true, labels: {} }
-        const mine = strs(input.my_properties).filter((id) => ['property', 'media_owner'].includes(dimOf(id)))
-        const vs = strs(input.competitors).filter((id) => COMP_TYPES.includes(dimOf(id)))
+        const base = stored ?? { mine: [], versus: [], all: kind === 'properties', labels: {} }
+        const mine = kind === 'brands' ? strs(input.my_brands).filter((id) => BRAND_TYPES.includes(dimOf(id))) : strs(input.my_properties).filter((id) => ['property', 'media_owner'].includes(dimOf(id)))
+        const vs = strs(input.competitors).filter((id) => (kind === 'brands' ? RIVAL_TYPES : COMP_TYPES).includes(dimOf(id)))
         const z = { mine: mine.length ? mine : base.mine, versus: input.compare_with_all === true ? [] : vs.length ? vs : base.versus, all: input.compare_with_all === true || (!vs.length && base.all) }
-        if (!z.mine.length) throw new Error('Say which properties are the user\'s own first.')
+        if (!z.mine.length) throw new Error(`Say which ${kind} are the user's own first.`)
         const c = compFrom(engine, z)
-        ctx.comp.set(c)
-        return { competitive_set: compText(c) }
+        if (kind === 'brands') c.all = false
+        store.set(c)
+        return { competitive_set: compText(c), set: kind }
       }
-      return { competitive_set: stored ? compText(stored) : null }
+      return { competitive_set: stored ? compText(stored) : null, set: kind }
     }
 
     case 'new_report': {
@@ -458,7 +535,7 @@ export async function runTool(ctx: ToolContext, name: string, input: Record<stri
         const stored = ctx.comp?.get() ?? null
         if (input.use_competitive_set === true) {
           if (!stored) throw new Error('There is no stored competitive set yet. Ask for the user\'s properties and competitors.')
-          patch.set.zero_share = { mine: stored.mine, versus: stored.versus, all: stored.all, own: false }
+          Object.assign(patch.set, usualPatch('properties', stored).set)
           delete patch.add?.['zero_share.mine']
         }
         const mine = strs(input.my_properties).filter((id) => ['property', 'media_owner'].includes(dimOf(id)))
@@ -477,6 +554,28 @@ export async function runTool(ctx: ToolContext, name: string, input: Record<stri
         if (input.compare_with_all === true) {
           patch.set['zero_share.versus'] = []
           patch.set['zero_share.all'] = true
+        }
+      }
+      // Competitive Intel: the user's brands, and who they compete with.
+      if (compareOf(report)) {
+        if (input.use_competitive_set === true) {
+          const stored = ctx.brands?.get()
+          if (!stored) throw new Error('There is no stored set of brands yet. Ask for the user\'s brands and competitors.')
+          Object.assign(patch.set, usualPatch('brands', stored).set)
+          delete patch.set.compare
+        }
+        const mine = strs(input.my_brands).filter((id) => BRAND_TYPES.includes(dimOf(id)))
+        if (mine.length) {
+          delete patch.set.compare
+          patch.set['compare.mine'] = mine
+          patch.set['compare.own'] = true
+        }
+        const vs = strs(input.competitors).filter((id) => RIVAL_TYPES.includes(dimOf(id)))
+        if (vs.length) {
+          delete patch.set.compare
+          if (input.competitors_mode === 'add') (patch.add ??= {})['compare.rivals'] = vs
+          else patch.set['compare.rivals'] = vs
+          patch.set['compare.own'] = true
         }
       }
       // Breakdowns and measures can be set or taken out, not only added.
@@ -539,8 +638,9 @@ export async function runTool(ctx: ToolContext, name: string, input: Record<stri
           : chat.offered.find((o) => o.label.toLowerCase() === said) ?? chat.offered.find((o) => said && o.label.toLowerCase().includes(said))
       if (!pick) throw new Error(`"${input.choice}" is not one of the choices last shown: ${chat.offered.map((o, i) => `${i + 1}. ${o.label}`).join('; ')}.`)
       // The usual set as it is now, not as it was when the question was asked: it may have been edited since.
-      const stored = ctx.comp?.get()
-      const patch = pick.label === USE_USUAL && stored ? { set: { zero_share: { mine: stored.mine, versus: stored.versus, all: stored.all, own: false } } } : pick.patch
+      const kind = kindOf(chat.report)
+      const stored = storeOf(ctx, kind)?.get()
+      const patch = pick.label === USE_USUAL && stored && kind ? usualPatch(kind, stored) : pick.patch
       return status(ctx, await engine.validate(chat.report ?? {}, patch))
     }
 
