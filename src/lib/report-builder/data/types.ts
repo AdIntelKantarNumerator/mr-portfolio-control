@@ -102,6 +102,9 @@ export const MEASURE_INFO: Record<MeasureKey, { label: string; type: 'money' | '
 /** The dimension an id belongs to: "advertiser:123" is an advertiser. */
 export const dimOf = (id: string) => String(id).split(':')[0]!
 
+/** A name as nameIn compares it: accents folded, lower case, letters and digits only. "Wendy's" and "WENDYS" are the same, and so are "Häagen-Dazs" and "Haagen-Dazs". */
+export const normName = (s: string) => String(s).normalize('NFD').toLowerCase().replace(/[^a-z0-9]/g, '')
+
 /** Every dimension a condition reads, so an adapter can choose where to read it from. */
 export function condDims(c: Cond | undefined, out = new Set<DimKey>()): Set<DimKey> {
   if (!c) return out
@@ -110,6 +113,7 @@ export function condDims(c: Cond | undefined, out = new Set<DimKey>()): Set<DimK
   else if ('not' in c) condDims(c.not, out)
   else if ('in' in c) out.add(c.in)
   else if ('named' in c) out.add(c.named)
+  else if ('nameIn' in c) out.add(c.nameIn)
   else if ('tuples' in c) c.tuples.forEach((d) => out.add(d))
   else if ('anyOf' in c) for (const id of c.anyOf) if (DIMENSIONS[dimOf(id) as DimKey]) out.add(dimOf(id) as DimKey)
   return out
@@ -128,12 +132,15 @@ export const queryDims = (q: Pick<AggregateQuery, 'groupBy' | 'where' | 'measure
  *   anyOf     ids of several dimensions, any of them ("my brands, or this whole category")
  *   tuples    rows whose values across several dimensions match one of these
  *   named     the dimension has a name (leaves out unnamed values)
+ *   nameIn    the dimension's name is one of these, compared as normName does
+ *             (case, spaces and punctuation ignored): bulk matching by name
  */
 export type Cond =
   | { in: DimKey; values: string[] }
   | { anyOf: string[] }
   | { tuples: DimKey[]; values: string[][] }
   | { named: DimKey }
+  | { nameIn: DimKey; names: string[] }
   | { and: Cond[] }
   | { or: Cond[] }
   | { not: Cond }

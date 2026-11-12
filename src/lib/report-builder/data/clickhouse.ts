@@ -32,7 +32,7 @@
  *     supports(), before it runs.
  */
 import { chQuery, clickhouseConfig, ClickHouseError, type ClickHouseConfig } from '@/lib/clickhouse'
-import { DIMENSIONS, dimOf, queryDims, type AggregateQuery, type AggregateResult, type Availability, type Cond, type DataAdapter, type DimKey, type MeasureKey, type NameHit, type SearchRequest } from './types'
+import { DIMENSIONS, dimOf, normName, queryDims, type AggregateQuery, type AggregateResult, type Availability, type Cond, type DataAdapter, type DimKey, type MeasureKey, type NameHit, type SearchRequest } from './types'
 
 const MONTH_TABLE = 'gpc_summary.property_product_summary_month'
 const CREATIVE_MONTH = 'gpc_creative.creative_product_media_summary_month'
@@ -52,7 +52,8 @@ export function sourceFor(q: Pick<AggregateQuery, 'groupBy' | 'where' | 'measure
   return daily ? 'daily' : 'month'
 }
 const NO_PROMOS = 'coalesce(is_promo, 0) = 0 AND coalesce(is_psa, 0) = 0'
-const SETTINGS = { max_execution_time: '20', max_bytes_before_external_group_by: '1000000000' }
+// 60 seconds: a deep detailed extract (a 360 import can have a dozen row levels) needs more than the 20 it had.
+const SETTINGS = { max_execution_time: '60', max_bytes_before_external_group_by: '1000000000' }
 
 /** Each dimension in SQL: its id, its name, and a line of context. Time dimensions give their canonical value as id. */
 const SQL: Record<DimKey, { id: string; name: string; context: string }> = {
@@ -111,6 +112,11 @@ export function condSql(c: Cond | undefined): string {
   if ('or' in c) return c.or.length ? `(${c.or.map(condSql).join(' OR ')})` : '0'
   if ('not' in c) return `NOT ${condSql(c.not)}`
   if ('named' in c) return `${SQL[c.named].name} != ''`
+  if ('nameIn' in c) {
+    const names = [...new Set(c.names.map(normName).filter(Boolean))]
+    // Letters and digits only after normName, so nothing in them can break out of the string.
+    return names.length ? `replaceRegexpAll(lowerUTF8(normalizeUTF8NFD(${SQL[c.nameIn].name})), '[^a-z0-9]', '') IN (${names.map((n) => `'${n}'`).join(',')})` : '0'
+  }
   if ('in' in c) return inSql(c.in, c.values)
   if ('anyOf' in c) {
     const by = new Map<DimKey, string[]>()

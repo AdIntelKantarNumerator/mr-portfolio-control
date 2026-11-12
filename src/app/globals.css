@@ -2499,3 +2499,30 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .tx-sample-meta { font-size: 11.5px; }
 .tx-sample-meta a { color: var(--brand); font-weight: 700; text-decoration: none; }
 .tx-sample-meta a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Report Builder: the 360 import wizard */
+.rb-imp-backdrop { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--ink) 30%, transparent); }
+.rb-imp { width: min(860px, 100%); max-height: min(86vh, 900px); display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+.rb-imp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.rb-imp-head h2 { margin: 2px 0 0; font-size: 20px; }
+.rb-imp-close { border: 0; background: none; font-size: 24px; line-height: 1; color: var(--muted); cursor: pointer; }
+.rb-imp-body { padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.rb-imp-search { width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: var(--surface); color: inherit; }
+.rb-imp-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
+.rb-imp-item { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); color: var(--ink); font: inherit; cursor: pointer; min-width: 0; }
+.rb-imp-item:hover { border-color: var(--c1); }
+.rb-imp-item b { overflow-wrap: anywhere; }
+.rb-imp-item small { color: var(--muted); font-size: 12px; }
+.rb-imp-back { align-self: flex-start; border: 0; background: none; color: var(--c1); font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
+.rb-imp-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 700px) { .rb-imp-compare { grid-template-columns: 1fr; } }
+.rb-imp-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+.rb-imp-notes li { display: flex; gap: 8px; align-items: baseline; }
+.rb-imp-tag { flex: none; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; }
+.rb-imp-dropped { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
+.rb-imp-approximate { background: color-mix(in srgb, #d08700 18%, transparent); color: #a46a00; }
+.rb-imp-changed { background: color-mix(in srgb, var(--c1) 14%, transparent); color: var(--c1); }
+.rb-imp-refused { display: flex; flex-direction: column; gap: 10px; }
+.rb-from360 { background: color-mix(in srgb, var(--c1) 14%, transparent); color: var(--c1); }
+.rb-imp-saved summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+.rb-imp-saved .rb-imp-notes { margin-top: 6px; font-size: 12.5px; }

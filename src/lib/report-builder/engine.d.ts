@@ -57,6 +57,8 @@ export interface SavedSummary {
   summary: string
   moves_with_new_data: boolean
   last_run: { period_label: string; total: number } | null
+  /** Brought in from a 360 Explore report: where from, and what the conversion changed. */
+  imported?: { client: string; user: string; report: string; type: string; imported: string; notes: Array<{ impact: string; what: string; why: string; did: string }> }
 }
 export interface Understanding {
   template?: string

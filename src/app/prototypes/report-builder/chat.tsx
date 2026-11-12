@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { MarkdownView } from '@/components/markdown-view'
 import { Kicker } from '@/components/ui'
+import { Import360 } from './import360'
 import type { CompSetView, PageReply } from '@/lib/report-builder/agent'
 import type { SavedItem } from '@/lib/report-builder/page-view'
 import type { IntelMode, SetKind, View, ViewTable, ViewTree } from '@/lib/report-builder/tools'
@@ -623,6 +624,7 @@ export function ReportBuilderChat({
   live: boolean
 }) {
   const [mode, setMode] = useState<IntelMode>(initialMode)
+  const [importing, setImporting] = useState(false)
   const [comp, setComp] = useState<CompSetView | null>(initialComp)
   const [brandSet, setBrandSet] = useState<CompSetView | null>(initialBrands)
   const [chatId, setChatId] = useState(newId)
@@ -750,10 +752,27 @@ export function ReportBuilderChat({
         <section className="rb-chatcard" aria-label="Conversation">
           <div className="rb-chathead">
             <span className="rb-muted">{panel?.editing ? `Editing ${panel.editing}` : panel && panel.status !== 'empty' ? panel.name : 'New report'}</span>
-            <button type="button" className="btn rb-small" disabled={!!busy} onClick={() => startOver()}>
-              + New report
-            </button>
+            <span className="rb-row">
+              {live ? (
+                <button type="button" className="btn rb-small" disabled={!!busy} onClick={() => setImporting(true)}>
+                  Import from 360
+                </button>
+              ) : null}
+              <button type="button" className="btn rb-small" disabled={!!busy} onClick={() => startOver()}>
+                + New report
+              </button>
+            </span>
           </div>
+          {importing ? (
+            <Import360
+              onClose={() => setImporting(false)}
+              onImported={(out) => {
+                setImporting(false)
+                setSaved(out.saved)
+                void act({ type: 'run_saved', report: out.id }, `Import and run "${out.name}"`)
+              }}
+            />
+          ) : null}
           <div className="rb-log" ref={logRef} aria-live="polite">
             <div className="rb-msg rb-bot">
               <p>{MODES[mode].hello}</p>
@@ -873,8 +892,26 @@ export function ReportBuilderChat({
                   <div className="rb-row">
                     <b>{s.name}</b>
                     <span className={`rb-pill${s.picksUpNewData ? ' rb-live' : ''}`}>{s.picksUpNewData ? 'updates with new data' : 'fixed period'}</span>
+                    {s.imported ? <span className="rb-pill rb-from360">From 360</span> : null}
                   </div>
                   <p className="rb-muted">{s.summary}</p>
+                  {s.imported ? (
+                    <details className="rb-imp-saved">
+                      <summary>
+                        From {s.imported.type.toLowerCase()} &ldquo;{s.imported.report}&rdquo; ({s.imported.client}, {s.imported.user}): {s.imported.notes.length} changes
+                      </summary>
+                      <ul className="rb-imp-notes">
+                        {s.imported.notes.map((n, i) => (
+                          <li key={i}>
+                            <span className={`rb-imp-tag rb-imp-${n.impact}`}>{n.impact}</span>
+                            <span>
+                              <b>{n.what}.</b> {n.why} {n.did}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
                   <p className="rb-muted rb-cap">{s.lastRun ? `Last run: ${s.lastRun}` : 'Not run yet'}</p>
                   <div className="rb-row">
                     <button type="button" className="btn" disabled={!!busy} onClick={() => act({ type: 'run_saved', report: s.id }, `Run ${s.name}`)}>

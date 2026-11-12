@@ -18,6 +18,7 @@ import {
   doublePrecision,
   index,
   integer,
+  bigint,
   jsonb,
   pgTable,
   primaryKey,
@@ -2441,6 +2442,47 @@ export const reportBuilderUsers = pgTable('report_builder_users', {
   email: text('email').primaryKey(),
   state: jsonb('state').notNull(),
   updatedAt: updatedAt(),
+})
+
+/**
+ * 360 Explore reports, copied by `npm run load:360` from the 360 SQL Server
+ * (drizzle/0046), for Report Builder's import. Owners, the reports used in
+ * 2026 with their specs, and the names those specs refer to.
+ */
+export const x360Users = pgTable('x360_users', {
+  usrId: integer('usr_id').primaryKey(),
+  usrN: text('usr_n').notNull(),
+  usrsetId: integer('usrset_id').notNull(),
+  usrsetN: text('usrset_n').notNull(),
+  mnemonic: text('mnemonic').notNull(),
+  licensegrpId: integer('licensegrp_id'),
+  licensegrpN: text('licensegrp_n'),
+  loadedAt: timestamp('loaded_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const x360Reports = pgTable('x360_reports', {
+  /** "<client mnemonic>:<reportset id>" */
+  reportKey: text('report_key').primaryKey(),
+  mnemonic: text('mnemonic').notNull(),
+  reportsetId: integer('reportset_id').notNull(),
+  usrId: integer('usr_id').notNull(),
+  usrsetId: integer('usrset_id').notNull(),
+  name: text('name').notNull(),
+  rpttypeId: integer('rpttype_id'),
+  lastUsed: timestamp('last_used', { withTimezone: true }),
+  /** When its parts last changed in 360, so a reload only fetches what moved. */
+  version: text('version').notNull(),
+  /** The report as 360 stores it, gathered from its tables: lib/import360/types.ts Raw360Spec. */
+  spec: jsonb('spec').notNull(),
+  loadedAt: timestamp('loaded_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const x360Names = pgTable('x360_names', {
+  /** "<entity type id>:<id>" */
+  nameKey: text('name_key').primaryKey(),
+  entmajId: integer('entmaj_id').notNull(),
+  masterId: bigint('master_id', { mode: 'number' }).notNull(),
+  name: text('name').notNull(),
 })
 
 /** One chat's report in progress and the choices last offered, keyed by Open WebUI's chat id. */

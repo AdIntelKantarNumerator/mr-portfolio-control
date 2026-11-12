@@ -13,7 +13,7 @@
  */
 import { currentAccess } from '@/lib/auth/access'
 import { getAuthConfig } from '@/lib/auth/config'
-import { reportBuilderAction, reportBuilderCompEdit, reportBuilderCompSearch, reportBuilderExpand, reportBuilderPageTurn, type CompEdit, type PageAction } from '@/lib/report-builder/agent'
+import { reportBuilderAction, reportBuilderCompEdit, reportBuilderCompSearch, reportBuilderExpand, reportBuilderImport360, reportBuilderPageTurn, type CompEdit, type Import360Step, type PageAction } from '@/lib/report-builder/agent'
 import { ReportModelError, type Turn } from '@/lib/report-builder/model'
 
 export const runtime = 'nodejs'
@@ -77,6 +77,25 @@ export async function POST(req: Request) {
     if (!e.spec || typeof e.spec !== 'object' || !path.length) return Response.json({ error: 'Nothing to expand.' }, { status: 400 })
     try {
       return Response.json(await reportBuilderExpand(email, e.spec as Record<string, unknown>, path, colIds))
+    } catch (err) {
+      return Response.json({ error: (err as Error).message }, { status: 400 })
+    }
+  }
+
+  // The 360 import wizard: lists from the snapshot, a preview, the import.
+  if (body.import360 && typeof body.import360 === 'object') {
+    const i = body.import360 as Record<string, unknown>
+    const n = (k: string) => (typeof i[k] === 'number' && Number.isInteger(i[k]) ? (i[k] as number) : NaN)
+    const key = typeof i.key === 'string' && /^[a-z0-9_]+:\d+$/.test(i.key) ? i.key : ''
+    let step: Import360Step | null = null
+    if (i.op === 'info') step = { op: 'info' }
+    else if (i.op === 'clients') step = { op: 'clients', q: typeof i.q === 'string' ? i.q.slice(0, 80) : '' }
+    else if (i.op === 'users' && !Number.isNaN(n('usrsetId'))) step = { op: 'users', usrsetId: n('usrsetId') }
+    else if (i.op === 'reports' && !Number.isNaN(n('usrId'))) step = { op: 'reports', usrId: n('usrId') }
+    else if ((i.op === 'preview' || i.op === 'import') && key) step = { op: i.op, key, nearest: i.nearest === true }
+    if (!step) return Response.json({ error: 'Unknown import step.' }, { status: 400 })
+    try {
+      return Response.json(await reportBuilderImport360(email, step))
     } catch (err) {
       return Response.json({ error: (err as Error).message }, { status: 400 })
     }

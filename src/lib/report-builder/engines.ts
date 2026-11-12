@@ -42,6 +42,8 @@ export interface ReportEngine {
   runSaved(idOrName: string, opts?: { limit?: number }): Promise<Result & { saved_report: { id: string; name: string }; since_last_run: { text: string; period_changed?: boolean } }>
   deleteSaved(id: string): { deleted: string; name: string }
   patchFromUnderstanding(spec: Spec, u: Understanding): Patch
+  /** Live data only: GPC entities of one kind whose names match, keyed by normName, with Aug-Oct 2026 spend (the 360 import). */
+  matchNames?(dim: string, names: string[]): Promise<Map<string, Array<{ id: string; name: string; context: string; spend: number }>>>
   /** Sample data only: pretend the next month has loaded. */
   advanceData?(): { final_through_label: string }
 }

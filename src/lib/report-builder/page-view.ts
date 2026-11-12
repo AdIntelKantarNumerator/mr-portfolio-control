@@ -107,8 +107,10 @@ export interface SavedItem {
   summary: string
   picksUpNewData: boolean
   lastRun: string | null
+  /** Imported from 360: where from, and the changes the conversion made. */
+  imported?: { client: string; user: string; report: string; type: string; imported: string; notes: Array<{ impact: string; what: string; why: string; did: string }> }
 }
 
 export async function savedList(engine: ReportEngine): Promise<SavedItem[]> {
-  return (await engine.listSaved()).map((r) => ({ id: r.id, name: r.name, summary: r.summary, picksUpNewData: r.moves_with_new_data, lastRun: r.last_run?.period_label ?? null }))
+  return (await engine.listSaved()).map((r) => ({ id: r.id, name: r.name, summary: r.summary, picksUpNewData: r.moves_with_new_data, lastRun: r.last_run?.period_label ?? null, ...(r.imported ? { imported: r.imported } : {}) }))
 }

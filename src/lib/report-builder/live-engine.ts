@@ -15,7 +15,7 @@
  */
 import type { EngineState, Option, Patch, Result, SavedSummary, Spec, Understanding, Validation } from './engine'
 import { EntitlementError } from './data/entitlements'
-import { DIMENSIONS, MEASURE_INFO, all, any, type AggregateQuery, type Cond, type DataAdapter, type DimGroup, type DimKey, type MeasureKey, type MeasureSpec } from './data/types'
+import { DIMENSIONS, MEASURE_INFO, all, any, normName, type AggregateQuery, type Cond, type DataAdapter, type DimGroup, type DimKey, type MeasureKey, type MeasureSpec } from './data/types'
 
 const INLINE_ROW_LIMIT = 2000
 const DOWNLOAD_ROW_LIMIT = 50_000
@@ -961,7 +961,8 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
   async function describeSaved(rec: SavedRec, a: Availability): Promise<SavedSummary> {
     const s = normalize(rec.spec)
     const per = resolveTime(s.time, throughOf(s, a), a.firstComplete)
-    return { id: rec.id, name: rec.name, summary: summarizeSync(s, a), moves_with_new_data: !('error' in per) && per.moves, last_run: rec.last_run }
+    const imported = (rec.spec as { import_360?: SavedSummary['imported'] }).import_360
+    return { id: rec.id, name: rec.name, summary: summarizeSync(s, a), moves_with_new_data: !('error' in per) && per.moves, last_run: rec.last_run, ...(imported ? { imported } : {}) }
   }
 
   async function listSaved(): Promise<SavedSummary[]> {
@@ -1104,6 +1105,27 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     return p
   }
 
+  /**
+   * GPC entities of one kind whose names match these (as normName compares
+   * them), with their spend in August to October 2026: the 360 import matches
+   * a report's selections this way, thousands at a time.
+   */
+  async function matchNames(dim: Dim, names: string[]) {
+    const out = new Map<string, Array<{ id: string; name: string; context: string; spend: number }>>()
+    const want = uniq(names.filter((n) => normName(n)))
+    for (let i = 0; i < want.length; i += 1000) {
+      const r = await data.aggregate({ period: { from: '2026-08-01', to: '2026-10-31' }, where: { nameIn: dim, names: want.slice(i, i + 1000) }, groupBy: [dim], context: true, measures: [{ as: 'v', measure: 'spend' }] })
+      for (const row of r.rows) {
+        const k = row.keys[dim]!
+        if (!k.name) continue
+        labels.set(k.id, k.name)
+        const key = normName(k.name)
+        out.set(key, [...(out.get(key) ?? []), { id: k.id, name: k.name, context: k.context ?? '', spend: row.values.v ?? 0 }])
+      }
+    }
+    return out
+  }
+
   async function catalog() {
     const a = await availability()
     return {
@@ -1160,5 +1182,6 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     runSaved,
     deleteSaved,
     patchFromUnderstanding,
+    matchNames: (dim: string, names: string[]) => matchNames(dim as Dim, names),
   }
 }

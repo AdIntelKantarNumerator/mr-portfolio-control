@@ -5,7 +5,7 @@
  * and entitlements around it, can be run and checked without a database.
  * Each fact is one day of spend for one combination of the named dimensions.
  */
-import { DIMENSIONS, dimOf, type AggregateQuery, type AggregateResult, type Availability, type Cond, type DataAdapter, type DimKey, type MeasureKey, type NameHit, type SearchRequest } from './types'
+import { DIMENSIONS, dimOf, normName, type AggregateQuery, type AggregateResult, type Availability, type Cond, type DataAdapter, type DimKey, type MeasureKey, type NameHit, type SearchRequest } from './types'
 
 type Named = Exclude<DimKey, 'month' | 'quarter' | 'year' | 'day' | 'week' | 'broadcast_week'>
 
@@ -41,6 +41,10 @@ function test(c: Cond | undefined, f: Fact): boolean {
   if ('or' in c) return c.or.some((x) => test(x, f))
   if ('not' in c) return !test(c.not, f)
   if ('named' in c) return Boolean(f.ids[c.named as Named]?.name)
+  if ('nameIn' in c) {
+    const n = f.ids[c.nameIn as Named]?.name
+    return Boolean(n) && c.names.map(normName).includes(normName(n!))
+  }
   if ('in' in c) {
     const v = valueOf(f, c.in)
     return v !== undefined && c.values.includes(v)

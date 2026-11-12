@@ -106,8 +106,9 @@ export async function chSelect<T = Record<string, unknown>>(
       body: sql,
       // A system-table read answers in milliseconds. Twenty seconds is the
       // server-side cap too; past it the page should say "could not reach"
-      // rather than hang.
-      signal: AbortSignal.timeout(22_000),
+      // rather than hang. A caller that sets a longer server-side limit
+      // (max_execution_time) gets that, plus two seconds, here too.
+      signal: AbortSignal.timeout(Math.max(22_000, (Number(settings.max_execution_time) || 0) * 1000 + 2_000)),
       cache: 'no-store',
     })
   } catch (err) {
