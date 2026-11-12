@@ -710,3 +710,91 @@ export async function dbxLegacyNodeName(tax: 'VX1' | 'VX2', level: string, nodeI
   const rows = await dbxQuery(config(), `SELECT max(NAME) n FROM mrdpp_prod.vx2_taxonomy.${table} WHERE ID = ${nodeId}`, [])
   return rows[0]?.n ? { name: rows[0].n, path: [rows[0].n] } : null
 }
+
+// --- sample creatives behind one Sankey node ----------------------------------------
+
+/** The node clicked on the Sankey: a GPC advertiser or top parent, or a GPC taxonomy node at a level. */
+export type SampleTarget = { by: 'advertiser' | 'parent'; key: string } | { level: 'industry' | 'category' | 'subcategory'; node: string }
+
+export interface SampleRaw {
+  creativeId: string
+  media: string
+  spend: number
+  providerCode: string | null
+  creativeType: string | null
+  title: string | null
+  firstSeen: string | null
+  /** The provider's reference to the creative file: an address, or (AdClarity) a file name. */
+  file: string | null
+}
+
+/** Most creatives a sample shows. */
+export const SAMPLE_SIZE = 8
+
+/**
+ * The biggest creatives behind one node of one FROM entity's Sankey (Scott,
+ * 12 November 2026): the same creatives, attribution and spend as the chart
+ * (dbxFlows), narrowed to what flows into the node clicked, ranked by the
+ * spend that reaches it. With each, the provider's reference to its file -
+ * lib/creative-assets.ts turns that into something to look at.
+ *
+ * "No GPC advertiser" is the creatives with no payer; "Unclassified" the
+ * spend with no taxonomy node; "Unknown product" the spend that went to it,
+ * as on the chart. Names travel as parameters, ids are checked to be integers.
+ */
+export async function dbxSamples(
+  from: FromTaxonomy,
+  fromId: string,
+  classicProducts: Map<string, number[]>,
+  target: SampleTarget,
+  noGpc: string,
+  unclassified: string,
+  onWait?: OnWait,
+): Promise<SampleRaw[]> {
+  const params: { name: string; value: string }[] = []
+  let cond: string
+  if ('by' in target) {
+    if (target.key === noGpc) cond = 'entity_id IS NULL'
+    else if (!isInt(target.key)) return []
+    else cond = target.by === 'parent' ? `coalesce(root_id, entity_id) = ${target.key}` : `entity_id = ${target.key}`
+  } else {
+    const col = target.level === 'industry' ? 'ind' : target.level === 'category' ? 'cat' : 'sub'
+    params.push({ name: 'node', value: target.node }, { name: 'unclassified', value: unclassified })
+    cond = `coalesce(${col}, :unclassified) = :node`
+  }
+  const sql = `
+WITH ${fromCreativesSql(from, [fromId], classicProducts)},
+${occSql('SELECT creative_id FROM from_crtv')},
+cs AS (SELECT DISTINCT creative_id FROM occ),
+${ANCESTRY},
+${ATTRIBUTION},
+a AS (SELECT o.creative_id, o.media, o.spend * coalesce(g.w, 1) spend, g.entity_id, r.root_id,
+    CASE WHEN g.kind = 'unknown' THEN '${UNKNOWN_NODE}' ELSE n.industry_name END ind,
+    n.category_name cat, coalesce(n.subcategory_name, n.category_name) sub
+  FROM occ o
+  LEFT JOIN attr g ON g.creative_id = o.creative_id
+  LEFT JOIN root r ON r.entity_id = g.entity_id
+  LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = g.taxonomy_node_id),
+pick AS (SELECT creative_id, media, sum(spend) spend FROM a WHERE ${cond} GROUP BY 1, 2),
+tp AS (SELECT creative_id, sum(spend) spend, max_by(media, spend) media FROM pick GROUP BY 1 ORDER BY spend DESC LIMIT ${SAMPLE_SIZE}),
+cr AS (SELECT c.creative_id, c.provider_code, c.creative_type, coalesce(c.creative_title, c.creative_headline) title,
+    c.first_seen_occurrence_timestamp first_seen, c.creative_url_hash
+  FROM mrdpp_prod.gold.creative c WHERE c.creative_id IN (SELECT creative_id FROM tp)),
+u AS (SELECT creative_url_hash, max(provider_creative_url) f FROM mrdpp_prod.bronze.creative_unique_urls
+  WHERE creative_url_hash IN (SELECT creative_url_hash FROM cr) GROUP BY 1)
+SELECT cast(tp.creative_id AS string) creative_id, tp.media, tp.spend, cr.provider_code, cr.creative_type, cr.title,
+  cast(cr.first_seen AS string) first_seen, u.f file
+FROM tp JOIN cr ON cr.creative_id = tp.creative_id LEFT JOIN u ON u.creative_url_hash = cr.creative_url_hash
+ORDER BY tp.spend DESC`
+  const rows = await dbxQuery(config(), sql, params, { onWait })
+  return rows.map((r) => ({
+    creativeId: r.creative_id!,
+    media: r.media ?? '',
+    spend: Number(r.spend ?? 0),
+    providerCode: r.provider_code,
+    creativeType: r.creative_type,
+    title: r.title,
+    firstSeen: r.first_seen,
+    file: r.file,
+  }))
+}

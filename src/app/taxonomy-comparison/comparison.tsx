@@ -50,7 +50,7 @@ import {
   type AdvertiserSummary,
   type Step,
 } from '@/lib/taxonomy-rules'
-import type { RunView } from '@/lib/taxonomy-run'
+import type { RunView, SampleCreative } from '@/lib/taxonomy-run'
 import { pickEntity, pollRun, startComparison, type StartState } from './actions'
 import { TreeButton } from './rollup'
 
@@ -216,6 +216,7 @@ function AdvertiserCard({
   const [level, setLevel] = useState<NodeLevel>('category')
   const [gpcBy, setGpcBy] = useState<GpcBy>('advertiser')
   const [open, setOpen] = useState<string | null>(null)
+  const [sample, setSample] = useState<SamplePick | null>(null)
   const [expanded, setExpanded] = useState(false)
   const summary = useMemo(() => summarise(a, from, totals), [a, from, totals])
 
@@ -313,12 +314,33 @@ function AdvertiserCard({
               <div className="tx-filters">
                 <Seg label="Media" value={media} onChange={(v) => setMedia(v as MediaType | '')} options={[['', 'All'], ...MEDIA_TYPES.map((m) => [m, m] as [string, string])]} />
                 <Seg label="Month" value={month} onChange={(v) => setMonth(v as Month | '')} options={[['', 'Both'], ...MONTHS.map((m) => [m, MONTH_LABEL[m].slice(0, 3)] as [string, string])]} />
-                <Seg label="GPC advertiser" value={gpcBy} onChange={(v) => setGpcBy(v as GpcBy)} options={(['advertiser', 'parent'] as GpcBy[]).map((b) => [b, GPC_BY_LABEL[b]] as [string, string])} />
-                <Seg label="GPC node" value={level} onChange={(v) => setLevel(v as NodeLevel)} options={NODE_LEVELS.map((l) => [l, NODE_LEVEL_LABEL[l]] as [string, string])} />
+                <Seg label="GPC advertiser" value={gpcBy} onChange={(v) => (setGpcBy(v as GpcBy), setSample(null))} options={(['advertiser', 'parent'] as GpcBy[]).map((b) => [b, GPC_BY_LABEL[b]] as [string, string])} />
+                <Seg label="GPC node" value={level} onChange={(v) => (setLevel(v as NodeLevel), setSample(null))} options={NODE_LEVELS.map((l) => [l, NODE_LEVEL_LABEL[l]] as [string, string])} />
               </div>
               {data.total > 0 ? (
                 <>
-                  <Sankey data={data} fromLabel={e?.name ?? a.input} gpcBy={gpcBy} more={more} onMore={setOpen} />
+                  <Sankey
+                    data={data}
+                    fromLabel={e?.name ?? a.input}
+                    gpcBy={gpcBy}
+                    more={more}
+                    onMore={setOpen}
+                    picked={sample}
+                    onSample={(p) => setSample((cur) => (cur && cur.kind === p.kind && cur.key === p.key ? null : p))}
+                  />
+                  {sample ? (
+                    <SamplesPanel
+                      key={`${sample.kind}:${sample.key}:${gpcBy}:${level}`}
+                      runId={runId}
+                      input={a.input}
+                      pick={sample}
+                      gpcBy={gpcBy}
+                      level={level}
+                      onClose={() => setSample(null)}
+                    />
+                  ) : (
+                    <p className="tx-muted tx-sample-hint">Click a GPC advertiser or node for sample creatives.</p>
+                  )}
                   {open && openView ? (
                     <GpcTotalPanel label={openLabel} view={openView} from={from} entityName={e?.name ?? a.input} onClose={() => setOpen(null)} />
                   ) : null}
@@ -607,6 +629,133 @@ function GpcTotalPanel({
   )
 }
 
+// --- sample creatives -------------------------------------------------------
+
+/** A Sankey node whose creatives to show: a GPC advertiser (or top parent) by id, or a taxonomy node by name. */
+export type SamplePick = { kind: 'gpc' | 'node'; key: string; label: string }
+
+/** An SVG group that acts as a button. */
+function samplable(go: () => void, label: string) {
+  return {
+    role: 'button',
+    tabIndex: 0,
+    'aria-label': label,
+    onClick: go,
+    onKeyDown: (ev: React.KeyboardEvent) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault()
+        go()
+      }
+    },
+  }
+}
+
+type SamplesState = { loading: true } | { loading: false; rows: SampleCreative[] } | { loading: false; error: string }
+
+/**
+ * The biggest creatives behind the node clicked, with thumbnails (Scott, 12
+ * November 2026): images as images, videos as their first frame, HTML5 ads
+ * as AdClarity's screenshot. Read from Databricks on click
+ * (samples/route.ts); a creative with nothing to show says so.
+ */
+function SamplesPanel({
+  runId,
+  input,
+  pick,
+  gpcBy,
+  level,
+  onClose,
+}: {
+  runId: string
+  input: string
+  pick: SamplePick
+  gpcBy: GpcBy
+  level: NodeLevel
+  onClose: () => void
+}) {
+  const [state, setState] = useState<SamplesState>({ loading: true })
+  const [secs, setSecs] = useState(0)
+  useEffect(() => {
+    let live = true
+    const q = new URLSearchParams({ run: runId, input })
+    if (pick.kind === 'gpc') {
+      q.set('by', gpcBy)
+      q.set('key', pick.key)
+    } else {
+      q.set('level', level)
+      q.set('node', pick.key)
+    }
+    const tick = setInterval(() => live && setSecs((x) => x + 1), 1000)
+    fetch(`/taxonomy-comparison/samples?${q}`)
+      .then(async (res) => {
+        const body = (await res.json()) as SampleCreative[] | { error: string }
+        if (!live) return
+        setState(Array.isArray(body) ? { loading: false, rows: body } : { loading: false, error: body.error })
+      })
+      .catch((err: Error) => live && setState({ loading: false, error: err.message }))
+      .finally(() => clearInterval(tick))
+    return () => {
+      live = false
+      clearInterval(tick)
+    }
+  }, [runId, input, pick, gpcBy, level])
+
+  return (
+    <div className="tx-total tx-samples" role="region" aria-label={`Sample creatives for ${pick.label}`}>
+      <div className="tx-total-head">
+        <div>
+          <div className="tx-muted">Top creatives by spend · Aug–Sep 2026</div>
+          <strong className="tx-total-title">{pick.label}</strong>
+        </div>
+        <button type="button" className="tx-close" onClick={onClose} aria-label="Close">
+          ×
+        </button>
+      </div>
+      {state.loading ? (
+        <p className="tx-muted">Reading creatives from Databricks… {secs}s</p>
+      ) : 'error' in state ? (
+        <p className="status crit">{state.error}</p>
+      ) : !state.rows.length ? (
+        <p className="tx-muted">No creatives found for this.</p>
+      ) : (
+        <div className="tx-sample-grid">
+          {state.rows.map((c) => (
+            <figure key={c.creativeId} className="tx-sample">
+              <div className="tx-sample-media">
+                {!c.asset ? (
+                  <span className="tx-muted">No preview</span>
+                ) : c.asset.kind === 'video' ? (
+                  // "#t=0.5" makes the browser paint a frame half a second in; metadata alone often leaves it black.
+                  <video src={`${c.asset.url}#t=0.5`} preload="metadata" controls muted playsInline />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element -- an outside address, shown as it is
+                  <img src={c.asset.url} alt={c.title ?? `Creative ${c.creativeId}`} loading="lazy" />
+                )}
+              </div>
+              <figcaption>
+                <strong>{money(c.spend)}</strong> <span className="tx-muted">· {c.media}{c.creativeType ? ` · ${c.creativeType}` : ''}</span>
+                {c.title ? <div className="tx-sample-title" title={c.title}>{c.title}</div> : null}
+                <div className="tx-muted tx-sample-meta">
+                  #{c.creativeId}
+                  {c.firstSeen ? ` · first seen ${c.firstSeen.slice(0, 10)}` : ''}
+                  {c.asset ? (
+                    <>
+                      {' · '}
+                      <a href={c.asset.url} target="_blank" rel="noreferrer">
+                        Open ↗
+                      </a>
+                    </>
+                  ) : null}
+                </div>
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // --- the Sankey -------------------------------------------------------------
 
 /** Categorical slots in fixed order (validated light and dark, 30 October 2026); the tail and "none" are neutral. */
@@ -636,12 +785,18 @@ function Sankey({
   gpcBy,
   more,
   onMore,
+  onSample,
+  picked,
 }: {
   data: SankeyData
   fromLabel: string
   gpcBy: GpcBy
   more: Set<string>
   onMore: (key: string) => void
+  /** A GPC advertiser (or top parent) or node was clicked: show its sample creatives. */
+  onSample: (pick: SamplePick) => void
+  /** The one whose samples are showing, highlighted. */
+  picked: SamplePick | null
 }) {
   const hatch = `tx-hatch-${useId().replace(/[^a-zA-Z0-9]/g, '')}`
   const fillFor = (key: string) => (key === NO_GPC ? `url(#${hatch})` : color.get(key))
@@ -739,8 +894,14 @@ function Sankey({
 
         {data.advertisers.map((r) => {
           const a = adv.get(r.key)!
+          // "Other" is many advertisers folded together: nothing to sample.
+          const pick: SamplePick | null = r.key === OTHER ? null : { kind: 'gpc', key: r.key, label: r.label }
           return (
-            <g key={`a-${r.key}`}>
+            <g
+              key={`a-${r.key}`}
+              className={pick ? `tx-pickable ${picked?.kind === 'gpc' && picked.key === r.key ? 'on' : ''}` : ''}
+              {...(pick ? samplable(() => onSample(pick), `Sample creatives for ${r.label}`) : {})}
+            >
               <rect x={X[1]} y={a.y} width={NODE_W} height={Math.max(a.h, 3)} rx={3} fill={color.get(r.key)} className={r.key === NO_GPC ? 'tx-node-nogpc' : ''}>
                 <title>{`${r.label}: ${money(r.spend)} (${pct(r.spend / data.total)})`}</title>
               </rect>
@@ -750,8 +911,16 @@ function Sankey({
                   role="button"
                   tabIndex={0}
                   transform={`translate(${X[1] - 13}, ${a.y + a.h / 2})`}
-                  onClick={() => onMore(r.key)}
-                  onKeyDown={(ev) => (ev.key === 'Enter' || ev.key === ' ') && onMore(r.key)}
+                  onClick={(ev) => {
+                    ev.stopPropagation()
+                    onMore(r.key)
+                  }}
+                  onKeyDown={(ev) => {
+                    if (ev.key === 'Enter' || ev.key === ' ') {
+                      ev.stopPropagation()
+                      onMore(r.key)
+                    }
+                  }}
                 >
                   <title>More GPC spend from other advertisers: see the total</title>
                   <circle r={9} />
@@ -768,7 +937,11 @@ function Sankey({
         {data.nodes.map((r) => {
           const nd = nodes.get(r.key)!
           return (
-            <g key={`n-${r.key}`}>
+            <g
+              key={`n-${r.key}`}
+              className={r.key === OTHER ? '' : `tx-pickable ${picked?.kind === 'node' && picked.key === r.key ? 'on' : ''}`}
+              {...(r.key === OTHER ? {} : samplable(() => onSample({ kind: 'node', key: r.key, label: r.label }), `Sample creatives for ${r.label}`))}
+            >
               <rect x={X[2]} y={nd.y} width={NODE_W} height={nd.h} rx={3} className={r.key === UNCLASSIFIED ? 'tx-node-none' : 'tx-node-gpc'}>
                 <title>{`${r.label}: ${money(r.spend)} (${pct(r.spend / data.total)})`}</title>
               </rect>

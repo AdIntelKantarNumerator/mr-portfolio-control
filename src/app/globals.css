@@ -2481,3 +2481,19 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rb-choice.rb-withicon { flex-direction: row; align-items: flex-start; gap: 10px; }
 .rb-choicetext { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .rb-ico { width: 22px; height: 22px; flex: none; color: var(--brand-2); margin-top: 1px; }
+
+/* Sample creatives behind a Sankey node (12 November 2026). */
+.tx-pickable { cursor: pointer; outline: none; }
+.tx-pickable:hover .tx-node-label, .tx-pickable:focus-visible .tx-node-label, .tx-pickable.on .tx-node-label { text-decoration: underline; text-underline-offset: 3px; fill: var(--brand); }
+.tx-pickable.on rect { stroke: var(--brand); stroke-width: 2; }
+.tx-sample-hint { font-size: 12.5px; margin: -4px 0 4px; }
+.tx-samples { margin-top: 6px; }
+.tx-sample-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.tx-sample { margin: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--raised); display: flex; flex-direction: column; }
+.tx-sample-media { height: 150px; display: grid; place-items: center; background: var(--canvas); border-bottom: 1px solid var(--line); }
+.tx-sample-media img, .tx-sample-media video { max-width: 100%; max-height: 150px; object-fit: contain; display: block; }
+.tx-sample figcaption { padding: 7px 9px 9px; font-size: 12.5px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tx-sample-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-sample-meta { font-size: 11.5px; }
+.tx-sample-meta a { color: var(--brand); font-weight: 700; text-decoration: none; }
+.tx-sample-meta a:hover { text-decoration: underline; text-underline-offset: 3px; }
