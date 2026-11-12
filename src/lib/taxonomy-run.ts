@@ -22,8 +22,7 @@ import { eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { classicBrandProducts, classicNames, classicSpend, taxonomyRuns } from '@/db/schema'
 import { completeJson, ModelError, resolveProvider } from './llm'
-import { dbxCandidates, dbxCreatives, dbxFlows, dbxGpcTotals, dbxSamples, type GpcTotalRaw, type SampleTarget } from './taxonomy-dbx'
-import { resolveAsset, type Asset } from './creative-assets'
+import { dbxCandidates, dbxCreatives, dbxFlows, dbxGpcTotals, dbxSamples, type GpcTotalRaw, type SampleFilter, type SampleTarget } from './taxonomy-dbx'
 import {
   compactName,
   computeFlags,
@@ -555,45 +554,31 @@ export interface SampleCreative {
   creativeId: string
   media: string
   spend: number
-  provider: string | null
   creativeType: string | null
   title: string | null
   firstSeen: string | null
-  /** An image or video to show, checked to exist; null when none could be found. */
-  asset: Asset | null
 }
 
 const SAMPLE_TTL = 3_600_000
 const sampleCache = new Map<string, { at: number; value: SampleCreative[] }>()
 
 /**
- * The biggest creatives behind one node of one advertiser's Sankey, each with
- * a thumbnail to show (Scott, 12 November 2026). Read from Databricks on
- * click and kept in this process for an hour: the window is fixed, and the
- * same node is often opened twice.
+ * The biggest creatives behind one node of one advertiser's Sankey, under the
+ * chart's media and month filters (Scott, 12 November 2026). Each is shown
+ * by its id through MediaRadar's creative API (app/taxonomy-comparison/
+ * creative). Read from Databricks on click and kept in this process for an
+ * hour: the window is fixed, and the same node is often opened twice.
  */
-export async function runSamples(run: RunView, input: string, target: SampleTarget): Promise<SampleCreative[]> {
+export async function runSamples(run: RunView, input: string, target: SampleTarget, filter: SampleFilter = {}): Promise<SampleCreative[]> {
   if (!run.result) return []
   const a = run.result.advertisers.find((x) => x.input === input)
   if (!a?.entity) return []
-  const key = JSON.stringify([run.id, input, target])
+  const key = JSON.stringify([run.id, input, target, filter.media ?? null, filter.month ?? null])
   const hit = sampleCache.get(key)
   if (hit && Date.now() - hit.at < SAMPLE_TTL) return hit.value
   const from = run.result.from
   const products = from === 'Classic' ? await classicProductsFor([a.entity.id]) : new Map<string, number[]>()
-  const raw = await dbxSamples(from, a.entity.id, products, target, NO_GPC, UNCLASSIFIED)
-  const value = await Promise.all(
-    raw.map(async (r) => ({
-      creativeId: r.creativeId,
-      media: r.media,
-      spend: r.spend,
-      provider: r.providerCode,
-      creativeType: r.creativeType,
-      title: r.title,
-      firstSeen: r.firstSeen,
-      asset: await resolveAsset(r.file, r.providerCode),
-    })),
-  )
+  const value: SampleCreative[] = await dbxSamples(from, a.entity.id, products, target, filter, NO_GPC, UNCLASSIFIED)
   sampleCache.set(key, { at: Date.now(), value })
   if (sampleCache.size > 500) sampleCache.delete(sampleCache.keys().next().value!)
   return value

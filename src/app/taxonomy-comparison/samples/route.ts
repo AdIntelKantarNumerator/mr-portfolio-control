@@ -1,15 +1,17 @@
 /**
  * GET /taxonomy-comparison/samples?run=<id>&input=<advertiser>&by=advertiser|parent&key=<GPC id>
  * GET /taxonomy-comparison/samples?run=<id>&input=<advertiser>&level=industry|category|subcategory&node=<name>
+ *     either with &media=<Digital|Social|Linear TV|CTV> and &month=<2026-08|2026-09>, the chart's filters
  *
- * The biggest creatives behind one node of an advertiser's Sankey, each with
- * an image or video to show (lib/taxonomy-run.ts runSamples; Scott, 12
- * November 2026). Read from Databricks when a node is clicked. Behind the
- * sign-in like every page.
+ * The biggest creatives behind one node of an advertiser's Sankey, under the
+ * chart's media and month filters (lib/taxonomy-run.ts runSamples; Scott, 12
+ * November 2026). Read from Databricks when a node is clicked; the page shows
+ * each through creative/[id]. Behind the sign-in like every page.
  */
 import { DatabricksError } from '@/lib/databricks'
 import type { SampleTarget } from '@/lib/taxonomy-dbx'
 import { readRun, runSamples } from '@/lib/taxonomy-run'
+import { MEDIA_TYPES, MONTHS, type MediaType, type Month } from '@/lib/taxonomy-rules'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -26,7 +28,13 @@ export async function GET(req: Request) {
   else if ((level === 'industry' || level === 'category' || level === 'subcategory') && q.get('node')) target = { level, node: q.get('node')!.slice(0, 300) }
   else return Response.json({ error: 'Say which node: by and key, or level and node.' }, { status: 400 })
   try {
-    return Response.json(await runSamples(run, input, target), { headers: { 'cache-control': 'no-store' } })
+    const media = q.get('media')
+    const month = q.get('month')
+    const filter = {
+      media: media && (MEDIA_TYPES as readonly string[]).includes(media) ? (media as MediaType) : null,
+      month: month && (MONTHS as readonly string[]).includes(month) ? (month as Month) : null,
+    }
+    return Response.json(await runSamples(run, input, target, filter), { headers: { 'cache-control': 'no-store' } })
   } catch (err) {
     const message = err instanceof DatabricksError ? err.message : `Reading Databricks failed: ${(err as Error).message}`
     return Response.json({ error: message }, { status: 502 })

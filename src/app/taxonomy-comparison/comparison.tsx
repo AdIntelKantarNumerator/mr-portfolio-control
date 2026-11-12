@@ -330,12 +330,14 @@ function AdvertiserCard({
                   />
                   {sample ? (
                     <SamplesPanel
-                      key={`${sample.kind}:${sample.key}:${gpcBy}:${level}`}
+                      key={`${sample.kind}:${sample.key}:${gpcBy}:${level}:${media}:${month}`}
                       runId={runId}
                       input={a.input}
                       pick={sample}
                       gpcBy={gpcBy}
                       level={level}
+                      media={media || null}
+                      month={month || null}
                       onClose={() => setSample(null)}
                     />
                   ) : (
@@ -653,10 +655,11 @@ function samplable(go: () => void, label: string) {
 type SamplesState = { loading: true } | { loading: false; rows: SampleCreative[] } | { loading: false; error: string }
 
 /**
- * The biggest creatives behind the node clicked, with thumbnails (Scott, 12
- * November 2026): images as images, videos as their first frame, HTML5 ads
- * as AdClarity's screenshot. Read from Databricks on click
- * (samples/route.ts); a creative with nothing to show says so.
+ * The biggest creatives behind the node clicked, under the chart's media and
+ * month filters, with thumbnails (Scott, 12 November 2026). Which creatives
+ * is read from Databricks on click (samples/route.ts); each is shown through
+ * MediaRadar's creative API by its id (creative/[id]/route.ts) - a thumbnail
+ * here, the creative itself, played or shown, in a new tab.
  */
 function SamplesPanel({
   runId,
@@ -664,6 +667,8 @@ function SamplesPanel({
   pick,
   gpcBy,
   level,
+  media,
+  month,
   onClose,
 }: {
   runId: string
@@ -671,6 +676,8 @@ function SamplesPanel({
   pick: SamplePick
   gpcBy: GpcBy
   level: NodeLevel
+  media: MediaType | null
+  month: Month | null
   onClose: () => void
 }) {
   const [state, setState] = useState<SamplesState>({ loading: true })
@@ -685,6 +692,8 @@ function SamplesPanel({
       q.set('level', level)
       q.set('node', pick.key)
     }
+    if (media) q.set('media', media)
+    if (month) q.set('month', month)
     const tick = setInterval(() => live && setSecs((x) => x + 1), 1000)
     fetch(`/taxonomy-comparison/samples?${q}`)
       .then(async (res) => {
@@ -698,13 +707,16 @@ function SamplesPanel({
       live = false
       clearInterval(tick)
     }
-  }, [runId, input, pick, gpcBy, level])
+  }, [runId, input, pick, gpcBy, level, media, month])
 
   return (
     <div className="tx-total tx-samples" role="region" aria-label={`Sample creatives for ${pick.label}`}>
       <div className="tx-total-head">
         <div>
-          <div className="tx-muted">Top creatives by spend · Aug–Sep 2026</div>
+          <div className="tx-muted">
+            Top creatives by spend · {month ? MONTH_LABEL[month] : 'Aug–Sep 2026'}
+            {media ? ` · ${media}` : ''}
+          </div>
           <strong className="tx-total-title">{pick.label}</strong>
         </div>
         <button type="button" className="tx-close" onClick={onClose} aria-label="Close">
@@ -716,36 +728,26 @@ function SamplesPanel({
       ) : 'error' in state ? (
         <p className="status crit">{state.error}</p>
       ) : !state.rows.length ? (
-        <p className="tx-muted">No creatives found for this.</p>
+        <p className="tx-muted">No creatives found for this{media || month ? ' with these filters' : ''}.</p>
       ) : (
         <div className="tx-sample-grid">
           {state.rows.map((c) => (
             <figure key={c.creativeId} className="tx-sample">
-              <div className="tx-sample-media">
-                {!c.asset ? (
-                  <span className="tx-muted">No preview</span>
-                ) : c.asset.kind === 'video' ? (
-                  // "#t=0.5" makes the browser paint a frame half a second in; metadata alone often leaves it black.
-                  <video src={`${c.asset.url}#t=0.5`} preload="metadata" controls muted playsInline />
-                ) : (
-                  // eslint-disable-next-line @next/next/no-img-element -- an outside address, shown as it is
-                  <img src={c.asset.url} alt={c.title ?? `Creative ${c.creativeId}`} loading="lazy" />
-                )}
-              </div>
+              <a className="tx-sample-media" href={`/taxonomy-comparison/creative/${c.creativeId}?type=creative`} target="_blank" rel="noreferrer" title="Open the creative">
+                {/* eslint-disable-next-line @next/next/no-img-element -- served by the creative API through the portfolio */}
+                <img src={`/taxonomy-comparison/creative/${c.creativeId}?type=thumbnail`} alt={c.title ?? `Creative ${c.creativeId}`} loading="lazy" />
+                {c.media !== 'Digital' ? <span className="tx-sample-play" aria-hidden>▶</span> : null}
+              </a>
               <figcaption>
                 <strong>{money(c.spend)}</strong> <span className="tx-muted">· {c.media}{c.creativeType ? ` · ${c.creativeType}` : ''}</span>
                 {c.title ? <div className="tx-sample-title" title={c.title}>{c.title}</div> : null}
                 <div className="tx-muted tx-sample-meta">
                   #{c.creativeId}
                   {c.firstSeen ? ` · first seen ${c.firstSeen.slice(0, 10)}` : ''}
-                  {c.asset ? (
-                    <>
-                      {' · '}
-                      <a href={c.asset.url} target="_blank" rel="noreferrer">
-                        Open ↗
-                      </a>
-                    </>
-                  ) : null}
+                  {' · '}
+                  <a href={`/taxonomy-comparison/creative/${c.creativeId}?type=creative`} target="_blank" rel="noreferrer">
+                    Open ↗
+                  </a>
                 </div>
               </figcaption>
             </figure>
