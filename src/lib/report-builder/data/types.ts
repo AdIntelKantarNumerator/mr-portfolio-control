@@ -29,6 +29,14 @@ export type DimKey =
   | 'media_owner'
   | 'property'
   | 'market'
+  | 'master_property'
+  | 'program'
+  | 'program_genre'
+  | 'league'
+  | 'daypart'
+  | 'language'
+  | 'direct_indirect'
+  | 'length'
   | 'month'
   | 'quarter'
   | 'year'
@@ -36,7 +44,12 @@ export type DimKey =
   | 'week'
   | 'broadcast_week'
 
-export type DimGroup = 'who' | 'what' | 'where' | 'when'
+/**
+ * Filters inside who, what or where are OR-ed (Toyota or Honda; NBC or all of
+ * Cable TV) and the groups AND-ed. The details (program, daypart, spot length,
+ * language...) each narrow on their own: Prime Time and Spanish means both.
+ */
+export type DimGroup = 'who' | 'what' | 'where' | 'detail' | 'when'
 
 export interface DimInfo {
   label: string
@@ -44,8 +57,10 @@ export interface DimInfo {
   group: DimGroup
   /** A time dimension: its values are dates or periods, not ids. */
   time?: boolean
-  /** Needs data by day (day and week breakdowns). */
+  /** Needs data by day: day and week breakdowns, and what only the daily tables record (daypart, league). */
   daily?: boolean
+  /** Comes from the creative data (spot length), which lacks some other dimensions; adapters say which (DataAdapter.supports). */
+  creative?: boolean
 }
 
 /** The dimensions every adapter answers for. */
@@ -60,6 +75,14 @@ export const DIMENSIONS: Record<DimKey, DimInfo> = {
   media_owner: { label: 'Media owner', plural: 'media owners', group: 'where' },
   property: { label: 'Property', plural: 'properties', group: 'where' },
   market: { label: 'Market', plural: 'markets', group: 'where' },
+  master_property: { label: 'Master property', plural: 'master properties', group: 'where' },
+  program: { label: 'Program', plural: 'programs', group: 'detail' },
+  program_genre: { label: 'Program genre', plural: 'program genres', group: 'detail' },
+  league: { label: 'League', plural: 'leagues', group: 'detail', daily: true },
+  daypart: { label: 'Daypart', plural: 'dayparts', group: 'detail', daily: true },
+  language: { label: 'Language', plural: 'languages', group: 'detail' },
+  direct_indirect: { label: 'Direct / indirect', plural: 'buying types', group: 'detail' },
+  length: { label: 'Spot length', plural: 'spot lengths', group: 'detail', creative: true },
   month: { label: 'Month', plural: 'months', group: 'when', time: true },
   quarter: { label: 'Quarter', plural: 'quarters', group: 'when', time: true },
   year: { label: 'Year', plural: 'years', group: 'when', time: true },
@@ -78,6 +101,26 @@ export const MEASURE_INFO: Record<MeasureKey, { label: string; type: 'money' | '
 
 /** The dimension an id belongs to: "advertiser:123" is an advertiser. */
 export const dimOf = (id: string) => String(id).split(':')[0]!
+
+/** Every dimension a condition reads, so an adapter can choose where to read it from. */
+export function condDims(c: Cond | undefined, out = new Set<DimKey>()): Set<DimKey> {
+  if (!c) return out
+  if ('and' in c) c.and.forEach((x) => condDims(x, out))
+  else if ('or' in c) c.or.forEach((x) => condDims(x, out))
+  else if ('not' in c) condDims(c.not, out)
+  else if ('in' in c) out.add(c.in)
+  else if ('named' in c) out.add(c.named)
+  else if ('tuples' in c) c.tuples.forEach((d) => out.add(d))
+  else if ('anyOf' in c) for (const id of c.anyOf) if (DIMENSIONS[dimOf(id) as DimKey]) out.add(dimOf(id) as DimKey)
+  return out
+}
+
+/** Every dimension a query reads: grouped, filtered on, or inside a measure's condition. */
+export const queryDims = (q: Pick<AggregateQuery, 'groupBy' | 'where' | 'measures'>): Set<DimKey> => {
+  const out = condDims(q.where, new Set(q.groupBy))
+  for (const m of q.measures) condDims(m.where, out)
+  return out
+}
 
 /**
  * A condition on the data. Combine with and / or / not.
@@ -143,6 +186,8 @@ export interface AggregateResult {
   rows: Array<{ keys: Partial<Record<DimKey, GroupKey>>; values: Record<string, number> }>
   count?: number
   totals?: Record<string, number>
+  /** What the reader should know about where the numbers came from (a different table, a caveat). */
+  notes?: string[]
 }
 
 export interface Availability {
@@ -182,4 +227,9 @@ export interface DataAdapter {
   search(req: SearchRequest): Promise<NameHit[]>
   /** Names and context for ids. Unknown ids are left out. */
   labels(ids: string[]): Promise<Array<{ id: string; name: string; context: string }>>
+  /**
+   * Whether these dimensions can be read together, or which cannot and why.
+   * Adapters that hold every dimension in one place leave it out.
+   */
+  supports?(dims: DimKey[]): { conflicts: DimKey[]; reason: string } | null
 }

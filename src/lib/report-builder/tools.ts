@@ -128,7 +128,7 @@ export interface ToolDef {
 
 const PREVIEW_ROWS = 10
 const RUN_ROWS = 25
-const NAME_TYPES = ['top_parent', 'advertiser', 'product', 'industry', 'category', 'subcategory', 'media_type', 'media_owner', 'property', 'market']
+const NAME_TYPES = ['top_parent', 'advertiser', 'product', 'industry', 'category', 'subcategory', 'media_type', 'media_owner', 'property', 'master_property', 'market', 'program', 'program_genre', 'league', 'daypart', 'language', 'direct_indirect', 'length']
 const COMP_TYPES = ['property', 'media_type', 'media_owner', 'market']
 const USE_USUAL = 'Yes, use it'
 
@@ -192,7 +192,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'search_names',
-    description: 'Find advertisers, parent companies, products, categories, media types, media owners or properties (networks, platforms) by name. Returns matches with an id, what kind of thing it is, a short description and recent spend. An empty query returns the biggest spenders.',
+    description:
+      'Find advertisers, parent companies, products, categories, media types, media owners, properties (networks, platforms), master properties, markets, programs, program genres, leagues, dayparts, languages, buying types (direct/indirect) or spot lengths by name. Returns matches with an id, what kind of thing it is, a short description and recent spend. An empty query returns the biggest. Leagues, dayparts and spot lengths are only found when asked for by type.',
     parameters: obj({ query: { type: 'string' }, types: { type: 'array', items: { type: 'string', enum: NAME_TYPES } } }, ['query']),
   },
   {
@@ -232,7 +233,7 @@ export const TOOLS: ToolDef[] = [
       breakdowns: { type: 'array', items: { type: 'string', enum: NAME_TYPES }, description: 'Extra row breakdowns to add, such as product or media_type.' },
       set_breakdowns: { type: 'array', items: { type: 'string', enum: NAME_TYPES }, description: 'The complete row breakdowns, in order, replacing the current ones. "Only advertiser and property" is ["advertiser","property"].' },
       remove_breakdowns: { type: 'array', items: { type: 'string', enum: NAME_TYPES }, description: 'Row breakdowns to take out.' },
-      columns: { type: 'string', enum: ['month', 'quarter', 'year', 'day', 'week', 'broadcast_week', 'media_type', 'property', 'none'], description: 'One column per value; "none" removes the column breakdown.' },
+      columns: { type: 'string', enum: ['month', 'quarter', 'year', 'day', 'week', 'broadcast_week', 'media_type', 'media_owner', 'property', 'master_property', 'market', 'program_genre', 'league', 'daypart', 'language', 'direct_indirect', 'length', 'none'], description: 'One column per value; "none" removes the column breakdown.' },
       measures: { type: 'array', items: { type: 'string', enum: ['occurrences', 'impressions'] }, description: 'Measures to add alongside spend.' },
       my_properties: { type: 'array', items: { type: 'string' }, description: 'Publisher reports: the user\'s own properties (or media owner), ids from search_names. Replaces the earlier ones.' },
       my_brands: { type: 'array', items: { type: 'string' }, description: 'Competitive reports: the user\'s own advertisers, parent companies or products, ids from search_names.' },

@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { clickhouseAdapter, condSql } from '../src/lib/report-builder/data/clickhouse'
+import { clickhouseAdapter, condSql, sourceFor } from '../src/lib/report-builder/data/clickhouse'
 import { EntitlementError, entitlementsFor, withEntitlements } from '../src/lib/report-builder/data/entitlements'
 import { memoryAdapter, type Fact } from '../src/lib/report-builder/data/memory'
 import type { AggregateQuery, Availability } from '../src/lib/report-builder/data/types'
@@ -170,4 +170,66 @@ test('a report outside the entitlement becomes a problem with a fix, not an erro
   assert.ok(fixed.ok)
   const r = await engine.run(fixed.spec)
   assert.equal(r.total, (100 + 80 + 60) * 31, 'Network TV only: no ESPN')
+})
+
+// ---------------------------------------------------------------- more dimensions (12 November 2026)
+
+test('daypart and league switch a report to the daily tables, as a breakout or only a filter; spot length to the creative data', () => {
+  const m = { from: '2026-10-01', to: '2026-10-31' }
+  const spend = [{ as: 'v', measure: 'spend' as const }]
+  assert.equal(sourceFor({ period: m, groupBy: ['advertiser'], measures: spend }), 'month')
+  assert.equal(sourceFor({ period: m, groupBy: ['daypart'], measures: spend }), 'daily')
+  assert.equal(sourceFor({ period: m, groupBy: ['advertiser'], where: { in: 'league', values: ['league:1'] }, measures: spend }), 'daily', 'a filter alone is enough')
+  assert.equal(sourceFor({ period: m, groupBy: ['advertiser'], measures: [{ as: 'v', measure: 'spend', where: { anyOf: ['daypart:3'] } }] }), 'daily', 'and inside a measure')
+  assert.equal(sourceFor({ period: m, groupBy: ['length'], measures: spend }), 'creative_month')
+  assert.equal(sourceFor({ period: { ...m, daily: true }, groupBy: ['length', 'broadcast_week'], measures: spend }), 'creative_daily')
+
+  const ch = clickhouseAdapter({ query: async () => [] })
+  const byDaypart = ch.sqlFor({ period: m, groupBy: ['daypart'], measures: spend }, '(DAILY)')
+  assert.match(byDaypart.rows, /FROM \(DAILY\) WHERE year_month BETWEEN 202609 AND 202611 AND start_date BETWEEN '2026-10-01' AND '2026-10-31' AND coalesce\(is_promo/)
+  const byLength = ch.sqlFor({ period: m, groupBy: ['length'], measures: spend })
+  assert.match(byLength.rows, /FROM gpc_creative\.creative_product_media_summary_month WHERE year_month BETWEEN 202610 AND 202610 GROUP BY k_length/)
+  assert.doesNotMatch(byLength.rows, /is_promo/, 'the creative data has no promo flags')
+  assert.equal(ch.supports!(['length', 'advertiser', 'media_type']), null)
+  assert.deepEqual(ch.supports!(['length', 'program', 'market'])!.conflicts, ['program', 'market'])
+})
+
+const CC = (dim: string, id: number, name: string) => ({ id: `${dim}:${id}`, name })
+function detailWorld(): Fact[] {
+  const out: Fact[] = []
+  for (const date of ['2026-10-05', '2026-10-06']) {
+    const base = { ...CARS, ...TOYOTA, ...NBC }
+    out.push({ date, ids: { ...base, daypart: CC('daypart', 1, 'Prime Time'), language: CC('language', 1, 'English') }, spend: 100, occurrences: 1 })
+    out.push({ date, ids: { ...base, daypart: CC('daypart', 1, 'Prime Time'), language: CC('language', 2, 'Spanish') }, spend: 10, occurrences: 1 })
+    out.push({ date, ids: { ...base, daypart: CC('daypart', 2, 'Early Fringe'), language: CC('language', 2, 'Spanish') }, spend: 1, occurrences: 1 })
+  }
+  return out
+}
+
+test('details each narrow on their own: Prime Time and Spanish means both, and they break out as rows or columns', async () => {
+  const engine = engineOn(memoryAdapter(detailWorld(), AVAIL))
+  const both = await engine.run({ template: 'x', rows: ['advertiser'], measures: ['spend'], filters: { daypart: ['daypart:1'], language: ['language:2'] }, time: OCT })
+  assert.equal(both.total, 20, 'Spanish in Prime Time only')
+  assert.match(both.summary, /Prime Time, Spanish/)
+  const grid = await engine.run({ template: 'x', rows: ['daypart'], columns: 'language', measures: ['spend'], scope: 'all', time: OCT })
+  assert.deepEqual(grid.columns.map((c) => c.label), ['Daypart', 'English', 'Spanish', 'Total spend'])
+  assert.deepEqual(grid.rows[0], ['Prime Time', 200, 20, 220])
+})
+
+test('spot length with program cannot be read together: a problem with both fixes, and suggestions skip what would clash', async () => {
+  const ch = clickhouseAdapter({ query: async () => [] })
+  const adapter = { ...memoryAdapter(world(), AVAIL), supports: ch.supports }
+  const engine = engineOn(adapter)
+  const v = await engine.validate({ template: 'x', rows: ['length', 'program'], measures: ['spend'], scope: 'all', time: OCT })
+  assert.equal(v.errors[0]!.code, 'cannot_combine')
+  assert.match(v.errors[0]!.message, /Spot length comes from the creative data, which does not record program/)
+  assert.deepEqual(v.errors[0]!.fixes.map((f) => f.label), ['Drop spot length', 'Drop program'])
+  const fixed = await engine.validate(v.spec, v.errors[0]!.fixes[1]!.patch)
+  assert.deepEqual(fixed.spec.rows, ['length'])
+
+  const zero = await engine.validate({ template: 'zero_share', rows: ['advertiser'], measures: ['spend'], zero_share: { mine: ['property:1'], versus: ['media_type:101'], mode: 'zero' }, time: OCT })
+  const labels = zero.refinements.map((r) => r.label)
+  assert.ok(labels.includes('Break out by daypart') && labels.includes('Break out by program'), labels.join(' | '))
+  const buyer = await engine.validate({ template: 'share_of_voice', rows: ['advertiser'], measures: ['spend'], calcs: ['share'], compare: { mine: ['advertiser:1'], rivals: ['advertiser:2'] }, time: OCT })
+  assert.ok(buyer.refinements.some((r) => r.label === 'Break out by spot length'))
 })

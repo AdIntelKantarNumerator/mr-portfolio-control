@@ -24,7 +24,11 @@ type Dim = DimKey
 type Group = DimGroup
 const DIMS = DIMENSIONS
 const NAME_DIMS = (Object.keys(DIMS) as Dim[]).filter((d) => !DIMS[d].time)
-const GROUP_LABEL: Record<Group, string> = { who: 'Who is advertising', what: 'What is advertised', where: 'Where it runs', when: 'When' }
+/** A search that names no kinds leaves out what lives in other tables (daypart, league, spot length): ask for those by name. */
+const DEFAULT_SEARCH = NAME_DIMS.filter((d) => !DIMS[d].daily && !DIMS[d].creative)
+const GROUP_LABEL: Record<Group, string> = { who: 'Who is advertising', what: 'What is advertised', where: 'Where it runs', detail: 'Program, daypart, length and other details', when: 'When' }
+/** Filters in who, what or where are OR-ed within the group; each detail narrows on its own. */
+const filterGroup = (d: Dim): string => (DIMS[d].group === 'detail' ? d : DIMS[d].group)
 const MEASURES = MEASURE_INFO
 const CALCS = {
   share: { label: 'Share of total', note: 'Each row as a percent of the report total. With a column breakdown: each cell as a percent of its column total (% down), shown in the cell under the value.' },
@@ -124,7 +128,7 @@ const dayToIdx = (n: number) => {
 }
 const weekday = (n: number) => new Date(n * DAY_MS).getUTCDay()
 /** The longest period each day or week breakdown may cover, in days. */
-const DAILY_LIMIT: Partial<Record<Dim, number>> = { day: 92, week: 371, broadcast_week: 371 }
+const DAILY_LIMIT: Partial<Record<Dim, number>> = { day: 92, week: 371, broadcast_week: 371, daypart: 371, league: 371 }
 
 function listText(items: string[], max = 4) {
   return items.length <= max ? items.join(', ') : `${items.slice(0, max).join(', ')} and ${items.length - max} more`
@@ -198,21 +202,35 @@ function normalize(specIn: Spec): NSpec {
 
 const dimOf = (id: string) => String(id).split(':')[0]!
 
-/** Whether a report needs data by day: a day or week breakdown, or a period in weeks or days. */
-function needsDaily(s: NSpec): boolean {
-  const t = s.time ?? {}
-  return [...s.rows, ...(s.columns ? [s.columns] : [])].some((d) => DIMS[d]?.daily) || t.unit === 'week' || t.unit === 'day' || dParse(t.start) !== null
+/** Every dimension a report reads: breakouts, filters, a drill-down, and the ids in its competitive set. */
+function dimsOf(s: NSpec): Dim[] {
+  const ids = [...(s.zero_share ? [...s.zero_share.mine, ...s.zero_share.versus] : []), ...(s.compare ? [...s.compare.mine, ...s.compare.rivals] : [])]
+  return uniq([...s.rows, ...(s.columns ? [s.columns] : []), ...Object.keys(s.filters), ...Object.keys(s.path ?? {}), ...ids.map(dimOf)].filter((d) => DIMS[d as Dim]) as Dim[])
 }
 
-/** The report's filters as conditions: OR within a group (who, what, where), the groups AND-ed by the caller. */
-function filterConds(s: NSpec): Record<'who' | 'what' | 'where', Cond | undefined> {
+/**
+ * Whether a report needs data by day: a day or week breakdown, a period in
+ * weeks or days, or anything only the daily tables record - daypart and
+ * league, as a breakout or a filter (Scott, 12 November 2026). The adapter
+ * reads the daily tables for those on its own; this also tells the engine to
+ * keep such a report within the daily limits.
+ */
+function needsDaily(s: NSpec): boolean {
+  const t = s.time ?? {}
+  return dimsOf(s).some((d) => DIMS[d]?.daily) || t.unit === 'week' || t.unit === 'day' || dParse(t.start) !== null
+}
+
+/** The report's filters as conditions: OR within a group (who, what, where), the groups AND-ed by the caller; each detail AND-ed on its own. */
+function filterConds(s: NSpec): Record<'who' | 'what' | 'where' | 'detail', Cond | undefined> {
   const groups: Record<'who' | 'what' | 'where', Cond[]> = { who: [], what: [], where: [] }
+  const details: Cond[] = []
   for (const [dim, ids] of Object.entries(s.filters)) {
     const d = DIMS[dim as Dim]
     if (!d || d.time || !ids.length) continue
-    groups[d.group as 'who' | 'what' | 'where'].push({ in: dim as Dim, values: ids })
+    if (d.group === 'detail') details.push({ in: dim as Dim, values: ids })
+    else groups[d.group as 'who' | 'what' | 'where'].push({ in: dim as Dim, values: ids })
   }
-  return { who: any(...groups.who), what: any(...groups.what), where: any(...groups.where) }
+  return { who: any(...groups.who), what: any(...groups.what), where: any(...groups.where), detail: all(...details) }
 }
 
 /** A drill-down path (the tree view) as a condition. */
@@ -292,7 +310,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
 
   async function search(query: string, opts: { types?: string[]; limit?: number } = {}) {
     const a = await availability()
-    const types = (opts.types?.length ? opts.types.filter((t) => NAME_DIMS.includes(t as Dim)) : NAME_DIMS) as Dim[]
+    const types = (opts.types?.length ? opts.types.filter((t) => NAME_DIMS.includes(t as Dim)) : DEFAULT_SEARCH) as Dim[]
     const limit = Math.max(1, Math.min(opts.limit ?? 8, 25))
     const q = String(query ?? '').trim()
     const aliasTargets = ALIASES.filter(([alias, dim]) => types.includes(dim) && q && (norm(q) === alias || norm(q).includes(alias)))
@@ -412,6 +430,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const who = filterLabels(s.filters, ['who'])
     const what = filterLabels(s.filters, ['what'])
     const where = filterLabels(s.filters, ['where'])
+    const detail = filterLabels(s.filters, ['detail'])
     const rows = s.rows.map((d) => (DIMS[d] ? DIMS[d].label.toLowerCase() : d))
     const named = (id: string) => (['property', 'advertiser', 'top_parent', 'product'].includes(dimOf(id)) ? labelOf(dimOf(id), id) : dimOf(id) === 'market' ? `the ${labelOf('market', id)} market` : `all ${labelOf(dimOf(id), id)}`)
     if (s.zero_share) {
@@ -437,6 +456,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     if (who.length) scope.push(listText(who))
     if (what.length) scope.push(listText(what))
     if (where.length) scope.push(`${s.zero_share ? 'competing media limited to ' : 'on '}${listText(where)}`)
+    if (detail.length) scope.push(listText(detail))
     if (scope.length || !s.zero_share) parts.push(scope.length ? scope.join(' · ') : 'all advertisers')
     const per = periodOf(s, a)
     if (!('error' in per)) parts.push(`${per.label} (${per.how})`)
@@ -490,7 +510,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const mineIds = new Set(s.compare?.mine ?? [])
 
     // Rows in scope, and which of their spend counts.
-    const subject = all(f.who, f.what, pathCond(s), s.compare ? { anyOf: [...s.compare.mine, ...s.compare.rivals] } : undefined)
+    const subject = all(f.who, f.what, f.detail, pathCond(s), s.compare ? { anyOf: [...s.compare.mine, ...s.compare.rivals] } : undefined)
     let scope: Cond | undefined
     let counted: Cond | undefined
     let mine: Cond | undefined
@@ -524,8 +544,8 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       })
       colVals = vals.rows.map((r) => {
         const k = r.keys[C]!
-        if (!time) labels.set(k.id, k.name)
-        return { id: k.id, name: time ? labelOf(C, k.id) : k.name }
+        if (!time && k.name) labels.set(k.id, k.name)
+        return { id: k.id, name: time ? labelOf(C, k.id) : k.name || 'Not specified' }
       })
       moreCols = Math.max(0, (vals.count ?? 0) - vals.rows.length)
     }
@@ -557,6 +577,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       withTotals: true,
     })
     const rows = res.rows
+    for (const n of res.notes ?? []) if (!notes.includes(n)) notes.push(n)
     const totals = res.totals ?? {}
     const matched = res.count ?? 0
     for (const r of rows) for (const d of R) if (!DIMS[d].time) labels.set(r.keys[d]!.id, r.keys[d]!.name)
@@ -570,7 +591,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       const pe = per.end - 12
       if (pe < a.firstComplete) notes.push(`A year earlier, the data covers only some media (all media start in ${monthLabel(a.firstComplete)}), so the change is not like for like.`)
       const pp = { from: dStr(monthFirstDay(ps)), to: dStr(monthLastDay(pe)) }
-      const pscope = all(f.who, f.what, f.where)
+      const pscope = all(f.who, f.what, f.detail, f.where)
       const [pr, pt] = await Promise.all([
         data.aggregate({ period: pp, where: all(pscope, R.length ? { tuples: R, values: rows.map(keyOf) } : undefined), groupBy: R, measures: [measure('v', primary)] }),
         data.aggregate({ period: pp, where: pscope, groupBy: [], measures: [measure('v', primary)] }),
@@ -629,7 +650,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       const out: unknown[] = row
         ? R.map((dim) => {
             const k = row.keys[dim]!
-            return DIMS[dim].time ? labelOf(dim, k.id) : k.name + (mineIds.has(k.id) ? ' (you)' : '')
+            return DIMS[dim].time ? labelOf(dim, k.id) : (k.name || 'Not specified') + (mineIds.has(k.id) ? ' (you)' : '')
           })
         : R.map((_, i) => (i === 0 ? 'Total' : ''))
       if (wallet) {
@@ -804,6 +825,25 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
           })
       }
     }
+    // Some dimensions live in different tables and cannot be read together (spot length with program, say).
+    const clash = data.supports?.(dimsOf(spec))
+    if (clash) {
+      const drop = (ds: Dim[]): Patch => {
+        const set: Record<string, unknown> = { rows: spec.rows.filter((r) => !ds.includes(r)) }
+        if (spec.columns && ds.includes(spec.columns)) set.columns = null
+        for (const d of ds) if (spec.filters[d]) set[`filters.${d}`] = null
+        return { set }
+      }
+      const creative = dimsOf(spec).filter((d) => DIMS[d].creative)
+      errors.push({
+        code: 'cannot_combine',
+        message: `${clash.reason} Choose one.`,
+        fixes: [
+          { label: `Drop ${creative.map((d) => DIMS[d].label.toLowerCase()).join(' and ')}`, patch: drop(creative) },
+          { label: `Drop ${clash.conflicts.map((d) => DIMS[d].label.toLowerCase()).join(' and ')}`, patch: drop(clash.conflicts) },
+        ],
+      })
+    }
     if (needsDaily(spec) && spec.calcs.includes('yoy'))
       errors.push({ code: 'yoy_daily', message: 'Change vs prior year works with months, not days or weeks.', fixes: [{ label: 'Drop the prior-year change', patch: { remove: { calcs: ['yoy'] } } }, { label: 'Use the last 3 complete months', patch: { set: { time: RECENT, columns: null } } }] })
 
@@ -873,6 +913,11 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       const add = (label: string, p: Patch) => refinements.push({ label, patch: p })
       if (!spec.columns && !spec.rows.some((d) => DIMS[d]?.time)) add('Add a column per month', { set: { columns: 'month' }, remove: { calcs: ['yoy'] } })
       if (spec.columns) add('Remove the column breakdown', { set: { columns: null } })
+      // Two of the newer breakouts, chosen by the kind of report, ahead of the everyday ones.
+      const used = new Set(dimsOf(spec))
+      const fits = (d: Dim) => !used.has(d) && !data.supports?.([...used, d])
+      const likely: Dim[] = spec.zero_share ? ['daypart', 'program', 'market'] : spec.compare ? ['length', 'market', 'daypart'] : ['market', 'daypart', 'length']
+      for (const d of likely.filter(fits).slice(0, 2)) add(`Break out by ${DIMS[d].label.toLowerCase()}`, { add: { rows: [d] } })
       if (!spec.rows.includes('product')) add('Break out by product', { add: { rows: ['product'] } })
       if (!spec.rows.includes('media_type') && spec.columns !== 'media_type') add('Break out by media type', { add: { rows: ['media_type'] } })
       if (!spec.rows.includes('property') && spec.columns !== 'property') add('Break out by property', { add: { rows: ['property'] } })
@@ -1007,7 +1052,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     }
     const zero = tpl ? 'zero_share' in tpl.spec : Boolean(cur.zero_share)
     const comparing = tpl ? 'compare' in tpl.spec : Boolean(cur.compare)
-    const named = new Set<Group>()
+    const named = new Set<string>()
     for (const e of u.entities ?? []) {
       if (zero && e.type === 'property') {
         ;(p.add['zero_share.mine'] ??= []).push(e.id)
@@ -1021,10 +1066,10 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         continue
       }
       ;(p.add[`filters.${e.type}`] ??= []).push(e.id)
-      named.add(d.group)
+      named.add(filterGroup(e.type as Dim))
     }
     if (!u.add) {
-      for (const dim of Object.keys(cur.filters)) if (DIMS[dim as Dim] && named.has(DIMS[dim as Dim].group)) p.set[`filters.${dim}`] = null
+      for (const dim of Object.keys(cur.filters)) if (DIMS[dim as Dim] && named.has(filterGroup(dim as Dim))) p.set[`filters.${dim}`] = null
       if (zero && p.add['zero_share.mine'] && cur.zero_share && !tpl) p.set['zero_share.mine'] = []
       if (named.size && cur.scope === 'all') p.set.scope = null
     }
@@ -1068,7 +1113,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         final_through: monthLabel(a.through),
         current_month_loading: monthLabel(a.prelim),
       },
-      dimensions: (Object.keys(DIMS) as Dim[]).map((key) => ({ key, label: DIMS[key].label, group: DIMS[key].group, group_label: GROUP_LABEL[DIMS[key].group], can_filter: !DIMS[key].time, can_be_columns: ['month', 'quarter', 'year', 'day', 'week', 'broadcast_week', 'media_type', 'property', 'industry', 'category'].includes(key) })),
+      dimensions: (Object.keys(DIMS) as Dim[]).map((key) => ({ key, label: DIMS[key].label, group: DIMS[key].group, group_label: GROUP_LABEL[DIMS[key].group], can_filter: !DIMS[key].time, can_be_columns: ['month', 'quarter', 'year', 'day', 'week', 'broadcast_week', 'media_type', 'media_owner', 'property', 'master_property', 'market', 'industry', 'category', 'program_genre', 'league', 'daypart', 'language', 'direct_indirect', 'length'].includes(key) })),
       measures: (Object.keys(MEASURES) as MeasureKey[]).map((key) => ({ key, label: MEASURES[key].label })),
       calcs: Object.entries(CALCS).map(([key, c]) => ({ key, label: c.label, note: c.note })),
       time: [
@@ -1082,6 +1127,9 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         'Filters inside one group (who, what, where) are combined with OR; the groups are combined with AND.',
         'Change vs prior year cannot be combined with a column breakdown. Share of total can: with columns it is % down (of each column), and share_across adds % across (of each row); both show inside each cell.',
         'Day breakdowns cover up to 3 months; week and broadcast week up to a year. "week" starts on Sunday; "broadcast_week" on Monday.',
+        'Daypart and league are recorded for TV and live streaming, and only day by day: a report with either reads the daily data, for up to a year. Program and program genre cover TV and live sports; direct/indirect covers digital.',
+        'Spot length comes from the creative data and cannot be combined with market, master property, program, program genre, direct/indirect, daypart or league.',
+        'Details (program, program genre, league, daypart, language, direct/indirect, spot length) each narrow the report on their own.',
         `The data covers all media from ${monthLabel(a.firstComplete)}; earlier months hold only some media, so default to the last 3 complete months.`,
         'Spend is the spend for the paying advertiser and product (promos and PSAs excluded).',
       ],

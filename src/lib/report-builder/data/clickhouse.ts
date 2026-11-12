@@ -20,11 +20,37 @@
  *   - The daily tables add up to the monthly one, medium by medium; TV files a
  *     few days under the neighbouring broadcast month, so day queries read a
  *     month either side and keep to the days asked for.
+ *   - Daypart and league (the sports entity) are recorded only in the daily
+ *     tables (TV and live streaming), so any query that reads them is answered
+ *     from the daily tables, even for a whole month (Scott, 12 November 2026).
+ *   - Spot length is recorded only in the creative summaries
+ *     (gpc_creative.creative_product_media_summary_month and _daily), which
+ *     add up to within 0.4% of the monthly table (October 2026) but have no
+ *     market, master property, program, genre, direct/indirect, daypart or
+ *     league, and no promo or PSA flags. A query that reads spot length is
+ *     answered from them; one that also reads any of those is refused, through
+ *     supports(), before it runs.
  */
 import { chQuery, clickhouseConfig, ClickHouseError, type ClickHouseConfig } from '@/lib/clickhouse'
-import { DIMENSIONS, dimOf, type AggregateQuery, type AggregateResult, type Availability, type Cond, type DataAdapter, type DimKey, type MeasureKey, type NameHit, type SearchRequest } from './types'
+import { DIMENSIONS, dimOf, queryDims, type AggregateQuery, type AggregateResult, type Availability, type Cond, type DataAdapter, type DimKey, type MeasureKey, type NameHit, type SearchRequest } from './types'
 
 const MONTH_TABLE = 'gpc_summary.property_product_summary_month'
+const CREATIVE_MONTH = 'gpc_creative.creative_product_media_summary_month'
+const CREATIVE_DAY = 'gpc_creative.creative_product_media_summary_daily'
+/** Where search and labels look up a dimension that the monthly table does not record. */
+const LOOKUP_TABLE: Partial<Record<DimKey, string>> = { daypart: 'gpc_summary.tv_product_summary_daily', league: 'gpc_summary.tv_product_summary_daily', length: CREATIVE_MONTH }
+/** What the creative summaries do not record. */
+const NOT_IN_CREATIVE: DimKey[] = ['market', 'master_property', 'program', 'program_genre', 'direct_indirect', 'daypart', 'league']
+const CREATIVE_NOTE = 'Spot length comes from the creative data, which cannot leave out promos and public service announcements, so totals can run slightly higher than other reports (about 0.4% in October 2026).'
+
+type Source = 'month' | 'daily' | 'creative_month' | 'creative_daily'
+/** Which table answers a query: spot length needs the creative data, daypart and league (and days and weeks) the daily data. */
+export function sourceFor(q: Pick<AggregateQuery, 'groupBy' | 'where' | 'measures' | 'period'>): Source {
+  const dims = [...queryDims(q)]
+  const daily = Boolean(q.period.daily) || dims.some((d) => DIMENSIONS[d].daily)
+  if (dims.some((d) => DIMENSIONS[d].creative)) return daily ? 'creative_daily' : 'creative_month'
+  return daily ? 'daily' : 'month'
+}
 const NO_PROMOS = 'coalesce(is_promo, 0) = 0 AND coalesce(is_psa, 0) = 0'
 const SETTINGS = { max_execution_time: '20', max_bytes_before_external_group_by: '1000000000' }
 
@@ -40,6 +66,14 @@ const SQL: Record<DimKey, { id: string; name: string; context: string }> = {
   media_owner: { id: 'coalesce(media_root_entity_id, 0)', name: 'media_root_entity_name', context: "'Media owner'" },
   property: { id: 'coalesce(media_entity_id, 0)', name: 'media_entity_name', context: "concat(media_name, ' · ', media_root_entity_name)" },
   market: { id: 'coalesce(property_market_id, 0)', name: 'initcapUTF8(property_market_name)', context: "'Market'" },
+  master_property: { id: 'coalesce(master_property_id, 0)', name: 'master_property_name', context: 'media_name' },
+  program: { id: 'coalesce(show_id, 0)', name: 'show_display_name', context: 'media_entity_name' },
+  program_genre: { id: 'coalesce(show_type_id, 0)', name: 'initcapUTF8(show_type_name)', context: "'Program genre'" },
+  league: { id: 'coalesce(sports_entity_id, 0)', name: 'sports_entity_name', context: "'League'" },
+  daypart: { id: 'coalesce(daypart_id, 0)', name: 'daypart_name', context: "'Daypart'" },
+  language: { id: 'coalesce(language_id, 0)', name: 'language_name', context: "'Language'" },
+  direct_indirect: { id: 'coalesce(direct_indirect_id, 0)', name: 'direct_indirect_name', context: "'Buying type'" },
+  length: { id: 'coalesce(length_v, 0)', name: "if(length_v IS NULL, '', concat(toString(length_v), ' sec'))", context: "'Spot length'" },
   month: { id: "concat(toString(intDiv(year_month, 100)), '-', leftPad(toString(year_month % 100), 2, '0'))", name: "''", context: "''" },
   quarter: { id: "concat(toString(intDiv(year_month, 100)), '-Q', toString(intDiv(year_month % 100 + 2, 3)))", name: "''", context: "''" },
   year: { id: 'toString(intDiv(year_month, 100))', name: "''", context: "''" },
@@ -124,6 +158,10 @@ const DAILY_COLS = [
   'entity_id', 'entity_name', 'entity_parent_id', 'entity_parent_name', 'product_id', 'product_name',
   'media_id', 'media_name', 'media_root_entity_id', 'media_root_entity_name', 'media_entity_id', 'media_entity_name',
   'property_market_id', 'property_market_name', 'cost_share_v', 'occurrences', 'impressions_share_v', 'is_promo', 'is_psa',
+  'master_property_id', 'master_property_name', 'show_id', 'show_display_name', 'show_type_id', 'show_type_name',
+  'language_id', 'language_name', 'direct_indirect_id', 'direct_indirect_name',
+  // Only in the daily tables (TV and live streaming): typed from the first table that has them.
+  'daypart_id', 'daypart_name', 'sports_entity_id', 'sports_entity_name',
 ]
 
 /** Whether this deployment reads live data: REPORT_BUILDER_DATA=gpc and Dev ClickHouse configured. */
@@ -157,6 +195,7 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
         `SELECT table, name, type FROM system.columns WHERE database = 'gpc_summary' AND table IN (${tables.map((t) => `'${t}'`).join(',')}) AND name IN (${DAILY_COLS.map((c) => `'${c}'`).join(',')})`,
       )
       const want = new Map(cols.filter((c) => c.table === 'property_product_summary_month').map((c) => [c.name, c.type]))
+      for (const c of cols) if (!want.has(c.name)) want.set(c.name, c.type)
       const parts = DAILY_TABLES.map((t) => {
         const have = new Map(cols.filter((c) => c.table === t).map((c) => [c.name, c.type]))
         const sel = DAILY_COLS.map((c) => {
@@ -177,14 +216,17 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
 
   /** The two statements for a query: its rows, and its totals and count. */
   function sqlFor(q: AggregateQuery, daily?: string): { rows: string; totals: string } {
-    const isDaily = Boolean(q.period.daily || q.groupBy.some((d) => DIMENSIONS[d].daily))
+    const src = sourceFor(q)
+    const isDaily = src === 'daily' || src === 'creative_daily'
     const from = q.period.from
     const to = q.period.to
     const time = isDaily
       ? `year_month BETWEEN ${ymShift(ymOf(from), -1)} AND ${ymShift(ymOf(to), 1)} AND start_date BETWEEN '${from}' AND '${to}'`
       : `year_month BETWEEN ${ymOf(from)} AND ${ymOf(to)}`
-    const source = isDaily ? daily! : MONTH_TABLE
-    const where = [time, q.includePromos ? '' : NO_PROMOS, q.where ? condSql(q.where) : ''].filter(Boolean).join(' AND ')
+    const source = src === 'daily' ? daily! : src === 'creative_daily' ? CREATIVE_DAY : src === 'creative_month' ? CREATIVE_MONTH : MONTH_TABLE
+    // The creative data has no promo or PSA flags; a query that reads it says so (aggregate's notes).
+    const promos = q.includePromos || src.startsWith('creative') ? '' : NO_PROMOS
+    const where = [time, promos, q.where ? condSql(q.where) : ''].filter(Boolean).join(' AND ')
     const selects: string[] = []
     for (const d of q.groupBy) {
       selects.push(`toString(${SQL[d].id}) AS k_${d}`, `any(${SQL[d].name}) AS n_${d}`)
@@ -225,9 +267,17 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
       return value
     },
 
+    supports(dims) {
+      if (!dims.some((d) => DIMENSIONS[d]?.creative)) return null
+      const conflicts = dims.filter((d) => NOT_IN_CREATIVE.includes(d))
+      return conflicts.length
+        ? { conflicts, reason: `Spot length comes from the creative data, which does not record ${conflicts.map((d) => DIMENSIONS[d].label.toLowerCase()).join(', ')}.` }
+        : null
+    },
+
     async aggregate(q): Promise<AggregateResult> {
-      const isDaily = Boolean(q.period.daily || q.groupBy.some((d) => DIMENSIONS[d].daily))
-      const sql = sqlFor(q, isDaily ? await dailySource() : undefined)
+      const src = sourceFor(q)
+      const sql = sqlFor(q, src === 'daily' ? await dailySource() : undefined)
       type Row = Record<string, string | number>
       const [rows, totals] = await Promise.all([query<Row>(sql.rows), q.withCount || q.withTotals ? query<Row>(sql.totals) : Promise.resolve([] as Row[])])
       const out: AggregateResult = {
@@ -241,6 +291,7 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
           values: Object.fromEntries(q.measures.map((m) => [m.as, Number(r[alias(m.as)] ?? 0)])),
         })),
       }
+      if (src.startsWith('creative')) out.notes = [CREATIVE_NOTE]
       if (q.withCount) out.count = Number(totals[0]?.n ?? 0)
       if (q.withTotals) out.totals = Object.fromEntries(q.measures.map((m) => [m.as, Number(totals[0]?.[alias(m.as)] ?? 0)]))
       return out
@@ -258,7 +309,7 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
           match = ` AND positionCaseInsensitiveUTF8(${d.name}, {t${i}:String}) > 0`
         }
         return `SELECT '${p.dim}' AS dim, toString(${d.id}) AS id, any(${d.name}) AS name, any(${d.context}) AS ctx, toFloat64(sum(cost_share_v)) AS spend
-          FROM ${MONTH_TABLE} WHERE year_month = ${ym} AND ${d.name} != ''${match}${extra} GROUP BY id ORDER BY spend DESC LIMIT ${Math.max(1, Math.floor(req.limit))}`
+          FROM ${LOOKUP_TABLE[p.dim] ?? MONTH_TABLE} WHERE year_month = ${ym} AND ${d.name} != ''${match}${extra} GROUP BY id ORDER BY spend DESC LIMIT ${Math.max(1, Math.floor(req.limit))}`
       })
       if (!parts.length) return []
       const rows = await query<{ dim: DimKey; id: string; name: string; ctx: string; spend: number }>(`SELECT * FROM (${parts.map((p) => `(${p})`).join(' UNION ALL ')})`, params)
@@ -273,7 +324,7 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
         if (!DIMENSIONS[d] || DIMENSIONS[d].time || n === null) continue
         by.set(d, [...(by.get(d) ?? []), n])
       }
-      const parts = [...by].map(([d, nums]) => `SELECT '${d}' AS dim, toString(${SQL[d].id}) AS id, any(${SQL[d].name}) AS name, any(${SQL[d].context}) AS ctx FROM ${MONTH_TABLE} WHERE ${SQL[d].id} IN (${nums.join(',')}) AND year_month >= 202601 GROUP BY id`)
+      const parts = [...by].map(([d, nums]) => `SELECT '${d}' AS dim, toString(${SQL[d].id}) AS id, any(${SQL[d].name}) AS name, any(${SQL[d].context}) AS ctx FROM ${LOOKUP_TABLE[d] ?? MONTH_TABLE} WHERE ${SQL[d].id} IN (${nums.join(',')}) AND year_month >= 202601 GROUP BY id`)
       if (!parts.length) return []
       const rows = await query<{ dim: string; id: string; name: string; ctx: string }>(parts.join(' UNION ALL '))
       return rows.filter((r) => r.name).map((r) => ({ id: `${r.dim}:${r.id}`, name: r.name, context: r.ctx }))

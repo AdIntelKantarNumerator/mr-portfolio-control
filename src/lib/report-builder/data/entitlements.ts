@@ -72,6 +72,7 @@ export function withEntitlements(inner: DataAdapter, e: Entitlements | null | un
 
   return {
     name: `${inner.name} (entitled)`,
+    supports: inner.supports ? (dims) => inner.supports!(dims) : undefined,
     async availability() {
       const a = await inner.availability()
       return ent.from && ent.from > a.firstComplete ? { ...a, firstComplete: ent.from } : a

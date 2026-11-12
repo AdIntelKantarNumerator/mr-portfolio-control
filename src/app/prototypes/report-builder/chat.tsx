@@ -595,7 +595,7 @@ function hintFor(view: View | null | undefined, editing: boolean): string {
     return 'Pick one above, or say what you want instead'
   }
   if (view.kind === 'problem') return 'Pick a fix above, or say what you want instead: "drop the columns"'
-  if (view.kind === 'ready') return 'Change it in your own words: "by broadcast week", "only CTV", "last 4 weeks", "top 10" or "run it"'
+  if (view.kind === 'ready') return 'Change it in your own words: "by daypart", "only Prime Time", "by market", "30-second spots only" or "run it"'
   if (view.kind === 'run') return editing ? 'Say "save changes", or keep adjusting: "by product", "latest month only"' : 'Say "save it as Toyota mix", or keep adjusting: "by network", "add impressions"'
   if (view.kind === 'saved') return 'Start another: "category share for pizza restaurants", or "run my saved reports"'
   return 'Describe a report, or ask to run a saved one'
