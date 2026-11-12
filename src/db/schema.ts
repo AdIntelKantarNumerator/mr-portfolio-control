@@ -2358,8 +2358,10 @@ export const releases = pgTable(
   'releases',
   {
     linearId: text('linear_id').primaryKey(),
-    /** "MED-339" */
+    /** "MED-339"; for a project, "PROJ-" and its Linear slug id. */
     identifier: text('identifier').notNull(),
+    /** "ticket", or "project" for a Linear project labelled as a release (drizzle/0045). */
+    kind: text('kind').notNull().default('ticket'),
     title: text('title').notNull(),
     description: text('description'),
     url: text('url'),

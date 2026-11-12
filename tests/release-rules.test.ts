@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { addMonths, announceFor, announceKey, monthGrid, parseRelease, previousDate, rangeOf, step, weekStart } from '../src/lib/release-rules'
+import { addMonths, announceFor, announceKey, monthGrid, parseRelease, previousDate, rangeOf, releaseName, step, weekStart } from '../src/lib/release-rules'
 
 // MED-339, the first one: Scott's own, 7 December 2026.
 const med339 = {
@@ -83,4 +83,15 @@ test('a month grid is whole weeks, Sunday first, with the days outside it blank'
   assert.ok(weeks.every((w) => w.length === 7))
   assert.equal(weeks.flat().filter(Boolean).length, 30)
   assert.equal(monthGrid('2026-12-01')[0]![0], null, '1 December 2026 is a Tuesday')
+})
+
+test('a whole Linear project labelled as a release is a release too, named as a project (Audio Processing, 12 November)', () => {
+  const p = parseRelease({ ...med339, linearId: '064d1e17', identifier: 'PROJ-206567a034e5', kind: 'project', title: 'Audio Processing in Creative Central', targetDate: '2026-12-01', targetDateFrom: 'project', assignee: null, projectLinearId: '064d1e17' })
+  assert.ok(typeof p !== 'string')
+  assert.equal(p.kind, 'project')
+  assert.equal(releaseName(p), 'Project: Audio Processing in Creative Central')
+  const t = parseRelease(med339)
+  assert.ok(typeof t !== 'string')
+  assert.equal(t.kind, 'ticket', 'a sender that does not say: a ticket')
+  assert.equal(releaseName(t), 'MED-339 Logo Detection in Creative Central Production Deployment')
 })

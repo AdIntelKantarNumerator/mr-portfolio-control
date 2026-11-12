@@ -1,7 +1,9 @@
 /**
  * The Release Calendar: the pure rules (Scott, 11 November 2026).
  *
- * Planned Production releases are Linear tickets carrying the release label.
+ * Planned Production releases are Linear tickets carrying the release label,
+ * and Linear projects carrying it (Scott, 12 November 2026: he labelled a
+ * whole project, Audio Processing in Creative Central, and expected it here).
  * Yaara reads them each pass, works out from each ticket's text which teams
  * it affects, and sends them here (app/api/agent/releases). The calendar
  * places each on its target date.
@@ -26,7 +28,10 @@ export const RELEASE_LABELS = ['Production Release', 'Production Deployment', 'P
 /** What Yaara sends for one ticket. The agent API contract: yaara/src/publish/portfolio.ts sends the same shape. */
 export interface IncomingRelease {
   linearId: string
+  /** "MED-339"; a project's is "PROJ-" and its Linear slug id, and is not shown. */
   identifier: string
+  /** A ticket, or a whole project labelled as a release. Older senders said nothing: a ticket. */
+  kind: 'ticket' | 'project'
   title: string
   description: string | null
   url: string | null
@@ -64,6 +69,7 @@ export function parseRelease(v: unknown): IncomingRelease | string {
   return {
     linearId,
     identifier,
+    kind: o.kind === 'project' ? 'project' : 'ticket',
     title,
     description: typeof o.description === 'string' ? o.description.slice(0, 20_000) : null,
     url: url && /^https:\/\//.test(url) ? url : null,
@@ -82,6 +88,9 @@ export function parseRelease(v: unknown): IncomingRelease | string {
     contactSlackUrl: slack && /^https:\/\/[a-z0-9.-]*slack\.com\//.test(slack) ? slack : null,
   }
 }
+
+/** How a release is named in the log and in messages: "MED-339 Logo Detection", or "Project: Audio Processing". */
+export const releaseName = (r: { kind?: string | null; identifier: string; title: string }) => (r.kind === 'project' ? `Project: ${r.title}` : `${r.identifier} ${r.title}`)
 
 /** The key an announcement is kept under: the date, or "none". */
 export const announceKey = (targetDate: string | null) => targetDate ?? 'none'

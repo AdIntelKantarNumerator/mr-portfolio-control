@@ -16,6 +16,7 @@ import {
   monthsIn,
   rangeOf,
   RELEASE_LABELS,
+  releaseName,
   statusTone,
   step,
   VIEW_LABEL,
@@ -242,10 +243,10 @@ function ReleaseCard({
         role="button"
         tabIndex={0}
         aria-haspopup="dialog"
-        aria-label={`${r.identifier} ${r.title}: details`}
+        aria-label={`${releaseName(r)}: details`}
         className={`rc-card tone-${statusTone(r.statusType)} ${on ? 'on' : ''} ${wide ? 'wide' : ''} ${compact ? 'compact' : ''} ${brief ? 'brief' : ''}`}
         id={`release-${r.identifier}`}
-        title={compact || brief ? `${r.identifier} · ${r.title}` : undefined}
+        title={compact || brief ? releaseName(r) : undefined}
         onClick={open}
         onKeyDown={(e) => {
           if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
@@ -255,9 +256,9 @@ function ReleaseCard({
         }}
       >
         <div className="rc-card-head">
-          <span className="rc-ident">{r.identifier}</span>
+          <span className="rc-ident">{r.kind === 'project' ? 'Project' : r.identifier}</span>
           <span className={`rc-status tone-${statusTone(r.statusType)}`}>{r.status ?? '—'}</span>
-          {r.targetDateFrom === 'project' ? (
+          {r.kind !== 'project' && r.targetDateFrom === 'project' ? (
             <span className="rc-from" title="The ticket has no target date; this is its project's">
               project date
             </span>
@@ -338,7 +339,7 @@ function InfoDialog({ r, onClose }: { r: CalendarRelease; onClose: () => void })
       <div className="rc-dialog" role="dialog" aria-modal="true" aria-label={r.title}>
         <div className="tx-family-head">
           <div>
-            <div className="tx-muted">{r.identifier}</div>
+            <div className="tx-muted">{r.kind === 'project' ? 'Project' : r.identifier}</div>
             <strong className="tx-total-title">{r.title}</strong>
           </div>
           <button type="button" className="tx-close" onClick={onClose} aria-label="Close">
@@ -350,7 +351,7 @@ function InfoDialog({ r, onClose }: { r: CalendarRelease; onClose: () => void })
             <div className="rc-dialog-when">
               <span className={`rc-status tone-${statusTone(r.statusType)}`}>{r.status ?? '—'}</span>{' '}
               {r.targetDate ? fmt(r.targetDate, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'No target date yet'}
-              {r.targetDateFrom === 'project' ? <span className="tx-muted rc-from-note"> · the project&apos;s target date; the ticket has none</span> : null}
+              {r.kind !== 'project' && r.targetDateFrom === 'project' ? <span className="tx-muted rc-from-note"> · the project&apos;s target date; the ticket has none</span> : null}
             </div>
             <Facts r={r} />
           </div>
@@ -358,7 +359,7 @@ function InfoDialog({ r, onClose }: { r: CalendarRelease; onClose: () => void })
           {r.url ? (
             <p>
               <a className="rc-link" href={r.url} target="_blank" rel="noreferrer">
-                Open {r.identifier} in Linear ↗
+                {r.kind === 'project' ? 'Open the project in Linear ↗' : `Open ${r.identifier} in Linear ↗`}
               </a>
             </p>
           ) : null}

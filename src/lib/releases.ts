@@ -11,7 +11,7 @@ import { and, eq, inArray, isNull, notInArray } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { initiatives, objectives, projects, releases, sourceRecords } from '@/db/schema'
 import { logChange } from './portfolio'
-import { announceFor, announceKey, previousDate, type Announce, type IncomingRelease } from './release-rules'
+import { announceFor, announceKey, previousDate, releaseName, type Announce, type IncomingRelease } from './release-rules'
 
 export interface ReleaseLinks {
   project: { id: string; name: string } | null
@@ -85,6 +85,7 @@ export async function saveReleases(list: IncomingRelease[], complete: boolean): 
     const prior = before.get(r.linearId) ?? null
     const values = {
       identifier: r.identifier,
+      kind: r.kind,
       title: r.title,
       description: r.description,
       url: r.url,
@@ -108,9 +109,9 @@ export async function saveReleases(list: IncomingRelease[], complete: boolean): 
       .values({ linearId: r.linearId, ...values })
       .onConflictDoUpdate({ target: releases.linearId, set: values })
     if (!prior) {
-      await logChange({ actor: 'Yaara', kind: 'release', summary: `Release ${r.identifier} on the calendar: ${r.title}${r.targetDate ? ` (${r.targetDate})` : ''}` })
+      await logChange({ actor: 'Yaara', kind: 'release', summary: `Release on the calendar: ${releaseName(r)}${r.targetDate ? ` (${r.targetDate})` : ''}` })
     } else if (prior.targetDate !== r.targetDate) {
-      await logChange({ actor: 'Yaara', kind: 'release', summary: `Release ${r.identifier} moved: ${prior.targetDate ?? 'no date'} → ${r.targetDate ?? 'no date'}` })
+      await logChange({ actor: 'Yaara', kind: 'release', summary: `Release ${releaseName(r)} moved: ${prior.targetDate ?? 'no date'} → ${r.targetDate ?? 'no date'}` })
     }
     outcomes.push({
       linearId: r.linearId,
@@ -127,9 +128,9 @@ export async function saveReleases(list: IncomingRelease[], complete: boolean): 
       .update(releases)
       .set({ removedAt: now })
       .where(and(isNull(releases.removedAt), list.length ? notInArray(releases.linearId, list.map((r) => r.linearId)) : undefined))
-      .returning({ identifier: releases.identifier })
+      .returning({ identifier: releases.identifier, kind: releases.kind, title: releases.title })
     removed = gone.length
-    for (const g of gone) await logChange({ actor: 'Yaara', kind: 'release', summary: `Release ${g.identifier} is no longer labelled a release; off the calendar` })
+    for (const g of gone) await logChange({ actor: 'Yaara', kind: 'release', summary: `Release ${releaseName(g)} is no longer labelled a release; off the calendar` })
   }
   return { outcomes, removed }
 }
@@ -151,6 +152,8 @@ export async function markAnnounced(posted: { linearId: string; targetDate: stri
 export interface CalendarRelease {
   linearId: string
   identifier: string
+  /** "ticket", or "project" for a whole Linear project labelled as a release. */
+  kind: string
   title: string
   description: string | null
   url: string | null
@@ -185,6 +188,7 @@ export async function readCalendar(): Promise<CalendarRelease[]> {
       return {
         linearId: r.linearId,
         identifier: r.identifier,
+        kind: r.kind,
         title: r.title,
         description: r.description,
         url: r.url,
