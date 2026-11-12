@@ -31,7 +31,7 @@ export async function GET(req: Request) {
     return new Response('That download link is damaged. Ask Report Builder to run the report again.', { status: 400 })
   }
 
-  const { engine } = await engineFor(access.email ? await loadUser(access.email.toLowerCase()) : null)
+  const { engine } = await engineFor(access.email ? await loadUser(access.email.toLowerCase()) : null, access.email ? access.email.toLowerCase() : null)
   const v = await engine.validate(spec)
   if (!v.ok) return new Response('That report is not complete, so there is nothing to download.', { status: 400 })
   const result = await engine.run(v.spec)

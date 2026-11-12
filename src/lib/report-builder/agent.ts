@@ -18,6 +18,7 @@ import { db } from '@/db/client'
 import { reportBuilderChats, reportBuilderUsers } from '@/db/schema'
 import type { EngineState, Spec } from './engine'
 import { dataSource, engineFor as pickEngine, type ReportEngine } from './engines'
+import { entitlementsFor } from './data/entitlements'
 import { chooseModel, runLoop, ReportModelError, type Post, type Turn } from './model'
 import { describeReport, savedList } from './page-view'
 import { REPORT_BUILDER_PAGE_SKILL, REPORT_BUILDER_SKILL } from './skill'
@@ -37,8 +38,8 @@ async function starterState(engine: ReportEngine): Promise<void> {
   await engine.saveReport(engine.live ? 'Vehicle insurance share' : 'Auto insurance share', { template: 'category_share', rows: ['advertiser'], measures: ['spend'], calcs: ['share'], filters: { subcategory: [sub.id] }, time: { mode: 'rolling', unit: 'month', count: months } })
 }
 
-/** An engine over one person's saved reports, held in memory for the turn. */
-export async function engineFor(state: StampedState | null): Promise<{
+/** An engine over one person's saved reports, held in memory for the turn, and limited to what they may see. */
+export async function engineFor(state: StampedState | null, email: string | null): Promise<{
   engine: ReportEngine
   state: () => StampedState
   fresh: boolean
@@ -50,7 +51,7 @@ export async function engineFor(state: StampedState | null): Promise<{
   const usable = state && (state.source ?? 'sample') === source
   let mem: StampedState = usable ? state : { saved: [], offset: 0, seq: 0, source }
   // The engine keeps saved reports; the competitive sets and the mode ride alongside, untouched by it.
-  const engine = pickEngine({ load: () => mem, save: (s) => (mem = { ...s, source, competitive: mem.competitive ?? null, brandSet: mem.brandSet ?? null, mode: mem.mode }) })
+  const engine = pickEngine({ load: () => mem, save: (s) => (mem = { ...s, source, competitive: mem.competitive ?? null, brandSet: mem.brandSet ?? null, mode: mem.mode }) }, process.env, entitlementsFor(email))
   const comp = { get: () => mem.competitive ?? null, set: (c: CompSet | null) => void (mem = { ...mem, competitive: c }) }
   const brands = { get: () => mem.brandSet ?? null, set: (c: CompSet | null) => void (mem = { ...mem, brandSet: c }) }
   const mode = { get: (): IntelMode => mem.mode ?? 'publisher', set: (m: IntelMode) => void (mem = { ...mem, mode: m }) }
@@ -113,7 +114,7 @@ async function withSession<T>(email: string, chatId: string | null, appUrl: stri
   const who = email.trim().toLowerCase()
   const chatKey = chatId?.trim() || `default:${who}`
   const before = await loadUser(who)
-  const { engine, state, fresh, comp, brands, mode } = await engineFor(before)
+  const { engine, state, fresh, comp, brands, mode } = await engineFor(before, who)
   const chat = await loadChat(chatKey, who)
   const chatBefore = JSON.stringify(chat)
   const userBefore = JSON.stringify(state())
@@ -292,7 +293,7 @@ export function reportBuilderPageTurn(input: TurnInput & { chatId: string }): Pr
 
 /** One row's children in the page's tree view. Reads only; nothing is saved. */
 export async function reportBuilderExpand(email: string, spec: Spec, path: string[], colIds: string[] | null): Promise<ViewTable> {
-  const { engine } = await engineFor(await loadUser(email.trim().toLowerCase()))
+  const { engine } = await engineFor(await loadUser(email.trim().toLowerCase()), email.trim().toLowerCase())
   const v = await engine.validate(spec)
   if (!v.ok) throw new Error('That report is not complete.')
   return expandRow(engine, v.spec, path, colIds)
@@ -300,7 +301,7 @@ export async function reportBuilderExpand(email: string, spec: Spec, path: strin
 
 /** The page's first look: saved reports and data freshness, with no chat yet. */
 export async function reportBuilderOverview(email: string): Promise<Pick<PageReply, 'saved' | 'dataThrough' | 'live' | 'compSet' | 'brandSet'> & { allMediaFrom: string; mode: IntelMode }> {
-  const { engine, comp, brands, mode } = await engineFor(await loadUser(email.trim().toLowerCase()))
+  const { engine, comp, brands, mode } = await engineFor(await loadUser(email.trim().toLowerCase()), email.trim().toLowerCase())
   const a = await engine.availability()
   return { saved: await savedList(engine), dataThrough: a.final_through_label, live: engine.live, allMediaFrom: a.earliest_label, compSet: compView(comp.get()), brandSet: compView(brands.get()), mode: mode.get() }
 }
@@ -320,7 +321,7 @@ const KINDS_FOR: Record<SetKind, { mine: string[]; versus: string[] }> = {
 /** An edit to the competitive set from the page's panel. Returns the set as it now stands. */
 export async function reportBuilderCompEdit(email: string, edit: CompEdit, set: SetKind = 'properties'): Promise<CompSetView | null> {
   const who = email.trim().toLowerCase()
-  const sets = await engineFor(await loadUser(who))
+  const sets = await engineFor(await loadUser(who), who)
   const { state } = sets
   const comp = set === 'brands' ? sets.brands : sets.comp
   const c: CompSet = structuredClone(comp.get() ?? { mine: [], versus: [], all: set === 'properties', labels: {} })
@@ -349,7 +350,7 @@ export async function reportBuilderCompEdit(email: string, edit: CompEdit, set: 
 
 /** Names for the competitive-set panel's search box. */
 export async function reportBuilderCompSearch(email: string, q: string, side: 'mine' | 'versus', set: SetKind = 'properties') {
-  const { engine } = await engineFor(await loadUser(email.trim().toLowerCase()))
+  const { engine } = await engineFor(await loadUser(email.trim().toLowerCase()), email.trim().toLowerCase())
   const types = KINDS_FOR[set][side]
   const hits = await engine.search(q, { types, limit: 8 })
   return hits.map((h) => ({ id: h.id, label: h.label, kind: h.type_label, context: h.context }))

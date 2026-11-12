@@ -1,78 +1,31 @@
 /**
- * Report Builder on live GPC data (11 November 2026).
+ * The report engine (11 November 2026; on a data adapter from 12 November).
  *
  * The same report model as engine.js (templates, the interview's questions and
- * fixes, adjustments, saved reports), but every number comes from Dev
- * ClickHouse: gpc_summary.property_product_summary_month, GPC spend by month x
- * property x paying entity x product, every id with its name. Search, preview
- * and run are read-only queries through lib/clickhouse.ts (statement guard and
- * readonly=2 on every request).
+ * fixes, adjustments, saved reports), with every number from a data adapter
+ * (data/types.ts): ClickHouse in the portfolio, in-memory data in tests.
+ * The engine never writes SQL. It describes each query (dimensions, measures
+ * under their own conditions, conditions on totals, order, totals and a
+ * count); the adapter answers it, and an entitlements wrapper around the
+ * adapter limits what each person sees.
  *
- * WHAT THE DATA IS (checked 11 November 2026)
- *   - All media only from August 2026. January to July 2026 hold a few media,
- *     mostly streaming; the current month is partial. "Complete" months are the
- *     ones with most media present, worked out from the data each time.
- *   - 30 to 48 million rows a month, so nothing is copied into the app: each
- *     preview is a GROUP BY over the period, about a second with a filter.
- *   - Spend is cost_share_v: the DPA-1051 spend model's share for the paying
- *     entity and product. Promos and PSAs are left out.
- *
- * Ids in a report are "<dimension>:<GPC id>", so a saved report keeps working
+ * Ids in a report are "<dimension>:<id>", so a saved report keeps working
  * when names change. Names come back with every query and are cached for the
  * process (they do not depend on who asks).
  */
-import { chQuery, clickhouseConfig, ClickHouseError, type ClickHouseConfig } from '@/lib/clickhouse'
 import type { EngineState, Option, Patch, Result, SavedSummary, Spec, Understanding, Validation } from './engine'
+import { EntitlementError } from './data/entitlements'
+import { DIMENSIONS, MEASURE_INFO, all, any, type AggregateQuery, type Cond, type DataAdapter, type DimGroup, type DimKey, type MeasureKey, type MeasureSpec } from './data/types'
 
-const MONTH_TABLE = 'gpc_summary.property_product_summary_month'
-const TABLE = MONTH_TABLE
-const BASE = 'coalesce(is_promo, 0) = 0 AND coalesce(is_psa, 0) = 0'
 const INLINE_ROW_LIMIT = 2000
 const DOWNLOAD_ROW_LIMIT = 50_000
-const SETTINGS = { max_execution_time: '20', max_bytes_before_external_group_by: '1000000000' }
 
-type Dim = 'industry' | 'category' | 'subcategory' | 'top_parent' | 'advertiser' | 'product' | 'media_type' | 'media_owner' | 'property' | 'market' | 'month' | 'quarter' | 'year' | 'day' | 'week' | 'broadcast_week'
-type Group = 'who' | 'what' | 'where' | 'when'
-
-interface DimDef {
-  label: string
-  plural: string
-  group: Group
-  time?: boolean
-  /** Needs the daily tables (day and week breakdowns). */
-  daily?: boolean
-  id: string
-  name: string
-  context: string
-}
-
-const DIMS: Record<Dim, DimDef> = {
-  industry: { label: 'Industry', plural: 'industries', group: 'what', id: 'coalesce(industry_id, 0)', name: 'industry_name', context: "''" },
-  category: { label: 'Category', plural: 'categories', group: 'what', id: 'coalesce(category_id, 0)', name: 'category_name', context: 'industry_name' },
-  subcategory: { label: 'Subcategory', plural: 'subcategories', group: 'what', id: 'coalesce(subcategory_id, 0)', name: 'subcategory_name', context: "concat(industry_name, ' > ', category_name)" },
-  top_parent: { label: 'Top parent', plural: 'top parents', group: 'who', id: 'coalesce(entity_parent_id, entity_id)', name: "if(entity_parent_name = '', entity_name, entity_parent_name)", context: "'Parent company'" },
-  advertiser: { label: 'Advertiser', plural: 'advertisers', group: 'who', id: 'entity_id', name: 'entity_name', context: "if(entity_parent_name = '', '', entity_parent_name)" },
-  product: { label: 'Product', plural: 'products', group: 'who', id: 'product_id', name: 'product_name', context: 'entity_name' },
-  media_type: { label: 'Media type', plural: 'media types', group: 'where', id: 'coalesce(media_id, 0)', name: 'media_name', context: "'Media type'" },
-  media_owner: { label: 'Media owner', plural: 'media owners', group: 'where', id: 'coalesce(media_root_entity_id, 0)', name: 'media_root_entity_name', context: "'Media owner'" },
-  property: { label: 'Property', plural: 'properties', group: 'where', id: 'coalesce(media_entity_id, 0)', name: 'media_entity_name', context: "concat(media_name, ' · ', media_root_entity_name)" },
-  market: { label: 'Market', plural: 'markets', group: 'where', id: 'coalesce(property_market_id, 0)', name: 'initcapUTF8(property_market_name)', context: "'Market'" },
-  month: { label: 'Month', plural: 'months', group: 'when', time: true, id: 'year_month', name: 'toString(year_month)', context: "''" },
-  quarter: { label: 'Quarter', plural: 'quarters', group: 'when', time: true, id: "concat(toString(intDiv(year_month, 100)), '-Q', toString(intDiv(year_month % 100 + 2, 3)))", name: "''", context: "''" },
-  year: { label: 'Year', plural: 'years', group: 'when', time: true, id: 'toString(intDiv(year_month, 100))', name: "''", context: "''" },
-  day: { label: 'Day', plural: 'days', group: 'when', time: true, daily: true, id: 'toString(start_date)', name: "''", context: "''" },
-  week: { label: 'Week', plural: 'weeks', group: 'when', time: true, daily: true, id: 'toString(toStartOfWeek(start_date, 0))', name: "''", context: "''" },
-  broadcast_week: { label: 'Broadcast week', plural: 'broadcast weeks', group: 'when', time: true, daily: true, id: 'toString(toMonday(start_date))', name: "''", context: "''" },
-}
-const NAME_DIMS = Object.keys(DIMS).filter((d) => !DIMS[d as Dim].time) as Dim[]
+type Dim = DimKey
+type Group = DimGroup
+const DIMS = DIMENSIONS
+const NAME_DIMS = (Object.keys(DIMS) as Dim[]).filter((d) => !DIMS[d].time)
 const GROUP_LABEL: Record<Group, string> = { who: 'Who is advertising', what: 'What is advertised', where: 'Where it runs', when: 'When' }
-
-const MEASURES = {
-  spend: { label: 'Spend', type: 'money' as const, sql: 'cost_share_v' },
-  occurrences: { label: 'Occurrences', type: 'int' as const, sql: 'occurrences' },
-  impressions: { label: 'Impressions', type: 'int' as const, sql: 'impressions_share_v', note: 'Not measured for every medium.' },
-}
-type MeasureKey = keyof typeof MEASURES
+const MEASURES = MEASURE_INFO
 const CALCS = {
   share: { label: 'Share of total', note: 'Each row as a percent of the report total. With a column breakdown: each cell as a percent of its column total (% down), shown in the cell under the value.' },
   share_across: { label: 'Share across', note: 'With a column breakdown only: each cell as a percent of its row total (% across), shown in the cell under the value.' },
@@ -102,7 +55,7 @@ const TEMPLATES = [
   { id: 'detail_extract', label: 'Detailed extract', description: 'Product-level rows by property and month, for a spreadsheet', spec: { template: 'detail_extract', rows: ['top_parent', 'advertiser', 'product', 'subcategory', 'media_type', 'property', 'month'], measures: ['spend', 'occurrences', 'impressions'], time: { mode: 'rolling', unit: 'month', count: 1 }, output: 'csv' } },
 ]
 
-/** Everyday words for GPC's own names: "fast food" is QSRs-Quick Serve Restaurants. */
+/** Everyday words for the taxonomy's own names: "fast food" is QSRs-Quick Serve Restaurants. */
 const ALIASES: Array<[string, Dim, string]> = [
   ['fast food', 'subcategory', 'QSRs-Quick Serve Restaurants'],
   ['quick serve', 'subcategory', 'QSRs-Quick Serve Restaurants'],
@@ -132,8 +85,6 @@ const clone = <T>(x: T): T => (x == null ? x : (JSON.parse(JSON.stringify(x)) as
 const uniq = <T>(a: T[]) => Array.from(new Set(a))
 const norm = (s: unknown) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const toIdx = (ym: number) => Math.floor(ym / 100) * 12 + ((ym % 100) - 1)
-const toYm = (idx: number) => Math.floor(idx / 12) * 100 + (idx % 12) + 1
 const monthId = (idx: number) => `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`
 const monthLabel = (idx: number) => `${MONTHS[idx % 12]} ${Math.floor(idx / 12)}`
 function parseMonth(id: unknown): number | null {
@@ -245,25 +196,27 @@ function normalize(specIn: Spec): NSpec {
   return s
 }
 
-/** Ids of properties, media types, owners or markets as one SQL condition ('0' when none). */
-function idSql(ids: string[]): string {
-  const by = new Map<Dim, number[]>()
-  for (const id of ids) {
-    const d = String(id).split(':')[0] as Dim
-    const n = num(id)
-    if (!DIMS[d] || DIMS[d].time || n === null) continue
-    by.set(d, [...(by.get(d) ?? []), n])
-  }
-  const parts = [...by].map(([d, ns]) => `${DIMS[d].id} IN (${ns.join(',')})`)
-  return parts.length ? `(${parts.join(' OR ')})` : '0'
-}
 const dimOf = (id: string) => String(id).split(':')[0]!
 
-const num = (id: string) => {
-  const n = Number(String(id).split(':')[1])
-  return Number.isFinite(n) ? Math.trunc(n) : null
+/** Whether a report needs data by day: a day or week breakdown, or a period in weeks or days. */
+function needsDaily(s: NSpec): boolean {
+  const t = s.time ?? {}
+  return [...s.rows, ...(s.columns ? [s.columns] : [])].some((d) => DIMS[d]?.daily) || t.unit === 'week' || t.unit === 'day' || dParse(t.start) !== null
 }
-const idsOf = (ids: string[]) => ids.map(num).filter((n): n is number => n !== null)
+
+/** The report's filters as conditions: OR within a group (who, what, where), the groups AND-ed by the caller. */
+function filterConds(s: NSpec): Record<'who' | 'what' | 'where', Cond | undefined> {
+  const groups: Record<'who' | 'what' | 'where', Cond[]> = { who: [], what: [], where: [] }
+  for (const [dim, ids] of Object.entries(s.filters)) {
+    const d = DIMS[dim as Dim]
+    if (!d || d.time || !ids.length) continue
+    groups[d.group as 'who' | 'what' | 'where'].push({ in: dim as Dim, values: ids })
+  }
+  return { who: any(...groups.who), what: any(...groups.what), where: any(...groups.where) }
+}
+
+/** A drill-down path (the tree view) as a condition. */
+const pathCond = (s: NSpec): Cond | undefined => all(...Object.entries(s.path ?? {}).filter(([d]) => DIMS[d as Dim]).map(([d, id]): Cond => ({ in: d as Dim, values: [String(id)] })))
 
 // ---------------------------------------------------------------- shared state
 
@@ -271,102 +224,24 @@ interface Availability {
   firstComplete: number
   through: number
   prelim: number
-  /** The last day loaded in the daily tables. */
+  /** The last day loaded. */
   prelimDay: number
-  at: number
 }
-let availCache: Availability | null = null
 const labels = new Map<string, string>()
 const contexts = new Map<string, string>()
-
-function config(): ClickHouseConfig {
-  const c = clickhouseConfig('dev')
-  if (!c) throw new ClickHouseError('Dev ClickHouse is not configured (CLICKHOUSE_DEV_URL).')
-  return c
-}
-
-/** Whether this deployment reads live GPC data. */
-export function liveConfigured(env: Record<string, string | undefined> = process.env): boolean {
-  return env.REPORT_BUILDER_DATA?.trim().toLowerCase() === 'gpc' && Boolean(clickhouseConfig('dev', env))
-}
-
-async function availability(): Promise<Availability> {
-  if (availCache && Date.now() - availCache.at < 10 * 60_000) return availCache
-  const rows = await chQuery<{ ym: number; media: number }>(config(), `SELECT year_month AS ym, uniqExact(media_id) AS media FROM ${TABLE} GROUP BY ym ORDER BY ym`, {}, SETTINGS)
-  const maxMedia = Math.max(1, ...rows.map((r) => Number(r.media)))
-  const complete = rows.filter((r) => Number(r.media) >= maxMedia * 0.7).map((r) => Number(r.ym))
-  const prelim = Math.max(...rows.map((r) => Number(r.ym)))
-  // The current month is still loading: complete months stop before it.
-  const done = complete.filter((ym) => ym < prelim)
-  const through = done.length ? done[done.length - 1]! : prelim
-  let first = through
-  for (let i = done.length - 1; i > 0 && toIdx(done[i - 1]!) === toIdx(done[i]!) - 1; i--) first = done[i - 1]!
-  const [last] = await chQuery<{ d: string }>(config(), `SELECT toString(max(start_date)) AS d FROM gpc_summary.video_product_summary_daily WHERE year_month >= ${prelim}`, {}, SETTINGS)
-  const prelimDay = Math.min(dParse(last?.d) ?? monthLastDay(toIdx(prelim)), monthLastDay(toIdx(prelim)))
-  availCache = { firstComplete: toIdx(first), through: toIdx(through), prelim: toIdx(prelim), prelimDay, at: Date.now() }
-  return availCache
-}
-
-// ---------------------------------------------------------------- the daily source
-
-/**
- * Day and week breakdowns read the daily tables, one per media family. Together
- * they hold exactly what the monthly table does (checked for October 2026,
- * medium by medium), so a report by week adds up to the same months. Their
- * columns differ a little, so each is read into the monthly table's shape:
- * a missing column is empty, and a different type is cast.
- */
-const DAILY_TABLES = ['tv', 'video', 'avod', 'display', 'social', 'print', 'live_stream'].map((t) => `${t}_product_summary_daily`)
-const DAILY_COLS = [
-  'year_month', 'start_date', 'industry_id', 'industry_name', 'category_id', 'category_name', 'subcategory_id', 'subcategory_name',
-  'entity_id', 'entity_name', 'entity_parent_id', 'entity_parent_name', 'product_id', 'product_name',
-  'media_id', 'media_name', 'media_root_entity_id', 'media_root_entity_name', 'media_entity_id', 'media_entity_name',
-  'property_market_id', 'property_market_name', 'cost_share_v', 'occurrences', 'impressions_share_v', 'is_promo', 'is_psa',
-]
-let dailySql: Promise<string> | null = null
-function dailySource(): Promise<string> {
-  dailySql ??= (async () => {
-    const tables = ['property_product_summary_month', ...DAILY_TABLES]
-    const cols = await chQuery<{ table: string; name: string; type: string }>(
-      config(),
-      `SELECT table, name, type FROM system.columns WHERE database = 'gpc_summary' AND table IN (${tables.map((t) => `'${t}'`).join(',')}) AND name IN (${DAILY_COLS.map((c) => `'${c}'`).join(',')})`,
-      {},
-      SETTINGS,
-    )
-    const want = new Map(cols.filter((c) => c.table === 'property_product_summary_month').map((c) => [c.name, c.type]))
-    const parts = DAILY_TABLES.map((t) => {
-      const have = new Map(cols.filter((c) => c.table === t).map((c) => [c.name, c.type]))
-      const sel = DAILY_COLS.map((c) => {
-        const ty = want.get(c) ?? 'String'
-        const got = have.get(c)
-        if (got === ty) return c
-        if (got) return `CAST(${c} AS ${ty}) AS ${c}`
-        const empty = ty.includes('Nullable') ? 'NULL' : ty.includes('String') ? "''" : '0'
-        return `CAST(${empty} AS ${ty}) AS ${c}`
-      })
-      return `SELECT ${sel.join(', ')} FROM gpc_summary.${t}`
-    })
-    return `(${parts.join(' UNION ALL ')})`
-  })()
-  dailySql.catch(() => (dailySql = null))
-  return dailySql
-}
-
-/** Whether a report needs the daily tables: a day or week breakdown, or a period in weeks or days. */
-function needsDaily(s: NSpec): boolean {
-  const t = s.time ?? {}
-  return [...s.rows, ...(s.columns ? [s.columns] : [])].some((d) => DIMS[d]?.daily) || t.unit === 'week' || t.unit === 'day' || dParse(t.start) !== null
-}
 
 // ---------------------------------------------------------------- the engine
 
 export interface LiveEngineConfig {
   store: { load(): EngineState; save(s: EngineState): void }
+  /** Where the numbers come from, already limited to what this person may see. */
+  adapter: DataAdapter
   now?: () => string
 }
 
 export function createLiveEngine(cfg: LiveEngineConfig) {
   const store = cfg.store
+  const data = cfg.adapter
   const now = cfg.now ?? (() => new Date().toISOString())
   const state = () => {
     const s = (store.load() ?? {}) as EngineState & { saved: SavedRec[] }
@@ -376,6 +251,13 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
   }
   // Results of the last few queries, so a preview right after a validation does not run twice.
   const memo = new Map<string, Promise<Result>>()
+
+  async function availability(): Promise<Availability> {
+    const a = await data.availability()
+    return { firstComplete: parseMonth(a.firstComplete)!, through: parseMonth(a.through)!, prelim: parseMonth(a.prelim)!, prelimDay: dParse(a.prelimDay)! }
+  }
+  /** One month, as a query period. */
+  const monthPeriod = (idx: number) => ({ from: dStr(monthFirstDay(idx)), to: dStr(monthLastDay(idx)) })
 
   function labelOf(dim: string, id: string): string {
     if (dim === 'month') {
@@ -396,27 +278,15 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
 
   async function ensureLabels(specIn: Spec): Promise<void> {
     const s = normalize(specIn)
-    const want = new Map<Dim, string[]>()
-    for (const [dim, ids] of Object.entries(s.filters)) if (DIMS[dim as Dim] && !DIMS[dim as Dim].time) want.set(dim as Dim, ids.filter((id) => !labels.has(id)))
-    const extra = [...(s.zero_share ? [...s.zero_share.mine, ...s.zero_share.versus] : []), ...(s.compare ? [...s.compare.mine, ...s.compare.rivals] : [])]
-    if (extra.length)
-      for (const id of extra) {
-        const d = dimOf(id) as Dim
-        if (DIMS[d] && !labels.has(id)) want.set(d, [...(want.get(d) ?? []), id])
-      }
-    const parts: string[] = []
-    for (const [dim, ids] of want) {
-      const nums = idsOf(ids)
-      if (!nums.length) continue
-      const d = DIMS[dim]
-      parts.push(`SELECT '${dim}' AS dim, toString(${d.id}) AS id, any(${d.name}) AS name, any(${d.context}) AS ctx FROM ${TABLE} WHERE ${d.id} IN (${nums.join(',')}) AND year_month >= 202601 GROUP BY id`)
-    }
-    if (!parts.length) return
-    const rows = await chQuery<{ dim: string; id: string; name: string; ctx: string }>(config(), parts.join(' UNION ALL '), {}, SETTINGS)
-    for (const r of rows) {
-      if (!r.name) continue
-      labels.set(`${r.dim}:${r.id}`, r.name)
-      contexts.set(`${r.dim}:${r.id}`, r.ctx)
+    const ids: string[] = []
+    for (const [dim, vals] of Object.entries(s.filters)) if (DIMS[dim as Dim] && !DIMS[dim as Dim].time) ids.push(...vals)
+    if (s.zero_share) ids.push(...s.zero_share.mine, ...s.zero_share.versus)
+    if (s.compare) ids.push(...s.compare.mine, ...s.compare.rivals)
+    const want = uniq(ids.filter((id) => DIMS[dimOf(id) as Dim] && !labels.has(id)))
+    if (!want.length) return
+    for (const r of await data.labels(want)) {
+      labels.set(r.id, r.name)
+      contexts.set(r.id, r.context)
     }
   }
 
@@ -426,28 +296,16 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const limit = Math.max(1, Math.min(opts.limit ?? 8, 25))
     const q = String(query ?? '').trim()
     const aliasTargets = ALIASES.filter(([alias, dim]) => types.includes(dim) && q && (norm(q) === alias || norm(q).includes(alias)))
-    const one = (dim: Dim, needle: string | null, paramName: string) => {
-      const d = DIMS[dim]
-      const match = needle === null ? '' : ` AND positionCaseInsensitiveUTF8(${d.name}, {${paramName}:String}) > 0`
-      return `SELECT '${dim}' AS dim, toString(${d.id}) AS id, any(${d.name}) AS name, any(${d.context}) AS ctx, toFloat64(sum(cost_share_v)) AS spend
-        FROM ${TABLE} WHERE year_month = ${toYm(a.through)} AND ${d.name} != ''${match} GROUP BY id ORDER BY spend DESC LIMIT ${limit}`
-    }
-    const parts = types.map((dim) => one(dim, q ? q : null, 'q'))
-    const params: Record<string, string> = q ? { q } : {}
-    aliasTargets.forEach(([, dim, label], i) => {
-      parts.push(one(dim, label, `a${i}`))
-      params[`a${i}`] = label
-    })
-    const rows = await chQuery<{ dim: Dim; id: string; name: string; ctx: string; spend: number }>(config(), `SELECT * FROM (${parts.map((p) => `(${p})`).join(' UNION ALL ')})`, params, SETTINGS)
+    const parts = [...types.map((dim) => ({ dim, text: q ? q : null })), ...aliasTargets.map(([, dim, label]) => ({ dim, text: label }))]
+    const rows = await data.search({ parts, month: monthId(a.through), limit })
     const lq = q.toLowerCase()
     const aliasNames = new Set(aliasTargets.map(([, , l]) => l.toLowerCase()))
     const scored = rows.map((r) => {
       const n = r.name.toLowerCase()
       const score = aliasNames.has(n) ? 95 : !q ? 1 : n === lq ? 100 : n.startsWith(lq) ? 80 : 40
-      const id = `${r.dim}:${r.id}`
-      labels.set(id, r.name)
-      contexts.set(id, r.ctx)
-      return { id, type: r.dim, type_label: DIMS[r.dim].label, label: r.name, context: r.ctx, spend_last_month: Number(r.spend), score }
+      labels.set(r.id, r.name)
+      contexts.set(r.id, r.context)
+      return { id: r.id, type: r.dim, type_label: DIMS[r.dim].label, label: r.name, context: r.context, spend_last_month: r.spend, score }
     })
     const seen = new Set<string>()
     return scored
@@ -597,40 +455,6 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
 
   // ---- the query
 
-  function whereParts(s: NSpec, start: number, end: number, days?: { d0: number; d1: number }) {
-    const groups: Record<'who' | 'what' | 'where', string[]> = { who: [], what: [], where: [] }
-    for (const [dim, ids] of Object.entries(s.filters)) {
-      const d = DIMS[dim as Dim]
-      const nums = idsOf(ids)
-      if (!d || d.time || !nums.length) continue
-      groups[d.group as 'who' | 'what' | 'where'].push(`${d.id} IN (${nums.join(',')})`)
-    }
-    const or = (xs: string[]) => (xs.length ? `(${xs.join(' OR ')})` : '')
-    const path: string[] = []
-    for (const [dim, id] of Object.entries(s.path ?? {})) {
-      const d = DIMS[dim as Dim]
-      if (!d) continue
-      if (dim === 'month') {
-        const t = parseMonth(id)
-        if (t != null) path.push(`year_month = ${toYm(t)}`)
-      } else if (d.time) path.push(`${d.id} = '${String(id).replace(/[^0-9Q-]/g, '')}'`)
-      else {
-        const n = num(id)
-        if (n !== null) path.push(`${d.id} = ${n}`)
-      }
-    }
-    return {
-      path: path.join(' AND '),
-      // The daily tables: the days, and a month either side for the sort key (TV files a few days under the next or last broadcast month).
-      time: days
-        ? `year_month BETWEEN ${toYm(start - 1)} AND ${toYm(end + 1)} AND start_date BETWEEN '${dStr(days.d0)}' AND '${dStr(days.d1)}'`
-        : `year_month BETWEEN ${toYm(start)} AND ${toYm(end)}`,
-      who: or(groups.who),
-      what: or(groups.what),
-      where: or(groups.where),
-    }
-  }
-
   async function run(specIn: Spec, opts: { limit?: number } = {}): Promise<Result> {
     const key = JSON.stringify([specIn, opts.limit ?? 0])
     const hit = memo.get(key)
@@ -651,7 +475,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     if ('error' in per) throw new Error(per.error)
     const notes = [...per.notes]
     const daily = needsDaily(s)
-    const TABLE = daily ? await dailySource() : MONTH_TABLE
+    const period: AggregateQuery['period'] = { from: dStr(per.d0), to: dStr(per.d1), daily }
     const zs = s.zero_share
     const wallet = zs?.mode === 'wallet'
     const R = s.rows.filter((d) => DIMS[d])
@@ -662,83 +486,81 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const calcs: NSpec['calcs'] = wallet ? [] : C ? s.calcs.filter((c) => c === 'share' || c === 'share_across') : s.calcs.filter((c) => c !== 'share_across')
     const down = Boolean(C) && calcs.includes('share')
     const across = Boolean(C) && calcs.includes('share_across')
-    const w = whereParts(s, per.start, per.end, daily ? per : undefined)
+    const f = filterConds(s)
     const mineIds = new Set(s.compare?.mine ?? [])
 
     // Rows in scope, and which of their spend counts.
-    const subject = [w.who, w.what, w.path, s.compare ? idSql([...s.compare.mine, ...s.compare.rivals]) : ''].filter(Boolean)
-    let scope: string
-    let counted: string
-    let mineSql = ''
+    const subject = all(f.who, f.what, pathCond(s), s.compare ? { anyOf: [...s.compare.mine, ...s.compare.rivals] } : undefined)
+    let scope: Cond | undefined
+    let counted: Cond | undefined
+    let mine: Cond | undefined
     if (zs) {
       // Publisher Intel: zero (competitors, not you), wallet (you and competitors), mine (only you), theirs (only competitors).
-      mineSql = idSql(zs.mine)
-      scope = [w.time, BASE, ...subject].join(' AND ')
-      const theirs = [`NOT ${mineSql}`, zs.versus.length ? idSql(zs.versus) : '', w.where].filter(Boolean).join(' AND ')
-      counted = zs.mode === 'mine' ? [mineSql, w.where].filter(Boolean).join(' AND ') : wallet ? `(${mineSql} OR (${theirs}))` : theirs
+      mine = { anyOf: zs.mine }
+      scope = subject
+      const theirs = all({ not: mine }, zs.versus.length ? { anyOf: zs.versus } : undefined, f.where)
+      counted = zs.mode === 'mine' ? all(mine, f.where) : wallet ? any(mine, theirs) : theirs
     } else {
-      scope = [w.time, BASE, ...subject, w.where].filter(Boolean).join(' AND ')
-      counted = '1'
+      scope = all(subject, f.where)
     }
-    const agg = (k: MeasureKey, cond = counted) => `toFloat64(sumIf(${MEASURES[k].sql}, ${cond}))`
+    const measure = (as: string, k: MeasureKey, where?: Cond): MeasureSpec => ({ as, measure: k, ...(where ? { where } : {}) })
 
     // Column breakdown: its values first (every month in the period; the 12 largest otherwise).
     let colVals: Array<{ id: string; name: string }> = []
     let moreCols = 0
     if (C && Array.isArray(s.col_ids)) {
-      const d = DIMS[C]
-      colVals = s.col_ids.map((id) => ({ id, name: d.time ? (C === 'month' ? monthLabel(toIdx(Number(id))) : labelOf(C, id)) : (labels.get(`${C}:${id}`) ?? id) }))
-      void d
+      colVals = s.col_ids.map((id) => ({ id, name: DIMS[C].time ? labelOf(C, id) : (labels.get(id) ?? id) }))
     } else if (C) {
-      const d = DIMS[C]
-      const vals = await chQuery<{ id: string; name: string; v: number; n: number }>(
-        config(),
-        `SELECT toString(${d.id}) AS id, any(${d.name}) AS name, ${agg(primary)} AS v, count() OVER () AS n FROM ${TABLE} WHERE ${scope} GROUP BY id HAVING v != 0 ORDER BY ${d.time ? 'id ASC' : 'v DESC'} LIMIT ${d.time ? 100 : 12}`,
-        {},
-        SETTINGS,
-      )
-      colVals = vals.map((r) => ({ id: r.id, name: d.time ? (C === 'month' ? labelOf('month', monthId(toIdx(Number(r.id)))) : labelOf(C, r.id)) : r.name }))
-      moreCols = vals.length ? Math.max(0, Number(vals[0]!.n) - vals.length) : 0
-      for (const v of vals) if (!d.time) labels.set(`${C}:${v.id}`, v.name)
+      const time = Boolean(DIMS[C].time)
+      const vals = await data.aggregate({
+        period,
+        where: scope,
+        groupBy: [C],
+        measures: [measure('v', primary, counted)],
+        having: [{ as: 'v', op: '!=', value: 0 }],
+        orderBy: [time ? { by: C } : { by: 'v', desc: true }],
+        limit: time ? 100 : 12,
+        withCount: true,
+      })
+      colVals = vals.rows.map((r) => {
+        const k = r.keys[C]!
+        if (!time) labels.set(k.id, k.name)
+        return { id: k.id, name: time ? labelOf(C, k.id) : k.name }
+      })
+      moreCols = Math.max(0, (vals.count ?? 0) - vals.rows.length)
     }
 
-    const selects: string[] = []
-    R.forEach((dim, i) => {
-      const d = DIMS[dim]
-      selects.push(`toString(${d.id}) AS r${i}`, `any(${d.name}) AS n${i}`)
-    })
-    for (const k of M) selects.push(`${agg(k)} AS m_${k}`)
+    const ms: MeasureSpec[] = M.map((k) => measure(k, k, counted))
     const withMine = zs && (zs.mode === 'zero' || wallet)
-    if (withMine) selects.push(`toFloat64(sumIf(cost_share_v, ${mineSql})) AS mine_spend`)
-    // Share of wallet by column: spend with you and in all, per value, as well as the measures.
-    const walletKeys: string[] = wallet ? ['spend', 'mine'] : M
+    if (withMine) ms.push(measure('mine', 'spend', mine))
+    if (withMine && !M.includes('spend')) ms.push(measure('spend', 'spend', counted))
     colVals.forEach((c, j) => {
-      const inCol = `toString(${DIMS[C!].id}) = '${c.id.replace(/'/g, '')}'`
-      for (const k of M) selects.push(`toFloat64(sumIf(${MEASURES[k].sql}, (${counted}) AND ${inCol})) AS c${j}_${k}`)
+      const inCol: Cond = { in: C!, values: [c.id] }
+      for (const k of M) ms.push(measure(`c${j}_${k}`, k, all(counted, inCol)))
+      // Share of wallet by column: spend with you and in all, per value.
       if (wallet) {
-        if (!M.includes('spend')) selects.push(`toFloat64(sumIf(cost_share_v, (${counted}) AND ${inCol})) AS c${j}_spend`)
-        selects.push(`toFloat64(sumIf(cost_share_v, ${mineSql} AND ${inCol})) AS c${j}_mine`)
+        if (!M.includes('spend')) ms.push(measure(`c${j}_spend`, 'spend', all(counted, inCol)))
+        ms.push(measure(`c${j}_mine`, 'spend', all(mine, inCol)))
       }
     })
-    const groupBy = R.length ? ` GROUP BY ${R.map((_, i) => `r${i}`).join(', ')}` : ''
-    const having = zs?.mode === 'zero' ? ' HAVING mine_spend = 0 AND m_spend > 0' : ` HAVING m_${primary} != 0`
-    const grouped = `SELECT ${selects.join(', ')} FROM ${TABLE} WHERE ${scope}${groupBy}${having}`
     const firstTime = R.length && DIMS[R[0]!].time
-    const order = firstTime ? 'r0 ASC' : `m_${primary} DESC`
     const cap = Math.min(opts.limit ?? DOWNLOAD_ROW_LIMIT, s.options.top_n ?? Infinity, DOWNLOAD_ROW_LIMIT)
-
-    type Row = Record<string, string | number>
-    const [rows, totals] = await Promise.all([
-      chQuery<Row>(config(), `SELECT *, count() OVER () AS __n FROM (${grouped}) ORDER BY ${order} LIMIT ${cap}`, {}, SETTINGS),
-      chQuery<Row>(
-        config(),
-        `SELECT ${[...M.map((k) => `sum(m_${k}) AS m_${k}`), ...(withMine ? ['sum(mine_spend) AS mine_spend'] : []), ...colVals.flatMap((_, j) => Array.from(new Set([...M, ...(wallet ? walletKeys : [])])).map((k) => `sum(c${j}_${k}) AS c${j}_${k}`))].join(', ')}, count() AS n FROM (${grouped})`,
-        {},
-        SETTINGS,
-      ),
-    ])
-    const matched = Number(totals[0]?.n ?? 0)
-    for (const r of rows) R.forEach((dim, i) => !DIMS[dim].time && labels.set(`${dim}:${r[`r${i}`]}`, String(r[`n${i}`])))
+    const res = await data.aggregate({
+      period,
+      where: scope,
+      groupBy: R,
+      measures: ms,
+      having: zs?.mode === 'zero' ? [{ as: 'mine', op: '=', value: 0 }, { as: 'spend', op: '>', value: 0 }] : [{ as: primary, op: '!=', value: 0 }],
+      orderBy: [firstTime ? { by: R[0]! } : { by: primary, desc: true }],
+      limit: cap,
+      withCount: true,
+      withTotals: true,
+    })
+    const rows = res.rows
+    const totals = res.totals ?? {}
+    const matched = res.count ?? 0
+    for (const r of rows) for (const d of R) if (!DIMS[d].time) labels.set(r.keys[d]!.id, r.keys[d]!.name)
+    const keyOf = (r: (typeof rows)[number]) => R.map((d) => r.keys[d]!.id)
 
     // Prior year, for the rows shown.
     const prior = new Map<string, number>()
@@ -747,19 +569,14 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       const ps = per.start - 12
       const pe = per.end - 12
       if (pe < a.firstComplete) notes.push(`A year earlier, the data covers only some media (all media start in ${monthLabel(a.firstComplete)}), so the change is not like for like.`)
-      const pw = whereParts(s, ps, pe)
-      const pscope = [pw.time, BASE, pw.who, pw.what, pw.where].filter(Boolean).join(' AND ')
-      const keys = R.length ? rows.map((r) => `(${R.map((_, i) => `'${String(r[`r${i}`]).replace(/'/g, '')}'`).join(',')})`) : []
-      const keyExpr = R.length ? `(${R.map((d) => `toString(${DIMS[d].id})`).join(',')})` : ''
-      const pr = await chQuery<Row>(
-        config(),
-        `SELECT ${R.length ? `${R.map((d, i) => `toString(${DIMS[d].id}) AS r${i}`).join(', ')}, ` : ''}toFloat64(sum(${MEASURES[primary].sql})) AS v FROM ${TABLE} WHERE ${pscope}${keys.length ? ` AND ${keyExpr} IN (${keys.join(',')})` : ''}${groupBy}`,
-        {},
-        SETTINGS,
-      )
-      for (const r of pr) prior.set(R.map((_, i) => r[`r${i}`]).join('\u0001'), Number(r.v))
-      const pt = await chQuery<Row>(config(), `SELECT toFloat64(sum(${MEASURES[primary].sql})) AS v FROM ${TABLE} WHERE ${pscope}`, {}, SETTINGS)
-      priorTotal = Number(pt[0]?.v ?? 0)
+      const pp = { from: dStr(monthFirstDay(ps)), to: dStr(monthLastDay(pe)) }
+      const pscope = all(f.who, f.what, f.where)
+      const [pr, pt] = await Promise.all([
+        data.aggregate({ period: pp, where: all(pscope, R.length ? { tuples: R, values: rows.map(keyOf) } : undefined), groupBy: R, measures: [measure('v', primary)] }),
+        data.aggregate({ period: pp, where: pscope, groupBy: [], measures: [measure('v', primary)] }),
+      ])
+      for (const r of pr.rows) prior.set(keyOf(r).join('\u0001'), r.values.v ?? 0)
+      priorTotal = pt.rows[0]?.values.v ?? 0
     }
 
     const columns: Result['columns'] = R.map((d) => ({ key: d, label: DIMS[d].label, type: 'text' }))
@@ -803,47 +620,45 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         }
       })
     }
-    const totalPrimary = Number(totals[0]?.[`m_${primary}`] ?? 0)
+    const totalPrimary = totals[primary] ?? 0
     const pct = (x: number, y: number) => (y ? Math.round((x / y) * 1000) / 10 : null)
     // Cents for money, whole numbers for counts: the spreadsheet should not carry float noise.
     const tidy = (k: MeasureKey, v: number) => (MEASURES[k].type === 'money' ? Math.round(v * 100) / 100 : Math.round(v))
-    const cells = (r: Row | undefined, isTotal: boolean): unknown[] => {
-      const out: unknown[] = isTotal
-        ? R.map((_, i) => (i === 0 ? 'Total' : ''))
-        : R.map((dim, i) =>
-            DIMS[dim].time
-              ? dim === 'month'
-                ? monthLabel(toIdx(Number(r![`r${i}`])))
-                : labelOf(dim, String(r![`r${i}`]))
-              : String(r![`n${i}`]) + (mineIds.has(`${dim}:${r![`r${i}`]}`) ? ' (you)' : ''),
-          )
+    const cells = (row: (typeof rows)[number] | null): unknown[] => {
+      const v = row ? row.values : totals
+      const out: unknown[] = row
+        ? R.map((dim) => {
+            const k = row.keys[dim]!
+            return DIMS[dim].time ? labelOf(dim, k.id) : k.name + (mineIds.has(k.id) ? ' (you)' : '')
+          })
+        : R.map((_, i) => (i === 0 ? 'Total' : ''))
       if (wallet) {
-        const split = (all: number, yours: number) => out.push(tidy('spend', yours), tidy('spend', all - yours), pct(yours, all))
-        if (C) colVals.forEach((_, j) => split(Number(r?.[`c${j}_spend`] ?? 0), Number(r?.[`c${j}_mine`] ?? 0)))
-        split(Number(r?.m_spend ?? 0), Number(r?.mine_spend ?? 0))
+        const split = (whole: number, yours: number) => out.push(tidy('spend', yours), tidy('spend', whole - yours), pct(yours, whole))
+        if (C) colVals.forEach((_, j) => split(v[`c${j}_spend`] ?? 0, v[`c${j}_mine`] ?? 0))
+        split(v.spend ?? 0, v.mine ?? 0)
       } else if (C) {
-        const rowTotal = Number(r?.[`m_${primary}`] ?? 0)
+        const rowTotal = v[primary] ?? 0
         colVals.forEach((_, j) =>
           M.forEach((k, i) => {
-            const v = Number(r?.[`c${j}_${k}`] ?? 0)
-            out.push(tidy(k, v))
-            if (i === 0 && down) out.push(pct(v, Number(totals[0]?.[`c${j}_${primary}`] ?? 0)))
-            if (i === 0 && across) out.push(pct(v, rowTotal))
+            const x = v[`c${j}_${k}`] ?? 0
+            out.push(tidy(k, x))
+            if (i === 0 && down) out.push(pct(x, totals[`c${j}_${primary}`] ?? 0))
+            if (i === 0 && across) out.push(pct(x, rowTotal))
           }),
         )
         M.forEach((k, i) => {
-          out.push(tidy(k, Number(r?.[`m_${k}`] ?? 0)))
+          out.push(tidy(k, v[k] ?? 0))
           if (i === 0 && down) out.push(pct(rowTotal, totalPrimary))
         })
       } else {
         M.forEach((k, i) => {
-          const v = Number(r?.[`m_${k}`] ?? 0)
-          out.push(tidy(k, v))
-          if (i === 0 && calcs.includes('share')) out.push(pct(v, totalPrimary))
+          const x = v[k] ?? 0
+          out.push(tidy(k, x))
+          if (i === 0 && calcs.includes('share')) out.push(pct(x, totalPrimary))
           if (i === 0 && calcs.includes('yoy')) {
-            const pv = isTotal ? priorTotal : (prior.get(R.map((_, j) => r?.[`r${j}`]).join('\u0001')) ?? 0)
+            const pv = row ? (prior.get(keyOf(row).join('\u0001')) ?? 0) : priorTotal
             out.push(pv ? tidy(k, pv) : null)
-            out.push(pv ? Math.round(((v - pv) / pv) * 1000) / 10 : null)
+            out.push(pv ? Math.round(((x - pv) / pv) * 1000) / 10 : null)
           }
         })
       }
@@ -855,16 +670,14 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     if (!opts.limit && matched > DOWNLOAD_ROW_LIMIT) notes.push(`The spreadsheet holds the first ${DOWNLOAD_ROW_LIMIT.toLocaleString('en-US')} rows of ${matched.toLocaleString('en-US')}. Narrow the report for the rest.`)
     if (!s.options.final_only) notes.push(`Figures for ${monthLabel(through)} are preliminary and still loading.`)
     if (!matched) notes.push(zs?.mode === 'zero' ? 'No advertisers matched: everyone in scope who spent on the competing properties also spent on yours.' : 'No spend matched these selections in this period.')
-    const outRows = rows.map((r) => cells(r, false))
-    // Each row's ids, as filters and paths use them, for drilling into it.
-    const keys = rows.map((r) => R.map((dim, i) => (dim === 'month' ? monthId(toIdx(Number(r[`r${i}`]))) : DIMS[dim].time ? String(r[`r${i}`]) : `${dim}:${r[`r${i}`]}`)))
     return {
       columns,
-      rows: outRows,
-      keys,
-      totals: R.length ? cells(totals[0], true) : null,
+      rows: rows.map((r) => cells(r)),
+      // Each row's ids, as filters and paths use them, for drilling into it.
+      keys: rows.map(keyOf),
+      totals: R.length ? cells(null) : null,
       row_count: rowCount,
-      rows_shown: outRows.length,
+      rows_shown: rows.length,
       total: totalPrimary,
       total_measure: MEASURES[primary].label,
       period: { start: daily ? dStr(per.d0) : monthId(per.start), end: daily ? dStr(per.d1) : monthId(per.end), label: per.label, how: per.how, moves_with_new_data: per.moves },
@@ -883,27 +696,23 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
   }
 
   /** Choices for "who do you compete with": the biggest properties in your media, all of your media, or everything. */
-  async function competitorOptions(mine: string[]): Promise<Option[]> {
+  async function competitorOptions(mineIds: string[]): Promise<Option[]> {
     const a = await availability()
-    const ym = toYm(a.through)
-    const mineSql = idSql(mine)
+    const period = monthPeriod(a.through)
+    const mine: Cond = { anyOf: mineIds }
+    const top = (where: Cond, d: Dim, n: number, context = false) =>
+      data.aggregate({ period, includePromos: true, where, groupBy: [d], context, measures: [{ as: 'v', measure: 'spend' }], orderBy: [{ by: 'v', desc: true }], limit: n })
     const out: Option[] = []
-    const [media] = await chQuery<{ id: string; name: string }>(config(), `SELECT toString(coalesce(media_id, 0)) AS id, any(media_name) AS name FROM ${TABLE} WHERE year_month = ${ym} AND ${mineSql} GROUP BY id ORDER BY sum(cost_share_v) DESC LIMIT 1`, {}, SETTINGS)
+    const media = (await top(mine, 'media_type', 1)).rows[0]?.keys.media_type
     if (media) {
-      const P = DIMS.property
-      const props = await chQuery<{ id: string; name: string; ctx: string }>(
-        config(),
-        `SELECT toString(${P.id}) AS id, any(${P.name}) AS name, any(${P.context}) AS ctx FROM ${TABLE} WHERE year_month = ${ym} AND coalesce(media_id, 0) = ${Number(media.id)} AND NOT ${mineSql} AND ${P.name} != '' GROUP BY id ORDER BY sum(cost_share_v) DESC LIMIT 4`,
-        {},
-        SETTINGS,
-      )
-      for (const p of props) {
-        const id = `property:${p.id}`
-        labels.set(id, p.name)
-        contexts.set(id, p.ctx)
-        out.push({ label: p.name, description: `Property · ${p.ctx}`, patch: { add: { 'zero_share.versus': [id] } } })
+      const props = await top(all({ in: 'media_type', values: [media.id] }, { not: mine }, { named: 'property' })!, 'property', 4, true)
+      for (const r of props.rows) {
+        const p = r.keys.property!
+        labels.set(p.id, p.name)
+        contexts.set(p.id, p.context ?? '')
+        out.push({ label: p.name, description: `Property · ${p.context ?? ''}`, patch: { add: { 'zero_share.versus': [p.id] } } })
       }
-      const mid = `media_type:${media.id}`
+      const mid = media.id
       labels.set(mid, media.name)
       out.push({ label: `All other ${media.name}`, description: `Every ${media.name} property but yours`, patch: { set: { 'zero_share.versus': [mid] } } })
     }
@@ -912,36 +721,40 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
   }
 
   /** Choices for a brand's competitors: the biggest advertisers in its subcategory, the subcategory, or the category. */
-  async function rivalOptions(mine: string[]): Promise<Option[]> {
+  async function rivalOptions(mineIds: string[]): Promise<Option[]> {
     const a = await availability()
-    const ym = toYm(a.through)
-    const mineSql = idSql(mine)
+    const period = monthPeriod(a.through)
+    const mine: Cond = { anyOf: mineIds }
     const out: Option[] = []
-    const [sub] = await chQuery<{ id: string; name: string; cid: string; cname: string }>(
-      config(),
-      `SELECT toString(coalesce(subcategory_id, 0)) AS id, any(subcategory_name) AS name, toString(any(coalesce(category_id, 0))) AS cid, any(category_name) AS cname FROM ${TABLE} WHERE year_month = ${ym} AND ${BASE} AND ${mineSql} GROUP BY id ORDER BY sum(cost_share_v) DESC LIMIT 1`,
-      {},
-      SETTINGS,
-    )
-    if (sub) {
-      const A = DIMS.advertiser
-      const top = await chQuery<{ id: string; name: string; ctx: string }>(
-        config(),
-        `SELECT toString(${A.id}) AS id, any(${A.name}) AS name, any(${A.context}) AS ctx FROM ${TABLE} WHERE year_month = ${ym} AND ${BASE} AND coalesce(subcategory_id, 0) = ${Number(sub.id)} AND NOT ${mineSql} GROUP BY id ORDER BY sum(cost_share_v) DESC LIMIT 4`,
-        {},
-        SETTINGS,
-      )
-      for (const r of top) {
-        const id = `advertiser:${r.id}`
-        labels.set(id, r.name)
-        out.push({ label: r.name, description: `Advertiser${r.ctx ? ` · ${r.ctx}` : ''}`, patch: { add: { 'compare.rivals': [id] } } })
+    const [first] = (await data.aggregate({ period, where: mine, groupBy: ['subcategory', 'category'], measures: [{ as: 'v', measure: 'spend' }], orderBy: [{ by: 'v', desc: true }], limit: 1 })).rows
+    if (first) {
+      const sub = first.keys.subcategory!
+      const cat = first.keys.category!
+      const top = await data.aggregate({ period, where: all({ in: 'subcategory', values: [sub.id] }, { not: mine }), groupBy: ['advertiser'], context: true, measures: [{ as: 'v', measure: 'spend' }], orderBy: [{ by: 'v', desc: true }], limit: 4 })
+      for (const r of top.rows) {
+        const adv = r.keys.advertiser!
+        labels.set(adv.id, adv.name)
+        out.push({ label: adv.name, description: `Advertiser${adv.context ? ` · ${adv.context}` : ''}`, patch: { add: { 'compare.rivals': [adv.id] } } })
       }
-      labels.set(`subcategory:${sub.id}`, sub.name)
-      labels.set(`category:${sub.cid}`, sub.cname)
-      out.push({ label: `All of ${sub.name}`, description: 'Every advertiser in your subcategory', patch: { set: { 'compare.rivals': [`subcategory:${sub.id}`] } } })
-      if (sub.cname && sub.cname !== sub.name) out.push({ label: `All of ${sub.cname}`, description: 'Every advertiser in your category', patch: { set: { 'compare.rivals': [`category:${sub.cid}`] } } })
+      labels.set(sub.id, sub.name)
+      labels.set(cat.id, cat.name)
+      out.push({ label: `All of ${sub.name}`, description: 'Every advertiser in your subcategory', patch: { set: { 'compare.rivals': [sub.id] } } })
+      if (cat.name && cat.name !== sub.name) out.push({ label: `All of ${cat.name}`, description: 'Every advertiser in your category', patch: { set: { 'compare.rivals': [cat.id] } } })
     }
     return out
+  }
+
+  /** A query outside the person's subscription, as a problem with ways round it. */
+  function notEntitled(err: EntitlementError, spec: NSpec): Validation['errors'][number] {
+    const fixes: Option[] = []
+    if (err.kind === 'measure') {
+      const left = spec.measures.filter((m) => !err.detail.measures?.includes(m))
+      if (left.length) fixes.push({ label: `Drop ${(err.detail.measures ?? []).map((m) => MEASURES[m].label.toLowerCase()).join(' and ')}`, patch: { set: { measures: left } } })
+    } else if (err.kind === 'daily') {
+      const monthly = (d: Dim) => (DIMS[d]?.daily ? 'month' : d)
+      fixes.push({ label: 'By month instead', patch: { set: { time: RECENT, rows: uniq(spec.rows.map(monthly)), columns: spec.columns ? monthly(spec.columns) : null } } })
+    } else fixes.push({ label: 'Use the last 3 complete months', patch: { set: { time: RECENT } } })
+    return { code: 'not_entitled', message: err.message, fixes }
   }
 
   async function validate(specIn: Spec, patch?: Patch | null): Promise<Validation> {
@@ -1038,11 +851,20 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       })
     }
 
-    const ok = !errors.length && !questions.length
+    let ok = !errors.length && !questions.length
     let rowCount: number | null = null
     const refinements: Option[] = []
+    let res: Result | null = null
     if (ok) {
-      const res = await run(spec, { limit: 10 })
+      try {
+        res = await run(spec, { limit: 10 })
+      } catch (err) {
+        if (!(err instanceof EntitlementError)) throw err
+        errors.push(notEntitled(err, spec))
+        ok = false
+      }
+    }
+    if (ok && res) {
       rowCount = res.row_count
       if (rowCount > INLINE_ROW_LIMIT) warnings.push(`This is a large extract (${rowCount.toLocaleString('en-US')} rows). It will be delivered as a file.`)
       if (spec.time?.mode === 'static') warnings.push('This period is fixed. If the report is saved, re-running it will not pick up newer months.')

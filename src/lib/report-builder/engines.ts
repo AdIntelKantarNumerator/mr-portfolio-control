@@ -1,8 +1,10 @@
 /**
  * Which data Report Builder reads, behind one interface.
  *
- *   live    GPC on Dev ClickHouse (live-engine.ts), when REPORT_BUILDER_DATA=gpc
- *           and CLICKHOUSE_DEV_URL is set. Every number is a query.
+ *   live    the report engine (live-engine.ts) on the ClickHouse data adapter
+ *           (data/clickhouse.ts), when REPORT_BUILDER_DATA=gpc and
+ *           CLICKHOUSE_DEV_URL are set, limited to the person's entitlements
+ *           (data/entitlements.ts). Every number is a query.
  *   sample  engine.js: real names, illustrative figures, all in memory. Used
  *           for tests and local work without ClickHouse.
  *
@@ -10,7 +12,9 @@
  * the download never need to know which one they have.
  */
 import SampleEngine, { type EngineState, type Patch, type Result, type SavedSummary, type Spec, type Understanding, type Validation } from './engine.js'
-import { createLiveEngine, liveConfigured } from './live-engine'
+import { createLiveEngine } from './live-engine'
+import { clickhouseAdapter, liveConfigured } from './data/clickhouse'
+import { withEntitlements, type Entitlements } from './data/entitlements'
 
 export interface Hit {
   id: string
@@ -72,9 +76,14 @@ export function sampleEngine(store: Store): ReportEngine {
   }
 }
 
-/** Live GPC data when this deployment is set up for it, the sample otherwise. */
-export function engineFor(store: Store, env: Record<string, string | undefined> = process.env): ReportEngine {
-  return liveConfigured(env) ? (createLiveEngine({ store }) as ReportEngine) : sampleEngine(store)
+// One ClickHouse adapter for the process: it caches what the data covers and the daily tables' shape.
+let shared: ReturnType<typeof clickhouseAdapter> | null = null
+
+/** Live data when this deployment is set up for it, limited to the person's entitlements; the sample otherwise. */
+export function engineFor(store: Store, env: Record<string, string | undefined> = process.env, entitlements: Entitlements | null = null): ReportEngine {
+  if (!liveConfigured(env)) return sampleEngine(store)
+  shared ??= clickhouseAdapter()
+  return createLiveEngine({ store, adapter: withEntitlements(shared, entitlements) }) as ReportEngine
 }
 
 export const dataSource = (env: Record<string, string | undefined> = process.env): 'gpc' | 'sample' => (liveConfigured(env) ? 'gpc' : 'sample')
