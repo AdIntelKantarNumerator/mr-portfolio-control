@@ -101,6 +101,17 @@ function matcherFor(engine: ReportEngine): Matcher {
   if (!engine.matchNames) throw new Error('Importing from 360 needs the live GPC data.')
   return {
     match: (dim: DimKey, names: string[]) => engine.matchNames!(dim, names),
+    byId: async (ids: string[]) => {
+      const out = new Map<string, string>()
+      const byDim: Record<string, string[]> = {}
+      for (const id of ids) (byDim[id.slice(0, id.indexOf(':'))] ??= []).push(id)
+      await engine.ensureLabels({ filters: byDim })
+      for (const id of ids) {
+        const name = engine.labelOf(id.slice(0, id.indexOf(':')), id)
+        if (name && name !== id) out.set(id, name)
+      }
+      return out
+    },
     search: async (dim: DimKey, text: string) => (await engine.search(text, { types: [dim], limit: 8 })).map((h) => ({ id: h.id, name: h.label, context: h.context, spend: (h as { spend_last_month?: number }).spend_last_month ?? 1 })),
   }
 }

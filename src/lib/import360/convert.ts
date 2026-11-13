@@ -43,6 +43,19 @@ export interface Candidate {
 export interface Matcher {
   match(dim: DimKey, names: string[]): Promise<Map<string, Candidate[]>>
   search?(dim: DimKey, text: string): Promise<Candidate[]>
+  /** GPC names of these ids ("market:91"), where GPC has them: for kinds whose ids GPC shares with 360. */
+  byId?(ids: string[]): Promise<Map<string, string>>
+}
+
+/** Markets: 360 and GPC share ids (Scott, 12 November 2026), so they are matched by id and the names only checked. */
+const SAME_IDS: DimKey[] = ['market']
+/** Whether two spellings of a name agree, loosely: "EL PASO(LAS CRUCES),TX" and "El Paso", "* TOTAL US" and "National". */
+export function similarNames(a360: string, gpc: string): boolean {
+  if (/total us/i.test(a360) && /national/i.test(gpc)) return true
+  const clean = (x: string) => normName(x.replace(/\(.*?\)/g, ' ').replace(/,\s*[A-Z]{2}\b.*$/, ''))
+  const a = clean(a360)
+  const b = clean(gpc)
+  return !!a && !!b && (a.includes(b) || b.includes(a) || a.slice(0, 5) === b.slice(0, 5))
 }
 
 // ---------------------------------------------------------------- spelling
@@ -399,6 +412,18 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
       for (const h of hits) add(h.id, h.name)
       left.delete(name)
     }
+    // Kinds whose ids GPC shares with 360 match by id; a name that disagrees is said.
+    const unlike: string[] = []
+    if (SAME_IDS.includes(m.dim) && matcher.byId) {
+      const got = await matcher.byId(s.picked.map((p) => `${m.dim}:${p.id}`))
+      for (const p of s.picked) {
+        const name = got.get(`${m.dim}:${p.id}`)
+        if (!name) continue
+        add(`${m.dim}:${p.id}`, name)
+        left.delete(p.name)
+        if (!similarNames(p.name, name)) unlike.push(`${p.name} → ${name}`)
+      }
+    }
     // Names already settled - by their creatives, or by the person - before any matching.
     const settled: { creatives: string[]; picked: string[]; dropped: string[] } = { creatives: [], picked: [], dropped: [] }
     for (const p of s.picked) {
@@ -436,6 +461,7 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
     }
     for (const [kind, ids] of picked) filters[kind] = [...new Set([...(filters[kind] ?? []), ...ids])]
     lists.push({ label: s.label, from: s.picked.map((p) => p.name), to: [...to].map(([id, name]) => ({ id, name })) })
+    if (unlike.length) note('approximate', `${s.label}: ${plural(unlike.length, 'name')} differ in GPC`, `Matched by id, which 360 and GPC share, but GPC names ${unlike.length === 1 ? 'it' : 'them'} differently.`, `Matched ${list(unlike, 3)}.`)
     if (settled.creatives.length) note('approximate', `${s.label}: ${plural(settled.creatives.length, 'name')} found by its creatives`, `No GPC ${s.label.toLowerCase()} has that name, so a sample of its creatives was followed into GPC.`, `Matched ${list(settled.creatives, 3)}.`)
     if (settled.picked.length) note('approximate', `${s.label}: ${plural(settled.picked.length, 'name')} matched by you`, 'Not found in GPC by name or with certainty by its creatives.', `You chose ${list(settled.picked, 3)}.`)
     if (settled.dropped.length) note('dropped', `${s.label}: ${list(settled.dropped)}`, 'Not found in GPC by name or by its creatives.', 'You chose to leave it out.')

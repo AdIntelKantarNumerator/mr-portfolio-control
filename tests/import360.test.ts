@@ -10,7 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { describe, dayIso, type Lookup, type Raw360Spec } from '../src/lib/import360/decode'
-import { convert360, gpcSpelling, looseKey, type Candidate, type Matcher } from '../src/lib/import360/convert'
+import { convert360, gpcSpelling, looseKey, similarNames, type Candidate, type Matcher } from '../src/lib/import360/convert'
 import { normName, type DimKey } from '../src/lib/report-builder/data/types'
 import { decide, landingOf } from '../src/lib/import360/creatives'
 
@@ -224,4 +224,24 @@ test('the creative lookup decides: one GPC entity with most of the spend, unless
   assert.equal(ask.status, 'uncertain')
   assert.deepEqual(ask.suggestions.slice(0, 3).map((s) => s.name), ['A', 'B', 'C'])
   assert.equal(decide(118, landingOf([])).status, 'uncertain', 'no creatives: uncertain')
+})
+
+test('markets match by id, which 360 and GPC share; a name that differs too much is said', async () => {
+  assert.ok(similarNames('EL PASO(LAS CRUCES),TX', 'EL PASO'))
+  assert.ok(similarNames('* TOTAL US', 'National'))
+  assert.ok(!similarNames('BOSTON,MA', 'Seattle'))
+  const spec: Raw360Spec = {
+    rpttype: 2307,
+    title: null,
+    cols: [{ type: 1, entmaj: 500, entmin: 2, order: 1, sort: 0, total: 0, calc: 0, demo: 0, name: 'Market' }, { type: 3, entmaj: 800, entmin: 36, order: 2, sort: 0, total: 0, calc: 0, demo: 0, name: '$' }],
+    opts: [],
+    sel: [{ mpt: 2, e: 500, ids: [91, 7, 999] }],
+  }
+  const names: Lookup = { ...look, name: (e, id) => (e === 500 ? ({ 91: 'EL PASO(LAS CRUCES),TX', 7: 'BOSTON,MA', 999: 'NOWHERE,ZZ' } as Record<number, string>)[id] : look.name(e, id)) }
+  const gpc: Record<string, string> = { 'market:91': 'EL PASO', 'market:7': 'Seattle' }
+  const byId: Matcher = { ...matcher, byId: async (ids) => new Map(ids.filter((id) => gpc[id]).map((id) => [id, gpc[id]!])) }
+  const c = await convert360(describe(spec, names), byId)
+  assert.deepEqual((c.spec.filters as Record<string, string[]>).market, ['market:91', 'market:7'])
+  assert.ok(c.notes.some((n) => /differ in GPC/.test(n.what) && /BOSTON,MA → Seattle/.test(n.did)))
+  assert.ok(c.notes.some((n) => /not found in GPC \(NOWHERE,ZZ\)/.test(n.what)), 'an id GPC lacks still falls back to the name, and is said')
 })
