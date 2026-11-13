@@ -190,7 +190,8 @@ const TIME_GENERIC = 700
 /** 360 measures in GPC: $ and units and impressions come across; ratings and print and web measures do not. */
 const MEASURE: Record<number, { m: 'spend' | 'occurrences' | 'impressions'; note?: string } | { drop: string }> = {
   800: { m: 'spend' },
-  801: { m: 'occurrences', note: 'Units are counted as occurrences in GPC.' },
+  // Units and occurrences are the same thing under two names: no note.
+  801: { m: 'occurrences' },
   834: { m: 'occurrences' },
   840: { m: 'occurrences' },
   837: { m: 'impressions' },
@@ -349,8 +350,9 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
       note('dropped', `${s.label} selection (${plural(s.picked.length, 'value')})`, m && 'drop' in m ? m.drop : 'Report Builder cannot select on this.', 'Left out; the report is not limited by it.')
       continue
     }
-    // Markets: "* TOTAL US", or nearly every market, means all of them - no market filter.
-    if (m.dim === 'market' && (s.picked.some((p) => /total us/i.test(p.name)) || s.picked.length >= 150)) {
+    // Markets: "* TOTAL US" (360 market -1) is GPC's National market (also -1), matched
+    // by name below like any other. A list of nearly every local market means all of them.
+    if (m.dim === 'market' && !s.picked.some((p) => p.id === -1 || /total us/i.test(p.name)) && s.picked.length >= 150) {
       note('changed', `Market selection (${plural(s.picked.length, 'market')})`, 'The 360 selection is the whole country.', 'The report covers every market.')
       continue
     }

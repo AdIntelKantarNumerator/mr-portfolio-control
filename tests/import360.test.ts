@@ -67,7 +67,10 @@ const GPC: Partial<Record<DimKey, Candidate[]>> = {
     { id: 'media_type:106', name: 'Spanish Language Network TV', context: '', spend: 1 },
   ],
   top_parent: [{ id: 'top_parent:9', name: 'The Procter & Gamble Company', context: '', spend: 10 }],
-  market: [{ id: 'market:46', name: 'New York', context: '', spend: 1 }],
+  market: [
+    { id: 'market:46', name: 'New York', context: '', spend: 1 },
+    { id: 'market:-1', name: 'National', context: '', spend: 100 },
+  ],
 }
 const matcher: Matcher = {
   async match(dim, names) {
@@ -153,5 +156,19 @@ test('spelling: markets lose their state, products their advertiser, companies t
   assert.deepEqual(filters.product, ['product:3'], "Novartis's Heart Failure, not Acme's")
   assert.deepEqual(filters.market, ['market:46'])
   assert.deepEqual(c.spec.measures, ['occurrences'])
-  assert.ok(c.notes.some((n) => /counted as occurrences/.test(n.why)))
+  assert.ok(!c.notes.some((n) => /occurrences/i.test(n.why + n.what)), 'units and occurrences are the same thing: no note')
+})
+
+test('360 Total US (market -1) is the GPC National market, not every market', async () => {
+  const spec: Raw360Spec = {
+    rpttype: 2307,
+    title: null,
+    cols: [{ type: 1, entmaj: 118, entmin: 2, order: 1, sort: 0, total: 0, calc: 0, demo: 0, name: 'Advertiser' }, { type: 3, entmaj: 800, entmin: 36, order: 2, sort: 0, total: 0, calc: 0, demo: 0, name: '$' }],
+    opts: [],
+    sel: [{ mpt: 12, e: 500, ids: [-1] }],
+  }
+  const totalUs: Lookup = { ...look, name: (e, id) => (e === 500 && id === -1 ? '* TOTAL US' : look.name(e, id)) }
+  const c = await convert360(describe(spec, totalUs), matcher)
+  assert.deepEqual((c.spec.filters as Record<string, string[]>).market, ['market:-1'])
+  assert.ok(!c.notes.some((n) => /market/i.test(n.what)), `no note: ${c.notes.map((n) => n.what).join('; ')}`)
 })
