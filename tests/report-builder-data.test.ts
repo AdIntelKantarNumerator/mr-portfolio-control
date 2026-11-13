@@ -143,6 +143,15 @@ test('the report engine runs on any adapter: a monthly trend adds up, and promos
   assert.equal((await engine.search('toy', { types: ['advertiser'] }))[0]!.label, 'Toyota')
 })
 
+test('broadcast months: the Monday-to-Sunday weeks ending in each month, read by day', async () => {
+  const engine = engineOn()
+  const r = await engine.run({ template: 'advertiser_trend', rows: ['advertiser'], columns: 'broadcast_month', measures: ['spend'], filters: { advertiser: ['advertiser:1'] }, time: { mode: 'static', start: '2026-09', end: '2026-10' } })
+  assert.deepEqual(r.columns.filter((c) => c.colId).map((c) => c.label), ['Bcst Sep 2026', 'Bcst Oct 2026'])
+  // Bcst Sep 2026 is Mon 31 Aug - Sun 27 Sep (the data starts 1 Sep: 27 days); Bcst Oct is Mon 28 Sep - Sun 25 Oct (28 days).
+  assert.deepEqual(r.rows[0], ['Toyota', 150 * 27, 150 * 28, 150 * 55])
+  assert.ok(r.notes.some((n) => /Broadcast months: Aug 31, 2026 to Oct 25, 2026/.test(n)), r.notes.join(' | '))
+})
+
 test('zero share, share of wallet by broadcast week, and a comparison with % across, on in-memory data', async () => {
   const engine = engineOn()
   const zero = await engine.run({ template: 'zero_share', rows: ['advertiser'], measures: ['spend'], zero_share: { mine: ['property:1'], versus: ['media_type:101'], mode: 'zero' }, time: OCT })

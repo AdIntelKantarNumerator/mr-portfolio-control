@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import { describe, dayIso, type Lookup, type Raw360Spec } from '../src/lib/import360/decode'
 import { convert360, gpcSpelling, looseKey, type Candidate, type Matcher } from '../src/lib/import360/convert'
 import { normName, type DimKey } from '../src/lib/report-builder/data/types'
+import { decide, landingOf } from '../src/lib/import360/creatives'
 
 const NAMES: Record<string, string> = {
   '139:7298430': 'Tremfya',
@@ -171,4 +172,56 @@ test('360 Total US (market -1) is the GPC National market, not every market', as
   const c = await convert360(describe(spec, totalUs), matcher)
   assert.deepEqual((c.spec.filters as Record<string, string[]>).market, ['market:-1'])
   assert.ok(!c.notes.some((n) => /market/i.test(n.what)), `no note: ${c.notes.map((n) => n.what).join('; ')}`)
+})
+
+// ---------------------------------------------------------------- names found by their creatives
+
+test('an advertiser not found by name is listed for the creative lookup; a choice settles it, or drops it', async () => {
+  const spec: Raw360Spec = {
+    rpttype: 2307,
+    title: null,
+    cols: [{ type: 1, entmaj: 118, entmin: 2, order: 1, sort: 0, total: 0, calc: 0, demo: 0, name: 'Advertiser' }, { type: 3, entmaj: 800, entmin: 36, order: 2, sort: 0, total: 0, calc: 0, demo: 0, name: '$' }],
+    opts: [],
+    sel: [{ mpt: 3, e: 118, ids: [2580834, 4780822] }],
+  }
+  const names: Lookup = { ...look, name: (e, id) => (e === 118 ? ({ 2580834: 'McDonalds Restaurant', 4780822: 'Michelob Ultra' } as Record<number, string>)[id] : look.name(e, id)) }
+  const d = describe(spec, names)
+  const before = await convert360(d, matcher)
+  assert.deepEqual(before.unresolved.map((u) => u.name), ['McDonalds Restaurant', 'Michelob Ultra'])
+
+  const after = await convert360(d, matcher, {
+    choices: {
+      '118:2580834': { ids: ['advertiser:13663'], names: ["McDonald's"], how: 'creatives', why: "99% of its creatives' spend is on McDonald's in GPC" },
+      '118:4780822': null,
+    },
+  })
+  assert.deepEqual(after.unresolved, [])
+  assert.deepEqual((after.spec.filters as Record<string, string[]>).advertiser, ['advertiser:13663'])
+  assert.ok(after.notes.some((n) => /found by its creatives/.test(n.what) && /McDonalds Restaurant → McDonald's/.test(n.did)))
+  assert.ok(after.notes.some((n) => n.impact === 'dropped' && /Michelob Ultra/.test(n.what) && /You chose to leave it out/.test(n.did)))
+  assert.ok(!after.notes.some((n) => /not found in GPC \(/.test(n.what)), 'nothing left unexplained')
+  assert.deepEqual(after.lists.find((l) => l.from.includes('Michelob Ultra')), { label: after.lists.find((l) => l.from.includes('Michelob Ultra'))!.label, from: ['McDonalds Restaurant', 'Michelob Ultra'], to: [{ id: 'advertiser:13663', name: "McDonald's" }] })
+})
+
+test('the creative lookup decides: one GPC entity with most of the spend, unless it is far bigger than the 360 advertiser', () => {
+  const flows = (rows: Array<[string, string, string, string, number]>) => rows.map(([gpcId, gpcName, gpcProductId, gpcProductName, spend]) => ({ gpcId, gpcName, gpcParentId: gpcId, gpcParentName: gpcName, gpcProductId, gpcProductName, spend }))
+  // McDonalds Restaurant: 98.7% on McDonald's.
+  const mcd = landingOf(flows([['13663', "McDonald's", '1', 'Big Mac', 987], ['11310', 'Red Bull', '2', 'Red Bull', 13]]))
+  const sure = decide(118, mcd, () => 1500)
+  assert.equal(sure.status, 'matched')
+  assert.deepEqual(sure.pick!.ids, ['advertiser:13663'])
+  assert.match(sure.pick!.why, /99% of its creatives' spend is on McDonald's/)
+
+  // A brand-named advertiser landing on its whole brewer: the products instead.
+  const ultra = landingOf(flows([['500', 'Anheuser-Busch', '7', 'Michelob Ultra', 900], ['500', 'Anheuser-Busch', '8', 'Michelob Ultra Zero', 100]]))
+  const narrowed = decide(118, ultra, () => 1_000_000)
+  assert.equal(narrowed.status, 'matched')
+  assert.deepEqual(narrowed.pick!.ids, ['product:7'])
+
+  // Spread over several: the person picks, from suggestions.
+  const spread = landingOf(flows([['1', 'A', '11', 'a', 40], ['2', 'B', '12', 'b', 35], ['3', 'C', '13', 'c', 25]]))
+  const ask = decide(118, spread)
+  assert.equal(ask.status, 'uncertain')
+  assert.deepEqual(ask.suggestions.slice(0, 3).map((s) => s.name), ['A', 'B', 'C'])
+  assert.equal(decide(118, landingOf([])).status, 'uncertain', 'no creatives: uncertain')
 })

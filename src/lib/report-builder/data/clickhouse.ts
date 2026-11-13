@@ -81,6 +81,7 @@ const SQL: Record<DimKey, { id: string; name: string; context: string }> = {
   day: { id: 'toString(start_date)', name: "''", context: "''" },
   week: { id: 'toString(toStartOfWeek(start_date, 0))', name: "''", context: "''" },
   broadcast_week: { id: 'toString(toMonday(start_date))', name: "''", context: "''" },
+  broadcast_month: { id: "formatDateTime(toMonday(start_date) + 6, '%Y-%m')", name: "''", context: "''" },
 }
 
 const MEASURE_SQL: Record<MeasureKey, string> = { spend: 'cost_share_v', occurrences: 'occurrences', impressions: 'impressions_share_v' }

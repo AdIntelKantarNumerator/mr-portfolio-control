@@ -128,7 +128,7 @@ const dayToIdx = (n: number) => {
 }
 const weekday = (n: number) => new Date(n * DAY_MS).getUTCDay()
 /** The longest period each day or week breakdown may cover, in days. */
-const DAILY_LIMIT: Partial<Record<Dim, number>> = { day: 92, week: 371, broadcast_week: 371, daypart: 371, league: 371 }
+const DAILY_LIMIT: Partial<Record<Dim, number>> = { day: 92, week: 371, broadcast_week: 371, broadcast_month: 1100, daypart: 371, league: 371 }
 
 function listText(items: string[], max = 4) {
   return items.length <= max ? items.join(', ') : `${items.slice(0, max).join(', ')} and ${items.length - max} more`
@@ -287,6 +287,10 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       return m ? `Q${m[2]} ${m[1]}` : id
     }
     if (dim === 'year') return id
+    if (dim === 'broadcast_month') {
+      const t = parseMonth(id)
+      return t == null ? id : `Bcst ${monthLabel(t)}`
+    }
     if (dim === 'day' || dim === 'week' || dim === 'broadcast_week') {
       const n = dParse(id)
       return n === null ? id : dim === 'day' ? dShort(n) : `${dim === 'week' ? 'Wk' : 'Bcst wk'} ${dShort(n)}`
@@ -414,7 +418,21 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
 
   const throughOf = (s: NSpec, a: Availability) => (s.options.final_only ? a.through : a.prelim)
   const throughDayOf = (s: NSpec, a: Availability) => (s.options.final_only ? monthLastDay(a.through) : a.prelimDay)
-  const periodOf = (s: NSpec, a: Availability) => resolveTime(s.time, throughOf(s, a), a.firstComplete, throughDayOf(s, a))
+  const periodOf = (s: NSpec, a: Availability) => broadcastMonths(s, resolveTime(s.time, throughOf(s, a), a.firstComplete, throughDayOf(s, a)), throughDayOf(s, a))
+
+  /**
+   * By broadcast month, a period in months covers whole broadcast months: from
+   * the Monday of the week holding the first month's 1st to the last Sunday of
+   * the last month (or the last Sunday the data reaches).
+   */
+  function broadcastMonths(s: NSpec, p: Period | { error: string }, throughDay: number): Period | { error: string } {
+    if ('error' in p || !dimsOf(s).includes('broadcast_month' as Dim) || dParse(s.time?.start) !== null || s.time?.unit === 'week' || s.time?.unit === 'day') return p
+    const d0 = p.d0 - ((weekday(p.d0) + 6) % 7)
+    let d1 = Math.min(p.d1, throughDay)
+    while (weekday(d1) !== 0) d1--
+    if (d1 <= d0) return p
+    return { ...p, d0, d1, notes: [...p.notes, `Broadcast months: ${dLabel(d0)} to ${dLabel(d1)}, Monday to Sunday weeks.`] }
+  }
 
   function filterLabels(filters: Record<string, string[]>, groups: Group[]) {
     const out: string[] = []
@@ -925,6 +943,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       if (!isRolling('month', 1)) add('Latest month', { set: { time: { mode: 'rolling', unit: 'month', count: 1 } } })
       if (!isRolling('week', 4)) add('Last 4 weeks', { set: { time: WEEKS } })
       if (spec.columns === 'month') add('By broadcast week', { set: { columns: 'broadcast_week', time: QUARTER_OF_WEEKS } })
+      if (spec.columns === 'month') add('By broadcast month', { set: { columns: 'broadcast_month' } })
       if (!spec.columns && !spec.zero_share && !spec.calcs.includes('share')) add('Add share of total', { add: { calcs: ['share'] } })
       if (spec.columns && spec.zero_share?.mode !== 'wallet' && !spec.calcs.includes('share')) add('Add % down', { add: { calcs: ['share'] } })
       if (spec.columns && spec.zero_share?.mode !== 'wallet' && !spec.calcs.includes('share_across')) add('Add % across', { add: { calcs: ['share_across'] } })
@@ -1135,7 +1154,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         final_through: monthLabel(a.through),
         current_month_loading: monthLabel(a.prelim),
       },
-      dimensions: (Object.keys(DIMS) as Dim[]).map((key) => ({ key, label: DIMS[key].label, group: DIMS[key].group, group_label: GROUP_LABEL[DIMS[key].group], can_filter: !DIMS[key].time, can_be_columns: ['month', 'quarter', 'year', 'day', 'week', 'broadcast_week', 'media_type', 'media_owner', 'property', 'master_property', 'market', 'industry', 'category', 'program_genre', 'league', 'daypart', 'language', 'direct_indirect', 'length'].includes(key) })),
+      dimensions: (Object.keys(DIMS) as Dim[]).map((key) => ({ key, label: DIMS[key].label, group: DIMS[key].group, group_label: GROUP_LABEL[DIMS[key].group], can_filter: !DIMS[key].time, can_be_columns: ['month', 'broadcast_month', 'quarter', 'year', 'day', 'week', 'broadcast_week', 'media_type', 'media_owner', 'property', 'master_property', 'market', 'industry', 'category', 'program_genre', 'league', 'daypart', 'language', 'direct_indirect', 'length'].includes(key) })),
       measures: (Object.keys(MEASURES) as MeasureKey[]).map((key) => ({ key, label: MEASURES[key].label })),
       calcs: Object.entries(CALCS).map(([key, c]) => ({ key, label: c.label, note: c.note })),
       time: [
@@ -1148,7 +1167,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       rules: [
         'Filters inside one group (who, what, where) are combined with OR; the groups are combined with AND.',
         'Change vs prior year cannot be combined with a column breakdown. Share of total can: with columns it is % down (of each column), and share_across adds % across (of each row); both show inside each cell.',
-        'Day breakdowns cover up to 3 months; week and broadcast week up to a year. "week" starts on Sunday; "broadcast_week" on Monday.',
+        'Day breakdowns cover up to 3 months; week and broadcast week up to a year. "week" starts on Sunday; "broadcast_week" on Monday. "broadcast_month" is the Monday-to-Sunday weeks ending in that month; a period in months then covers whole broadcast months.',
         'Daypart and league are recorded for TV and live streaming, and only day by day: a report with either reads the daily data, for up to a year. Program and program genre cover TV and live sports; direct/indirect covers digital.',
         'Spot length comes from the creative data and cannot be combined with market, master property, program, program genre, direct/indirect, daypart or league.',
         'Details (program, program genre, league, daypart, language, direct/indirect, spot length) each narrow the report on their own.',

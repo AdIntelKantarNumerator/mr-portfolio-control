@@ -12,7 +12,9 @@ import { db } from '@/db/client'
 import { x360Names, x360Reports, x360Users } from '@/db/schema'
 import type { ReportEngine } from '@/lib/report-builder/engines'
 import type { DimKey } from '@/lib/report-builder/data/types'
-import { convert360, type Converted, type Matcher, type Note } from './convert'
+import { dbxFlows } from '@/lib/taxonomy-dbx'
+import { convert360, coreName, IMPORT_PERIOD, type Choices, type Converted, type Matcher, type Note } from './convert'
+import { decide, FOLLOWS, landingOf, type Resolution, type Suggestion } from './creatives'
 import { describe, type Described, type Lookup, type Raw360Spec } from './decode'
 
 export interface Client360 {
@@ -118,12 +120,12 @@ async function load(key: string) {
 }
 
 /** What importing this report would give, and what it would change. Nothing is saved. */
-export async function preview360(engine: ReportEngine, key: string, nearest = false): Promise<Preview> {
+export async function preview360(engine: ReportEngine, key: string, nearest = false, choices?: Choices): Promise<Preview> {
   const { r, u } = await load(key)
   const raw = r.spec as Raw360Spec
   const look = await lookupFor(raw)
   const described = describe(raw, look)
-  const converted = await convert360(described, matcherFor(engine), { nearest })
+  const converted = await convert360(described, matcherFor(engine), { nearest, choices })
   return {
     key,
     report: { name: r.name, client: u?.usrsetN ?? r.mnemonic, user: u?.usrN ?? `User ${r.usrId}`, type: described.type.name, lastUsed: r.lastUsed ? r.lastUsed.toISOString().slice(0, 10) : null },
@@ -137,8 +139,8 @@ export async function preview360(engine: ReportEngine, key: string, nearest = fa
  * run, and saying so), and save it among the person's saved reports, with the
  * notes kept on it. Returns the saved report.
  */
-export async function import360(engine: ReportEngine, key: string, nearest = false): Promise<{ id: string; name: string; notes: Note[] }> {
-  const p = await preview360(engine, key, nearest)
+export async function import360(engine: ReportEngine, key: string, nearest = false, choices?: Choices): Promise<{ id: string; name: string; notes: Note[] }> {
+  const p = await preview360(engine, key, nearest, choices)
   if (p.converted.verdict === 'refused' && !nearest) throw new Error(p.converted.refusal ?? 'This report cannot be imported.')
   const notes = [...p.converted.notes]
   let spec: Record<string, unknown> = p.converted.spec
@@ -167,3 +169,51 @@ export async function snapshotInfo(): Promise<{ reports: number; loaded: string 
   return { reports: Number(r?.n ?? 0), loaded: r?.at ? new Date(r.at).toISOString().slice(0, 10) : null }
 }
 
+
+/** An entity's GPC spend over the import period, for telling a brand from its whole parent company. */
+async function spendOf(engine: ReportEngine, id: string): Promise<number | undefined> {
+  try {
+    const dim = id.slice(0, id.indexOf(':'))
+    const v = await engine.validate({ template: 'summary', rows: [dim], measures: ['spend'], filters: { [dim]: [id] }, time: IMPORT_PERIOD })
+    return v.ok ? (await engine.run(v.spec)).total : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * One 360 advertiser, parent or brand not found in GPC by name: follow its
+ * creatives into GPC (Databricks Gold, lib/import360/creatives.ts) and say
+ * whether that settles it. When it does not, GPC names like it are suggested
+ * too. Takes tens of seconds; the wizard calls it one name at a time and
+ * shows its progress.
+ */
+export async function resolve360(engine: ReportEngine, e: number, id: number, name: string): Promise<Resolution & { error?: string }> {
+  const f = FOLLOWS[e]
+  if (!f) throw new Error('Only advertisers, parents and brands can be looked up by their creatives.')
+  let r: Resolution & { error?: string }
+  try {
+    const fromId = `${f.prefix}${id}`
+    const landing = landingOf((await dbxFlows('VX1', [fromId], new Map())).get(fromId) ?? [])
+    const best = landing.advertiser[0]
+    const size = f.level === 'advertiser' && best && best.share >= 0.8 ? await spendOf(engine, best.id) : undefined
+    r = decide(e, landing, (x) => (best && x === best.id ? size : undefined))
+  } catch (err) {
+    r = { status: 'uncertain', suggestions: [], followed: 0, error: `The creative lookup failed: ${(err as Error).message}` }
+  }
+  if (r.status === 'uncertain' && engine.search) {
+    // GPC names like it, at its own level and the next nearest.
+    const kinds: DimKey[] = f.level === 'product' ? ['product', 'advertiser'] : f.level === 'top_parent' ? ['top_parent', 'advertiser'] : ['advertiser', 'product']
+    const seen = new Set(r.suggestions.map((x) => x.id))
+    const byName: Suggestion[] = []
+    for (const kind of kinds) {
+      for (const h of await engine.search(coreName(name), { types: [kind], limit: 6 })) {
+        if (seen.has(h.id)) continue
+        seen.add(h.id)
+        byName.push({ id: h.id, name: h.label, context: h.context, spend: (h as { spend_last_month?: number }).spend_last_month ?? 0, share: 0, via: 'name' })
+      }
+    }
+    r = { ...r, suggestions: [...r.suggestions, ...byName.slice(0, 8)] }
+  }
+  return r
+}

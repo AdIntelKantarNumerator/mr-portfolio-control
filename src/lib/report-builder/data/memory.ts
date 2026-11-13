@@ -7,7 +7,7 @@
  */
 import { DIMENSIONS, dimOf, normName, type AggregateQuery, type AggregateResult, type Availability, type Cond, type DataAdapter, type DimKey, type MeasureKey, type NameHit, type SearchRequest } from './types'
 
-type Named = Exclude<DimKey, 'month' | 'quarter' | 'year' | 'day' | 'week' | 'broadcast_week'>
+type Named = Exclude<DimKey, 'month' | 'quarter' | 'year' | 'day' | 'week' | 'broadcast_week' | 'broadcast_month'>
 
 export interface Fact {
   /** YYYY-MM-DD */
@@ -30,6 +30,7 @@ function timeValue(d: DimKey, date: string): string {
   if (d === 'day') return date
   const n = dayNum(date)
   const wd = new Date(n * DAY_MS).getUTCDay()
+  if (d === 'broadcast_month') return isoDay(n - ((wd + 6) % 7) + 6).slice(0, 7)
   return d === 'week' ? isoDay(n - wd) : isoDay(n - ((wd + 6) % 7))
 }
 

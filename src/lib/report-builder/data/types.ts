@@ -43,6 +43,7 @@ export type DimKey =
   | 'day'
   | 'week'
   | 'broadcast_week'
+  | 'broadcast_month'
 
 /**
  * Filters inside who, what or where are OR-ed (Toyota or Honda; NBC or all of
@@ -89,6 +90,8 @@ export const DIMENSIONS: Record<DimKey, DimInfo> = {
   day: { label: 'Day', plural: 'days', group: 'when', time: true, daily: true },
   week: { label: 'Week', plural: 'weeks', group: 'when', time: true, daily: true },
   broadcast_week: { label: 'Broadcast week', plural: 'broadcast weeks', group: 'when', time: true, daily: true },
+  // A broadcast month is the Monday-to-Sunday weeks whose Sunday falls in it: it ends on the month's last Sunday.
+  broadcast_month: { label: 'Broadcast month', plural: 'broadcast months', group: 'when', time: true, daily: true },
 }
 
 export type MeasureKey = 'spend' | 'occurrences' | 'impressions'

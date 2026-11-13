@@ -2523,6 +2523,19 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rb-imp-approximate { background: color-mix(in srgb, #d08700 18%, transparent); color: #a46a00; }
 .rb-imp-changed { background: color-mix(in srgb, var(--c1) 14%, transparent); color: var(--c1); }
 .rb-imp-refused { display: flex; flex-direction: column; gap: 10px; }
+.rb-imp-ok { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+.rb-imp-progress { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 20%, transparent); overflow: hidden; margin: 4px 0 12px; }
+.rb-imp-progress span { display: block; height: 100%; background: var(--c1); transition: width 1s linear; }
+.rb-imp-lookup { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; }
+.rb-imp-lookup p { margin: 2px 0 0; }
+.rb-imp-pick { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 0 4px; }
+.rb-imp-pick label { display: flex; gap: 8px; align-items: baseline; cursor: pointer; }
+.rb-imp-count { font: inherit; background: none; border: 0; padding: 0 2px; margin-right: 8px; color: var(--c1); text-decoration: underline dotted; cursor: pointer; }
+.rb-imp-count.rb-on { font-weight: 700; text-decoration: underline; }
+.rb-imp-items { border: 1px solid var(--line, color-mix(in srgb, var(--muted) 30%, transparent)); border-radius: 8px; padding: 8px 12px; margin: 4px 0 12px; }
+.rb-imp-items-head { display: flex; justify-content: space-between; align-items: center; }
+.rb-imp-items ul { margin: 6px 0 0; padding-left: 18px; max-height: 220px; overflow: auto; columns: 2; column-gap: 24px; font-size: 13px; }
+@media (max-width: 700px) { .rb-imp-items ul { columns: 1; } }
 .rb-from360 { background: color-mix(in srgb, var(--c1) 14%, transparent); color: var(--c1); }
 .rb-imp-saved summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
 .rb-imp-saved .rb-imp-notes { margin-top: 6px; font-size: 12.5px; }

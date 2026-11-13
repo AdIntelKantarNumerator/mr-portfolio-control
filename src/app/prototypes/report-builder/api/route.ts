@@ -15,6 +15,7 @@ import { currentAccess } from '@/lib/auth/access'
 import { getAuthConfig } from '@/lib/auth/config'
 import { reportBuilderAction, reportBuilderCompEdit, reportBuilderCompSearch, reportBuilderExpand, reportBuilderImport360, reportBuilderPageTurn, type CompEdit, type Import360Step, type PageAction } from '@/lib/report-builder/agent'
 import { ReportModelError, type Turn } from '@/lib/report-builder/model'
+import type { Choices } from '@/lib/import360/convert'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -33,6 +34,24 @@ function readTurns(raw: unknown): Turn[] | null {
     .slice(-MAX_TURNS)
   while (turns.length && turns[0]!.role !== 'user') turns.shift()
   return turns.length && turns[turns.length - 1]!.role === 'user' ? turns : null
+}
+
+/** The import's settled names: "<entmaj>:<id>" to GPC ids (with names) or null to drop. Anything malformed is ignored. */
+function readChoices(raw: unknown): Choices | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const out: Choices = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>).slice(0, 200)) {
+    if (!/^\d+:-?\d+$/.test(k)) continue
+    if (v === null) {
+      out[k] = null
+      continue
+    }
+    const c = v as { ids?: unknown; names?: unknown; how?: unknown; why?: unknown }
+    const ids = Array.isArray(c.ids) ? c.ids.filter((x): x is string => typeof x === 'string' && /^(advertiser|top_parent|product):-?\d+$/.test(x)).slice(0, 20) : []
+    const names = Array.isArray(c.names) ? c.names.map((x) => String(x).slice(0, 200)).slice(0, ids.length) : []
+    out[k] = { ids, names, how: c.how === 'creatives' ? 'creatives' : 'picked', ...(typeof c.why === 'string' ? { why: c.why.slice(0, 300) } : {}) }
+  }
+  return out
 }
 
 function readAction(raw: unknown): PageAction | null {
@@ -92,7 +111,8 @@ export async function POST(req: Request) {
     else if (i.op === 'clients') step = { op: 'clients', q: typeof i.q === 'string' ? i.q.slice(0, 80) : '' }
     else if (i.op === 'users' && !Number.isNaN(n('usrsetId'))) step = { op: 'users', usrsetId: n('usrsetId') }
     else if (i.op === 'reports' && !Number.isNaN(n('usrId'))) step = { op: 'reports', usrId: n('usrId') }
-    else if ((i.op === 'preview' || i.op === 'import') && key) step = { op: i.op, key, nearest: i.nearest === true }
+    else if ((i.op === 'preview' || i.op === 'import') && key) step = { op: i.op, key, nearest: i.nearest === true, choices: readChoices(i.choices) }
+    else if (i.op === 'resolve' && !Number.isNaN(n('e')) && !Number.isNaN(n('id')) && typeof i.name === 'string') step = { op: 'resolve', e: n('e'), id: n('id'), name: i.name.slice(0, 200) }
     if (!step) return Response.json({ error: 'Unknown import step.' }, { status: 400 })
     try {
       return Response.json(await reportBuilderImport360(email, step))

@@ -74,7 +74,7 @@ export const looseKey = (s: string) => normName(s.toLowerCase().replace(/&/g, ' 
  * word: "Procter Gamble" is not inside "The Procter & Gamble Company". The
  * looseKey comparison then picks the real match among what it finds.
  */
-const coreName = (s: string) =>
+export const coreName = (s: string) =>
   s
     .replace(/[.,&:()'"/-]/g, ' ')
     .replace(new RegExp(CORPORATE.source, 'gi'), ' ')
@@ -89,12 +89,26 @@ function fitsContext(h: Candidate, context: string | null): boolean {
   return !a || !b || b.includes(a) || a.includes(b.slice(0, 6))
 }
 
+/**
+ * What the person (or the creative lookup) settled for one 360 name, keyed
+ * "<entmaj>:<id>": GPC ids to use, or null to leave it out.
+ */
+export type Choice = { ids: string[]; names: string[]; how: 'creatives' | 'picked'; why?: string } | null
+export type Choices = Record<string, Choice>
+
+/** 360 entity types whose unmatched names can be looked up by their creatives (lib/import360/creatives.ts). */
+export const LOOKUP_TYPES = [118, 102, 139]
+
 export interface Converted {
   /** ok: nothing to report; partial: imported with notes; refused: the type cannot be built (nearest offered). */
   verdict: 'ok' | 'partial' | 'refused'
   refusal: string | null
   spec: Record<string, unknown>
   notes: Note[]
+  /** Advertisers, parents and brands not found by name and not yet settled: for the creative lookup. */
+  unresolved: Array<{ e: number; label: string; id: number; name: string }>
+  /** Each selection, in 360 and in Report Builder: for the review's lists. */
+  lists: Array<{ label: string; from: string[]; to: Array<{ id: string; name: string }> }>
 }
 
 /** The period every import gets. */
@@ -146,8 +160,8 @@ export const ENTITY: Record<number, Map360> = {
   736: { dim: 'month' },
   737: { dim: 'month' },
   744: { dim: 'month' },
-  724: { dim: 'month', note: 'Broadcast months are shown as calendar months.' },
-  725: { dim: 'month', note: 'Broadcast months are shown as calendar months.' },
+  724: { dim: 'broadcast_month' },
+  725: { dim: 'broadcast_month' },
   728: { dim: 'broadcast_week' },
   729: { dim: 'broadcast_week' },
   741: { dim: 'week' },
@@ -236,14 +250,16 @@ const CALC = { vertical: 1, horizontal: 2, grand: 8 }
 const list = (xs: string[], max = 5) => (xs.length <= max ? xs.join(', ') : `${xs.slice(0, max).join(', ')} and ${xs.length - max} more`)
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
 
-export async function convert360(d: Described, matcher: Matcher, opts: { nearest?: boolean } = {}): Promise<Converted> {
+export async function convert360(d: Described, matcher: Matcher, opts: { nearest?: boolean; choices?: Choices } = {}): Promise<Converted> {
   const notes: Note[] = []
   const note = (impact: Impact, what: string, why: string, did: string) => notes.push({ impact, what, why, did })
 
   // ---- the report type
   const typeId = d.type.id ?? 2307
   const refusal = BUILDS[typeId] ? null : (REFUSED[typeId] ?? `Report Builder cannot build a ${d.type.name} report.`)
-  if (refusal && !opts.nearest) return { verdict: 'refused', refusal, spec: {}, notes: [] }
+  if (refusal && !opts.nearest) return { verdict: 'refused', refusal, spec: {}, notes: [], unresolved: [], lists: [] }
+  const unresolved: Converted['unresolved'] = []
+  const lists: Converted['lists'] = []
   if (refusal) note('changed', `${d.type.name} report`, refusal, 'Imported as a summary with the same selections and breakouts, the nearest report it can build.')
 
   // ---- the layout: pages and extra columns become rows; one column breakout
@@ -322,11 +338,17 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
   if (mediaSel && mediaSel.picked.length) {
     const want = mediaSel.picked.map((p) => MEDIA_ALIAS[normName(p.name)] ?? p.name)
     const found = await matcher.match('media_type', want)
+    const to = new Map<string, string>()
     mediaSel.picked.forEach((p, i) => {
       const hits = found.get(normName(want[i]!)) ?? []
-      if (hits.length) for (const h of hits) mediaPick.add(h.id)
+      if (hits.length)
+        for (const h of hits) {
+          mediaPick.add(h.id)
+          to.set(h.id, h.name)
+        }
       else mediaMiss.push(p.name)
     })
+    lists.push({ label: mediaSel.label, from: mediaSel.picked.map((p) => p.name), to: [...to].map(([id, name]) => ({ id, name })) })
     if (mediaMiss.length) note('dropped', `Media: ${list(mediaMiss)}`, 'GPC data has no equivalent media type.', 'Left out of the media selection.')
     if (mediaPick.size) filters.media_type = [...mediaPick]
     else note('dropped', 'Media selection', 'None of the selected media are in GPC data.', 'The report covers all media.')
@@ -346,7 +368,7 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
     if (s.excluded.length) excluded()
     if (!s.picked.length) continue
     const m = ENTITY[s.e]
-    if (!m || 'drop' in m || m.dim === 'month' || ['quarter', 'year', 'week', 'broadcast_week', 'day'].includes(m.dim)) {
+    if (!m || 'drop' in m || m.dim === 'month' || ['quarter', 'year', 'week', 'broadcast_week', 'broadcast_month', 'day'].includes(m.dim)) {
       note('dropped', `${s.label} selection (${plural(s.picked.length, 'value')})`, m && 'drop' in m ? m.drop : 'Report Builder cannot select on this.', 'Left out; the report is not limited by it.')
       continue
     }
@@ -362,14 +384,34 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
     // Each 360 name, and how it would be spelled in GPC (see gpcSpelling).
     const left = new Map(s.picked.map((p) => [p.name, gpcSpelling(m.dim, p.name)]))
     const picked = new Map<DimKey, Set<string>>()
+    const to = new Map<string, string>()
     let split = 0
     const loose: string[] = []
+    const add = (id: string, name: string) => {
+      const kind = id.slice(0, id.indexOf(':')) as DimKey
+      const set = picked.get(kind) ?? new Set<string>()
+      set.add(id)
+      picked.set(kind, set)
+      to.set(id, name)
+    }
     const take = (kind: DimKey, name: string, hits: Candidate[]) => {
       if (hits.length > 1) split++
-      const set = picked.get(kind) ?? new Set<string>()
-      for (const h of hits) set.add(h.id)
-      picked.set(kind, set)
+      for (const h of hits) add(h.id, h.name)
       left.delete(name)
+    }
+    // Names already settled - by their creatives, or by the person - before any matching.
+    const settled: { creatives: string[]; picked: string[]; dropped: string[] } = { creatives: [], picked: [], dropped: [] }
+    for (const p of s.picked) {
+      const key = `${s.e}:${p.id}`
+      if (!opts.choices || !(key in opts.choices)) continue
+      const c = opts.choices[key]
+      left.delete(p.name)
+      if (!c || !c.ids.length) {
+        settled.dropped.push(p.name)
+        continue
+      }
+      c.ids.forEach((id, i) => add(id, c.names[i] ?? id))
+      settled[c.how === 'creatives' ? 'creatives' : 'picked'].push(`${p.name} → ${c.names.join(', ')}${c.why ? ` (${c.why})` : ''}`)
     }
     for (const kind of kinds) {
       if (!left.size) break
@@ -393,7 +435,13 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
       }
     }
     for (const [kind, ids] of picked) filters[kind] = [...new Set([...(filters[kind] ?? []), ...ids])]
-    const matched = s.picked.length - left.size
+    lists.push({ label: s.label, from: s.picked.map((p) => p.name), to: [...to].map(([id, name]) => ({ id, name })) })
+    if (settled.creatives.length) note('approximate', `${s.label}: ${plural(settled.creatives.length, 'name')} found by its creatives`, `No GPC ${s.label.toLowerCase()} has that name, so a sample of its creatives was followed into GPC.`, `Matched ${list(settled.creatives, 3)}.`)
+    if (settled.picked.length) note('approximate', `${s.label}: ${plural(settled.picked.length, 'name')} matched by you`, 'Not found in GPC by name or with certainty by its creatives.', `You chose ${list(settled.picked, 3)}.`)
+    if (settled.dropped.length) note('dropped', `${s.label}: ${list(settled.dropped)}`, 'Not found in GPC by name or by its creatives.', 'You chose to leave it out.')
+    // Unmatched advertisers, parents and brands can still be found by their creatives.
+    if (LOOKUP_TYPES.includes(s.e)) for (const p of s.picked) if (left.has(p.name)) unresolved.push({ e: s.e, label: s.label, id: p.id, name: p.name })
+    const matched = s.picked.length - left.size - settled.dropped.length
     if (loose.length) note('approximate', `${s.label}: ${plural(loose.length, 'name')} matched with a different spelling`, 'GPC spells some company names differently.', `Matched ${list(loose, 3)}.`)
     if (m.note && !typeNotes.has(m.note)) {
       typeNotes.add(m.note)
@@ -427,5 +475,5 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
   }
   // Every import changes the period; anything beyond that makes it partial.
   const verdict = refusal ? 'refused' : notes.every((n) => n.what.startsWith('Period:')) ? 'ok' : 'partial'
-  return { verdict, refusal, spec, notes }
+  return { verdict, refusal, spec, notes, unresolved, lists }
 }

@@ -19,7 +19,8 @@ import { reportBuilderChats, reportBuilderUsers } from '@/db/schema'
 import type { EngineState, Spec } from './engine'
 import { dataSource, engineFor as pickEngine, type ReportEngine } from './engines'
 import { entitlementsFor } from './data/entitlements'
-import { import360, listClients, listReports, listUsers, preview360, snapshotInfo } from '@/lib/import360/service'
+import { import360, listClients, listReports, listUsers, preview360, resolve360, snapshotInfo } from '@/lib/import360/service'
+import type { Choices } from '@/lib/import360/convert'
 import { chooseModel, runLoop, ReportModelError, type Post, type Turn } from './model'
 import { describeReport, savedList } from './page-view'
 import { REPORT_BUILDER_PAGE_SKILL, REPORT_BUILDER_SKILL } from './skill'
@@ -306,8 +307,9 @@ export type Import360Step =
   | { op: 'clients'; q: string }
   | { op: 'users'; usrsetId: number }
   | { op: 'reports'; usrId: number }
-  | { op: 'preview'; key: string; nearest: boolean }
-  | { op: 'import'; key: string; nearest: boolean }
+  | { op: 'preview'; key: string; nearest: boolean; choices?: Choices }
+  | { op: 'import'; key: string; nearest: boolean; choices?: Choices }
+  | { op: 'resolve'; e: number; id: number; name: string }
 
 export async function reportBuilderImport360(email: string, step: Import360Step): Promise<unknown> {
   const who = email.trim().toLowerCase()
@@ -322,13 +324,17 @@ export async function reportBuilderImport360(email: string, step: Import360Step)
       return listReports(step.usrId)
     case 'preview': {
       const { engine } = await engineFor(await loadUser(who), who)
-      return preview360(engine, step.key, step.nearest)
+      return preview360(engine, step.key, step.nearest, step.choices)
     }
     case 'import': {
       const { engine, state } = await engineFor(await loadUser(who), who)
-      const out = await import360(engine, step.key, step.nearest)
+      const out = await import360(engine, step.key, step.nearest, step.choices)
       await saveUser(who, state())
       return { ...out, saved: await savedList(engine) }
+    }
+    case 'resolve': {
+      const { engine } = await engineFor(await loadUser(who), who)
+      return resolve360(engine, step.e, step.id, step.name)
     }
   }
 }
