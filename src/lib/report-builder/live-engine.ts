@@ -227,8 +227,8 @@ function filterConds(s: NSpec): Record<'who' | 'what' | 'where' | 'detail', Cond
   for (const [dim, ids] of Object.entries(s.filters)) {
     const d = DIMS[dim as Dim]
     if (!d || d.time || !ids.length) continue
-    // Markets narrow wherever the media is: "these 3 markets" AND "these media types", never OR (Scott, 12 November 2026).
-    if (d.group === 'detail' || dim === 'market') details.push({ in: dim as Dim, values: ids })
+    // Markets and countries narrow wherever the media is: "these 3 markets" AND "these media types", never OR (Scott, 12 November 2026).
+    if (d.group === 'detail' || dim === 'market' || dim === 'country') details.push({ in: dim as Dim, values: ids })
     else groups[d.group as 'who' | 'what' | 'where'].push({ in: dim as Dim, values: ids })
   }
   return { who: any(...groups.who), what: any(...groups.what), where: any(...groups.where), detail: all(...details) }
@@ -1155,7 +1155,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
         final_through: monthLabel(a.through),
         current_month_loading: monthLabel(a.prelim),
       },
-      dimensions: (Object.keys(DIMS) as Dim[]).map((key) => ({ key, label: DIMS[key].label, group: DIMS[key].group, group_label: GROUP_LABEL[DIMS[key].group], can_filter: !DIMS[key].time, can_be_columns: ['month', 'broadcast_month', 'quarter', 'year', 'day', 'week', 'broadcast_week', 'media_type', 'media_owner', 'property', 'master_property', 'market', 'industry', 'category', 'program_genre', 'league', 'daypart', 'language', 'direct_indirect', 'length'].includes(key) })),
+      dimensions: (Object.keys(DIMS) as Dim[]).map((key) => ({ key, label: DIMS[key].label, group: DIMS[key].group, group_label: GROUP_LABEL[DIMS[key].group], can_filter: !DIMS[key].time, can_be_columns: ['month', 'broadcast_month', 'quarter', 'year', 'day', 'week', 'broadcast_week', 'media_type', 'media_owner', 'property', 'master_property', 'market', 'country', 'industry', 'category', 'program_genre', 'league', 'daypart', 'language', 'direct_indirect', 'length'].includes(key) })),
       measures: (Object.keys(MEASURES) as MeasureKey[]).map((key) => ({ key, label: MEASURES[key].label })),
       calcs: Object.entries(CALCS).map(([key, c]) => ({ key, label: c.label, note: c.note })),
       time: [

@@ -67,6 +67,7 @@ const SQL: Record<DimKey, { id: string; name: string; context: string }> = {
   media_owner: { id: 'coalesce(media_root_entity_id, 0)', name: 'media_root_entity_name', context: "'Media owner'" },
   property: { id: 'coalesce(media_entity_id, 0)', name: 'media_entity_name', context: "concat(media_name, ' · ', media_root_entity_name)" },
   market: { id: 'coalesce(property_market_id, 0)', name: 'initcapUTF8(property_market_name)', context: "'Market'" },
+  country: { id: 'coalesce(country_id, 0)', name: 'country_name', context: 'country_iso_2_code' },
   master_property: { id: 'coalesce(master_property_id, 0)', name: 'master_property_name', context: 'media_name' },
   program: { id: 'coalesce(show_id, 0)', name: 'show_display_name', context: 'media_entity_name' },
   program_genre: { id: 'coalesce(show_type_id, 0)', name: 'initcapUTF8(show_type_name)', context: "'Program genre'" },
@@ -164,7 +165,7 @@ const DAILY_COLS = [
   'year_month', 'start_date', 'industry_id', 'industry_name', 'category_id', 'category_name', 'subcategory_id', 'subcategory_name',
   'entity_id', 'entity_name', 'entity_parent_id', 'entity_parent_name', 'product_id', 'product_name',
   'media_id', 'media_name', 'media_root_entity_id', 'media_root_entity_name', 'media_entity_id', 'media_entity_name',
-  'property_market_id', 'property_market_name', 'cost_share_v', 'occurrences', 'impressions_share_v', 'is_promo', 'is_psa',
+  'property_market_id', 'property_market_name', 'country_id', 'country_name', 'country_iso_2_code', 'cost_share_v', 'occurrences', 'impressions_share_v', 'is_promo', 'is_psa',
   'master_property_id', 'master_property_name', 'show_id', 'show_display_name', 'show_type_id', 'show_type_name',
   'language_id', 'language_name', 'direct_indirect_id', 'direct_indirect_name',
   // Only in the daily tables (TV and live streaming): typed from the first table that has them.

@@ -29,6 +29,7 @@ export type DimKey =
   | 'media_owner'
   | 'property'
   | 'market'
+  | 'country'
   | 'master_property'
   | 'program'
   | 'program_genre'
@@ -76,6 +77,8 @@ export const DIMENSIONS: Record<DimKey, DimInfo> = {
   media_owner: { label: 'Media owner', plural: 'media owners', group: 'where' },
   property: { label: 'Property', plural: 'properties', group: 'where' },
   market: { label: 'Market', plural: 'markets', group: 'where' },
+  // Country (13 November 2026): GPC carries it on every table; outside the US it is AVOD so far.
+  country: { label: 'Country', plural: 'countries', group: 'where' },
   master_property: { label: 'Master property', plural: 'master properties', group: 'where' },
   program: { label: 'Program', plural: 'programs', group: 'detail' },
   program_genre: { label: 'Program genre', plural: 'program genres', group: 'detail' },

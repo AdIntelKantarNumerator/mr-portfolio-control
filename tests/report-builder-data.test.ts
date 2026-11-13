@@ -18,9 +18,9 @@ import { createLiveEngine } from '../src/lib/report-builder/live-engine'
 
 const AVAIL: Availability = { firstComplete: '2026-08', through: '2026-10', prelim: '2026-11', prelimDay: '2026-11-05' }
 const N = (dim: string, id: number, name: string, context = '') => ({ id: `${dim}:${id}`, name, context })
-const NBC = { property: N('property', 1, 'NBC', 'Network TV · Comcast'), media_type: N('media_type', 101, 'Network TV'), media_owner: N('media_owner', 11, 'Comcast'), market: N('market', -1, 'National') }
-const CBS = { property: N('property', 2, 'CBS', 'Network TV · Paramount'), media_type: N('media_type', 101, 'Network TV'), media_owner: N('media_owner', 12, 'Paramount'), market: N('market', -1, 'National') }
-const ESPN = { property: N('property', 3, 'ESPN', 'Cable TV · Disney'), media_type: N('media_type', 102, 'Cable TV'), media_owner: N('media_owner', 13, 'Disney'), market: N('market', -1, 'National') }
+const NBC = { property: N('property', 1, 'NBC', 'Network TV · Comcast'), media_type: N('media_type', 101, 'Network TV'), media_owner: N('media_owner', 11, 'Comcast'), market: N('market', -1, 'National'), country: N('country', 1, 'United States', 'US') }
+const CBS = { property: N('property', 2, 'CBS', 'Network TV · Paramount'), media_type: N('media_type', 101, 'Network TV'), media_owner: N('media_owner', 12, 'Paramount'), market: N('market', -1, 'National'), country: N('country', 1, 'United States', 'US') }
+const ESPN = { property: N('property', 3, 'ESPN', 'Cable TV · Disney'), media_type: N('media_type', 102, 'Cable TV'), media_owner: N('media_owner', 13, 'Disney'), market: N('market', -1, 'National'), country: N('country', 1, 'United States', 'US') }
 const CARS = { industry: N('industry', 1, 'Automotive'), category: N('category', 10, 'Cars & Lt Trucks', 'Automotive'), subcategory: N('subcategory', 100, 'SUVs', 'Automotive > Cars & Lt Trucks') }
 const who = (adv: number, name: string) => ({ advertiser: N('advertiser', adv, name, `${name} Inc.`), top_parent: N('top_parent', adv, `${name} Inc.`), product: N('product', adv * 10, `${name} SUV`, name) })
 const TOYOTA = who(1, 'Toyota')
@@ -141,6 +141,15 @@ test('the report engine runs on any adapter: a monthly trend adds up, and promos
   assert.deepEqual(r.rows[0], ['Toyota', 150 * 30, 150 * 31, 150 * 61])
   assert.equal(r.total, (150 + 80 + 60) * 61, 'the Honda promo is not counted')
   assert.equal((await engine.search('toy', { types: ['advertiser'] }))[0]!.label, 'Toyota')
+})
+
+test('country: a breakout and a filter that narrows like market', async () => {
+  const engine = engineOn()
+  const r = await engine.run({ template: 'summary', rows: ['country'], measures: ['spend'], filters: { country: ['country:1'], media_type: ['media_type:102'] }, time: OCT })
+  assert.deepEqual(r.rows, [['United States', 50 * 31]])
+  const none = await engine.run({ template: 'summary', rows: ['advertiser'], measures: ['spend'], filters: { country: ['country:190'] }, time: OCT })
+  assert.equal(none.rows.length, 0)
+  assert.equal(condSql({ in: 'country', values: ['country:190'] }), 'coalesce(country_id, 0) IN (190)')
 })
 
 test('a market narrows the media, never widens it: market AND media type', async () => {
