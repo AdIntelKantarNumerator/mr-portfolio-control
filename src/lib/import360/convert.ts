@@ -6,7 +6,8 @@
  * roughly what the 360 report shows - not the same creatives. So each 360
  * brand, advertiser, product, category, property or market is matched to GPC
  * by name, best effort: one 360 entity may become several GPC ones (Tremfya
- * as two GPC products), a brand may become a product, and anything without a
+ * as two GPC products; GPC's product is the brand, so a 360 brand is a GPC
+ * product with no caveat), and anything without a
  * match, or a capability Report Builder lacks (ratings, creative rows, growth
  * %), is left out. Every change becomes a Note - what it was, why, what was
  * done instead - shown before importing and kept with the saved report. A
@@ -111,7 +112,8 @@ export const ENTITY: Record<number, Map360> = {
   118: { dim: 'advertiser' },
   102: { dim: 'top_parent' },
   101: { dim: 'advertiser', note: 'GPC has no subsidiary level; advertisers are used.' },
-  139: { dim: 'product', note: 'GPC has no brand level; products are used, matched by name.' },
+  // GPC's product is the brand: a 360 brand is a GPC product, one for one.
+  139: { dim: 'product' },
   100: { dim: 'product' },
   105: { dim: 'industry' },
   107: { dim: 'industry', note: 'GPC has no industry group; industries are used.' },
@@ -352,7 +354,8 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
       note('changed', `Market selection (${plural(s.picked.length, 'market')})`, 'The 360 selection is the whole country.', 'The report covers every market.')
       continue
     }
-    // Brands and subsidiaries have no GPC level: try the nearest kinds in turn.
+    // Brands are GPC products, but a name not found there may be an advertiser;
+    // subsidiaries have no GPC level. Try the nearest kinds in turn.
     const kinds: DimKey[] = s.e === 139 ? ['product', 'advertiser'] : s.e === 101 ? ['advertiser', 'top_parent'] : s.e === 102 ? ['top_parent', 'advertiser'] : [m.dim]
     // Each 360 name, and how it would be spelled in GPC (see gpcSpelling).
     const left = new Map(s.picked.map((p) => [p.name, gpcSpelling(m.dim, p.name)]))

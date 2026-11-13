@@ -681,7 +681,10 @@ export async function runTool(ctx: ToolContext, name: string, input: Record<stri
       if (!found) throw new Error(`No saved report matches "${input.report}". list_saved_reports shows what there is.`)
       const r = await engine.runSaved(found.id, { limit: RUN_ROWS })
       const spec = (await engine.getSaved(found.id)).spec
-      const out = { report: r.saved_report.name, since_last_run: r.since_last_run.text, ...(await shown(ctx, r, spec, r.saved_report.name)) }
+      // The report run is the report in hand: the side panel shows it, and a change edits it.
+      chat.report = spec
+      chat.editing = { id: found.id, name: r.saved_report.name }
+      const out ={ report: r.saved_report.name, since_last_run: r.since_last_run.text, ...(await shown(ctx, r, spec, r.saved_report.name)) }
       ctx.view = { ...ctx.view!, savedName: r.saved_report.name, sinceLastRun: r.since_last_run.text }
       return out
     }

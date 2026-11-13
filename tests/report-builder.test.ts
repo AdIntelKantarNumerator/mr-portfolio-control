@@ -111,6 +111,14 @@ test('run gives a table and a download link; save, open and replace keep one sav
   assert.equal(replaced.replaced, true)
   assert.equal(((await call(ctx, 'list_saved_reports')).reports as unknown[]).length, 1)
   await assert.rejects(() => call(ctx, 'delete_saved_report', { report: 't-mobile', confirmed: false }), /confirm/)
+
+  // Running a saved report (as the 360 import does) makes it the report in hand: the side panel shows it.
+  await call(ctx, 'new_report')
+  assert.equal((await describeReport(ctx.engine, ctx.chat)).status, 'empty')
+  await call(ctx, 'run_saved_report', { report: 't-mobile' })
+  const panel = await describeReport(ctx.engine, ctx.chat)
+  assert.notEqual(panel.status, 'empty')
+  assert.equal(panel.editing, 'T-Mobile trend')
 })
 
 test('every tool the model is offered is one runTool knows', async () => {

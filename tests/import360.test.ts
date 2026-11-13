@@ -105,7 +105,7 @@ test('the Tremfya report becomes a GPC trend, and every change is explained', as
   assert.deepEqual(filters.product, ['product:1', 'product:2'], 'one 360 brand, two GPC products: both, and said')
   assert.deepEqual(filters.media_type, ['media_type:101', 'media_type:106'], '"Span Lang Net TV" is Spanish Language Network TV')
   const say = (re: RegExp) => c.notes.find((n) => re.test(n.what))
-  assert.equal(say(/^Brand$/)!.impact, 'approximate')
+  assert.equal(say(/^Brand$/), undefined, "GPC's product is the brand: no caveat")
   assert.equal(say(/Creative rows/)!.impact, 'dropped')
   assert.match(say(/^GRPs$/)!.why, /no ratings/)
   assert.equal(say(/^Media: Search/)!.impact, 'dropped')
