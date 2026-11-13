@@ -19,12 +19,22 @@
  * Figures stay in Report Builder's own units (whole dollars), not 360's
  * thousands, so the file agrees with the page.
  *
+ * Big reports (13 November 2026: a 40,000-row PDF failed). The web app has
+ * 1.75 GB, so the files are built lean: Excel through exceljs's streaming
+ * writer, row by row; PDF one compressed content stream per page, written as
+ * PDF operators rather than one object per drawn string (pdf-lib is kept for
+ * the document, fonts and logo). 40,000 rows then take a few seconds and a
+ * fraction of the memory. The standard PDF fonts cover Western characters
+ * only (WinAnsi), so every string is made safe before it is measured or
+ * drawn: a Japanese name became an error before; now its letters show as "?".
+ *
  * Pure but for the logo, read once from public/brand.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
 import ExcelJS from 'exceljs'
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib'
+import { PDFDocument, StandardFonts, type PDFFont, type PDFPage } from 'pdf-lib'
 import type { Column, Result } from '../engine'
 
 export type FileFormat = 'csv' | 'xlsx' | 'pdf'
@@ -113,80 +123,88 @@ const XL_FORMAT: Record<Column['type'], string | undefined> = {
   text: undefined,
 }
 
+/** Written row by row through exceljs's streaming writer, so a big report never sits in memory as a workbook. */
 export async function xlsxFile(result: Result, meta: FileMeta): Promise<Buffer> {
   const g = grid(result)
-  const wb = new ExcelJS.Workbook()
+  const out = new PassThrough()
+  const chunks: Buffer[] = []
+  out.on('data', (c: Buffer) => chunks.push(c))
+  const done = new Promise<void>((ok, fail) => {
+    out.on('end', ok)
+    out.on('error', fail)
+  })
+  const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: out, useStyles: true, useSharedStrings: false })
   wb.creator = 'Report Builder'
   wb.created = meta.completed
-  const ws = wb.addWorksheet('Report')
   const bold = { bold: true }
   const xl = (v: unknown, t: Column['type']) => (t === 'text' ? (v ?? '') : num(v) == null ? null : t === 'pct' || t === 'change' ? num(v)! / 100 : num(v))
 
-  ws.getCell(1, Math.min(3, g.cols.length)).value = meta.title
-  ws.getCell(1, Math.min(3, g.cols.length)).font = bold
-  ws.getCell('A5').value = 'Report Completed:'
-  ws.getCell('B5').value = stamp(meta.completed)
-  ws.getCell('A6').value = 'Reported Time Period:'
-  ws.getCell('B6').value = periodSpan(result.period.start, result.period.end)
-  ws.getCell('A5').font = ws.getCell('A6').font = bold
-
-  const head = ws.getRow(8)
-  g.cols.forEach((c, i) => {
-    head.getCell(i + 1).value = c.head
-    head.getCell(i + 1).font = bold
-  })
-  const put = (rowNo: number, values: unknown[], isTotal: boolean) => {
-    const row = ws.getRow(rowNo)
-    values.forEach((v, i) => {
-      const c = g.cols[i]!
-      const cell = row.getCell(i + 1)
-      cell.value = xl(v, c.type) as ExcelJS.CellValue
-      if (XL_FORMAT[c.type]) cell.numFmt = XL_FORMAT[c.type]!
-      if (isTotal) cell.font = bold
-    })
+  const ws = wb.addWorksheet('Report', { views: [{ state: 'frozen', ySplit: 8 }] })
+  ws.columns = g.cols.map((c, i) => ({ width: c.type === 'text' ? (i === 0 ? 24 : 36) : Math.max(14, Math.min(24, c.head.length + 2)) }))
+  const titleAt = Math.min(3, g.cols.length)
+  const put = (values: unknown[], style?: (cell: ExcelJS.Cell, i: number) => void) => {
+    const row = ws.addRow(values as ExcelJS.CellValue[])
+    if (style) values.forEach((_, i) => style(row.getCell(i + 1), i))
+    row.commit()
   }
-  g.rows.forEach((r, i) => put(9 + i, r, false))
-  if (g.total) put(9 + g.rows.length, g.total, true)
-  g.cols.forEach((c, i) => {
-    ws.getColumn(i + 1).width = c.type === 'text' ? (i === 0 ? 24 : 36) : Math.max(14, Math.min(24, c.head.length + 2))
-  })
-  ws.views = [{ state: 'frozen', ySplit: 8 }]
+  put([...Array(titleAt - 1).fill(null), meta.title], (c, i) => i === titleAt - 1 && (c.font = bold))
+  put([])
+  put([])
+  put([])
+  put(['Report Completed:', stamp(meta.completed)], (c, i) => i === 0 && (c.font = bold))
+  put(['Reported Time Period:', periodSpan(result.period.start, result.period.end)], (c, i) => i === 0 && (c.font = bold))
+  put([])
+  put(
+    g.cols.map((c) => c.head),
+    (c) => (c.font = bold),
+  )
+  const data = (r: unknown[], isTotal: boolean) =>
+    put(
+      r.map((v, i) => xl(v, g.cols[i]!.type)),
+      (cell, i) => {
+        const f = XL_FORMAT[g.cols[i]!.type]
+        if (f) cell.numFmt = f
+        if (isTotal) cell.font = bold
+      },
+    )
+  for (const r of g.rows) data(r, false)
+  if (g.total) data(g.total, true)
+  ws.commit()
 
   // Summary: what the report is.
   const sm = wb.addWorksheet('Summary')
-  sm.getColumn(1).width = 30
-  sm.getColumn(2).width = 60
-  sm.getColumn(3).width = 60
-  let n = 5
+  sm.columns = [{ width: 30 }, { width: 60 }, { width: 60 }]
   const line = (a: string, b = '', c = '', strong = false) => {
-    const r = sm.getRow(n++)
-    r.getCell(1).value = a
-    r.getCell(2).value = b
-    if (c) r.getCell(3).value = c
+    const r = sm.addRow([a, b, c || null])
     if (strong) r.getCell(1).font = bold
     r.getCell(2).alignment = r.getCell(3).alignment = { wrapText: true, vertical: 'top' }
+    r.commit()
   }
+  for (let i = 0; i < 4; i++) line('')
   line('Report Title:', meta.title, '', true)
   if (meta.owner) line('Report Owner:', meta.owner, '', true)
   line('Report Completed:', stamp(meta.completed), '', true)
   line('Reported Time Period:', `${periodSpan(result.period.start, result.period.end)} (${result.period.label})`, '', true)
   line('Data Through:', result.data_through_label, '', true)
-  n++
+  line('')
   line('Layout', '', '', true)
   for (const s of meta.summary) line(`  ${s.label}`, s.value)
   if (result.notes.length) {
-    n++
+    line('')
     line('Notes', '', '', true)
     for (const t of result.notes) line('', t)
   }
   if (meta.imported) {
-    n++
+    line('')
     line('Imported from 360', `${meta.imported.client} › ${meta.imported.user} › ${meta.imported.report}`, '', true)
     for (const x of meta.imported.notes) line(`  ${x.impact}`, x.what, x.did)
   }
-  n++
+  line('')
   line(COPYRIGHT(meta.completed.getFullYear()))
-  return Buffer.from(await wb.xlsx.writeBuffer())
+  sm.commit()
+  await wb.commit()
+  await done
+  return Buffer.concat(chunks)
 }
 
 // ---------------------------------------------------------------- PDF
@@ -203,8 +221,20 @@ function logo(): Uint8Array | null {
   return logoBytes
 }
 
+/** The characters the standard PDF fonts can show (WinAnsi): printable Latin-1 and a few typographic marks. */
+const WIN_ANSI_EXTRA = new Set('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ')
+/** A string the standard fonts can measure and draw: full-width and compatibility forms folded, anything else "?". */
+export function pdfSafe(s: string): string {
+  let out = ''
+  for (const ch of s.normalize('NFKC')) {
+    const c = ch.codePointAt(0)!
+    out += (c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff) || WIN_ANSI_EXTRA.has(ch) ? ch : c === 0x09 || c === 0x0a || c === 0x0d ? ' ' : '?'
+  }
+  return out
+}
+
 const PDF_FMT = (v: unknown, t: Column['type']): string => {
-  if (t === 'text') return String(v ?? '')
+  if (t === 'text') return pdfSafe(String(v ?? ''))
   const n = num(v)
   if (n == null || Number.isNaN(n)) return ''
   const body = t === 'pct' || t === 'change' ? `${Math.abs(n).toFixed(1)}%` : Math.round(Math.abs(n)).toLocaleString('en-US')
@@ -212,28 +242,30 @@ const PDF_FMT = (v: unknown, t: Column['type']): string => {
   return t === 'change' && n > 0 ? `+${body}` : body
 }
 
+const f2 = (n: number) => (Math.round(n * 100) / 100).toString()
+
 export async function pdfFile(result: Result, meta: FileMeta): Promise<Uint8Array> {
   const g = grid(result)
   const doc = await PDFDocument.create()
+  const title = pdfSafe(meta.title)
   doc.setTitle(meta.title)
   doc.setCreator('Report Builder')
   const roman = await doc.embedFont(StandardFonts.TimesRoman)
   const boldF = await doc.embedFont(StandardFonts.TimesRomanBold)
   const png = logo()
-  const img: PDFImage | null = png ? await doc.embedPng(png).catch(() => null) : null
+  const img = png ? await doc.embedPng(png).catch(() => null) : null
 
   const W = 792
   const H = 612
   const M = 21.6
   const SIZE = 6
   const LINE = 7.04 // 360's row pitch
-  const black = rgb(0, 0, 0)
 
   // Widths: breakouts share what the measures leave, measures fit their widest figure.
   const measureIdx = g.cols.map((_, i) => i).filter((i) => i >= g.dims)
   const measureW = measureIdx.map((i) => {
     const values = [...g.rows.slice(0, 2000).map((r) => r[i]), g.total?.[i]].map((v) => PDF_FMT(v, g.cols[i]!.type))
-    const widest = Math.max(roman.widthOfTextAtSize(g.cols[i]!.measure, SIZE), ...values.map((s) => roman.widthOfTextAtSize(s, SIZE)))
+    const widest = Math.max(roman.widthOfTextAtSize(pdfSafe(g.cols[i]!.measure), SIZE), ...values.map((s) => roman.widthOfTextAtSize(s, SIZE)))
     return Math.max(34, widest + 8)
   })
   const room = W - 2 * M - measureW.reduce((a, b) => a + b, 0)
@@ -245,69 +277,112 @@ export async function pdfFile(result: Result, meta: FileMeta): Promise<Uint8Arra
     x += i < g.dims ? dimW : measureW[i - g.dims]!
   }
   const right = x
+  const edge = (i: number) => (i + 1 < xs.length ? xs[i + 1]! : right)
 
   const fit = (s: string, w: number, f: PDFFont) => {
     if (f.widthOfTextAtSize(s, SIZE) <= w) return s
-    let t = s
-    while (t.length > 1 && f.widthOfTextAtSize(t + '…', SIZE) > w) t = t.slice(0, -1)
-    return t + '…'
+    let lo = 0
+    let hi = s.length
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      if (f.widthOfTextAtSize(s.slice(0, mid) + '…', SIZE) <= w) lo = mid
+      else hi = mid - 1
+    }
+    return s.slice(0, lo) + '…'
   }
-  const text = (p: PDFPage, s: string, at: number, y: number, f: PDFFont, size = SIZE) => p.drawText(s.replace(/[^\x20-\x7E -ÿ…]/g, '?'), { x: at, y, size, font: f, color: black })
-  const textRight = (p: PDFPage, s: string, edge: number, y: number, f: PDFFont) => text(p, s, edge - f.widthOfTextAtSize(s, SIZE), y, f)
 
   // Column groups (periods) for the two-line heading.
   const groups: Array<{ name: string; from: number; to: number }> = []
   for (const i of measureIdx) {
-    const name = g.cols[i]!.group ?? ''
+    const name = pdfSafe(g.cols[i]!.group ?? '')
     const last = groups[groups.length - 1]
     if (last && last.name === name) last.to = i
     else groups.push({ name, from: i, to: i })
   }
 
-  const pages: PDFPage[] = []
-  let page!: PDFPage
+  /** One page's drawing, as PDF operators, flushed into a single compressed stream. */
+  class Sheet {
+    ops: string[] = []
+    fonts = new Map<PDFFont, string>()
+    constructor(readonly page: PDFPage) {}
+    key(f: PDFFont) {
+      let k = this.fonts.get(f)
+      if (!k) {
+        k = this.page.node.newFontDictionary('F', f.ref).toString()
+        this.fonts.set(f, k)
+      }
+      return k
+    }
+    text(s: string, at: number, y: number, f: PDFFont, size = SIZE) {
+      if (!s) return
+      this.ops.push(`BT ${this.key(f)} ${size} Tf ${f2(at)} ${f2(y)} Td ${f.encodeText(s).toString()} Tj ET`)
+    }
+    textRight(s: string, edgeX: number, y: number, f: PDFFont) {
+      this.text(s, edgeX - f.widthOfTextAtSize(s, SIZE), y, f)
+    }
+    line(x1: number, y1: number, x2: number, y2: number, w: number) {
+      this.ops.push(`${w} w 0 G ${f2(x1)} ${f2(y1)} m ${f2(x2)} ${f2(y2)} l S`)
+    }
+    band(x0: number, y0: number, w: number, h: number) {
+      this.ops.push(`0.843 g ${f2(x0)} ${f2(y0)} ${f2(w)} ${f2(h)} re f 0 g`)
+    }
+    image() {
+      if (!img) return
+      const k = this.page.node.newXObject('Im', img.ref).toString()
+      this.ops.push(`q 23 0 0 23 ${M} ${f2(H - M - 23)} cm ${k} Do Q`)
+    }
+    flush() {
+      if (!this.ops.length) return
+      this.page.node.addContentStream(doc.context.register(doc.context.flateStream(this.ops.join('\n'))))
+      this.ops = []
+    }
+  }
+
+  const sheets: Sheet[] = []
+  let sheet!: Sheet
   let y = 0
   const newPage = () => {
-    page = doc.addPage([W, H])
-    pages.push(page)
-    if (img) page.drawImage(img, { x: M, y: H - M - 23, width: 23, height: 23 })
-    text(page, 'MediaRadar', M + 28, H - M - 15, boldF, 10)
-    text(page, meta.title, (W - boldF.widthOfTextAtSize(meta.title, 10)) / 2, H - M - 9, boldF, 10)
+    sheet?.flush()
+    sheet = new Sheet(doc.addPage([W, H]))
+    sheets.push(sheet)
+    sheet.image()
+    sheet.text('MediaRadar', M + 28, H - M - 15, boldF, 10)
+    sheet.text(title, (W - boldF.widthOfTextAtSize(title, 10)) / 2, H - M - 9, boldF, 10)
     y = H - 75
     // Heading: the periods over their measures, the breakouts named together.
     for (const gr of groups) {
       if (!gr.name) continue
-      const mid = (xs[gr.from]! + (gr.to + 1 < xs.length ? xs[gr.to + 1]! : right)) / 2
-      text(page, gr.name, mid - boldF.widthOfTextAtSize(gr.name, SIZE) / 2, y, boldF)
-      page.drawLine({ start: { x: xs[gr.from]! + 2, y: y - 2 }, end: { x: (gr.to + 1 < xs.length ? xs[gr.to + 1]! : right) - 2, y: y - 2 }, thickness: 0.5, color: black })
+      const mid = (xs[gr.from]! + edge(gr.to)) / 2
+      sheet.text(gr.name, mid - boldF.widthOfTextAtSize(gr.name, SIZE) / 2, y, boldF)
+      sheet.line(xs[gr.from]! + 2, y - 2, edge(gr.to) - 2, y - 2, 0.5)
     }
     y -= LINE + 2
-    text(page, fit(g.cols.slice(0, g.dims).map((c) => c.measure).join('/'), dimW * Math.max(1, g.dims) - 4, boldF), M, y, boldF)
-    for (const i of measureIdx) textRight(page, g.cols[i]!.measure, (i + 1 < xs.length ? xs[i + 1]! : right) - 3, y, boldF)
-    page.drawLine({ start: { x: M, y: y - 3 }, end: { x: right, y: y - 3 }, thickness: 0.7, color: black })
+    sheet.text(fit(pdfSafe(g.cols.slice(0, g.dims).map((c) => c.measure).join('/')), dimW * Math.max(1, g.dims) - 4, boldF), M, y, boldF)
+    for (const i of measureIdx) sheet.textRight(pdfSafe(g.cols[i]!.measure), edge(i) - 3, y, boldF)
+    sheet.line(M, y - 3, right, y - 3, 0.7)
     y -= LINE + 3
   }
   const bottom = M + 30
   newPage()
 
-  const last: unknown[] = []
+  const last: string[] = []
   const drawRow = (r: unknown[], isTotal: boolean) => {
     if (y < bottom) {
       newPage()
       last.length = 0 // a new page names its breakouts again
     }
     const f = isTotal ? boldF : roman
-    if (isTotal) page.drawRectangle({ x: M, y: y - 2, width: right - M, height: LINE + 1, color: rgb(0.843, 0.843, 0.843) })
+    if (isTotal) sheet.band(M, y - 2, right - M, LINE + 1)
     let changed = false
     for (let i = 0; i < g.dims; i++) {
-      const v = String(r[i] ?? '')
+      const v = pdfSafe(String(r[i] ?? ''))
       if (isTotal || changed || last[i] !== v) {
         changed = true
-        if (v) text(page, fit(v, dimW - 4, f), xs[i]! + 1, y, f)
+        if (v) sheet.text(fit(v, dimW - 4, f), xs[i]! + 1, y, f)
       }
       last[i] = v
     }
-    for (const i of measureIdx) textRight(page, PDF_FMT(r[i], g.cols[i]!.type), (i + 1 < xs.length ? xs[i + 1]! : right) - 3, y, f)
+    for (const i of measureIdx) sheet.textRight(PDF_FMT(r[i], g.cols[i]!.type), edge(i) - 3, y, f)
     y -= LINE
   }
   for (const r of g.rows) drawRow(r, false)
@@ -324,12 +399,14 @@ export async function pdfFile(result: Result, meta: FileMeta): Promise<Uint8Arra
   y -= LINE
   for (const s of foot) {
     if (y < M + 10) newPage()
-    text(page, fit(s, W - 2 * M, roman), M, y, roman)
+    sheet.text(fit(pdfSafe(s), W - 2 * M, roman), M, y, roman)
     y -= LINE
   }
-  pages.forEach((p, i) => {
-    const label = `Page ${i + 1} of ${pages.length}`
-    p.drawText(label, { x: W - M - roman.widthOfTextAtSize(label, SIZE), y: M - 8, size: SIZE, font: roman, color: black })
+  sheet.flush()
+  sheets.forEach((p, i) => {
+    const label = `Page ${i + 1} of ${sheets.length}`
+    p.textRight(label, W - M, M - 8, roman)
+    p.flush()
   })
-  return doc.save()
+  return doc.save({ objectsPerTick: 2000 })
 }

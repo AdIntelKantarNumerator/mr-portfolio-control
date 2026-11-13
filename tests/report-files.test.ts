@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import ExcelJS from 'exceljs'
 import { PDFDocument } from 'pdf-lib'
-import { csvFile, periodSpan, pdfFile, xlsxFile, type FileMeta } from '../src/lib/report-builder/export/files'
+import { csvFile, pdfSafe, periodSpan, pdfFile, xlsxFile, type FileMeta } from '../src/lib/report-builder/export/files'
 import type { Result } from '../src/lib/report-builder/engine'
 
 const markets = ['National', 'Abilene', 'Albany, GA', 'New York']
@@ -88,4 +88,19 @@ test('PDF: landscape letter pages, numbered', async () => {
   const { width, height } = doc.getPage(0).getSize()
   assert.deepEqual([width, height], [792, 612])
   assert.equal(doc.getTitle(), 'McDonalds November')
+})
+
+test('big reports with names the standard PDF fonts cannot show: every format is made, quickly', async () => {
+  const big: unknown[][] = []
+  for (let i = 0; i < 20_000; i++) big.push([`Market ${i % 50}`, i % 5 ? `Advertiser ${i}` : `スズキ ${i}`, 'Spot TV', i * 3, i, 0])
+  const r = { ...RESULT, rows: big, row_count: big.length, rows_shown: big.length }
+  const t = Date.now()
+  const pdf = await PDFDocument.load(await pdfFile(r, { ...META, title: 'Japanese スズキ' }))
+  assert.ok(pdf.getPageCount() > 250)
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.load((await xlsxFile(r, META)) as unknown as ArrayBuffer)
+  assert.equal(wb.getWorksheet('Report')!.getCell('B9').value, 'スズキ 0', 'Excel keeps the real name')
+  assert.ok(csvFile(r, META).includes('スズキ 0'), 'and so does the CSV')
+  assert.ok(Date.now() - t < 30_000, `took ${Date.now() - t} ms`)
+  assert.equal(pdfSafe('スズキ Ｈｏｎｄａ café'), '??? Honda café', 'full-width letters fold; Latin-1 stays; the rest is ?')
 })

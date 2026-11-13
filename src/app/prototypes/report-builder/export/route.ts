@@ -52,7 +52,14 @@ export async function GET(req: Request) {
     ...(access.email ? { owner: access.email } : {}),
     ...(imp ? { imported: { client: imp.client, user: imp.user, report: imp.report, notes: imp.notes ?? [] } } : {}),
   }
-  const body = format === 'xlsx' ? await xlsxFile(result, meta) : format === 'pdf' ? await pdfFile(result, meta) : csvFile(result, meta)
+  let body: string | Uint8Array
+  try {
+    body = format === 'xlsx' ? await xlsxFile(result, meta) : format === 'pdf' ? await pdfFile(result, meta) : csvFile(result, meta)
+  } catch (err) {
+    // Said in words, not a bare 500: the person can try another format meanwhile.
+    console.error(`[report-builder export] ${format}, ${result.rows.length} rows:`, err)
+    return new Response(`The ${format.toUpperCase()} file could not be made (${(err as Error).message}). The CSV download has every row; please tell the Report Builder team.`, { status: 500, headers: { 'content-type': 'text/plain; charset=utf-8' } })
+  }
   const file = `${name} (${result.period.label.replace('–', 'to')}).${FORMATS[format].ext}`
   return new Response(body as BodyInit, {
     headers: {
