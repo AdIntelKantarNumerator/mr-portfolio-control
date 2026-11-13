@@ -192,6 +192,22 @@ export function Import360({ onClose, onImported }: { onClose: () => void; onImpo
       if (p.converted.unresolved?.length) void lookup(p, p.converted.unresolved, near)
     })
   }
+  // Several GPC matches may stand for one 360 name (Michelob Ultra: its light beer and its zero); none left means leave it out.
+  const togglePick = (key: string, sg: Suggestion) => {
+    const cur = choices[key]
+    const ids = cur ? [...cur.ids] : []
+    const names = cur ? [...cur.names] : []
+    const at = ids.indexOf(sg.id)
+    if (at >= 0) {
+      ids.splice(at, 1)
+      names.splice(at, 1)
+    } else {
+      ids.push(sg.id)
+      names.push(sg.name)
+    }
+    setChoices({ ...choices, [key]: ids.length ? { ids, names, how: 'picked' } : null })
+  }
+
   const doImport = () => {
     if (!preview) return
     void run('Importing', async () => {
@@ -299,10 +315,10 @@ export function Import360({ onClose, onImported }: { onClose: () => void; onImpo
                 ) : null}
                 {r?.status === 'uncertain' ? (
                   <div className="rb-imp-pick">
-                    <p className="rb-muted">{r.error ? r.error : r.followed ? 'Its creatives land on several GPC entities, none clearly.' : 'No creatives with spend were found for it.'} Pick the GPC match, or leave it out.</p>
+                    <p className="rb-muted">{r.error ? r.error : r.followed ? 'Its creatives land on several GPC entities, none clearly.' : 'No creatives with spend were found for it.'} Pick one or more GPC matches, or leave it out.</p>
                     {r.suggestions.map((sg) => (
                       <label key={sg.id}>
-                        <input type="radio" name={keyOf(u)} checked={!!c && c.ids[0] === sg.id} onChange={() => setChoices({ ...choices, [keyOf(u)]: { ids: [sg.id], names: [sg.name], how: 'picked' } })} />
+                        <input type="checkbox" checked={!!c && c.ids.includes(sg.id)} onChange={() => togglePick(keyOf(u), sg)} />
                         <span>
                           <b>{sg.name}</b>{' '}
                           <small className="rb-muted">
@@ -313,7 +329,7 @@ export function Import360({ onClose, onImported }: { onClose: () => void; onImpo
                       </label>
                     ))}
                     <label>
-                      <input type="radio" name={keyOf(u)} checked={c === null} onChange={() => setChoices({ ...choices, [keyOf(u)]: null })} />
+                      <input type="checkbox" checked={c === null} onChange={() => setChoices({ ...choices, [keyOf(u)]: null })} />
                       <span>Leave it out</span>
                     </label>
                   </div>
