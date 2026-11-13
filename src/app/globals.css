@@ -2427,6 +2427,7 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rb-name { font-weight: 600; font-size: 15px; }
 .rb-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; }
 .rb-dlrow { display: contents; }
+.rb-group + .rb-group { margin-top: 3px; }
 .rb-dl dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding-top: 2px; }
 .rb-dl dd { margin: 0; overflow-wrap: anywhere; }
 .rb-status::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--amber); }

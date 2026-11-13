@@ -871,7 +871,15 @@ export function ReportBuilderChat({
                     {panel.rows.map((r) => (
                       <div key={r.label} className="rb-dlrow">
                         <dt>{r.label}</dt>
-                        <dd>{r.value}</dd>
+                        <dd>
+                          {r.groups
+                            ? r.groups.map((g) => (
+                                <div key={g.label} className="rb-group">
+                                  <b>{g.label}:</b> {g.items}
+                                </div>
+                              ))
+                            : r.value}
+                        </dd>
                       </div>
                     ))}
                     <dt>Period</dt>

@@ -27,7 +27,8 @@ export interface ReportPanel {
   editing: string | null
   status: 'empty' | 'waiting' | 'problem' | 'ready'
   statusText: string
-  rows: Array<{ label: string; value: string }>
+  /** groups: the same value in parts, each under a name the page shows in bold. */
+  rows: Array<{ label: string; value: string; groups?: Array<{ label: string; items: string }> }>
   period: string | null
   picksUpNewData: boolean
 }
@@ -57,20 +58,25 @@ export async function describeReport(engine: ReportEngine, chat: ChatState): Pro
     calcs: Array<{ key: string; label: string }>
   }
   const dim = (k: string) => cat.dimensions.find((d) => d.key === k)?.label ?? k
-  const filters = Object.entries(s.filters ?? {}).map(([k, ids]) => ids.map((id) => engine.labelOf(k, id)).join(', '))
+  // Each kind of filter under its own name ("Market: National, Laredo"); a name GPC repeats (three products called Truly) once.
+  const names = (labels: string[]) => [...new Set(labels)].join(', ')
+  const filters: Array<{ label: string; items: string }> = Object.entries(s.filters ?? {})
+    .filter(([, ids]) => ids.length)
+    .map(([k, ids]) => ({ label: dim(k), items: names(ids.map((id) => engine.labelOf(k, id))) }))
   // Whose properties or brands, and who they are set against, in the words of each kind of report.
-  const lab = (ids: string[] | undefined) => (ids ?? []).map((id) => engine.labelOf(id.split(':')[0]!, id)).join(', ')
+  const lab = (ids: string[] | undefined) => names((ids ?? []).map((id) => engine.labelOf(id.split(':')[0]!, id)))
+  const f = (label: string, items: string) => ({ label, items })
   const z = s.zero_share
   if (z) {
     const mine = lab(z.mine) || 'not chosen yet'
     const vs = lab(z.versus) || (z.all ? 'every other property' : 'not chosen yet')
     const mode = z.mode ?? 'zero'
-    if (mode === 'zero') filters.unshift(`Not buying on: ${mine}`, `Buying on: ${vs}`)
-    else if (mode === 'wallet') filters.unshift(`Yours: ${mine}`, `Against: ${vs}`)
-    else if (mode === 'mine') filters.unshift(`Yours: ${mine}`)
-    else filters.unshift(`Competitors: ${vs}`, `Not on: ${mine}`)
+    if (mode === 'zero') filters.unshift(f('Not buying on', mine), f('Buying on', vs))
+    else if (mode === 'wallet') filters.unshift(f('Yours', mine), f('Against', vs))
+    else if (mode === 'mine') filters.unshift(f('Yours', mine))
+    else filters.unshift(f('Competitors', vs), f('Not on', mine))
   }
-  if (s.compare) filters.unshift(`Yours: ${lab(s.compare.mine) || 'not chosen yet'}`, `Competitors: ${lab(s.compare.rivals) || 'not chosen yet'}`)
+  if (s.compare) filters.unshift(f('Yours', lab(s.compare.mine) || 'not chosen yet'), f('Competitors', lab(s.compare.rivals) || 'not chosen yet'))
   const t = s.time
   const period = !t
     ? null
@@ -83,10 +89,10 @@ export async function describeReport(engine: ReportEngine, chat: ChatState): Pro
     .map((m) => cat.measures.find((x) => x.key === m)?.label ?? m)
     .concat((s.calcs ?? []).map((c) => cat.calcs.find((x) => x.key === c)?.label ?? c))
   const status: ReportPanel['status'] = v.errors.length ? 'problem' : v.questions.length ? 'waiting' : 'ready'
-  const rows = [
+  const rows: ReportPanel['rows'] = [
     { label: 'Showing', value: measures.join(', ') },
     { label: 'Broken out by', value: (s.rows ?? []).map(dim).join(' › ') + (s.columns ? `, with a column per ${dim(s.columns).toLowerCase()}` : '') },
-    { label: 'Limited to', value: filters.length ? filters.join(' · ') : 'Everything' },
+    { label: 'Limited to', value: filters.length ? filters.map((x) => `${x.label}: ${x.items}`).join(' · ') : 'Everything', ...(filters.length ? { groups: filters } : {}) },
     { label: 'Data', value: s.options?.final_only === false ? 'Final and preliminary' : 'Final only' },
   ]
   if (s.options?.top_n) rows.push({ label: 'Rows kept', value: `Top ${s.options.top_n}` })

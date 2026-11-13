@@ -227,7 +227,8 @@ function filterConds(s: NSpec): Record<'who' | 'what' | 'where' | 'detail', Cond
   for (const [dim, ids] of Object.entries(s.filters)) {
     const d = DIMS[dim as Dim]
     if (!d || d.time || !ids.length) continue
-    if (d.group === 'detail') details.push({ in: dim as Dim, values: ids })
+    // Markets narrow wherever the media is: "these 3 markets" AND "these media types", never OR (Scott, 12 November 2026).
+    if (d.group === 'detail' || dim === 'market') details.push({ in: dim as Dim, values: ids })
     else groups[d.group as 'who' | 'what' | 'where'].push({ in: dim as Dim, values: ids })
   }
   return { who: any(...groups.who), what: any(...groups.what), where: any(...groups.where), detail: all(...details) }

@@ -143,7 +143,15 @@ test('the report engine runs on any adapter: a monthly trend adds up, and promos
   assert.equal((await engine.search('toy', { types: ['advertiser'] }))[0]!.label, 'Toyota')
 })
 
-test('broadcast months: the Monday-to-Sunday weeks ending in each month, read by day', async () => {
+test('a market narrows the media, never widens it: market AND media type', async () => {
+  const engine = engineOn()
+  const none = await engine.run({ template: 'summary', rows: ['market'], measures: ['spend'], filters: { market: ['market:999'], media_type: ['media_type:101'] }, time: OCT })
+  assert.equal(none.rows.length, 0, 'no spend in market 999, whatever the media type')
+  const nat = await engine.run({ template: 'summary', rows: ['market'], measures: ['spend'], filters: { market: ['market:-1'], media_type: ['media_type:102'] }, time: OCT })
+  assert.deepEqual(nat.rows, [['National', 50 * 31]], 'National and Cable TV: Toyota on ESPN only')
+})
+
+test('broadcast months:the Monday-to-Sunday weeks ending in each month, read by day', async () => {
   const engine = engineOn()
   const r = await engine.run({ template: 'advertiser_trend', rows: ['advertiser'], columns: 'broadcast_month', measures: ['spend'], filters: { advertiser: ['advertiser:1'] }, time: { mode: 'static', start: '2026-09', end: '2026-10' } })
   assert.deepEqual(r.columns.filter((c) => c.colId).map((c) => c.label), ['Bcst Sep 2026', 'Bcst Oct 2026'])
