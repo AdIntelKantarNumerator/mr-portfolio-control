@@ -998,8 +998,15 @@ function MessageView({
           {v.tree ? <TreeTable tree={v.tree} max={v.kind === 'run' ? 25 : 10} /> : <Table table={v.table} max={v.kind === 'run' ? 25 : 10} />}
           {v.downloadUrl ? (
             <div className="rb-row">
-              <a className="btn" href={v.downloadUrl}>
-                Download spreadsheet
+              <span className="rb-muted">Download</span>
+              <a className="btn" href={`${v.downloadUrl}&format=xlsx`}>
+                Excel
+              </a>
+              <a className="btn" href={`${v.downloadUrl}&format=pdf`}>
+                PDF
+              </a>
+              <a className="btn" href={`${v.downloadUrl}&format=csv`}>
+                CSV
               </a>
               <span className="rb-muted">
                 {v.table.rowCount.toLocaleString('en-US')} rows · {v.period}

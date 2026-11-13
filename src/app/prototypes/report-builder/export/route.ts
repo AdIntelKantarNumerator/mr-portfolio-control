@@ -1,7 +1,9 @@
 /**
- * A Report Builder spreadsheet, from the download link in the chat.
+ * A Report Builder report as a file, from the download links in the chat.
  *
- *   GET /prototypes/report-builder/export?r=<report>&name=<file name>
+ *   GET /prototypes/report-builder/export?r=<report>&name=<file name>&format=csv|xlsx|pdf
+ *
+ * Laid out as 360 lays out its CSV, Excel and PDF (lib/report-builder/export/files.ts).
  *
  * The report travels in the link (base64url JSON) and is recomputed here for
  * whoever opens it, on their own saved state, so a link never carries data,
@@ -12,7 +14,9 @@
 import { currentAccess } from '@/lib/auth/access'
 import { getAuthConfig } from '@/lib/auth/config'
 import { engineFor, loadUser } from '@/lib/report-builder/agent'
-import { csv } from '@/lib/report-builder/engines'
+import { csvFile, FORMATS, pdfFile, xlsxFile, type FileFormat, type FileMeta } from '@/lib/report-builder/export/files'
+import { describeReport } from '@/lib/report-builder/page-view'
+import { emptyChat } from '@/lib/report-builder/tools'
 import type { Spec } from '@/lib/report-builder/engine'
 
 export const runtime = 'nodejs'
@@ -35,11 +39,24 @@ export async function GET(req: Request) {
   const v = await engine.validate(spec)
   if (!v.ok) return new Response('That report is not complete, so there is nothing to download.', { status: 400 })
   const result = await engine.run(v.spec)
-  const name = (url.searchParams.get('name') ?? 'Report').replace(/[^A-Za-z0-9 &'-]+/g, '').trim().slice(0, 80) || 'Report'
-  const file = `${name} (${result.period.label.replace('–', 'to')}).csv`
-  return new Response('﻿' + csv(result), {
+  const name = (url.searchParams.get('name') ?? 'Report').replace(/[^A-Za-z0-9 &'()-]+/g, '').trim().slice(0, 80) || 'Report'
+  const f = url.searchParams.get('format')
+  const format: FileFormat = f === 'xlsx' || f === 'pdf' ? f : 'csv'
+
+  const panel = await describeReport(engine, { ...emptyChat(), report: v.spec })
+  const imp = (spec as { import_360?: { client: string; user: string; report: string; notes?: Array<{ impact: string; what: string; did: string }> } }).import_360
+  const meta: FileMeta = {
+    title: name,
+    completed: new Date(),
+    summary: panel.rows.concat(panel.period ? [{ label: 'Period', value: panel.period }] : []),
+    ...(access.email ? { owner: access.email } : {}),
+    ...(imp ? { imported: { client: imp.client, user: imp.user, report: imp.report, notes: imp.notes ?? [] } } : {}),
+  }
+  const body = format === 'xlsx' ? await xlsxFile(result, meta) : format === 'pdf' ? await pdfFile(result, meta) : csvFile(result, meta)
+  const file = `${name} (${result.period.label.replace('–', 'to')}).${FORMATS[format].ext}`
+  return new Response(body as BodyInit, {
     headers: {
-      'content-type': 'text/csv; charset=utf-8',
+      'content-type': FORMATS[format].type,
       'content-disposition': `attachment; filename="${file.replace(/"/g, '')}"`,
       'cache-control': 'no-store',
     },

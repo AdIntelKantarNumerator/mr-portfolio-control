@@ -273,7 +273,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'run_report',
-    description: `Run the report in progress in full. Returns the first ${RUN_ROWS} rows as a table and a link to download every row as a spreadsheet.`,
+    description: `Run the report in progress in full. Returns the first ${RUN_ROWS} rows as a table and a link to download every row as CSV; add &format=xlsx or &format=pdf to the link for Excel or PDF, laid out like 360's.`,
     parameters: obj({ name: { type: 'string', description: 'A short name, used for the file.' } }),
   },
   {
