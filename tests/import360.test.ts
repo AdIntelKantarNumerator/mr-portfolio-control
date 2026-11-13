@@ -114,7 +114,7 @@ test('the Tremfya report becomes a GPC trend, and every change is explained', as
   assert.match(say(/^GRPs$/)!.why, /no ratings/)
   assert.equal(say(/^Media: Search/)!.impact, 'dropped')
   assert.match(say(/matched more than one GPC entity/)!.did, /All of them are included/)
-  assert.match(say(/house ads/i)!.why, /promos and public service announcements/)
+  assert.equal(say(/house ads/i), undefined, 'excluding house ads is what GPC does anyway: no note')
   assert.match(say(/^Period: Jan 2025 – Apr 2025$/)!.did, /Aug – Oct 2026/)
   assert.equal(say(/Row order/)!.impact, 'changed')
   for (const n of c.notes) assert.ok(n.why && n.did, `every note says why and what was done: ${n.what}`)

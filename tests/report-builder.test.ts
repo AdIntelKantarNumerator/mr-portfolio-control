@@ -217,7 +217,7 @@ test('the page gets what to draw: choices, then a table it can chart, and the re
   assert.equal(panel.status, 'ready')
   assert.equal(panel.name, 'Ford media mix')
   assert.equal(await suggestName(ctx.engine, ctx.chat.report!), 'Ford media mix')
-  assert.ok(panel.rows.some((r) => r.label === 'Limited to' && r.value === 'Ford'))
+  assert.ok(panel.rows.some((r) => r.label === 'Limited to' && r.value === 'Advertiser: Ford' && r.groups?.[0]?.label === 'Advertiser'), 'each kind of filter under its name')
 })
 
 test('everyday words find the right thing: fast food is Quick Service Restaurants', async () => {

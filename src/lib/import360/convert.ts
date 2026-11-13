@@ -375,7 +375,7 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
       continue
     }
     if (s.e === 333) {
-      if (s.excluded.some((x) => /house/i.test(x.name))) note('approximate', 'Excluding house ads', 'GPC reports always leave out promos and public service announcements, the nearest equivalent.', 'House ads are not separately excluded.')
+      // Excluding house ads is what GPC already does by leaving out promos and PSAs: nothing to say (Scott, 12 November 2026).
       continue
     }
     if (s.excluded.length) excluded()
