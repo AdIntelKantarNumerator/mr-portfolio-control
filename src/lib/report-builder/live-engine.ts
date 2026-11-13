@@ -221,6 +221,9 @@ function needsDaily(s: NSpec): boolean {
 }
 
 /** The report's filters as conditions: OR within a group (who, what, where), the groups AND-ed by the caller; each detail AND-ed on its own. */
+/** GPC's United States (country_id 1). */
+export const US_COUNTRY = 'country:1'
+
 function filterConds(s: NSpec): Record<'who' | 'what' | 'where' | 'detail', Cond | undefined> {
   const groups: Record<'who' | 'what' | 'where', Cond[]> = { who: [], what: [], where: [] }
   const details: Cond[] = []
@@ -231,6 +234,8 @@ function filterConds(s: NSpec): Record<'who' | 'what' | 'where' | 'detail', Cond
     if (d.group === 'detail' || dim === 'market' || dim === 'country') details.push({ in: dim as Dim, values: ids })
     else groups[d.group as 'who' | 'what' | 'where'].push({ in: dim as Dim, values: ids })
   }
+  // The US unless the report names a country or breaks out by country (Scott, 13 November 2026).
+  if (!s.filters.country?.length && !dimsOf(s).includes('country' as Dim)) details.push({ in: 'country' as Dim, values: [US_COUNTRY] })
   return { who: any(...groups.who), what: any(...groups.what), where: any(...groups.where), detail: all(...details) }
 }
 

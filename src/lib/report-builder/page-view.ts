@@ -76,6 +76,8 @@ export async function describeReport(engine: ReportEngine, chat: ChatState): Pro
     else if (mode === 'mine') filters.unshift(f('Yours', mine))
     else filters.unshift(f('Competitors', vs), f('Not on', mine))
   }
+  // The engine keeps a report to the US unless it names countries or breaks out by country: say so.
+  if (!s.filters?.country?.length && !(s.rows ?? []).includes('country') && s.columns !== 'country') filters.push(f('Country', 'United States'))
   if (s.compare) filters.unshift(f('Yours', lab(s.compare.mine) || 'not chosen yet'), f('Competitors', lab(s.compare.rivals) || 'not chosen yet'))
   const t = s.time
   const period = !t

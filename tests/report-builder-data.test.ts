@@ -152,6 +152,16 @@ test('country: a breakout and a filter that narrows like market', async () => {
   assert.equal(condSql({ in: 'country', values: ['country:190'] }), 'coalesce(country_id, 0) IN (190)')
 })
 
+test('reports keep to the US unless they name a country or break out by country', async () => {
+  const uk = { date: '2026-10-10', ids: { ...TOYOTA, property: N('property', 9, 'UK AVOD'), media_type: N('media_type', 110, 'AVOD'), media_owner: N('media_owner', 19, 'Owner'), market: N('market', -1, 'National'), country: N('country', 190, 'United Kingdom', 'UK') }, spend: 1000, occurrences: 1 }
+  const engine = engineOn(memoryAdapter([...world(), uk], AVAIL))
+  const q = { template: 'summary', rows: ['advertiser'], measures: ['spend'], filters: { advertiser: ['advertiser:1'] }, time: OCT }
+  assert.equal((await engine.run(q)).total, 150 * 31, 'the UK spend is left out by default')
+  assert.equal((await engine.run({ ...q, filters: { ...q.filters, country: ['country:190'] } })).total, 1000, 'named, it is the UK only')
+  const by = await engine.run({ ...q, rows: ['country'] })
+  assert.deepEqual(by.rows.map((r) => r[0]).sort(), ['United Kingdom', 'United States'], 'broken out by country: every country')
+})
+
 test('a market narrows the media, never widens it: market AND media type', async () => {
   const engine = engineOn()
   const none = await engine.run({ template: 'summary', rows: ['market'], measures: ['spend'], filters: { market: ['market:999'], media_type: ['media_type:101'] }, time: OCT })
