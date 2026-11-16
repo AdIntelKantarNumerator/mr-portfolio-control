@@ -30,10 +30,15 @@ import {
   type LegacyTaxonomy,
   type TaxNode,
   type TreeNode,
+  nodeChildren,
+  nodeFlows,
+  sankeyFiltered,
+  type NodeSankey,
 } from '@/lib/taxonomy-industry-rules'
+import { levelName, NODE_LEVELS, noneLabel, sankeyData, type NodeLevel } from '@/lib/taxonomy-rules'
 import { MEDIA_TYPES, MONTH_LABEL, MONTHS, money, pct, type MediaType, type Month } from '@/lib/taxonomy-rules'
 import type { IndustryView } from '@/lib/taxonomy-industry'
-import { Progress, Seg } from '../comparison'
+import { Progress, Sankey, Seg } from '../comparison'
 import { TreeButton } from '../rollup'
 import { openLegacy, openNode, pollLegacy, pollNode, pollTree, rereadTree } from './actions'
 
@@ -335,6 +340,19 @@ function Spenders({ result, updatedAt, busy, onReread }: { result: IndustryResul
         <Seg label="Month" value={month} onChange={(v) => setMonth(v as Month | '')} options={[['', 'Both'], ...MONTHS.map((m) => [m, MONTH_LABEL[m].slice(0, 3)] as [string, string])]} />
       </div>
 
+      {result.sankey ? (
+        <NodeSankeyView
+          key={tax || 'VX1'}
+          sankey={result.sankey}
+          name={result.name}
+          tax={tax || 'VX1'}
+          media={media || null}
+          month={month || null}
+        />
+      ) : (
+        <p className="tx-muted ix-note">Re-read this node to see where its spend lands in the legacy taxonomies.</p>
+      )}
+
       <div className={picked ? 'ix-pair' : ''}>
         <SpenderList title={picked ? `GPC · ${result.name}` : null} name={result.name} ranking={r} by={by} both={both} tree />
         {picked ? (
@@ -473,6 +491,65 @@ function SpenderList({
       ) : (
         <p className="tx-muted">No spend in {name} for this media and month.</p>
       )}
+    </div>
+  )
+}
+
+/**
+ * Where a GPC node's spend lands in a legacy taxonomy, as a Sankey (Scott, 16
+ * November 2026): the node on the left, broken out by its own children; the
+ * legacy advertisers in the middle; their legacy nodes on the right. The
+ * taxonomy follows "Compare to" when one is picked, VX1 otherwise, and can be
+ * switched here; the media and month filters apply, except to Classic, which
+ * is placed through its snapshot for the whole window.
+ */
+function NodeSankeyView({
+  sankey,
+  name,
+  tax: initial,
+  media,
+  month,
+}: {
+  sankey: NodeSankey
+  name: string
+  tax: LegacyTaxonomy
+  media: MediaType | null
+  month: Month | null
+}) {
+  const [tax, setTax] = useState<LegacyTaxonomy>(initial)
+  const [level, setLevel] = useState<NodeLevel>('category')
+  // Classic's slices carry no month or media: the filters cannot apply to them.
+  const fm = sankeyFiltered(sankey, tax) ? media : null
+  const fmo = sankeyFiltered(sankey, tax) ? month : null
+  const flows = useMemo(() => nodeFlows(sankey, tax, { media: fm, month: fmo }), [sankey, tax, fm, fmo])
+  const none = noneLabel(tax)
+  const data = useMemo(() => sankeyData(flows, level, 7, 'advertiser', none), [flows, level, none])
+  const kids = useMemo(() => nodeChildren(sankey, { media: fm, month: fmo }), [sankey, fm, fmo])
+  const L = LEGACY_LABEL[tax]
+  return (
+    <div className="ix-sankey">
+      <div className="tx-filters">
+        <Seg label="Lands in" value={tax} onChange={(v) => setTax(v as LegacyTaxonomy)} options={LEGACY_TAXONOMIES.map((t) => [t, LEGACY_LABEL[t]] as [string, string])} />
+        <Seg label={`${L} node`} value={level} onChange={(v) => setLevel(v as NodeLevel)} options={NODE_LEVELS.map((l) => [l, levelName(tax, l)] as [string, string])} />
+      </div>
+      {data.total > 0 ? (
+        <Sankey
+          data={data}
+          fromLabel={name}
+          heads={{ left: 'GPC', mid: `${L} ADVERTISER`.toUpperCase(), right: `${L} ${levelName(tax, level)}`.toUpperCase() }}
+          none={none}
+          breakdown={kids.length > 1 ? kids : null}
+          more={new Set()}
+          onMore={() => undefined}
+          onSample={null}
+          picked={null}
+        />
+      ) : (
+        <p className="tx-muted">None of this node&apos;s spend lands in {L}{media || month ? ' for this media and month' : ''}.</p>
+      )}
+      {!sankeyFiltered(sankey, tax) && (media || month) ? (
+        <p className="tx-muted ix-note">Classic is placed through Vivvix products for the whole window: the media and month filters do not apply to it.</p>
+      ) : null}
     </div>
   )
 }

@@ -2540,3 +2540,14 @@ li:hover > .t > .row-edit, td:hover > .row-edit, .row-edit:focus-visible { opaci
 .rb-from360 { background: color-mix(in srgb, var(--c1) 14%, transparent); color: var(--c1); }
 .rb-imp-saved summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
 .rb-imp-saved .rb-imp-notes { margin-top: 6px; font-size: 12.5px; }
+
+/* Taxonomy Comparison, 16 November 2026: the narrative first and large, the swap, the left bar in pieces. */
+.tx-narrative { margin: 2px 0 14px; padding: 12px 16px; border-left: 4px solid var(--brand); border-radius: 8px; background: color-mix(in srgb, var(--brand) 6%, var(--surface)); }
+.tx-narrative-head { margin: 0; font-size: 19px; font-weight: 700; line-height: 1.35; color: var(--ink); }
+.tx-narrative-list { margin: 8px 0 0; padding-left: 20px; font-size: 14.5px; line-height: 1.5; }
+.tx-narrative-list li + li { margin-top: 3px; }
+.tx-narrative-model { margin: 8px 0 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
+.tx-from { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tx-swap { margin-left: 6px; font-weight: 700; }
+.tx-from.swapped .tx-swap { border-color: var(--brand); color: var(--brand); }
+.tx-node-src { stroke: var(--surface); stroke-width: 0.6; }

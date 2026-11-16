@@ -21,7 +21,6 @@ import {
   MONTHS,
   NO_GPC,
   UNKNOWN_PRODUCT_ID,
-  NODE_LEVEL_LABEL,
   NODE_LEVELS,
   OTHER,
   gpcTotalKey,
@@ -32,11 +31,18 @@ import {
   rankAdvertisers,
   rankNodes,
   rankProducts,
+  rankSrcNodes,
+  explainShift,
+  levelName,
+  noneLabel,
+  sides,
   sankeyData,
   TAXONOMY_LABEL,
   UNCLASSIFIED,
   type AdvertiserResult,
   type Candidate,
+  type Direction,
+  type ShiftStory,
   type Flag,
   type FromTaxonomy,
   type GpcBy,
@@ -58,6 +64,9 @@ export function Comparison({ initial }: { initial: RunView | null }) {
   const router = useRouter()
   const [state, submit, pending] = useActionState<StartState, FormData>(startComparison, {})
   const [run, setRun] = useState<RunView | null>(initial)
+  // Which way: a legacy taxonomy into GPC, or GPC into it (Scott, 16 November 2026).
+  const [direction, setDirection] = useState<Direction>(initial?.input.direction ?? 'to-gpc')
+  const swapped = direction === 'from-gpc'
 
   useEffect(() => {
     if (state.runId) router.replace(`/taxonomy-comparison?run=${state.runId}`)
@@ -75,27 +84,46 @@ export function Comparison({ initial }: { initial: RunView | null }) {
   return (
     <>
       <form action={submit} className="tile tx-form">
-        <div className="tx-from">
-          <label className="tx-from-pick">
-            <span className="tx-muted">From</span>
-            <select name="from" className="tx-select" defaultValue={initial?.input.from ?? 'VX1'}>
-              {FROM_TAXONOMIES.map((t) => (
-                <option key={t} value={t}>
-                  {TAXONOMY_LABEL[t]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <span className="tx-arrow" aria-hidden>
-            →
-          </span>
-          <span className="tx-to">GPC</span>
+        <div className={`tx-from ${swapped ? 'swapped' : ''}`}>
+          <input type="hidden" name="direction" value={direction} />
+          <span className="tx-muted">From</span>
+          {swapped ? (
+            <>
+              <span className="tx-to">GPC</span>
+              <span className="tx-arrow" aria-hidden>
+                →
+              </span>
+            </>
+          ) : null}
+          <select name="from" className="tx-select" defaultValue={initial?.input.from ?? 'VX1'} aria-label={swapped ? 'To taxonomy' : 'From taxonomy'}>
+            {FROM_TAXONOMIES.map((t) => (
+              <option key={t} value={t}>
+                {TAXONOMY_LABEL[t]}
+              </option>
+            ))}
+          </select>
+          {!swapped ? (
+            <>
+              <span className="tx-arrow" aria-hidden>
+                →
+              </span>
+              <span className="tx-to">GPC</span>
+            </>
+          ) : null}
+          <button
+            type="button"
+            className="btn tx-swap"
+            onClick={() => setDirection((d) => (d === 'to-gpc' ? 'from-gpc' : 'to-gpc'))}
+            title={swapped ? 'Compare from the legacy taxonomy into GPC' : 'Put GPC on the left: follow GPC entities into the legacy taxonomy'}
+          >
+            ⇄ Swap
+          </button>
         </div>
         <textarea
           name="advertisers"
           className="tx-input"
           rows={5}
-          placeholder={'One advertiser per line, e.g.\nProgressive\nProcter & Gamble\nToyota'}
+          placeholder={swapped ? 'One GPC entity per line, e.g.\nProgressive\nProcter & Gamble\nToyota' : 'One advertiser per line, e.g.\nProgressive\nProcter & Gamble\nToyota'}
           defaultValue={initial?.input.names.join('\n') ?? ''}
           title={`Up to ${MAX_ADVERTISERS} advertisers. Aug–Sep 2026, advertiser level.`}
         />
@@ -170,19 +198,23 @@ const FLAG_LABEL: Record<Flag['kind'], string> = {
 
 function Results({ run, onChange }: { run: RunView; onChange: (run: RunView) => void }) {
   const result = run.result!
+  const direction: Direction = result.direction ?? 'to-gpc'
+  const { left, right } = sides(result.from, direction)
   return (
     <>
       <div className="tx-summary">
         <div>
-          <span className="tx-big">{result.advertisers.length}</span> advertisers · {TAXONOMY_LABEL[result.from]} → GPC
+          <span className="tx-big">{result.advertisers.length}</span> {direction === 'from-gpc' ? 'entities' : 'advertisers'} · {TAXONOMY_LABEL[left]} → {TAXONOMY_LABEL[right]}
         </div>
         <div className="tx-downloads">
-          <a className="btn" href={`/taxonomy-comparison/csv?run=${run.id}`} title="Spend by GPC advertiser and node, one row per slice">
+          <a className="btn" href={`/taxonomy-comparison/csv?run=${run.id}`} title={`Spend by ${TAXONOMY_LABEL[right]} advertiser and node, one row per slice`}>
             Download CSV
           </a>
-          <a className="btn" href={`/taxonomy-comparison/creatives?run=${run.id}`} title="Every creative behind every advertiser, with its metadata. Read live from Databricks: allow up to a minute.">
-            Creatives CSV
-          </a>
+          {direction === 'to-gpc' ? (
+            <a className="btn" href={`/taxonomy-comparison/creatives?run=${run.id}`} title="Every creative behind every advertiser, with its metadata. Read live from Databricks: allow up to a minute.">
+              Creatives CSV
+            </a>
+          ) : null}
         </div>
       </div>
       <p className="tx-muted tx-meta">
@@ -190,7 +222,7 @@ function Results({ run, onChange }: { run: RunView; onChange: (run: RunView) => 
         {result.from === 'Classic' && result.classicLoadedAt ? ` · Classic snapshot ${result.classicLoadedAt.slice(0, 10)}, linked to creatives through Vivvix` : ''}
       </p>
       {result.advertisers.map((a) => (
-        <AdvertiserCard key={a.input} a={a} from={result.from} runId={run.id} totals={result.gpcTotals ?? {}} onChange={onChange} />
+        <AdvertiserCard key={a.input} a={a} from={result.from} direction={direction} runId={run.id} totals={result.gpcTotals ?? {}} onChange={onChange} />
       ))}
     </>
   )
@@ -199,12 +231,14 @@ function Results({ run, onChange }: { run: RunView; onChange: (run: RunView) => 
 function AdvertiserCard({
   a,
   from,
+  direction,
   runId,
   totals,
   onChange,
 }: {
   a: AdvertiserResult
   from: FromTaxonomy
+  direction: Direction
   runId: string
   totals: Record<string, GpcTotalRow[]>
   onChange: (run: RunView) => void
@@ -219,6 +253,14 @@ function AdvertiserCard({
   const [sample, setSample] = useState<SamplePick | null>(null)
   const [expanded, setExpanded] = useState(false)
   const summary = useMemo(() => summarise(a, from, totals), [a, from, totals])
+  // The two sides by name: the source on the left, the target on the right.
+  const { left, right } = sides(from, direction)
+  const L = TAXONOMY_LABEL[left]
+  const R = TAXONOMY_LABEL[right]
+  const none = noneLabel(right)
+  // Sample creatives and GPC totals are about GPC advertisers: only when GPC is the target.
+  const intoGpc = right === 'GPC'
+  const story = useMemo(() => (a.entity ? explainShift(a.flows, { sourceName: a.entity.name, left, right }) : null), [a, left, right])
 
   const pick = (id: string) =>
     start(async () => {
@@ -229,7 +271,9 @@ function AdvertiserCard({
     })
 
   const flows = useMemo(() => filterFlows(a.flows, { media: media || null, month: month || null }), [a.flows, media, month])
-  const data = useMemo(() => sankeyData(flows, level, 7, gpcBy), [flows, level, gpcBy])
+  const data = useMemo(() => sankeyData(flows, level, 7, gpcBy, none), [flows, level, gpcBy, none])
+  // The left bar, broken out by the source side's own nodes at the same level.
+  const breakdown = useMemo(() => rankSrcNodes(flows, level), [flows, level])
   const e = a.entity
   const tone = !e ? 'crit' : e.kind === 'exact' ? 'good' : 'warn'
 
@@ -239,7 +283,7 @@ function AdvertiserCard({
     const rows = totals[gpcTotalKey(gpcBy, key)]
     return rows ? gpcTotalView(rows, filter, e, from) : null
   }
-  const more = new Set(rankAdvertisers(flows, gpcBy).flatMap((r) => {
+  const more = new Set((intoGpc ? rankAdvertisers(flows, gpcBy) : []).flatMap((r) => {
     const v = totalFor(r.key)
     return v && hasMoreElsewhere(v) ? [r.key] : []
   }))
@@ -258,14 +302,16 @@ function AdvertiserCard({
         </div>
       </div>
 
-      <SummaryView s={summary} from={from} />
+      {story ? <Narrative story={story} commentary={a.commentary} /> : null}
+
+      <SummaryView s={summary} from={from} left={L} right={R} none={none} />
 
       {expanded ? (
         <>
           <div className="tx-entity-row">
             <label className="tx-entity" title={e?.reason ?? (e ? `Exact name match (id ${e.id})` : a.missing)}>
               <span className="tx-muted">
-                {TAXONOMY_LABEL[from]}
+                {L}
                 {e?.level ? <strong className="tx-level"> · {e.level}</strong> : null}
               </span>
               {a.candidates.length ? (
@@ -287,13 +333,13 @@ function AdvertiserCard({
             </div>
             {(() => {
               const total = flowTotal(a.flows)
-              const none = a.flows.filter((f) => !f.gpcId).reduce((sum, f) => sum + f.spend, 0)
+              const noneSpend = a.flows.filter((f) => !f.gpcId).reduce((sum, f) => sum + f.spend, 0)
               return total > 0 ? (
-                <div className={`tx-stat ${none ? 'tx-stat-nogpc' : ''}`} title="Spend on creatives that have no GPC advertiser">
-                  <span className="tx-muted">No GPC advertiser</span>
+                <div className={`tx-stat ${noneSpend ? 'tx-stat-nogpc' : ''}`} title={`Spend on creatives that have no ${R} advertiser`}>
+                  <span className="tx-muted">{none}</span>
                   <strong>
-                    {none ? '⚠ ' : ''}
-                    {money(none)} <span className="tx-muted">{pct(none / total)}</span>
+                    {noneSpend ? '⚠ ' : ''}
+                    {money(noneSpend)} <span className="tx-muted">{pct(noneSpend / total)}</span>
                   </strong>
                 </div>
               ) : null
@@ -307,28 +353,32 @@ function AdvertiserCard({
           </div>
           {error ? <p className="status crit">{error}</p> : null}
 
-          <p className="tx-commentary">{a.commentary}</p>
-
           {a.flows.length ? (
             <>
               <div className="tx-filters">
                 <Seg label="Media" value={media} onChange={(v) => setMedia(v as MediaType | '')} options={[['', 'All'], ...MEDIA_TYPES.map((m) => [m, m] as [string, string])]} />
                 <Seg label="Month" value={month} onChange={(v) => setMonth(v as Month | '')} options={[['', 'Both'], ...MONTHS.map((m) => [m, MONTH_LABEL[m].slice(0, 3)] as [string, string])]} />
-                <Seg label="GPC advertiser" value={gpcBy} onChange={(v) => (setGpcBy(v as GpcBy), setSample(null))} options={(['advertiser', 'parent'] as GpcBy[]).map((b) => [b, GPC_BY_LABEL[b]] as [string, string])} />
-                <Seg label="GPC node" value={level} onChange={(v) => (setLevel(v as NodeLevel), setSample(null))} options={NODE_LEVELS.map((l) => [l, NODE_LEVEL_LABEL[l]] as [string, string])} />
+                <Seg label={`${R} advertiser`} value={gpcBy} onChange={(v) => (setGpcBy(v as GpcBy), setSample(null))} options={(['advertiser', 'parent'] as GpcBy[]).map((b) => [b, GPC_BY_LABEL[b]] as [string, string])} />
+                <Seg label={`${R} node`} value={level} onChange={(v) => (setLevel(v as NodeLevel), setSample(null))} options={NODE_LEVELS.map((l) => [l, levelName(right, l)] as [string, string])} />
               </div>
               {data.total > 0 ? (
                 <>
                   <Sankey
                     data={data}
                     fromLabel={e?.name ?? a.input}
-                    gpcBy={gpcBy}
+                    heads={{
+                      left: L.toUpperCase(),
+                      mid: `${R} ${gpcBy === 'parent' ? 'TOP PARENT' : 'ADVERTISER'}`.toUpperCase(),
+                      right: `${R} ${levelName(right, level)}`.toUpperCase(),
+                    }}
+                    none={none}
+                    breakdown={breakdown}
                     more={more}
                     onMore={setOpen}
                     picked={sample}
-                    onSample={(p) => setSample((cur) => (cur && cur.kind === p.kind && cur.key === p.key ? null : p))}
+                    onSample={intoGpc ? (p) => setSample((cur) => (cur && cur.kind === p.kind && cur.key === p.key ? null : p)) : null}
                   />
-                  {sample ? (
+                  {!intoGpc ? null : sample ? (
                     <SamplesPanel
                       key={`${sample.kind}:${sample.key}:${gpcBy}:${level}:${media}:${month}`}
                       runId={runId}
@@ -349,14 +399,18 @@ function AdvertiserCard({
                   {/* Advertisers and products side by side, the taxonomy below (Scott, 9 November 2026). */}
                   <div className="tx-lists">
                     <RankList
-                      title={gpcBy === 'parent' ? 'GPC top parents' : 'GPC advertisers'}
-                      rows={rankAdvertisers(flows, gpcBy)}
+                      title={gpcBy === 'parent' ? `${R} top parents` : `${R} advertisers`}
+                      rows={rankAdvertisers(flows, gpcBy, none)}
                       total={data.total}
                       more={more}
                       onMore={setOpen}
-                      tree={(r) => (r.key === NO_GPC ? null : { entity: r.key, role: gpcBy === 'parent' ? 'parent' : 'advertiser' })}
+                      tree={intoGpc ? (r) => (r.key === NO_GPC ? null : { entity: r.key, role: gpcBy === 'parent' ? 'parent' : 'advertiser' }) : undefined}
                     />
-                    {(() => {
+                    {!intoGpc ? (
+                      breakdown ? (
+                        <RankList title={`${L} ${levelName(left, level).toLowerCase()} (source)`} rows={breakdown} total={data.total} />
+                      ) : null
+                    ) : (() => {
                       const products = rankProducts(flows)
                       return products ? (
                         <RankList
@@ -374,7 +428,7 @@ function AdvertiserCard({
                     })()}
                   </div>
                   <div className="tx-lists tx-lists-one">
-                    <RankList title={`GPC ${NODE_LEVEL_LABEL[level].toLowerCase()}`} rows={rankNodes(flows, level)} total={data.total} />
+                    <RankList title={`${R} ${levelName(right, level).toLowerCase()}`} rows={rankNodes(flows, level)} total={data.total} />
                   </div>
                 </>
               ) : (
@@ -383,7 +437,7 @@ function AdvertiserCard({
             </>
           ) : null}
 
-          {e && a.flows.length ? (
+          {e && a.flows.length && intoGpc ? (
             <a className="tx-link-csv" href={`/taxonomy-comparison/creatives?run=${runId}&input=${encodeURIComponent(a.input)}`} title="Read live from Databricks: allow up to a minute">
               ⤓ Creatives behind {e.name} (CSV)
             </a>
@@ -416,9 +470,32 @@ function edgeTone(s: AdvertiserSummary): 'green' | 'amber' | 'slate' {
   return d && (d.shiftedShare == null || d.shiftedShare < 0.1) ? 'green' : 'amber'
 }
 
+/**
+ * What happened to the spend, in sentences, first on the card and in large
+ * type (Scott, 16 November 2026): the computed story (explainShift) - how much,
+ * where most of it lands, and why it is not cleaner - then the model's
+ * commentary when there is one.
+ */
+function Narrative({ story, commentary }: { story: ShiftStory; commentary: string }) {
+  return (
+    <div className="tx-narrative">
+      <p className="tx-narrative-head">{story.headline}</p>
+      {story.details.length ? (
+        <ul className="tx-narrative-list">
+          {story.details.map((d, i) => (
+            <li key={i}>{d}</li>
+          ))}
+        </ul>
+      ) : null}
+      {commentary.trim() ? <p className="tx-narrative-model">{commentary}</p> : null}
+    </div>
+  )
+}
+
 /** The short assessment: large type, four facts (lib/taxonomy-rules.ts summarise). */
-function SummaryView({ s, from }: { s: AdvertiserSummary; from: FromTaxonomy }) {
-  const name = TAXONOMY_LABEL[from]
+function SummaryView({ s, left, right, none }: { s: AdvertiserSummary; from: FromTaxonomy; left: string; right: string; none: string }) {
+  // The source side, by name: the legacy taxonomy, or GPC when swapped.
+  const name = left
   if (!s.fromEntity) return <p className="tx-sum-empty">Not found in {name}.</p>
   if (s.total <= 0) return <p className="tx-sum-empty">No creative spend for {name} &quot;{s.fromEntity}&quot; in Aug–Sep 2026.</p>
   const d = s.dominant
@@ -436,15 +513,15 @@ function SummaryView({ s, from }: { s: AdvertiserSummary; from: FromTaxonomy }) 
       </div>
 
       <div className="tx-sum-col">
-        <div className="tx-sum-head">Lands in GPC</div>
+        <div className="tx-sum-head">Lands in {right}</div>
         {s.gpc.map((g) => (
-          <SumRow key={g.label} label={g.label} spend={g.spend} share={g.share} warn={g.label === NO_GPC} />
+          <SumRow key={g.label} label={g.label === NO_GPC ? none : g.label} spend={g.spend} share={g.share} warn={g.label === NO_GPC} />
         ))}
         {s.gpcOthers ? <SumRow label={`Others (${s.gpcOthers.count})`} spend={s.gpcOthers.spend} share={s.gpcOthers.share} quiet /> : null}
       </div>
 
       <div className="tx-sum-col">
-        <div className="tx-sum-head">GPC industries</div>
+        <div className="tx-sum-head">{right} industries</div>
         {s.industries.map((i) => (
           <SumRow key={i.label} label={i.label} spend={i.spend} share={i.share} warn={i.label === UNCLASSIFIED} />
         ))}
@@ -763,6 +840,8 @@ function SamplesPanel({
 /** Categorical slots in fixed order (validated light and dark, 30 October 2026); the tail and "none" are neutral. */
 const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6']
 const NEUTRAL = '#a3a29b'
+/** The left bar's pieces: the source entity in shades of one slate, darkest first. */
+const SRC_SHADES = ['#3d4f66', '#55677d', '#6e8095', '#8798ab', '#a1b0c0', '#bac6d3', '#cfd8e1']
 /** "No GPC advertiser" is a finding, not a series: amber and hatched, with a warning label (Scott, 30 October 2026). */
 const NONE = '#c98500'
 
@@ -781,10 +860,12 @@ const X = [180, 430, 660]
 /** The FROM node's height; the other columns use the same dollars-per-pixel. */
 const FROM_H = 300
 
-function Sankey({
+export function Sankey({
   data,
   fromLabel,
-  gpcBy,
+  heads,
+  none = NO_GPC,
+  breakdown,
   more,
   onMore,
   onSample,
@@ -792,11 +873,16 @@ function Sankey({
 }: {
   data: SankeyData
   fromLabel: string
-  gpcBy: GpcBy
+  /** The three column headings, as the sides are named. */
+  heads: { left: string; mid: string; right: string }
+  /** What "no advertiser" is called on the target side. */
+  none?: string
+  /** The left bar's breakdown by the source side's nodes, when recorded (Scott, 16 November 2026). */
+  breakdown?: Ranked[] | null
   more: Set<string>
   onMore: (key: string) => void
-  /** A GPC advertiser (or top parent) or node was clicked: show its sample creatives. */
-  onSample: (pick: SamplePick) => void
+  /** A GPC advertiser (or top parent) or node was clicked: show its sample creatives. Null: not clickable. */
+  onSample: ((pick: SamplePick) => void) | null
   /** The one whose samples are showing, highlighted. */
   picked: SamplePick | null
 }) {
@@ -822,6 +908,23 @@ function Sankey({
   const adv = centre(advStack)
   const nodes = centre(nodeStack)
   const leftH = FROM_H
+  // The left bar in pieces: its biggest source nodes, the rest together.
+  const pieces = (() => {
+    if (!breakdown?.length) return null
+    const named = breakdown.filter((r) => r.spend > 0)
+    const kept = named.slice(0, 6)
+    const rest = named.slice(6)
+    const all = rest.length ? [...kept, { key: OTHER, label: `${OTHER} (${rest.length})`, spend: rest.reduce((x, r) => x + r.spend, 0) }] : kept
+    const sum = all.reduce((x, r) => x + r.spend, 0) || 1
+    let y = 0
+    return all.map((r, i) => {
+      const h = (r.spend / sum) * leftH
+      const out = { r, y, h, fill: SRC_SHADES[Math.min(i, SRC_SHADES.length - 1)]! }
+      y += h
+      return out
+    })
+  })()
+  const top = pieces ? 58 : 28
   const leftY = (H - leftH) / 2
   const color = new Map(data.advertisers.map((r, i) => [r.key, colorFor(r.key, i)]))
 
@@ -867,14 +970,14 @@ function Sankey({
 
   return (
     <div className="tx-sankey-wrap">
-      <svg className="tx-sankey" viewBox={`0 0 ${W} ${H + 28}`} role="img" aria-label={`Where ${fromLabel}'s spend lands in GPC`}>
+      <svg className="tx-sankey" viewBox={`0 0 ${W} ${H + top}`} role="img" aria-label={`Where ${fromLabel}'s spend lands: ${heads.mid.toLowerCase()} and ${heads.right.toLowerCase()}`}>
         <defs>
           <pattern id={hatch} width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
             <rect width={6} height={6} fill={NONE} opacity={0.35} />
             <line x1={0} y1={0} x2={0} y2={6} stroke={NONE} strokeWidth={3} />
           </pattern>
         </defs>
-        <g transform="translate(0, 28)">
+        <g transform={`translate(0, ${top})`}>
         {left.map((p) => (
           <path key={`l-${p.key}`} d={p.d} fill={fillFor(p.key)} className={p.key === NO_GPC ? 'tx-link tx-link-none' : 'tx-link'}>
             <title>{`${fromLabel} → ${p.r.label}: ${money(p.r.spend)} (${pct(p.r.spend / data.total)})`}</title>
@@ -886,23 +989,49 @@ function Sankey({
           </path>
         ))}
 
-        <rect x={X[0]} y={leftY} width={NODE_W} height={leftH} rx={3} className="tx-node-from" />
-        <text x={X[0] - 8} y={leftY + leftH / 2} textAnchor="end" dominantBaseline="middle" className="tx-node-label strong">
-          {short(fromLabel, 22)}
-        </text>
-        <text x={X[0] - 8} y={leftY + leftH / 2 + 16} textAnchor="end" dominantBaseline="middle" className="tx-node-label">
-          {money(data.total)}
-        </text>
+        {pieces ? (
+          <>
+            {/* The source entity above its bar, which is broken out by its own nodes. */}
+            <text x={X[0] + NODE_W} y={leftY - 26} textAnchor="end" className="tx-node-label strong">
+              {short(fromLabel, 34)}
+            </text>
+            <text x={X[0] + NODE_W} y={leftY - 11} textAnchor="end" className="tx-node-label">
+              {money(data.total)}
+            </text>
+            {pieces.map((p) => (
+              <g key={`s-${p.r.key}`}>
+                <rect x={X[0]} y={leftY + p.y} width={NODE_W} height={Math.max(p.h, 0.5)} fill={p.fill} className="tx-node-src">
+                  <title>{`${p.r.label}: ${money(p.r.spend)} (${pct(p.r.spend / data.total)})`}</title>
+                </rect>
+                {p.h >= 13 ? (
+                  <text x={X[0] - 6} y={leftY + p.y + p.h / 2} textAnchor="end" dominantBaseline="middle" className="tx-node-label">
+                    {`${short(p.r.label, 22)} · ${pct(p.r.spend / data.total)}`}
+                  </text>
+                ) : null}
+              </g>
+            ))}
+          </>
+        ) : (
+          <>
+            <rect x={X[0]} y={leftY} width={NODE_W} height={leftH} rx={3} className="tx-node-from" />
+            <text x={X[0] - 8} y={leftY + leftH / 2} textAnchor="end" dominantBaseline="middle" className="tx-node-label strong">
+              {short(fromLabel, 22)}
+            </text>
+            <text x={X[0] - 8} y={leftY + leftH / 2 + 16} textAnchor="end" dominantBaseline="middle" className="tx-node-label">
+              {money(data.total)}
+            </text>
+          </>
+        )}
 
         {data.advertisers.map((r) => {
           const a = adv.get(r.key)!
           // "Other" is many advertisers folded together: nothing to sample.
-          const pick: SamplePick | null = r.key === OTHER ? null : { kind: 'gpc', key: r.key, label: r.label }
+          const pick: SamplePick | null = r.key === OTHER || !onSample ? null : { kind: 'gpc', key: r.key, label: r.label }
           return (
             <g
               key={`a-${r.key}`}
               className={pick ? `tx-pickable ${picked?.kind === 'gpc' && picked.key === r.key ? 'on' : ''}` : ''}
-              {...(pick ? samplable(() => onSample(pick), `Sample creatives for ${r.label}`) : {})}
+              {...(pick && onSample ? samplable(() => onSample(pick), `Sample creatives for ${r.label}`) : {})}
             >
               <rect x={X[1]} y={a.y} width={NODE_W} height={Math.max(a.h, 3)} rx={3} fill={color.get(r.key)} className={r.key === NO_GPC ? 'tx-node-nogpc' : ''}>
                 <title>{`${r.label}: ${money(r.spend)} (${pct(r.spend / data.total)})`}</title>
@@ -930,7 +1059,7 @@ function Sankey({
                 </g>
               ) : null}
               <text x={X[1] + NODE_W + 6} y={a.y + a.h / 2} dominantBaseline="middle" className={`tx-node-label halo ${r.key === NO_GPC ? 'nogpc' : ''}`}>
-                {r.key === NO_GPC ? `⚠ ${advLabel(r)} · ${pct(r.spend / data.total)}` : advLabel(r)}
+                {r.key === NO_GPC ? `⚠ ${advLabel({ ...r, label: none })} · ${pct(r.spend / data.total)}` : advLabel(r)}
               </text>
             </g>
           )
@@ -941,8 +1070,8 @@ function Sankey({
           return (
             <g
               key={`n-${r.key}`}
-              className={r.key === OTHER ? '' : `tx-pickable ${picked?.kind === 'node' && picked.key === r.key ? 'on' : ''}`}
-              {...(r.key === OTHER ? {} : samplable(() => onSample({ kind: 'node', key: r.key, label: r.label }), `Sample creatives for ${r.label}`))}
+              className={r.key === OTHER || !onSample ? '' : `tx-pickable ${picked?.kind === 'node' && picked.key === r.key ? 'on' : ''}`}
+              {...(r.key === OTHER || !onSample ? {} : samplable(() => onSample({ kind: 'node', key: r.key, label: r.label }), `Sample creatives for ${r.label}`))}
             >
               <rect x={X[2]} y={nd.y} width={NODE_W} height={nd.h} rx={3} className={r.key === UNCLASSIFIED ? 'tx-node-none' : 'tx-node-gpc'}>
                 <title>{`${r.label}: ${money(r.spend)} (${pct(r.spend / data.total)})`}</title>
@@ -955,9 +1084,9 @@ function Sankey({
         })}
 
         </g>
-        <text x={X[0] + NODE_W / 2} y={12} textAnchor="middle" className="tx-col-head">FROM</text>
-        <text x={X[1] + NODE_W / 2} y={12} textAnchor="middle" className="tx-col-head">{gpcBy === 'parent' ? 'GPC TOP PARENT' : 'GPC ADVERTISER'}</text>
-        <text x={X[2] + NODE_W / 2} y={12} textAnchor="middle" className="tx-col-head">GPC NODE</text>
+        <text x={X[0] + NODE_W / 2} y={12} textAnchor="middle" className="tx-col-head">{heads.left}</text>
+        <text x={X[1] + NODE_W / 2} y={12} textAnchor="middle" className="tx-col-head">{heads.mid}</text>
+        <text x={X[2] + NODE_W / 2} y={12} textAnchor="middle" className="tx-col-head">{heads.right}</text>
       </svg>
     </div>
   )

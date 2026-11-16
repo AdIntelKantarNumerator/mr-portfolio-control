@@ -21,10 +21,12 @@ export async function startComparison(_prev: StartState, formData: FormData): Pr
   const who = await editor()
   if (!who.ok) return { error: who.error }
   const from = String(formData.get('from') ?? '')
-  if (!isFromTaxonomy(from)) return { error: 'Pick the taxonomy to compare from.' }
+  if (!isFromTaxonomy(from)) return { error: 'Pick the legacy taxonomy to compare.' }
   const { names, error } = parseAdvertisers(String(formData.get('advertisers') ?? ''))
   if (error) return { error }
-  return { runId: await startRun(from, names, who.name) }
+  // "from-gpc": GPC entities followed into the legacy taxonomy picked (the swap).
+  const direction = formData.get('direction') === 'from-gpc' ? 'from-gpc' : 'to-gpc'
+  return { runId: await startRun(from, names, who.name, direction) }
 }
 
 export async function pollRun(id: string): Promise<RunView | null> {

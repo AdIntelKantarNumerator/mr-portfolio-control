@@ -207,7 +207,54 @@ from_crtv AS (
     JOIN links l ON l.product_id = c.primary_product_id)`
 }
 
-const flowsSql = (fromCte: string) => `
+/**
+ * Each creative's place in a legacy taxonomy, for creatives in a CTE \`cs\`
+ * (Scott, 16 November 2026): its three node levels (l1, l2, l3) and its
+ * advertiser and parent (adv_*, par_*). VX1 from brandcentral (Industry, Major,
+ * Class), VX2 from its taxonomy tables (Industry, Category, Subcategory).
+ * Classic has no id on a creative: only its VX0 product (vx0) comes back, and
+ * lib/taxonomy-run.ts places it from the Classic snapshot.
+ */
+function legacySql(tax: FromTaxonomy, name = 'leg'): string {
+  if (tax === 'VX1') {
+    return `
+${name} AS (SELECT c.creative_id, f.industry_category_n l1, f.major_category_n l2, f.class_category_n l3, CAST(NULL AS bigint) vx0,
+    cast(a.source_advertiser_id AS string) adv_id, a.n adv_name,
+    CASE WHEN p.par IS NULL OR p.par = 9999 THEN cast(a.source_advertiser_id AS string) ELSE 'P' || p.par END par_id,
+    coalesce(co.n, a.n) par_name
+  FROM mrdpp_prod.gold.creative c
+  JOIN (SELECT source_product_id, max(category_id) cat, max(advertiser_id) adv, max(parent_company_id) par FROM mrdpp_prod.brandcentral.product
+    WHERE record_status_flag = 'ACTIVE'
+      AND source_product_id IN (SELECT vx1_product_id FROM mrdpp_prod.gold.creative WHERE creative_id IN (SELECT creative_id FROM cs))
+    GROUP BY 1) p ON p.source_product_id = c.vx1_product_id
+  LEFT JOIN mrdpp_prod.brandcentral.category_flatten f ON f.leaf_category_id = p.cat
+  LEFT JOIN (SELECT advertiser_id, max(source_advertiser_id) source_advertiser_id, max(advertiser_n) n FROM mrdpp_prod.brandcentral.advertiser WHERE record_status_flag = 'ACTIVE' GROUP BY 1) a ON a.advertiser_id = p.adv
+  LEFT JOIN (SELECT source_company_id, max(company_n) n FROM mrdpp_prod.brandcentral.company WHERE record_status_flag = 'ACTIVE' GROUP BY 1) co ON co.source_company_id = p.par
+  WHERE c.creative_id IN (SELECT creative_id FROM cs))`
+  }
+  if (tax === 'VX2') {
+    return `
+${name} AS (SELECT c.creative_id, i.NAME l1, ct.NAME l2, sc.NAME l3, CAST(NULL AS bigint) vx0,
+    cast(a.id AS string) adv_id, a.n adv_name, cast(coalesce(a.par, a.id) AS string) par_id, coalesce(pa.n, a.n) par_name
+  FROM mrdpp_prod.gold.creative c
+  JOIN mrdpp_prod.vx2_taxonomy.d_product p ON p.PRSEQ = c.vx2_product_id
+  LEFT JOIN mrdpp_prod.vx2_taxonomy.d_industry i ON i.CODE = p.PRIGRP
+  LEFT JOIN mrdpp_prod.vx2_taxonomy.d_category ct ON ct.CODE = p.PRCATGY
+  LEFT JOIN mrdpp_prod.vx2_taxonomy.d_subcategory sc ON sc.CODE = p.PRSBCAT
+  LEFT JOIN (SELECT CODE, max(ID) id, max(NAME) n, max(PARENT_ADVERTISER_ID) par FROM mrdpp_prod.vx2_taxonomy.d_advertiser GROUP BY CODE) a ON a.CODE = p.PRINST
+  LEFT JOIN (SELECT ID, max(NAME) n FROM mrdpp_prod.vx2_taxonomy.d_advertiser GROUP BY ID) pa ON pa.ID = a.par
+  WHERE c.creative_id IN (SELECT creative_id FROM cs))`
+  }
+  return `
+${name} AS (SELECT creative_id, CAST(NULL AS string) l1, CAST(NULL AS string) l2, CAST(NULL AS string) l3, primary_product_id vx0,
+    CAST(NULL AS string) adv_id, CAST(NULL AS string) adv_name, CAST(NULL AS string) par_id, CAST(NULL AS string) par_name
+  FROM mrdpp_prod.gold.creative WHERE creative_id IN (SELECT creative_id FROM cs))`
+}
+
+/** A flow as read, before Classic's VX0 products are placed (lib/taxonomy-run.ts). */
+export type FlowRaw = Flow & { vx0?: string | null }
+
+const flowsSql = (fromCte: string, from: FromTaxonomy) => `
 WITH ${fromCte},
 occ AS (
   SELECT o.creative_id, o.capture_month month,
@@ -223,13 +270,16 @@ occ AS (
   GROUP BY ALL),
 cs AS (SELECT DISTINCT creative_id FROM occ),
 ${ANCESTRY},
-${ATTRIBUTION}
+${ATTRIBUTION},
+${legacySql(from)}
 SELECT f.from_id, o.month, o.media, cast(g.entity_id AS string) gpc_id, e.display_name gpc_name,
   cast(rt.entity_id AS string) gpc_parent_id, rt.display_name gpc_parent_name,
   cast(g.product_id AS string) gpc_product_id, g.product_name gpc_product_name,
   CASE WHEN g.kind = 'unknown' THEN '${UNKNOWN_NODE}' ELSE n.industry_name END industry, n.category_name category, n.subcategory_name subcategory,
+  l.l1 src_industry, l.l2 src_category, l.l3 src_subcategory, cast(l.vx0 AS string) vx0,
   sum(o.spend * coalesce(g.w, 1)) spend
 FROM occ o JOIN from_crtv f ON f.creative_id = o.creative_id
+LEFT JOIN leg l ON l.creative_id = o.creative_id
 LEFT JOIN attr g ON g.creative_id = o.creative_id
 LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = g.taxonomy_node_id
 LEFT JOIN mrdpp_prod.global_catalog.entity e ON e.entity_id = g.entity_id
@@ -246,10 +296,10 @@ export async function dbxFlows(
   ids: string[],
   classicProducts: Map<string, number[]>,
   onWait?: OnWait,
-): Promise<Map<string, Flow[]>> {
-  const out = new Map<string, Flow[]>()
+): Promise<Map<string, FlowRaw[]>> {
+  const out = new Map<string, FlowRaw[]>()
   if (!ids.length) return out
-  const rows = await dbxQuery(config(), flowsSql(fromCreativesSql(from, ids, classicProducts)), [], { onWait })
+  const rows = await dbxQuery(config(), flowsSql(fromCreativesSql(from, ids, classicProducts), from), [], { onWait })
   for (const r of rows) {
     const month = `${r.month!.slice(0, 4)}-${r.month!.slice(4, 6)}` as Month
     if (!(MONTHS as readonly string[]).includes(month)) continue
@@ -268,9 +318,112 @@ export async function dbxFlows(
       industry: r.industry,
       category: r.category,
       subcategory: r.subcategory || null,
+      srcIndustry: r.src_industry ?? null,
+      srcCategory: r.src_category ?? null,
+      srcSubcategory: r.src_subcategory || null,
+      vx0: r.vx0,
       spend,
     })
     out.set(r.from_id!, list)
+  }
+  return out
+}
+
+// --- the swap: GPC on the left -------------------------------------------------
+
+/**
+ * Where a GPC entity's spend lands in a legacy taxonomy (Scott, 16 November
+ * 2026): the swap of dbxFlows. The entity is taken with everything below it,
+ * so a parent brings its brands. Its spend is what the attribution gives it -
+ * each creative's slices whose payer is the entity or under it - and each
+ * slice goes to the legacy advertiser and node of the creative's legacy
+ * product. The flow's target side (gpc*, industry, category, subcategory) is
+ * the LEGACY side here, and src* the GPC node of the attributed product.
+ */
+export async function dbxFlowsFromGpc(to: FromTaxonomy, ids: string[], onWait?: OnWait): Promise<Map<string, FlowRaw[]>> {
+  const out = new Map<string, FlowRaw[]>()
+  const picked = ids.filter(isInt)
+  if (!picked.length) return out
+  const sql = `
+WITH ${ANCESTRY},
+sub AS (SELECT ancestor from_id, descendant entity_id FROM anc WHERE ancestor IN (${inList(picked)})),
+cand AS (SELECT DISTINCT creative_id FROM mrdpp_prod.global_catalog.creative_entity
+  WHERE has_spend AND entity_id IN (SELECT entity_id FROM sub)),
+${occSql('SELECT creative_id FROM cand')},
+cs AS (SELECT DISTINCT creative_id FROM occ),
+${ATTRIBUTION},
+${legacySql(to)},
+mine AS (SELECT s.from_id, g.creative_id, g.w, g.taxonomy_node_id, g.kind FROM attr g JOIN sub s ON s.entity_id = g.entity_id)
+SELECT cast(m.from_id AS string) from_id, o.month, o.media,
+  l.adv_id gpc_id, l.adv_name gpc_name, l.par_id gpc_parent_id, l.par_name gpc_parent_name,
+  l.l1 industry, l.l2 category, l.l3 subcategory, cast(l.vx0 AS string) vx0,
+  CASE WHEN m.kind = 'unknown' THEN '${UNKNOWN_NODE}' ELSE n.industry_name END src_industry, n.category_name src_category, n.subcategory_name src_subcategory,
+  sum(o.spend * m.w) spend
+FROM occ o JOIN mine m ON m.creative_id = o.creative_id
+LEFT JOIN leg l ON l.creative_id = o.creative_id
+LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = m.taxonomy_node_id
+GROUP BY ALL`
+  const rows = await dbxQuery(config(), sql, [], { onWait })
+  for (const r of rows) {
+    const month = `${r.month!.slice(0, 4)}-${r.month!.slice(4, 6)}` as Month
+    const spend = Number(r.spend ?? 0)
+    if (!(MONTHS as readonly string[]).includes(month) || !spend) continue
+    const list = out.get(r.from_id!) ?? []
+    list.push({
+      month,
+      media: r.media as MediaType,
+      gpcId: r.gpc_id,
+      gpcName: r.gpc_name,
+      gpcParentId: r.gpc_parent_id ?? r.gpc_id,
+      gpcParentName: r.gpc_parent_name ?? r.gpc_name,
+      industry: r.industry,
+      category: r.category,
+      subcategory: r.subcategory || null,
+      srcIndustry: r.src_industry ?? null,
+      srcCategory: r.src_category ?? null,
+      srcSubcategory: r.src_subcategory || null,
+      vx0: r.vx0,
+      spend,
+    })
+    out.set(r.from_id!, list)
+  }
+  return out
+}
+
+/**
+ * GPC entities by name, for the swap: the FROM side is GPC. Matched as the
+ * legacy searches are (compacted names, the same patterns), exact names first,
+ * then those with the most products. A top-level entity is offered as a
+ * "Parent"; anything below one says which.
+ */
+export async function dbxGpcCandidates(names: string[], onWait?: OnWait): Promise<Map<string, Candidate[]>> {
+  const { params, values } = patternValues(names)
+  const sql = `
+WITH pats AS (${values}),
+e AS (SELECT pt.input, pt.k, e.entity_id, coalesce(e.display_name, e.legal_name) name, nullif(e.parent_entity_id, e.entity_id) par
+  FROM pats pt JOIN mrdpp_prod.global_catalog.entity e
+    ON regexp_replace(lower(coalesce(e.display_name, e.legal_name)), '[^a-z0-9]', '') LIKE pt.pat),
+pc AS (SELECT entity_id, count(*) n FROM mrdpp_prod.global_catalog.product WHERE entity_id IN (SELECT entity_id FROM e) GROUP BY 1),
+u AS (SELECT e.input, e.k, cast(e.entity_id AS string) id, max(e.name) name, max(coalesce(pc.n, 0)) size,
+    max(CASE WHEN e.par IS NULL THEN 'parent company' ELSE p.name END) parent
+  FROM e LEFT JOIN pc ON pc.entity_id = e.entity_id
+  LEFT JOIN (SELECT entity_id, coalesce(display_name, legal_name) name FROM mrdpp_prod.global_catalog.entity) p ON p.entity_id = e.par
+  GROUP BY ALL)
+SELECT * FROM u ${TOP}`
+  const rows = await dbxQuery(config(), sql, params, { onWait })
+  const out = new Map<string, Candidate[]>()
+  for (const r of rows) {
+    const size = Number(r.size ?? 0)
+    const list = out.get(r.input!) ?? []
+    list.push({
+      id: r.id!,
+      name: r.name ?? '',
+      size: `${size.toLocaleString('en-US')} product${size === 1 ? '' : 's'}`,
+      weight: size,
+      level: r.parent === 'parent company' ? 'Parent' : 'Entity',
+      via: r.parent && r.parent !== 'parent company' && r.parent !== r.name ? `under "${r.parent}"` : undefined,
+    })
+    out.set(r.input!, list)
   }
   return out
 }
@@ -558,7 +711,15 @@ export interface NodeSpenderRaw {
 /** VX1's category levels, as brandcentral.category_flatten names its columns. */
 const VX1_LEVELS = ['section', 'industry', 'major', 'class', 'subcategory', 'microcategory'] as const
 
-export async function dbxNodeSpenders(nodeId: string, keep: number, onWait?: OnWait): Promise<NodeSpenderRaw[]> {
+/** Legacy advertisers a node's Sankey names, per taxonomy; the rest are one "Other". */
+export const SANKEY_ADVERTISERS = 30
+
+/** The GPC column one level below a node's level, for its Sankey's left bar; none below a subcategory. */
+export function childColumn(level: string): string | null {
+  return level === 'Industry Group' ? 'industry_name' : level === 'Industry' ? 'category_name' : level === 'Category' ? 'subcategory_name' : null
+}
+
+export async function dbxNodeSpenders(nodeId: string, keep: number, onWait?: OnWait, childCol: string | null = null): Promise<NodeSpenderRaw[]> {
   if (!isInt(nodeId)) throw new DatabricksError(`Not a taxonomy node id: ${nodeId}`)
   const sql = `
 WITH RECURSIVE sub (id) AS (
@@ -608,7 +769,27 @@ lx AS (SELECT cw.s, explode(array(
   LEFT JOIN mrdpp_prod.vx2_taxonomy.d_industry i ON i.CODE = p2.PRIGRP
   LEFT JOIN mrdpp_prod.vx2_taxonomy.d_category ct ON ct.CODE = p2.PRCATGY
   LEFT JOIN mrdpp_prod.vx2_taxonomy.d_subcategory sc ON sc.CODE = p2.PRSBCAT),
-leg AS (SELECT e.k k, max(e.n) n, sum(s) s FROM lx WHERE e.k IS NOT NULL GROUP BY e.k)
+leg AS (SELECT e.k k, max(e.n) n, sum(s) s FROM lx WHERE e.k IS NOT NULL GROUP BY e.k),
+-- The node's Sankey (Scott, 16 November 2026): its spend by VX1 and VX2
+-- advertiser and node, month and media; the biggest SANKEY_ADVERTISERS
+-- advertisers by name, the rest as OTHER. Classic is placed from vx0.
+${legacySql('VX1', 'lv1')},
+${legacySql('VX2', 'lv2')},
+cwm AS (SELECT creative_id, media, month, sum(spend) s FROM a GROUP BY 1, 2, 3),
+lf AS (
+  SELECT 'VX1' tax, l.adv_id, l.adv_name, l.l1, l.l2, l.l3, c.media, c.month, sum(c.s) s FROM cwm c LEFT JOIN lv1 l ON l.creative_id = c.creative_id GROUP BY ALL
+  UNION ALL
+  SELECT 'VX2', l.adv_id, l.adv_name, l.l1, l.l2, l.l3, c.media, c.month, sum(c.s) FROM cwm c LEFT JOIN lv2 l ON l.creative_id = c.creative_id GROUP BY ALL),
+lfr AS (SELECT *, dense_rank() OVER (PARTITION BY tax ORDER BY tot DESC, adv_id) rk
+  FROM (SELECT *, sum(s) OVER (PARTITION BY tax, adv_id) tot FROM lf WHERE adv_id IS NOT NULL)),
+lfo AS (
+  SELECT tax, CASE WHEN rk <= ${SANKEY_ADVERTISERS} THEN adv_id ELSE 'OTHER' END a, CASE WHEN rk <= ${SANKEY_ADVERTISERS} THEN adv_name END n, l1, l2, l3, media, month, s FROM lfr
+  UNION ALL
+  SELECT tax, '', NULL, l1, l2, l3, media, month, s FROM lf WHERE adv_id IS NULL)${childCol ? `,
+ch AS (SELECT n.${childCol} k, a.media, a.month, sum(a.spend) s FROM a
+  JOIN mrdpp_prod.global_catalog.product p ON p.product_id = a.product_id
+  LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = p.taxonomy_node_id
+  GROUP BY ALL)` : ''}
 SELECT t.gby, cast(t.k AS string) key,
   CASE WHEN t.gby = 'product' THEN pr.product_name ELSE coalesce(e.display_name, e.legal_name) END name,
   t.media, cast(t.month AS string) month, t.s spend
@@ -621,7 +802,12 @@ SELECT 'total', NULL, NULL, media, cast(month AS string), sum(spend) FROM a GROU
 UNION ALL
 SELECT 'count', gby, NULL, NULL, NULL, cast(count(DISTINCT k) AS double) FROM v GROUP BY gby
 UNION ALL
-SELECT CASE WHEN k LIKE 'VX0|%' THEN 'vx0' ELSE 'legacy' END, CASE WHEN k LIKE 'VX0|%' THEN substr(k, 5) ELSE k END, n, NULL, NULL, s FROM leg`
+SELECT CASE WHEN k LIKE 'VX0|%' THEN 'vx0' ELSE 'legacy' END, CASE WHEN k LIKE 'VX0|%' THEN substr(k, 5) ELSE k END, n, NULL, NULL, s FROM leg
+UNION ALL
+SELECT 'lflow', concat_ws(chr(31), tax, a, coalesce(l1, ''), coalesce(l2, ''), coalesce(l3, '')), max(n), media, cast(month AS string), sum(s)
+  FROM lfo GROUP BY tax, a, l1, l2, l3, media, month${childCol ? `
+UNION ALL
+SELECT 'child', coalesce(k, ''), NULL, media, cast(month AS string), sum(s) FROM ch GROUP BY k, media, month` : ''}`
   const rows = await dbxQuery(config(), sql, [], { onWait, large: true })
   return rows.map((r) => ({ gby: r.gby!, key: r.key, name: r.name, media: r.media, month: r.month, spend: Number(r.spend ?? 0) }))
 }

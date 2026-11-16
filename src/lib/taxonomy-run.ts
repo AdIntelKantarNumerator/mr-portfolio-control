@@ -20,12 +20,13 @@
  */
 import { eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { classicBrandProducts, classicNames, classicSpend, taxonomyRuns } from '@/db/schema'
+import { classicBrandProducts, classicBrandSpend, classicCategories, classicNames, classicSpend, classicVxCategories, taxonomyRuns } from '@/db/schema'
 import { completeJson, ModelError, resolveProvider } from './llm'
-import { dbxCandidates, dbxCreatives, dbxFlows, dbxGpcTotals, dbxSamples, type GpcTotalRaw, type SampleFilter, type SampleTarget } from './taxonomy-dbx'
+import { dbxCandidates, dbxCreatives, dbxFlows, dbxFlowsFromGpc, dbxGpcCandidates, dbxGpcTotals, dbxSamples, type FlowRaw, type GpcTotalRaw, type SampleFilter, type SampleTarget } from './taxonomy-dbx'
 import {
   compactName,
   computeFlags,
+  explainShift,
   filterFlows,
   flowTotal,
   gpcTotalKey,
@@ -42,9 +43,11 @@ import {
   pct,
   rankAdvertisers,
   rankNodes,
+  sides,
   TAXONOMY_LABEL,
   type AdvertiserResult,
   type Candidate,
+  type Direction,
   type Flow,
   type FromTaxonomy,
   type GpcBy,
@@ -56,7 +59,10 @@ import {
 export interface RunResult {
   /** 2 since FROM → GPC (30 October 2026); results without it are the side-by-side version. */
   version: 2
+  /** The legacy taxonomy compared with GPC: the FROM side, or with "from-gpc" the TO side. */
   from: FromTaxonomy
+  /** "from-gpc" when GPC is on the left (16 November 2026); absent means into GPC. */
+  direction?: Direction
   advertisers: AdvertiserResult[]
   /** Each charted GPC entity's whole spend by FROM entity, keyed gpcTotalKey(by, id). Absent on runs before 30 October 2026. */
   gpcTotals?: Record<string, GpcTotalRow[]>
@@ -69,21 +75,22 @@ export interface RunResult {
 export interface RunInput {
   from: FromTaxonomy | null
   names: string[]
+  direction?: Direction
 }
 
 export function parseRunInput(raw: string): RunInput {
   const v = JSON.parse(raw) as unknown
   if (Array.isArray(v)) return { from: null, names: v.map(String) }
-  const o = v as { from?: string; names?: unknown[] }
-  return { from: o.from && isFromTaxonomy(o.from) ? o.from : null, names: (o.names ?? []).map(String) }
+  const o = v as { from?: string; names?: unknown[]; direction?: string }
+  return { from: o.from && isFromTaxonomy(o.from) ? o.from : null, names: (o.names ?? []).map(String), direction: o.direction === 'from-gpc' ? 'from-gpc' : 'to-gpc' }
 }
 
-export async function startRun(from: FromTaxonomy, names: string[], askedBy: string | null): Promise<string> {
+export async function startRun(from: FromTaxonomy, names: string[], askedBy: string | null, direction: Direction = 'to-gpc'): Promise<string> {
   const [row] = await db
     .insert(taxonomyRuns)
-    .values({ input: JSON.stringify({ from, names }), askedBy, status: 'running', progress: JSON.stringify(initialSteps(from)) })
+    .values({ input: JSON.stringify({ from, names, direction }), askedBy, status: 'running', progress: JSON.stringify(initialSteps(from, direction)) })
     .returning({ id: taxonomyRuns.id })
-  void execute(row.id, from, names).catch(async (err) => {
+  void execute(row.id, from, names, direction).catch(async (err) => {
     console.error('[taxonomy] run failed', err)
     await db
       .update(taxonomyRuns)
@@ -93,8 +100,9 @@ export async function startRun(from: FromTaxonomy, names: string[], askedBy: str
   return row.id
 }
 
-async function execute(id: string, from: FromTaxonomy, names: string[]): Promise<void> {
-  const steps = initialSteps(from)
+async function execute(id: string, from: FromTaxonomy, names: string[], direction: Direction = 'to-gpc'): Promise<void> {
+  const steps = initialSteps(from, direction)
+  const swapped = direction === 'from-gpc'
   const save = () => db.update(taxonomyRuns).set({ progress: JSON.stringify(steps) }).where(eq(taxonomyRuns.id, id))
   const step = async <T>(key: string, work: (note: (detail: string) => Promise<void>) => Promise<T>): Promise<T> => {
     const s = steps.find((x) => x.key === key)!
@@ -121,15 +129,18 @@ async function execute(id: string, from: FromTaxonomy, names: string[]): Promise
   }
 
   const candidates = await step('candidates', async (note) => {
-    const found =
-      from === 'Classic' ? await classicCandidates(names) : await dbxCandidates(from, names, (s) => note(`Searching Databricks… ${s}s`))
+    const found = swapped
+      ? await dbxGpcCandidates(names, (s) => note(`Searching Databricks… ${s}s`))
+      : from === 'Classic'
+        ? await classicCandidates(names)
+        : await dbxCandidates(from, names, (s) => note(`Searching Databricks… ${s}s`))
     const per = names.map((n) => found.get(n) ?? [])
     await note(`${per.filter((c) => c.length).length} of ${names.length} names found candidates`)
     return per
   })
 
   const { resolved, model } = await step('match', async (note) => {
-    const out = await resolveAll(from, names, candidates)
+    const out = await resolveAll(swapped ? 'GPC' : from, names, candidates)
     await note(out.model ? `Decided by ${out.model}` : 'No model configured: matched by name only')
     return out
   })
@@ -140,10 +151,11 @@ async function execute(id: string, from: FromTaxonomy, names: string[]): Promise
       await note('Nothing matched, so nothing to follow')
       return new Map<string, Flow[]>()
     }
+    if (swapped) return placeClassic(await dbxFlowsFromGpc(from, ids, (s) => note(`Query running… ${s}s`)), from, direction)
     const products = from === 'Classic' ? await classicProductsFor(ids) : new Map<string, number[]>()
-    return dbxFlows(from, ids, products, (s) => note(`Query running… ${s}s`))
+    return placeClassic(await dbxFlows(from, ids, products, (s) => note(`Query running… ${s}s`)), from, direction)
   })
-  const reported = from === 'Classic' ? await classicReportedFor(ids) : new Map<string, number>()
+  const reported = from === 'Classic' && !swapped ? await classicReportedFor(ids) : new Map<string, number>()
 
   const advertisers: AdvertiserResult[] = names.map((input, i) => {
     const entity = resolved[i]
@@ -153,28 +165,149 @@ async function execute(id: string, from: FromTaxonomy, names: string[]): Promise
       candidates: candidates[i],
       missing: entity ? undefined : candidates[i].length ? 'candidates were found, none is this advertiser' : 'no name like it',
       flows: entity ? (flows.get(entity.id) ?? []) : [],
-      classicReported: entity && from === 'Classic' ? (reported.get(entity.id) ?? 0) : undefined,
+      classicReported: entity && from === 'Classic' && !swapped ? (reported.get(entity.id) ?? 0) : undefined,
       flags: [],
       commentary: '',
     }
-    r.flags = computeFlags(r, from)
+    r.flags = computeFlags(r, from, direction)
     return r
   })
 
-  const gpcTotals = await step('gpc-totals', async (note) => {
-    const out = await computeGpcTotals(from, advertisers, {}, (s) => note(`Query running… ${s}s`))
-    await note(`${Object.keys(out).length} GPC entities checked`)
-    return out
-  })
+  // A GPC entity's whole spend, by legacy advertiser: for the "Σ total" on a
+  // GPC advertiser. With GPC on the left there is no GPC advertiser to total.
+  const gpcTotals = swapped
+    ? {}
+    : await step('gpc-totals', async (note) => {
+        const out = await computeGpcTotals(from, advertisers, {}, (s) => note(`Query running… ${s}s`))
+        await note(`${Object.keys(out).length} GPC entities checked`)
+        return out
+      })
 
   await step('commentary', async (note) => {
-    const written = await writeCommentary(from, advertisers)
+    const written = await writeCommentary(from, advertisers, direction)
     for (const a of advertisers) a.commentary = written.get(a.input) ?? fallbackCommentary(a)
     await note(written.size ? 'Written' : 'Summarised without a model')
   })
 
-  const result: RunResult = { version: 2, from, advertisers, gpcTotals, model, classicLoadedAt: await classicLoadedAt(), finishedAt: new Date().toISOString() }
+  const result: RunResult = {
+    version: 2,
+    from,
+    ...(swapped ? { direction } : {}),
+    advertisers,
+    gpcTotals,
+    model,
+    classicLoadedAt: await classicLoadedAt(),
+    finishedAt: new Date().toISOString(),
+  }
   await db.update(taxonomyRuns).set({ status: 'done', result: JSON.stringify(result) }).where(eq(taxonomyRuns.id, id))
+}
+
+// --- Classic, placed from its snapshot -----------------------------------------
+
+/**
+ * Classic has no id on a creative, only the VX0 product, so its side of a
+ * flow is placed here from the snapshot (classic_vx_categories, classic_brand_products):
+ *
+ *   into GPC   the FROM side's categories (src*): the Classic category of the
+ *              brand Vivvix maps the product to, at depths 1-3;
+ *   from GPC   the TARGET side: the Classic advertiser (the top of its company
+ *              tree) the product belongs to, and its categories.
+ *
+ * A product that maps to several is split evenly; one that maps to none stays
+ * "Unclassified", or "No Classic advertiser". Other taxonomies pass through.
+ */
+async function placeClassic(read: Map<string, FlowRaw[]>, from: FromTaxonomy, direction: Direction): Promise<Map<string, Flow[]>> {
+  const strip = (f: FlowRaw): Flow => {
+    const { vx0, ...rest } = f
+    void vx0
+    return rest
+  }
+  if (from !== 'Classic') return new Map([...read].map(([k, v]) => [k, v.map(strip)]))
+  const ids = [...new Set([...read.values()].flat().flatMap((f) => (f.vx0 && /^\d+$/.test(f.vx0) ? [Number(f.vx0)] : [])))]
+  const cats = new Map((await db.select().from(classicCategories)).map((c) => [c.id, c]))
+  const catsOf = new Map<number, number[]>()
+  const advsOf = new Map<number, number[]>()
+  for (let i = 0; i < ids.length; i += 5000) {
+    const part = ids.slice(i, i + 5000)
+    for (const r of await db.select().from(classicVxCategories).where(inArray(classicVxCategories.vxProductId, part))) {
+      catsOf.set(r.vxProductId, [...(catsOf.get(r.vxProductId) ?? []), r.categoryId])
+    }
+    if (direction === 'from-gpc') {
+      for (const r of await db.select().from(classicBrandProducts).where(inArray(classicBrandProducts.vxProductId, part))) {
+        advsOf.set(r.vxProductId, [...(advsOf.get(r.vxProductId) ?? []), r.advertiserId])
+      }
+    }
+  }
+  const advIds = [...new Set([...advsOf.values()].flat())]
+  const advName = new Map<number, string>()
+  for (let i = 0; i < advIds.length; i += 5000) {
+    for (const r of await db
+      .selectDistinct({ id: classicBrandSpend.advertiserId, name: classicBrandSpend.advertiserName })
+      .from(classicBrandSpend)
+      .where(inArray(classicBrandSpend.advertiserId, advIds.slice(i, i + 5000)))) {
+      advName.set(r.id, r.name)
+    }
+  }
+  // The names at depths 1-3 above a category.
+  const levels = (id: number): [string | null, string | null, string | null] => {
+    const chain: { depth: number; name: string }[] = []
+    const seen = new Set<number>()
+    for (let c = cats.get(id); c && !seen.has(c.id); c = c.parentId != null ? cats.get(c.parentId) : undefined) {
+      seen.add(c.id)
+      chain.push({ depth: c.depth, name: c.name })
+    }
+    const at = (d: number) => chain.find((x) => x.depth === d)?.name ?? null
+    return [at(1), at(2), at(3)]
+  }
+
+  const out = new Map<string, Flow[]>()
+  for (const [key, flows] of read) {
+    const placed: Flow[] = []
+    for (const f of flows) {
+      const pid = f.vx0 && /^\d+$/.test(f.vx0) ? Number(f.vx0) : null
+      const catList = pid != null ? (catsOf.get(pid) ?? []) : []
+      const nodes = catList.length ? catList.map(levels) : [[null, null, null] as [string | null, string | null, string | null]]
+      if (direction === 'to-gpc') {
+        for (const [l1, l2, l3] of nodes) placed.push({ ...strip(f), srcIndustry: l1, srcCategory: l2, srcSubcategory: l3, spend: f.spend / nodes.length })
+        continue
+      }
+      const advList = pid != null ? (advsOf.get(pid) ?? []) : []
+      const advs = advList.length ? advList : [null]
+      for (const adv of advs) {
+        for (const [l1, l2, l3] of nodes) {
+          const id = adv != null ? String(adv) : null
+          const name = adv != null ? (advName.get(adv) ?? `Classic company ${adv}`) : null
+          placed.push({
+            ...strip(f),
+            // Classic's advertiser is the top of its tree: its own parent.
+            gpcId: id,
+            gpcName: name,
+            gpcParentId: id,
+            gpcParentName: name,
+            industry: l1,
+            category: l2,
+            subcategory: l3,
+            spend: f.spend / (advs.length * nodes.length),
+          })
+        }
+      }
+    }
+    out.set(key, merge(placed))
+  }
+  return out
+}
+
+/** Slices that differ only in spend, added together. */
+function merge(flows: Flow[]): Flow[] {
+  const by = new Map<string, Flow>()
+  for (const f of flows) {
+    const { spend, ...rest } = f
+    const k = JSON.stringify(rest)
+    const prior = by.get(k)
+    if (prior) prior.spend += spend
+    else by.set(k, { ...f })
+  }
+  return [...by.values()]
 }
 
 // --- each charted GPC entity's whole spend -----------------------------------
@@ -377,7 +510,7 @@ async function classicReportedFor(ids: string[]): Promise<Map<string, number>> {
 
 // --- deciding which entity is the advertiser --------------------------------
 
-const matchSystem = (from: FromTaxonomy) => `You match pasted advertiser names to entities in the ${TAXONOMY_LABEL[from]} media-measurement taxonomy.
+const matchSystem = (from: FromTaxonomy | 'GPC') => `You match pasted advertiser names to entities in the ${TAXONOMY_LABEL[from]} media-measurement taxonomy.
 For each pasted advertiser you get candidate entities found by name search, each with an id, its name, a size (${
   from === 'Classic' ? 'its Aug–Sep 2026 ad spend' : 'its product count'
 }) and sometimes its parent, or the subsidiary or brand name that led to it.
@@ -400,7 +533,7 @@ Rules:
 - For every pick whose name is not identical to the pasted name, give a one-sentence reason a salesperson would understand.
 Reply with JSON only: {"matches":[{"input":"<pasted name>","pick":{"id":"…","reason":"…"}|null}]}`
 
-async function resolveAll(from: FromTaxonomy, names: string[], candidates: Candidate[][]): Promise<{ resolved: (Resolved | null)[]; model: string | null }> {
+async function resolveAll(from: FromTaxonomy | 'GPC', names: string[], candidates: Candidate[][]): Promise<{ resolved: (Resolved | null)[]; model: string | null }> {
   const byName = names.map((n, i) => byNameOnly(n, candidates[i]))
   if (!resolveProvider()) return { resolved: byName, model: null }
 
@@ -446,19 +579,22 @@ function byNameOnly(name: string, c: Candidate[]): Resolved | null {
 
 // --- commentary ---------------------------------------------------------------
 
-const COMMENTARY_SYSTEM = `You write short commentary on where one advertiser's ad spend lands in GPC, the target taxonomy.
-The spend is that of the advertiser's entity in a FROM taxonomy (VX1, VX2 or MediaRadar Classic), Aug–Sep 2026. Its creatives were followed into GPC: you get the GPC advertisers those creatives are assigned to and the GPC taxonomy nodes, with dollars and shares, and computed flags.
-Write 2–4 plain sentences per advertiser: how cleanly it maps (one GPC advertiser or several, how much has none), where it sits in the GPC taxonomy, and any match caveat. Use only the numbers given. No preamble, no bullet points.
+const COMMENTARY_SYSTEM = `You write short commentary on where one advertiser's ad spend lands when it is followed from one media-measurement taxonomy (the source) into another (the target).
+The source and target are named for each advertiser - GPC and a legacy taxonomy (VX1, VX2 or MediaRadar Classic), either way round - Aug–Sep 2026. You get the target advertisers and nodes its spend lands on, with dollars and shares, computed FINDINGS that explain the shifts, and flags.
+Write 2–4 plain sentences per advertiser that explain WHY the spend lands where it does, building on the FINDINGS: duplicate or related entities that split it, unrelated advertisers that take some, spend with no target advertiser, and the category it moves to. Use only the numbers given. No preamble, no bullet points.
 Reply with JSON only: {"commentary":[{"input":"<pasted name>","text":"…"}]}`
 
-function describe(from: FromTaxonomy, a: AdvertiserResult): string {
-  const lines = [`ADVERTISER: ${a.input}`]
-  if (!a.entity) return `${lines[0]}\n  not found in ${TAXONOMY_LABEL[from]}`
+function describe(from: FromTaxonomy, a: AdvertiserResult, direction: Direction = 'to-gpc'): string {
+  const { left, right } = sides(from, direction)
+  const lines = [`ADVERTISER: ${a.input}  (source ${TAXONOMY_LABEL[left]}, target ${TAXONOMY_LABEL[right]})`]
+  if (!a.entity) return `${lines[0]}\n  not found in ${TAXONOMY_LABEL[left]}`
   const total = flowTotal(a.flows)
-  lines.push(`  ${TAXONOMY_LABEL[from]} entity: "${a.entity.name}"${a.entity.level ? ` (${a.entity.level})` : ''}; creative spend ${money(total)}`)
+  lines.push(`  ${TAXONOMY_LABEL[left]} entity: "${a.entity.name}"${a.entity.level ? ` (${a.entity.level})` : ''}; creative spend ${money(total)}`)
   if (a.classicReported != null) lines.push(`  Classic's own reported spend: ${money(a.classicReported)}`)
-  for (const r of rankAdvertisers(a.flows).slice(0, 8)) lines.push(`  GPC advertiser: ${r.label} ${money(r.spend)} (${pct(total ? r.spend / total : 0)})`)
-  for (const r of rankNodes(a.flows, 'category').slice(0, 6)) lines.push(`  GPC category: ${r.label} ${money(r.spend)} (${pct(total ? r.spend / total : 0)})`)
+  const story = explainShift(a.flows, { sourceName: a.entity.name, left, right })
+  for (const d of story?.details ?? []) lines.push(`  FINDING: ${d}`)
+  for (const r of rankAdvertisers(a.flows).slice(0, 8)) lines.push(`  ${TAXONOMY_LABEL[right]} advertiser: ${r.label} ${money(r.spend)} (${pct(total ? r.spend / total : 0)})`)
+  for (const r of rankNodes(a.flows, 'category').slice(0, 6)) lines.push(`  ${TAXONOMY_LABEL[right]} category: ${r.label} ${money(r.spend)} (${pct(total ? r.spend / total : 0)})`)
   for (const m of MEDIA_TYPES) {
     const t = flowTotal(filterFlows(a.flows, { media: m }))
     if (t) lines.push(`  ${m}: ${money(t)}`)
@@ -467,10 +603,10 @@ function describe(from: FromTaxonomy, a: AdvertiserResult): string {
   return lines.join('\n')
 }
 
-async function writeCommentary(from: FromTaxonomy, advertisers: AdvertiserResult[]): Promise<Map<string, string>> {
+async function writeCommentary(from: FromTaxonomy, advertisers: AdvertiserResult[], direction: Direction = 'to-gpc'): Promise<Map<string, string>> {
   const out = new Map<string, string>()
   if (!resolveProvider()) return out
-  const prompt = advertisers.map((a) => describe(from, a)).join('\n\n')
+  const prompt = advertisers.map((a) => describe(from, a, direction)).join('\n\n')
   try {
     const { text } = await completeJson(COMMENTARY_SYSTEM, prompt, { maxTokens: 3500, timeoutMs: 180_000, tier: 'advanced' })
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')) as { commentary?: { input?: string; text?: string }[] }
@@ -484,12 +620,15 @@ async function writeCommentary(from: FromTaxonomy, advertisers: AdvertiserResult
   return out
 }
 
+/**
+ * Without the model, nothing: the page's narrative is computed
+ * (explainShift) and stands on its own, so a fallback line here would only
+ * repeat its headline.
+ */
 export function fallbackCommentary(a: AdvertiserResult): string {
   if (!a.entity) return 'Not found.'
-  const total = flowTotal(a.flows)
-  if (!total) return 'No creative spend found in Aug–Sep 2026.'
-  const top = rankAdvertisers(a.flows)[0]
-  return `${money(total)} of creative spend; ${pct(top.spend / total)} lands on ${top.label} in GPC.`
+  if (!flowTotal(a.flows)) return 'No creative spend found in Aug–Sep 2026.'
+  return ''
 }
 
 // --- a person picks a different FROM entity ---------------------------------
@@ -504,6 +643,8 @@ export async function chooseEntity(runId: string, input: string, candidateId: st
   const run = await readRun(runId)
   if (!run?.result || run.result.version !== 2) return { error: 'That comparison has not finished.' }
   const from = run.result.from
+  const direction: Direction = run.result.direction ?? 'to-gpc'
+  const swapped = direction === 'from-gpc'
   const a = run.result.advertisers.find((x) => x.input === input)
   if (!a) return { error: 'That advertiser is not in this comparison.' }
 
@@ -512,18 +653,18 @@ export async function chooseEntity(runId: string, input: string, candidateId: st
   } else {
     const c = a.candidates.find((x) => x.id === candidateId)
     if (!c) return { error: 'That entity was not among the candidates found.' }
-    const products = from === 'Classic' ? await classicProductsFor([c.id]) : new Map<string, number[]>()
-    const flows = await dbxFlows(from, [c.id], products)
+    const products = from === 'Classic' && !swapped ? await classicProductsFor([c.id]) : new Map<string, number[]>()
+    const flows = await placeClassic(swapped ? await dbxFlowsFromGpc(from, [c.id]) : await dbxFlows(from, [c.id], products), from, direction)
     Object.assign(a, {
       entity: { id: c.id, name: c.name, level: c.level, kind: matchKind(input, c.name), chosenBy: by, reason: `chosen by ${by}` },
       missing: undefined,
       flows: flows.get(c.id) ?? [],
-      classicReported: from === 'Classic' ? ((await classicReportedFor([c.id])).get(c.id) ?? 0) : undefined,
+      classicReported: from === 'Classic' && !swapped ? ((await classicReportedFor([c.id])).get(c.id) ?? 0) : undefined,
     })
   }
-  a.flags = computeFlags(a, from)
-  run.result.gpcTotals = { ...(run.result.gpcTotals ?? {}), ...(await computeGpcTotals(from, [a], run.result.gpcTotals ?? {})) }
-  a.commentary = (await writeCommentary(from, [a])).get(a.input) ?? fallbackCommentary(a)
+  a.flags = computeFlags(a, from, direction)
+  if (!swapped) run.result.gpcTotals = { ...(run.result.gpcTotals ?? {}), ...(await computeGpcTotals(from, [a], run.result.gpcTotals ?? {})) }
+  a.commentary = (await writeCommentary(from, [a], direction)).get(a.input) ?? fallbackCommentary(a)
   await db.update(taxonomyRuns).set({ result: JSON.stringify(run.result) }).where(eq(taxonomyRuns.id, runId))
   return {}
 }

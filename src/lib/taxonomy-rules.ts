@@ -168,6 +168,15 @@ export interface Flow {
   industry: string | null
   category: string | null
   subcategory: string | null
+  /**
+   * The SOURCE side's own node for the same dollars (Scott, 16 November
+   * 2026): the FROM entity's legacy category when comparing into GPC, the
+   * GPC category when GPC is the FROM side. Drawn as the breakdown of the
+   * left bar. Absent on runs from before.
+   */
+  srcIndustry?: string | null
+  srcCategory?: string | null
+  srcSubcategory?: string | null
   spend: number
 }
 
@@ -191,9 +200,38 @@ export interface Flag {
   text: string
 }
 
+/**
+ * Which way a comparison runs (Scott, 16 November 2026). "to-gpc", the first
+ * way: a legacy advertiser's creatives followed into GPC. "from-gpc", the
+ * swap: a GPC entity's spend followed into the legacy taxonomy picked, so the
+ * Sankey reads GPC on the left and the legacy taxonomy on the right. Flows
+ * keep one shape either way: gpc*, industry, category and subcategory are the
+ * TARGET side, src* the source side, whatever the target is.
+ */
+export type Direction = 'to-gpc' | 'from-gpc'
+
+/** The taxonomy on each side of a run. */
+export function sides(from: FromTaxonomy, direction: Direction = 'to-gpc'): { left: FromTaxonomy | 'GPC'; right: FromTaxonomy | 'GPC' } {
+  return direction === 'from-gpc' ? { left: 'GPC', right: from } : { left: from, right: 'GPC' }
+}
+
+/** What each of the three node levels is called in a taxonomy. */
+const LEVEL_NAMES: Record<FromTaxonomy | 'GPC', [string, string, string]> = {
+  GPC: ['Industry', 'Category', 'Subcategory'],
+  VX1: ['Industry', 'Major', 'Class'],
+  VX2: ['Industry', 'Category', 'Subcategory'],
+  Classic: ['Level 1', 'Level 2', 'Level 3'],
+}
+
 export const NODE_LEVELS = ['industry', 'category', 'subcategory'] as const
 export type NodeLevel = (typeof NODE_LEVELS)[number]
 export const NODE_LEVEL_LABEL: Record<NodeLevel, string> = { industry: 'Industry', category: 'Category', subcategory: 'Subcategory' }
+
+/** A level's name in a taxonomy: VX1's three are Industry, Major and Class. */
+export const levelName = (tax: FromTaxonomy | 'GPC', level: NodeLevel) => LEVEL_NAMES[tax][NODE_LEVELS.indexOf(level)]!
+
+/** "No GPC advertiser", or "No VX1 advertiser" when the target is VX1. */
+export const noneLabel = (target: FromTaxonomy | 'GPC') => (target === 'GPC' ? NO_GPC : `No ${TAXONOMY_LABEL[target]} advertiser`)
 
 export const NO_GPC = 'No GPC advertiser'
 export const UNCLASSIFIED = 'Unclassified'
@@ -216,6 +254,26 @@ export function nodeOf(f: Flow, level: NodeLevel): string {
   return f.industry || UNCLASSIFIED
 }
 
+/** The source side's node a flow comes from at a level; missing levels fall back as nodeOf does. */
+export function srcNodeOf(f: Flow, level: NodeLevel): string {
+  if (level === 'subcategory') return f.srcSubcategory || f.srcCategory || UNCLASSIFIED
+  if (level === 'category') return f.srcCategory || UNCLASSIFIED
+  return f.srcIndustry || UNCLASSIFIED
+}
+
+/** The source side's nodes by spend - the left bar's breakdown - or null for a run that did not record them. */
+export function rankSrcNodes(flows: Flow[], level: NodeLevel): Ranked[] | null {
+  if (flows.length && flows.every((f) => f.srcIndustry === undefined)) return null
+  const by = new Map<string, Ranked>()
+  for (const f of flows) {
+    const key = srcNodeOf(f, level)
+    const r = by.get(key) ?? { key, label: key, spend: 0 }
+    r.spend += f.spend
+    by.set(key, r)
+  }
+  return [...by.values()].sort((a, b) => b.spend - a.spend)
+}
+
 /** The middle column: the GPC advertiser a creative is assigned to, or the top of that advertiser's tree. */
 export type GpcBy = 'advertiser' | 'parent'
 export const GPC_BY_LABEL: Record<GpcBy, string> = { advertiser: 'Advertiser', parent: 'Top parent' }
@@ -231,11 +289,11 @@ export interface Ranked {
 }
 
 /** GPC advertisers by spend, labelled with their id when two share a name. */
-export function rankAdvertisers(flows: Flow[], gpcBy: GpcBy = 'advertiser'): Ranked[] {
+export function rankAdvertisers(flows: Flow[], gpcBy: GpcBy = 'advertiser', none: string = NO_GPC): Ranked[] {
   const by = new Map<string, Ranked>()
   for (const f of flows) {
     const key = advertiserKey(f, gpcBy)
-    const r = by.get(key) ?? { key, label: advertiserName(f, gpcBy) ?? NO_GPC, spend: 0 }
+    const r = by.get(key) ?? { key, label: advertiserName(f, gpcBy) ?? none, spend: 0 }
     r.spend += f.spend
     by.set(key, r)
   }
@@ -296,7 +354,7 @@ export interface SankeyData {
  * advertiser" and "Unclassified" always stand on their own, because they are
  * the finding, not the tail.
  */
-export function sankeyData(flows: Flow[], level: NodeLevel, top = 7, gpcBy: GpcBy = 'advertiser'): SankeyData {
+export function sankeyData(flows: Flow[], level: NodeLevel, top = 7, gpcBy: GpcBy = 'advertiser', none: string = NO_GPC): SankeyData {
   const keep = (ranked: Ranked[], special: string) => {
     const named = ranked.filter((r) => r.key !== special && r.spend > 0)
     const kept = named.slice(0, top)
@@ -307,7 +365,7 @@ export function sankeyData(flows: Flow[], level: NodeLevel, top = 7, gpcBy: GpcB
     if (sp) out.push(sp)
     return { out, keys: new Set([...kept.map((r) => r.key), ...(sp ? [special] : [])]) }
   }
-  const adv = keep(rankAdvertisers(flows, gpcBy), NO_GPC)
+  const adv = keep(rankAdvertisers(flows, gpcBy, none), NO_GPC)
   const nodes = keep(rankNodes(flows, level), UNCLASSIFIED)
   const links = new Map<string, { from: string; to: string; spend: number }>()
   for (const f of flows) {
@@ -386,31 +444,36 @@ export const UNMAPPED_SHARE = 0.02
 export function computeFlags(
   r: Pick<AdvertiserResult, 'entity' | 'flows' | 'classicReported' | 'missing'>,
   from: FromTaxonomy,
+  direction: Direction = 'to-gpc',
 ): Flag[] {
   const flags: Flag[] = []
+  // Named for the side each is about: the source entity, the target advertisers.
+  const { left, right } = sides(from, direction)
+  const src = TAXONOMY_LABEL[left]
+  const dst = TAXONOMY_LABEL[right]
   if (!r.entity) {
-    flags.push({ kind: 'missing', text: `${TAXONOMY_LABEL[from]}: no matching advertiser found${r.missing ? ` — ${r.missing}` : ''}.` })
+    flags.push({ kind: 'missing', text: `${src}: no matching advertiser found${r.missing ? ` — ${r.missing}` : ''}.` })
     return flags
   }
   if (r.entity.kind !== 'exact') {
     const level = r.entity.level ? ` (${r.entity.level.toLowerCase()})` : ''
     const close = r.entity.kind === 'close' ? ' — same name, different punctuation or suffix' : ''
     const reason = r.entity.reason ? ` — ${r.entity.reason.replace(/[.\s]+$/, '')}` : ''
-    flags.push({ kind: 'name', text: `${TAXONOMY_LABEL[from]}: matched "${r.entity.name}"${level}${close}${reason}.` })
+    flags.push({ kind: 'name', text: `${src}: matched "${r.entity.name}"${level}${close}${reason}.` })
   }
   const total = flowTotal(r.flows)
   if (total > 0) {
     const ranked = rankAdvertisers(r.flows)
     const none = ranked.find((x) => x.key === NO_GPC)?.spend ?? 0
-    if (none / total > UNMAPPED_SHARE) flags.push({ kind: 'unmapped', text: `${money(none)} (${pct(none / total)}) of the spend has no GPC advertiser.` })
+    if (none / total > UNMAPPED_SHARE) flags.push({ kind: 'unmapped', text: `${money(none)} (${pct(none / total)}) of the spend has no ${dst} advertiser.` })
     const material = ranked.filter((x) => x.key !== NO_GPC && x.spend / total >= SPLIT_SHARE)
     if (material.length > 1) {
-      flags.push({ kind: 'split', text: `Spend splits across ${material.length} GPC advertisers: ${material.map((x) => `${x.label} ${pct(x.spend / total)}`).join(', ')}.` })
+      flags.push({ kind: 'split', text: `Spend splits across ${material.length} ${dst} advertisers: ${material.map((x) => `${x.label} ${pct(x.spend / total)}`).join(', ')}.` })
     }
   } else {
-    flags.push({ kind: 'unmapped', text: `No creative spend found for this ${TAXONOMY_LABEL[from]} entity in Aug–Sep 2026.` })
+    flags.push({ kind: 'unmapped', text: `No creative spend found for this ${src} entity in Aug–Sep 2026.` })
   }
-  if (from === 'Classic' && r.classicReported != null) {
+  if (left === 'Classic' && r.classicReported != null) {
     flags.push({
       kind: 'coverage',
       text: `Classic reports ${money(r.classicReported)}; its creatives, linked through Vivvix, carry ${money(total)} of occurrence spend. They are different estimates: compare the split, not the totals.`,
@@ -430,7 +493,10 @@ export function money(v: number): string {
 }
 
 /** The whole comparison as CSV: one row per advertiser, month, media type, GPC advertiser and GPC leaf. */
-export function toCsv(from: FromTaxonomy, results: AdvertiserResult[]): string {
+export function toCsv(from: FromTaxonomy, results: AdvertiserResult[], direction: Direction = 'to-gpc'): string {
+  // Columns named for their side: with the swap, the source is GPC and the target the legacy taxonomy.
+  const { left, right } = sides(from, direction)
+  const R = TAXONOMY_LABEL[right]
   const esc = (v: string | number) => {
     const s = String(v)
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
@@ -438,23 +504,27 @@ export function toCsv(from: FromTaxonomy, results: AdvertiserResult[]): string {
   const lines = [
     [
       'Advertiser (as entered)', 'FROM taxonomy', 'FROM entity', 'FROM level', 'FROM id', 'Month', 'Media type',
-      'GPC advertiser', 'GPC id', 'GPC top parent', 'GPC top parent id', 'GPC product', 'GPC product id', 'GPC industry', 'GPC category', 'GPC subcategory', 'Spend (USD)', 'Flags',
+      `${R} advertiser`, `${R} id`, `${R} top parent`, `${R} top parent id`, `${R} product`, `${R} product id`,
+      `${R} ${levelName(right, 'industry').toLowerCase()}`, `${R} ${levelName(right, 'category').toLowerCase()}`, `${R} ${levelName(right, 'subcategory').toLowerCase()}`,
+      `FROM ${levelName(left, 'industry').toLowerCase()}`, `FROM ${levelName(left, 'category').toLowerCase()}`, `FROM ${levelName(left, 'subcategory').toLowerCase()}`,
+      'Spend (USD)', 'Flags',
     ].join(','),
   ]
   for (const r of results) {
     const flagText = r.flags.map((f) => f.text).join(' | ')
-    const head = [r.input, TAXONOMY_LABEL[from], r.entity?.name ?? 'not found', r.entity?.level ?? '', r.entity?.id ?? '']
+    const head = [r.input, TAXONOMY_LABEL[left], r.entity?.name ?? 'not found', r.entity?.level ?? '', r.entity?.id ?? '']
     if (!r.flows.length) {
-      lines.push([...head, '', '', '', '', '', '', '', '', '', '', '', 0, flagText].map(esc).join(','))
+      lines.push([...head, '', '', '', '', '', '', '', '', '', '', '', '', '', '', 0, flagText].map(esc).join(','))
       continue
     }
     const sorted = [...r.flows].sort((a, b) => a.month.localeCompare(b.month) || a.media.localeCompare(b.media) || b.spend - a.spend)
     for (const f of sorted) {
       lines.push(
         [
-          ...head, MONTH_LABEL[f.month], f.media, f.gpcName ?? NO_GPC, f.gpcId ?? '', f.gpcParentName ?? '', f.gpcParentId ?? '',
+          ...head, MONTH_LABEL[f.month], f.media, f.gpcName ?? noneLabel(right), f.gpcId ?? '', f.gpcParentName ?? '', f.gpcParentId ?? '',
           f.gpcProductName ?? '', f.gpcProductId ?? '',
-          f.industry ?? UNCLASSIFIED, f.category ?? '', f.subcategory ?? '', Math.round(f.spend), flagText,
+          f.industry ?? UNCLASSIFIED, f.category ?? '', f.subcategory ?? '',
+          f.srcIndustry ?? '', f.srcCategory ?? '', f.srcSubcategory ?? '', Math.round(f.spend), flagText,
         ]
           .map(esc)
           .join(','),
@@ -588,6 +658,114 @@ export function summaryText(s: AdvertiserSummary, from: FromTaxonomy): string {
   return lines.join('\n')
 }
 
+// --- the shift, explained -----------------------------------------------------
+
+/** A share with one decimal: near 100% the difference is the point ("99.6%"). */
+const exact = (share: number) => `${(Math.floor(share * 1000) / 10).toFixed(1)}%`
+
+export interface ShiftStory {
+  /** One sentence: how much, and where most of it lands. */
+  headline: string
+  /** Why it is not cleaner, when it is not: related entities, unrelated ones, nothing at all, the category it changes to. */
+  details: string[]
+}
+
+/** At or above this share an unrelated advertiser is worth naming. */
+export const UNRELATED_SHARE = 0.05
+
+/**
+ * What happened to the spend, in sentences (Scott, 16 November 2026: the
+ * narrative should try to explain big shifts). Computed from the flows, never
+ * the model's, so it stands when the model is unavailable and reads the same
+ * every time:
+ *
+ *   - the related entities it splits across: everything under the same top
+ *     parent as the biggest, or named like it or like the source entity once
+ *     legal suffixes go ("Progressive", "The Progressive Corporation") - and
+ *     what one entity would take if they were one, with duplicate names said;
+ *   - unrelated advertisers taking UNRELATED_SHARE or more each;
+ *   - the share with no advertiser on the target side;
+ *   - the industry it is mostly in on each side, when the source side's was
+ *     recorded.
+ */
+export function explainShift(
+  flows: Flow[],
+  opts: { sourceName: string; left: FromTaxonomy | 'GPC'; right: FromTaxonomy | 'GPC' },
+): ShiftStory | null {
+  const total = flowTotal(flows)
+  if (total <= 0) return null
+  const right = TAXONOMY_LABEL[opts.right]
+  const left = TAXONOMY_LABEL[opts.left]
+  const ranked = rankAdvertisers(flows, 'advertiser').filter((r) => r.key !== NO_GPC)
+  const top = ranked[0]
+  const none = flows.filter((f) => !f.gpcId).reduce((a, f) => a + f.spend, 0)
+  const details: string[] = []
+  if (!top) return { headline: `${money(total)} of ${left} spend, none of it on a ${right} advertiser.`, details }
+
+  // The family of the biggest: the same top parent, or the same name.
+  const parentOf = new Map<string, string>()
+  const nameOf = new Map<string, string>()
+  for (const f of flows) {
+    if (!f.gpcId) continue
+    parentOf.set(f.gpcId, f.gpcParentId ?? f.gpcId)
+    nameOf.set(f.gpcId, f.gpcName ?? '')
+  }
+  const names = new Set([normaliseName(nameOf.get(top.key) ?? ''), normaliseName(opts.sourceName)].filter(Boolean))
+  const topParent = parentOf.get(top.key)
+  const related = ranked.filter((r) => parentOf.get(r.key) === topParent || names.has(normaliseName(nameOf.get(r.key) ?? '')))
+  const relatedSpend = related.reduce((a, r) => a + r.spend, 0)
+  const topShare = top.spend / total
+
+  const headline = `${money(total)} of ${left} spend; ${pct(topShare)} lands on ${top.label} in ${right}.`
+
+  if (related.length > 1 && relatedSpend / total - topShare >= 0.005) {
+    // Same display name, ids aside: "Progressive" three times is a duplicate;
+    // "The Progressive Corporation" beside them is a related entity.
+    const base = (r: Ranked) => r.label.replace(/ #\w+$/, '')
+    const groups = new Map<string, Ranked[]>()
+    for (const r of related) groups.set(base(r), [...(groups.get(base(r)) ?? []), r])
+    const dupes = [...groups].filter(([, g]) => g.length > 1)
+    const others = [...groups].filter(([, g]) => g.length === 1).map(([n]) => n)
+    const shown = related.filter((r) => r.spend / total >= 0.0005)
+    const list = shown
+      .slice(0, 4)
+      .map((r) => `${r.label} ${pct(r.spend / total)}`)
+      .join(', ')
+    const what = dupes.length
+      ? `${right} has ${dupes.map(([n, g]) => `${g.length} entities named “${n}”`).join(' and ')}${others.length ? `, plus ${others.slice(0, 2).join(' and ')}` : ''}`
+      : `${right} splits it across ${related.length} related entities`
+    details.push(`${what} (${list}${shown.length > 4 ? ', …' : ''}). If they were aligned to a single ${right} entity, ${exact(relatedSpend / total)} of the spend would land on it.`)
+  }
+
+  const unrelated = ranked.filter((r) => !related.includes(r) && r.spend / total >= UNRELATED_SHARE)
+  if (unrelated.length) {
+    const u = unrelated.reduce((a, r) => a + r.spend, 0)
+    details.push(
+      `${pct(u / total)} lands on ${unrelated.length === 1 ? 'an unrelated advertiser' : `${unrelated.length} unrelated advertisers`}: ${unrelated
+        .slice(0, 3)
+        .map((r) => `${r.label} ${pct(r.spend / total)}`)
+        .join(', ')} - creatives ${right} files under a different company.`,
+    )
+  }
+
+  if (none / total >= 0.01) {
+    details.push(
+      opts.right === 'GPC'
+        ? `${pct(none / total)} has no GPC advertiser: creatives with no paying entity in GPC.`
+        : `${pct(none / total)} has no ${right} advertiser: creatives with no ${right} product.`,
+    )
+  }
+
+  const src = rankSrcNodes(flows, 'industry')
+  const dst = rankNodes(flows, 'industry').filter((r) => r.key !== UNCLASSIFIED)
+  if (src && src[0] && src[0].key !== UNCLASSIFIED && dst[0]) {
+    const a = src[0]
+    const b = dst[0]
+    details.push(`By industry: mostly ${a.label} in ${left} (${pct(a.spend / total)}), ${b.label} in ${right} (${pct(b.spend / total)}).`)
+  }
+  return { headline, details }
+}
+
 // --- progress ---------------------------------------------------------------
 
 export type StepState = 'waiting' | 'running' | 'done' | 'failed'
@@ -601,7 +779,15 @@ export interface Step {
   endedAt?: string
 }
 
-export function initialSteps(from: FromTaxonomy): Step[] {
+export function initialSteps(from: FromTaxonomy, direction: Direction = 'to-gpc'): Step[] {
+  if (direction === 'from-gpc') {
+    return [
+      { key: 'candidates', label: 'Find candidate entities in GPC', state: 'waiting' },
+      { key: 'match', label: 'Decide which entity is the advertiser', state: 'waiting' },
+      { key: 'flows', label: `Follow its spend into ${TAXONOMY_LABEL[from]} (Databricks)`, state: 'waiting' },
+      { key: 'commentary', label: 'Write the commentary', state: 'waiting' },
+    ]
+  }
   return [
     { key: 'candidates', label: `Find candidate advertisers in ${TAXONOMY_LABEL[from]}`, state: 'waiting' },
     { key: 'match', label: 'Decide which entity is the advertiser', state: 'waiting' },

@@ -24,7 +24,7 @@
  *
  * No database, no network: the page, the run and the tests read these.
  */
-import { MEDIA_TYPES, MONTHS, type FlowFilter, type MediaType, type Month } from './taxonomy-rules'
+import { MEDIA_TYPES, MONTHS, type Flow, type FlowFilter, type MediaType, type Month } from './taxonomy-rules'
 
 export const INDUSTRY_BY = ['product', 'brand', 'advertiser', 'parent'] as const
 export type IndustryBy = (typeof INDUSTRY_BY)[number]
@@ -116,6 +116,8 @@ export interface IndustryResult {
   counts: Record<IndustryBy, number>
   /** GPC nodes only, read since 10 November 2026: where its spend falls in each legacy taxonomy, for "Compare to". */
   legacy?: LegacyPlacement
+  /** GPC nodes only, read since 16 November 2026: its Sankey into each legacy taxonomy. */
+  sankey?: NodeSankey
   finishedAt: string
 }
 
@@ -284,3 +286,70 @@ export function legacyPlacement(rows: readonly { tax: string; level: string; id:
 
 /** Exact matches across the two lists (Scott: exact only): the same name, ignoring case and spacing. */
 export const matchName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ')
+
+// --- the node's Sankey (Scott, 16 November 2026) ---------------------------------
+
+/**
+ * One slice of a GPC node's spend as it lands in a legacy taxonomy: on a
+ * legacy advertiser ("OTHER" past the biggest, "" when none) and its three
+ * node levels. VX1 and VX2 come by month and media; Classic, placed from its
+ * snapshot, comes for the whole window (media and month null).
+ */
+export interface NodeFlow {
+  adv: string
+  advName: string | null
+  l1: string | null
+  l2: string | null
+  l3: string | null
+  media: MediaType | null
+  month: Month | null
+  spend: number
+}
+
+export interface NodeSankey {
+  flows: Partial<Record<LegacyTaxonomy, NodeFlow[]>>
+  /** The node's own children (the GPC level below), for the left bar. */
+  children: IndustryRow[]
+}
+
+/** The label the advertisers past the biggest go under. */
+export const OTHER_ADVERTISERS = 'All other advertisers'
+
+/**
+ * A node's slices in the comparison's Flow shape, so its Sankey is drawn
+ * by the same code: the legacy advertiser and nodes are the target side,
+ * the node's children the source side's breakdown. Filters apply where the
+ * slices carry month and media - Classic's do not.
+ */
+export function nodeFlows(sankey: NodeSankey, tax: LegacyTaxonomy, f: FlowFilter = {}): Flow[] {
+  const rows = sankey.flows[tax] ?? []
+  return rows
+    .filter((r) => r.media == null || ((!f.media || r.media === f.media) && (!f.month || r.month === f.month)))
+    .map((r) => {
+      const id = r.adv ? r.adv : null
+      const name = r.adv === 'OTHER' ? OTHER_ADVERTISERS : r.advName
+      return {
+        month: (r.month ?? MONTHS[0]) as Month,
+        media: (r.media ?? MEDIA_TYPES[0]) as MediaType,
+        gpcId: id,
+        gpcName: name,
+        gpcParentId: id,
+        gpcParentName: name,
+        industry: r.l1,
+        category: r.l2,
+        subcategory: r.l3,
+        spend: r.spend,
+      }
+    })
+}
+
+/** The left bar: the node's children by spend, under the same filter. */
+export function nodeChildren(sankey: NodeSankey, f: FlowFilter = {}): { key: string; label: string; spend: number }[] {
+  return sankey.children
+    .map((c) => ({ key: c.key, label: c.label, spend: sumCells(c.cells, f) }))
+    .filter((c) => c.spend > 0)
+    .sort((a, b) => b.spend - a.spend)
+}
+
+/** Whether a taxonomy's slices can follow the media and month filters (Classic's cannot). */
+export const sankeyFiltered = (sankey: NodeSankey, tax: LegacyTaxonomy) => (sankey.flows[tax] ?? []).every((r) => r.media != null)
