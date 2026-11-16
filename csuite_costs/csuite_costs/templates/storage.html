@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Storage · C-Suite Cost Flows{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Storage costs by model</h1>
+    <p class="lede">Choose how long the ad library, page scans and occurrence records are kept. Every flow's storage cost updates. Raw TV and radio recordings stay on their own short window.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <h2 id="horizon-heading">Long-term retention</h2>
+  <div class="segmented" role="group" aria-labelledby="horizon-heading" id="horizons"
+       data-panel-url="{{ url_for('storage_panel') }}">
+    {% for months, label in options %}
+      <a class="segment" href="{{ url_for('storage', months=months) }}" data-months="{{ months }}"
+         aria-pressed="{{ 'true' if months == s.months else 'false' }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+</section>
+
+<div id="storage-panel" aria-live="polite">
+  {% include "_storage.html" %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const group = document.getElementById("horizons");
+  const panel = document.getElementById("storage-panel");
+  let latest = 0;
+
+  group.addEventListener("click", async (e) => {
+    const button = e.target.closest(".segment");
+    if (!button) return;
+    e.preventDefault();
+    const months = button.dataset.months;
+    group.querySelectorAll(".segment").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
+    const request = ++latest;
+    const response = await fetch(`${group.dataset.panelUrl}?months=${months}`);
+    if (request !== latest || !response.ok) return;
+    panel.innerHTML = await response.text();
+    history.replaceState(null, "", `?months=${months}`);
+  });
+})();
+</script>
+{% endblock %}

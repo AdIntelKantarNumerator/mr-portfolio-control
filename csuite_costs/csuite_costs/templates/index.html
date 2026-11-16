@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>What it costs to monitor each medium, from capture to campaign results</h1>
+    <p class="lede">Each medium is recorded or scanned, every ad occurrence is detected and timed, and the results are combined into cross-media campaign reports. Open a flow to change its volumes and see each line item.</p>
+  </div>
+  <dl class="kpis">
+    <div><dt>Portfolio monthly cost</dt><dd>{{ portfolio_total|money }}</dd></div>
+    <div><dt>Annual run rate</dt><dd>{{ (portfolio_total * 12)|money }}</dd></div>
+    <div><dt>Most expensive flow</dt><dd>{{ biggest[0].name }}</dd></div>
+  </dl>
+</section>
+
+<section class="panel">
+  <h2>Where the money goes across all flows</h2>
+  <div class="stage-bar" role="img" aria-label="Portfolio cost by stage">
+    {% for title, total in stage_totals %}
+      {% set pct = (total / portfolio_total * 100) if portfolio_total else 0 %}
+      <span class="seg seg-{{ stages[loop.index0][0] }}" style="flex-grow: {{ '%.3f'|format(pct) }}"
+            title="{{ title }}: {{ total|money }} ({{ '%.0f'|format(pct) }}%)"></span>
+    {% endfor %}
+  </div>
+  <ol class="stage-legend">
+    {% for title, total in stage_totals %}
+      <li><span class="swatch seg-{{ stages[loop.index0][0] }}"></span>{{ title }} <strong>{{ total|money }}</strong>
+        <small>{{ '%.0f'|format((total / portfolio_total * 100) if portfolio_total else 0) }}%</small></li>
+    {% endfor %}
+  </ol>
+</section>
+
+{% for flow, r in results %}
+  <section class="panel flow-panel">
+    <header class="flow-head">
+      <div>
+        <h2>{{ flow.name }}</h2>
+        <p>{{ flow.tagline }}</p>
+      </div>
+      <a class="button" href="{{ url_for('flow_detail', flow_id=flow.id) }}">Model this flow &rarr;</a>
+    </header>
+    {% with detailed=False %}{% include "_lane.html" %}{% endwith %}
+  </section>
+{% endfor %}
+{% endblock %}

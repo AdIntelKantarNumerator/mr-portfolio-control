@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}C-Suite Cost Flows{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('index') }}">C-Suite Cost Flows</a>
+    <nav>
+      {% for f in all_flows %}
+        <a href="{{ url_for('flow_detail', flow_id=f.id) }}"
+           {% if flow is defined and flow.id == f.id %}aria-current="page"{% endif %}>{{ f.name }}</a>
+      {% endfor %}
+      <a href="{{ url_for('storage') }}" class="nav-storage"
+         {% if page is defined and page == 'storage' %}aria-current="page"{% endif %}>Storage</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    Monthly USD at illustrative list prices, not quotes. Edit rates and volumes in <code>flows.py</code>.
+    JSON: <a href="{{ url_for('api_flows') }}">/api/flows</a>
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

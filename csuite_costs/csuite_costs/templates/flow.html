@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}{{ flow.name }} · C-Suite Cost Flows{% endblock %}
+{% block content %}
+<section class="hero hero-flow">
+  <div>
+    <a class="back" href="{{ url_for('index') }}">&larr; All flows</a>
+    <h1>{{ flow.name }}</h1>
+    <p class="lede">{{ flow.tagline }}. Change the inputs below; every stage recalculates.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <form id="params" class="params" data-lane-url="{{ url_for('flow_lane', flow_id=flow.id) }}">
+    {% for p in flow.params %}
+      <label>
+        <span class="param-label">{{ p.label }}</span>
+        <span class="param-input">
+          <input type="number" name="{{ p.key }}" value="{{ r.params[p.key]|input }}" min="{{ p.minimum }}"{% if p.maximum is not none %} max="{{ p.maximum }}"{% endif %} step="{{ p.step }}" inputmode="decimal">
+          <span class="param-unit">{{ p.unit }}</span>
+        </span>
+      </label>
+    {% endfor %}
+    <button type="reset" class="button button-quiet" id="reset">Reset to defaults</button>
+  </form>
+  <p class="form-error" id="form-error" role="alert" hidden></p>
+</section>
+
+<section class="panel" aria-live="polite">
+  <div id="lane-container">
+    {% with detailed=True %}{% include "_lane.html" %}{% endwith %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const form = document.getElementById("params");
+  const container = document.getElementById("lane-container");
+  const errorBox = document.getElementById("form-error");
+  const defaults = {{ flow.params | map(attribute="default") | list | tojson }};
+  let timer, latest = 0;
+
+  async function refresh() {
+    const query = new URLSearchParams(new FormData(form)).toString();
+    const request = ++latest;
+    const response = await fetch(`${form.dataset.laneUrl}?${query}`);
+    if (request !== latest) return;  // a newer change is already in flight
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      errorBox.textContent = body.error || "Could not recalculate.";
+      errorBox.hidden = false;
+      return;
+    }
+    errorBox.hidden = true;
+    container.innerHTML = await response.text();
+    history.replaceState(null, "", `?${query}`);
+  }
+
+  form.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(refresh, 200); });
+  form.addEventListener("submit", (e) => { e.preventDefault(); refresh(); });
+  form.addEventListener("reset", (e) => {
+    e.preventDefault();
+    form.querySelectorAll("input").forEach((input, i) => { input.value = defaults[i]; });
+    refresh();
+  });
+})();
+</script>
+{% endblock %}

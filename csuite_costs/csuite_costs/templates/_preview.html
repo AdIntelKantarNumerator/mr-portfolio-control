@@ -1,0 +1,28 @@
+{# Mock of the campaign result a customer sees for this medium (sample data). #}
+{% set p = flow.preview %}
+<figure class="preview preview-{{ p.kind }}">
+  <div class="visual" aria-hidden="true">
+    {% if p.kind == 'video' %}
+      <div class="player"><span class="play"></span><span class="progress"><span></span></span></div>
+    {% elif p.kind == 'audio' %}
+      <div class="wave">{% for h in [30,55,80,45,95,60,35,70,90,50,25,65,85,40,75,55,30,60] %}<span style="height: {{ h }}%"></span>{% endfor %}</div>
+    {% elif p.kind == 'print' %}
+      <div class="page"><span class="line"></span><span class="line short"></span><span class="ad-box">AD</span><span class="line"></span><span class="line short"></span></div>
+    {% elif p.kind == 'coupon' %}
+      <div class="coupon"><strong>$1.00 OFF</strong><span>Valid Nov 9 to 15</span></div>
+    {% elif p.kind == 'campaign' %}
+      <div class="mix">
+        {% for label, h in [('TV', 90), ('Radio', 65), ('Print', 35), ('Coupons', 50)] %}
+          <span class="mix-col"><span class="mix-bar mix-{{ loop.index }}" style="height: {{ h }}%"></span><small>{{ label }}</small></span>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+  <figcaption>
+    <strong>{{ p.title }}</strong>
+    <dl>
+      {% for label, value in p.fields %}<dt>{{ label }}</dt><dd>{{ value }}</dd>{% endfor %}
+    </dl>
+    <div class="preview-note">Sample customer report</div>
+  </figcaption>
+</figure>

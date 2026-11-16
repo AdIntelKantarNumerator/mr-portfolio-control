@@ -1,0 +1,60 @@
+{# Storage costs for every flow at one long-term retention. Expects `s` from storage_by_flow(). #}
+<dl class="kpis kpis-row">
+  <div><dt>Storage per month, keeping {{ s.label }}</dt><dd>{{ s.total_monthly|money }}</dd></div>
+  <div><dt>Annual storage run rate</dt><dd>{{ s.total_annual|money }}</dd></div>
+  <div><dt>Compared with keeping 1 month</dt><dd>{{ '%.1f'|format(s.multiple_of_shortest or 0) }}&times;</dd></div>
+</dl>
+
+<div class="storage-grid">
+  {% for f in s.flows %}
+    <section class="panel storage-card">
+      <header class="storage-head">
+        <h2><a href="{{ url_for('flow_detail', flow_id=f.id) }}">{{ f.name }}</a></h2>
+        <div class="amount">{{ f.total|money }}<small>/mo</small></div>
+      </header>
+      <div class="share" title="{{ '%.1f'|format(f.share * 100) }}% of all storage">
+        <span style="width: {{ '%.1f'|format(f.share * 100) }}%"></span>
+      </div>
+      <div class="share-label">{{ '%.0f'|format(f.share * 100) }}% of all storage</div>
+      <ul class="items">
+        {% for i in f['items'] %}
+          <li>
+            <div class="item-row"><span class="item-name">{{ i.name }}</span><span class="item-cost">{{ i.cost|money }}</span></div>
+            <div class="item-calc">{{ i.rate|rate }} per {{ i.unit }} &times; {{ i.quantity|qty }}</div>
+            {% if i.long_term %}
+              <span class="basis basis-input">Kept {{ s.label }}</span>
+            {% else %}
+              <span class="basis basis-fixed">Fixed window</span>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endfor %}
+</div>
+
+<section class="panel">
+  <h2>Every horizon at a glance</h2>
+  <p class="lede">Monthly storage cost once that much history is held.</p>
+  <div class="table-wrap">
+    <table class="matrix">
+      <thead>
+        <tr>
+          <th scope="col">Kept for</th>
+          {% for f in s.flows %}<th scope="col">{{ f.name }}</th>{% endfor %}
+          <th scope="col">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in s.matrix %}
+          <tr {% if row.months == s.months %}class="selected" aria-current="true"{% endif %}>
+            <th scope="row">{{ row.label }}</th>
+            {% for f in s.flows %}<td>{{ row.totals[f.id]|money }}</td>{% endfor %}
+            <td class="matrix-total">{{ row.total|money }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="estimate-note">Costs assume the same monthly volumes and storage classes as each flow's defaults. Long retention is where moving older data to a colder tier (such as Glacier Deep Archive) would matter most.</p>
+</section>

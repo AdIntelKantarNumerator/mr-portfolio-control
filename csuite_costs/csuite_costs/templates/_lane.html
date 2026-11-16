@@ -1,0 +1,59 @@
+{# One flow, left to right. Expects `flow`, `r` (compute result) and `detailed`. #}
+<dl class="volumes">
+  {% for v in r.volumes %}
+    <div><dt>{{ v.label }}</dt><dd>{{ v.value|count }} <small>{{ v.unit }}</small></dd></div>
+  {% endfor %}
+</dl>
+
+<div class="lane {{ 'lane-detailed' if detailed else 'lane-compact' }}">
+  {% for s in r.stages %}
+    <section class="stage stage-{{ s.key }}" aria-label="{{ s.title }}">
+      <header class="stage-head">
+        <span class="step">{{ loop.index }}</span>
+        <h3>{{ s.title }}</h3>
+      </header>
+      <p class="stage-summary">{{ s.summary }}</p>
+      <div class="amount">{{ s.total|money }}<small>/mo</small></div>
+      <div class="share" title="{{ '%.1f'|format(s.share * 100) }}% of this flow">
+        <span style="width: {{ '%.1f'|format(s.share * 100) }}%"></span>
+      </div>
+      <div class="share-label">{{ '%.0f'|format(s.share * 100) }}% of flow cost</div>
+
+      {% if detailed %}
+        <ul class="items">
+          {% for i in s.line_items %}
+            <li>
+              <div class="item-row"><span class="item-name">{{ i.name }}</span><span class="item-cost">{{ i.cost|money }}</span></div>
+              <div class="item-calc">{{ i.rate|rate }} per {{ i.unit }} &times; {{ i.quantity|qty }}</div>
+              {% if i.note %}<div class="item-note">{{ i.note }}</div>{% endif %}
+              <span class="basis basis-{{ i.basis }}">{{ i.basis_label }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <ul class="items-compact">
+          {% for i in s.line_items %}<li>{{ i.name }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+
+      {% if s.key == 'view' %}{% include '_preview.html' %}{% endif %}
+    </section>
+    {% if not loop.last %}
+      <div class="arrow" aria-hidden="true">
+        <svg viewBox="0 0 32 24" width="32" height="24"><path d="M2 12h24M18 4l8 8-8 8" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    {% endif %}
+  {% endfor %}
+</div>
+
+<dl class="totals">
+  <div><dt>Monthly cost</dt><dd>{{ r.total_monthly|money }}</dd></div>
+  <div><dt>Annual run rate</dt><dd>{{ r.total_annual|money }}</dd></div>
+  {% if r.content_label != r.occurrence_label %}
+    <div><dt>Cost per {{ r.content_label }} monitored</dt><dd>{{ r.cost_per_content|money }}</dd></div>
+  {% endif %}
+  <div><dt>Cost per {{ r.occurrence_label }} detected</dt><dd>{{ r.cost_per_occurrence|money }}</dd></div>
+  <div><dt>Cost per customer view</dt><dd>{{ r.cost_per_view|money }}</dd></div>
+  <div><dt>Largest stage</dt><dd>{{ r.largest_stage }}</dd></div>
+</dl>
+<p class="estimate-note">{{ '%.0f'|format(r.estimate_share * 100) }}% of this flow's cost comes from unsourced estimates; volumes are placeholders.</p>
