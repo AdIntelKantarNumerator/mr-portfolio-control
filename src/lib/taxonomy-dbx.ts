@@ -774,15 +774,25 @@ leg AS (SELECT e.k k, max(e.n) n, sum(s) s FROM lx WHERE e.k IS NOT NULL GROUP B
 -- VX0 product, placed from the snapshot.
 ${legacySql('VX1', 'lv1')},
 ${legacySql('VX2', 'lv2')},
-ac AS (SELECT a.creative_id, a.media, a.month, a.spend, ${childCol ? `coalesce(n.${childCol}, '')` : "''"} child, c.primary_product_id vx0
+-- One pass, as for "Compare to" above: the slices summed per creative and
+-- child first, then each creative's VX1, VX2 and VX0 placement exploded and
+-- added up once. Referring to the attribution once per taxonomy made the
+-- read take over eleven minutes.
+ac AS (SELECT a.creative_id, a.media, a.month, ${childCol ? `coalesce(n.${childCol}, '')` : "''"} child, sum(a.spend) s
   FROM a
   JOIN mrdpp_prod.global_catalog.product p ON p.product_id = a.product_id
   LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = p.taxonomy_node_id
-  LEFT JOIN mrdpp_prod.gold.creative c ON c.creative_id = a.creative_id),
-lf AS (
-  SELECT 'VX1' tax, x.child, l.l1, l.l2, l.l3, x.media, x.month, sum(x.spend) s FROM ac x LEFT JOIN lv1 l ON l.creative_id = x.creative_id GROUP BY ALL
-  UNION ALL
-  SELECT 'VX2', x.child, l.l1, l.l2, l.l3, x.media, x.month, sum(x.spend) FROM ac x LEFT JOIN lv2 l ON l.creative_id = x.creative_id GROUP BY ALL)
+  GROUP BY ALL),
+cv AS (SELECT creative_id, primary_product_id vx0 FROM mrdpp_prod.gold.creative WHERE creative_id IN (SELECT creative_id FROM cs)),
+lfx AS (SELECT x.child, x.media, x.month, x.s, explode(array(
+    named_struct('tax', 'VX1', 'l1', l1.l1, 'l2', l1.l2, 'l3', l1.l3),
+    named_struct('tax', 'VX2', 'l1', l2.l1, 'l2', l2.l2, 'l3', l2.l3),
+    named_struct('tax', 'VX0', 'l1', cast(cv.vx0 AS string), 'l2', cast(NULL AS string), 'l3', cast(NULL AS string)))) e
+  FROM ac x
+  LEFT JOIN lv1 l1 ON l1.creative_id = x.creative_id
+  LEFT JOIN lv2 l2 ON l2.creative_id = x.creative_id
+  LEFT JOIN cv ON cv.creative_id = x.creative_id),
+lf AS (SELECT e.tax tax, child, e.l1 l1, e.l2 l2, e.l3 l3, media, month, sum(s) s FROM lfx GROUP BY ALL)
 SELECT t.gby, cast(t.k AS string) key,
   CASE WHEN t.gby = 'product' THEN pr.product_name ELSE coalesce(e.display_name, e.legal_name) END name,
   t.media, cast(t.month AS string) month, t.s spend
@@ -797,10 +807,10 @@ SELECT 'count', gby, NULL, NULL, NULL, cast(count(DISTINCT k) AS double) FROM v 
 UNION ALL
 SELECT CASE WHEN k LIKE 'VX0|%' THEN 'vx0' ELSE 'legacy' END, CASE WHEN k LIKE 'VX0|%' THEN substr(k, 5) ELSE k END, n, NULL, NULL, s FROM leg
 UNION ALL
-SELECT 'lflow', concat_ws(chr(31), tax, child, coalesce(l1, ''), coalesce(l2, ''), coalesce(l3, '')), NULL, media, cast(month AS string), sum(s)
-  FROM lf GROUP BY tax, child, l1, l2, l3, media, month
+SELECT 'lflow', concat_ws(chr(31), tax, child, coalesce(l1, ''), coalesce(l2, ''), coalesce(l3, '')), NULL, media, cast(month AS string), s
+  FROM lf WHERE tax <> 'VX0'
 UNION ALL
-SELECT 'cvx0', concat_ws(chr(31), child, cast(vx0 AS string)), NULL, NULL, NULL, sum(spend) FROM ac WHERE vx0 IS NOT NULL GROUP BY child, vx0`
+SELECT 'cvx0', concat_ws(chr(31), child, l1), NULL, NULL, NULL, sum(s) FROM lf WHERE tax = 'VX0' AND l1 IS NOT NULL GROUP BY child, l1`
   const rows = await dbxQuery(config(), sql, [], { onWait, large: true })
   return rows.map((r) => ({ gby: r.gby!, key: r.key, name: r.name, media: r.media, month: r.month, spend: Number(r.spend ?? 0) }))
 }
