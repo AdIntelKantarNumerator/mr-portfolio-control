@@ -290,14 +290,15 @@ export const matchName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, '
 // --- the node's Sankey (Scott, 16 November 2026) ---------------------------------
 
 /**
- * One slice of a GPC node's spend as it lands in a legacy taxonomy: on a
- * legacy advertiser ("OTHER" past the biggest, "" when none) and its three
- * node levels. VX1 and VX2 come by month and media; Classic, placed from its
- * snapshot, comes for the whole window (media and month null).
+ * One slice of a GPC node's spend as it lands in a legacy taxonomy, category
+ * to category (Scott: no advertisers - "just show category level to category
+ * level"): the node's own GPC child category (the level below it; "" for a
+ * subcategory, which has none) and the legacy taxonomy's three node levels.
+ * VX1 and VX2 come by month and media; Classic, placed from its snapshot,
+ * for the whole window (media and month null).
  */
 export interface NodeFlow {
-  adv: string
-  advName: string | null
+  child: string
   l1: string | null
   l2: string | null
   l3: string | null
@@ -307,48 +308,37 @@ export interface NodeFlow {
 }
 
 export interface NodeSankey {
+  /** 2 since category to category; a read without it is read again (outdated). */
+  version: 2
   flows: Partial<Record<LegacyTaxonomy, NodeFlow[]>>
-  /** The node's own children (the GPC level below), for the left bar. */
-  children: IndustryRow[]
 }
 
-/** The label the advertisers past the biggest go under. */
-export const OTHER_ADVERTISERS = 'All other advertisers'
-
 /**
- * A node's slices in the comparison's Flow shape, so its Sankey is drawn
- * by the same code: the legacy advertiser and nodes are the target side,
- * the node's children the source side's breakdown. Filters apply where the
- * slices carry month and media - Classic's do not.
+ * A node's slices in the comparison's Flow shape, so its Sankey is drawn by
+ * the same code: the node's GPC child categories take the middle column and
+ * the legacy categories the right. A subcategory, with no children, is its
+ * own middle. Filters apply where the slices carry month and media - Classic's
+ * do not.
  */
-export function nodeFlows(sankey: NodeSankey, tax: LegacyTaxonomy, f: FlowFilter = {}): Flow[] {
+export function nodeFlows(sankey: NodeSankey, tax: LegacyTaxonomy, nodeName: string, f: FlowFilter = {}): Flow[] {
   const rows = sankey.flows[tax] ?? []
   return rows
     .filter((r) => r.media == null || ((!f.media || r.media === f.media) && (!f.month || r.month === f.month)))
     .map((r) => {
-      const id = r.adv ? r.adv : null
-      const name = r.adv === 'OTHER' ? OTHER_ADVERTISERS : r.advName
+      const child = r.child || nodeName
       return {
         month: (r.month ?? MONTHS[0]) as Month,
         media: (r.media ?? MEDIA_TYPES[0]) as MediaType,
-        gpcId: id,
-        gpcName: name,
-        gpcParentId: id,
-        gpcParentName: name,
+        gpcId: child,
+        gpcName: child,
+        gpcParentId: child,
+        gpcParentName: child,
         industry: r.l1,
         category: r.l2,
         subcategory: r.l3,
         spend: r.spend,
       }
     })
-}
-
-/** The left bar: the node's children by spend, under the same filter. */
-export function nodeChildren(sankey: NodeSankey, f: FlowFilter = {}): { key: string; label: string; spend: number }[] {
-  return sankey.children
-    .map((c) => ({ key: c.key, label: c.label, spend: sumCells(c.cells, f) }))
-    .filter((c) => c.spend > 0)
-    .sort((a, b) => b.spend - a.spend)
 }
 
 /** Whether a taxonomy's slices can follow the media and month filters (Classic's cannot). */
@@ -358,8 +348,11 @@ export const sankeyFiltered = (sankey: NodeSankey, tax: LegacyTaxonomy) => (sank
  * A GPC node read before its Sankey was part of the read (16 November 2026)
  * is read again when it is opened, rather than kept: the page would show the
  * lists without the Sankey, and a small "re-read" note under them was easy
- * to miss (Scott: "I don't see the industry sankey diagram").
+ * to miss (Scott: "I don't see the industry sankey diagram"). So is one
+ * whose Sankey is the first, by advertiser.
  */
 export function outdated(key: string, result: unknown): boolean {
-  return key.startsWith('node:') && !!result && !(result as { sankey?: unknown }).sankey
+  if (!key.startsWith('node:') || !result) return false
+  // No Sankey, or the first one (by advertiser, 16 November 2026, replaced the same day).
+  return (result as { sankey?: { version?: number } }).sankey?.version !== 2
 }

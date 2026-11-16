@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { computeFlags, explainShift, levelName, noneLabel, rankSrcNodes, sides, toCsv, type Flow } from '../src/lib/taxonomy-rules'
-import { nodeChildren, nodeFlows, sankeyFiltered, type NodeSankey } from '../src/lib/taxonomy-industry-rules'
+import { nodeFlows, sankeyFiltered, type NodeSankey } from '../src/lib/taxonomy-industry-rules'
 
 const flow = (over: Partial<Flow>): Flow => ({
   month: '2026-08',
@@ -79,31 +79,32 @@ test('the CSV names its columns for the sides', () => {
 })
 
 const sankey: NodeSankey = {
+  version: 2,
   flows: {
     VX1: [
-      { adv: '6944', advName: 'Progressive', l1: 'Insurance & Real Estate', l2: 'Property & Casualty', l3: 'Auto', media: 'CTV', month: '2026-09', spend: 30 },
-      { adv: 'OTHER', advName: null, l1: 'Insurance & Real Estate', l2: 'Property & Casualty', l3: null, media: 'Digital', month: '2026-09', spend: 5 },
+      { child: 'Auto Insurance', l1: 'Insurance & Real Estate', l2: 'Property & Casualty', l3: 'Auto', media: 'CTV', month: '2026-09', spend: 30 },
+      { child: '', l1: 'Insurance & Real Estate', l2: 'Property & Casualty', l3: null, media: 'Digital', month: '2026-09', spend: 5 },
     ],
-    Classic: [{ adv: '12', advName: 'Progressive Corp', l1: 'Finance', l2: null, l3: null, media: null, month: null, spend: 20 }],
+    Classic: [{ child: 'Auto Insurance', l1: 'Finance', l2: null, l3: null, media: null, month: null, spend: 20 }],
   },
-  children: [{ key: 'Auto Insurance', label: 'Auto Insurance', cells: [{ media: 'CTV', month: '2026-09', spend: 30 }] }],
 }
 
-test("a node's Sankey: legacy advertisers as the target, OTHER named, filters where the slices allow them", () => {
-  const all = nodeFlows(sankey, 'VX1')
+test("a node's Sankey is category to category: GPC children in the middle, no advertisers, filters where the slices allow them", () => {
+  const all = nodeFlows(sankey, 'VX1', 'Insurance')
   assert.equal(all.length, 2)
-  assert.equal(all[1]!.gpcName, 'All other advertisers')
-  assert.equal(nodeFlows(sankey, 'VX1', { media: 'CTV' }).length, 1)
-  assert.equal(nodeFlows(sankey, 'Classic', { media: 'CTV' }).length, 1, 'Classic has no media: kept')
+  assert.equal(all[0]!.gpcName, 'Auto Insurance')
+  assert.equal(all[1]!.gpcName, 'Insurance', 'no child: the node itself')
+  assert.equal(all[0]!.category, 'Property & Casualty')
+  assert.equal(nodeFlows(sankey, 'VX1', 'Insurance', { media: 'CTV' }).length, 1)
+  assert.equal(nodeFlows(sankey, 'Classic', 'Insurance', { media: 'CTV' }).length, 1, 'Classic has no media: kept')
   assert.equal(sankeyFiltered(sankey, 'Classic'), false)
-  assert.deepEqual(nodeChildren(sankey, { media: 'Digital' }), [])
-  assert.equal(nodeChildren(sankey)[0]!.spend, 30)
 })
 
-test('the reported case: a node read before the Sankey is read again when opened; one with it, or a legacy node, is kept', async () => {
+test('a node read before the Sankey, or with the first one by advertiser, is read again when opened; the current one, or a legacy node, is kept', async () => {
   const { outdated } = await import('../src/lib/taxonomy-industry-rules')
   assert.equal(outdated('node:104', { name: 'Streaming Media', views: {} }), true)
-  assert.equal(outdated('node:104', { name: 'Streaming Media', sankey: { flows: {}, children: [] } }), false)
+  assert.equal(outdated('node:104', { name: 'Streaming Media', sankey: { flows: {}, children: [] } }), true)
+  assert.equal(outdated('node:104', { name: 'Streaming Media', sankey: { version: 2, flows: {} } }), false)
   assert.equal(outdated('legacy:VX1:major:7', { name: 'TV' }), false)
   assert.equal(outdated('node:104', null), false)
 })

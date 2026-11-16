@@ -30,12 +30,11 @@ import {
   type LegacyTaxonomy,
   type TaxNode,
   type TreeNode,
-  nodeChildren,
   nodeFlows,
   sankeyFiltered,
   type NodeSankey,
 } from '@/lib/taxonomy-industry-rules'
-import { levelName, NODE_LEVELS, noneLabel, sankeyData, type NodeLevel } from '@/lib/taxonomy-rules'
+import { levelName, NODE_LEVELS, sankeyData, type NodeLevel } from '@/lib/taxonomy-rules'
 import { MEDIA_TYPES, MONTH_LABEL, MONTHS, money, pct, type MediaType, type Month } from '@/lib/taxonomy-rules'
 import type { IndustryView } from '@/lib/taxonomy-industry'
 import { Progress, Sankey, Seg } from '../comparison'
@@ -345,6 +344,7 @@ function Spenders({ result, updatedAt, busy, onReread }: { result: IndustryResul
           key={tax || 'VX1'}
           sankey={result.sankey}
           name={result.name}
+          level={result.level}
           tax={tax || 'VX1'}
           media={media || null}
           month={month || null}
@@ -495,23 +495,28 @@ function SpenderList({
   )
 }
 
+/** The GPC level below a node's: what its middle column holds. */
+const CHILD_LEVEL: Record<string, string> = { 'Industry Group': 'Industry', Industry: 'Category', Category: 'Subcategory' }
+
 /**
- * Where a GPC node's spend lands in a legacy taxonomy, as a Sankey (Scott, 16
- * November 2026): the node on the left, broken out by its own children; the
- * legacy advertisers in the middle; their legacy nodes on the right. The
- * taxonomy follows "Compare to" when one is picked, VX1 otherwise, and can be
- * switched here; the media and month filters apply, except to Classic, which
- * is placed through its snapshot for the whole window.
+ * Where a GPC node's spend lands in a legacy taxonomy, category to category
+ * (Scott, 16 November 2026: advertisers are not relevant here): the node on
+ * the left, its GPC child categories in the middle, the legacy categories on
+ * the right. The taxonomy follows "Compare to" when one is picked, VX1
+ * otherwise, and can be switched here; the media and month filters apply,
+ * except to Classic, which is placed through its snapshot for the whole window.
  */
 function NodeSankeyView({
   sankey,
   name,
+  level: gpcLevel,
   tax: initial,
   media,
   month,
 }: {
   sankey: NodeSankey
   name: string
+  level: string
   tax: LegacyTaxonomy
   media: MediaType | null
   month: Month | null
@@ -521,24 +526,21 @@ function NodeSankeyView({
   // Classic's slices carry no month or media: the filters cannot apply to them.
   const fm = sankeyFiltered(sankey, tax) ? media : null
   const fmo = sankeyFiltered(sankey, tax) ? month : null
-  const flows = useMemo(() => nodeFlows(sankey, tax, { media: fm, month: fmo }), [sankey, tax, fm, fmo])
-  const none = noneLabel(tax)
-  const data = useMemo(() => sankeyData(flows, level, 7, 'advertiser', none), [flows, level, none])
-  const kids = useMemo(() => nodeChildren(sankey, { media: fm, month: fmo }), [sankey, fm, fmo])
+  const flows = useMemo(() => nodeFlows(sankey, tax, name, { media: fm, month: fmo }), [sankey, tax, name, fm, fmo])
+  const data = useMemo(() => sankeyData(flows, level, 7, 'advertiser'), [flows, level])
   const L = LEGACY_LABEL[tax]
+  const child = CHILD_LEVEL[gpcLevel] ?? gpcLevel
   return (
     <div className="ix-sankey">
       <div className="tx-filters">
         <Seg label="Lands in" value={tax} onChange={(v) => setTax(v as LegacyTaxonomy)} options={LEGACY_TAXONOMIES.map((t) => [t, LEGACY_LABEL[t]] as [string, string])} />
-        <Seg label={`${L} node`} value={level} onChange={(v) => setLevel(v as NodeLevel)} options={NODE_LEVELS.map((l) => [l, levelName(tax, l)] as [string, string])} />
+        <Seg label={`${L} level`} value={level} onChange={(v) => setLevel(v as NodeLevel)} options={NODE_LEVELS.map((l) => [l, levelName(tax, l)] as [string, string])} />
       </div>
       {data.total > 0 ? (
         <Sankey
           data={data}
           fromLabel={name}
-          heads={{ left: 'GPC', mid: `${L} ADVERTISER`.toUpperCase(), right: `${L} ${levelName(tax, level)}`.toUpperCase() }}
-          none={none}
-          breakdown={kids.length > 1 ? kids : null}
+          heads={{ left: 'GPC', mid: `GPC ${child}`.toUpperCase(), right: `${L} ${levelName(tax, level)}`.toUpperCase() }}
           more={new Set()}
           onMore={() => undefined}
           onSample={null}

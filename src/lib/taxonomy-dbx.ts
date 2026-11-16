@@ -711,9 +711,6 @@ export interface NodeSpenderRaw {
 /** VX1's category levels, as brandcentral.category_flatten names its columns. */
 const VX1_LEVELS = ['section', 'industry', 'major', 'class', 'subcategory', 'microcategory'] as const
 
-/** Legacy advertisers a node's Sankey names, per taxonomy; the rest are one "Other". */
-export const SANKEY_ADVERTISERS = 30
-
 /** The GPC column one level below a node's level, for its Sankey's left bar; none below a subcategory. */
 export function childColumn(level: string): string | null {
   return level === 'Industry Group' ? 'industry_name' : level === 'Industry' ? 'category_name' : level === 'Category' ? 'subcategory_name' : null
@@ -770,26 +767,22 @@ lx AS (SELECT cw.s, explode(array(
   LEFT JOIN mrdpp_prod.vx2_taxonomy.d_category ct ON ct.CODE = p2.PRCATGY
   LEFT JOIN mrdpp_prod.vx2_taxonomy.d_subcategory sc ON sc.CODE = p2.PRSBCAT),
 leg AS (SELECT e.k k, max(e.n) n, sum(s) s FROM lx WHERE e.k IS NOT NULL GROUP BY e.k),
--- The node's Sankey (Scott, 16 November 2026): its spend by VX1 and VX2
--- advertiser and node, month and media; the biggest SANKEY_ADVERTISERS
--- advertisers by name, the rest as OTHER. Classic is placed from vx0.
+-- The node's Sankey (Scott, 16 November 2026: category to category, no
+-- advertisers): its spend by its own GPC child category - the level below
+-- it, from the product each slice was attributed to - and the VX1 and VX2
+-- category of the creative, by month and media. Classic comes as child and
+-- VX0 product, placed from the snapshot.
 ${legacySql('VX1', 'lv1')},
 ${legacySql('VX2', 'lv2')},
-cwm AS (SELECT creative_id, media, month, sum(spend) s FROM a GROUP BY 1, 2, 3),
-lf AS (
-  SELECT 'VX1' tax, l.adv_id, l.adv_name, l.l1, l.l2, l.l3, c.media, c.month, sum(c.s) s FROM cwm c LEFT JOIN lv1 l ON l.creative_id = c.creative_id GROUP BY ALL
-  UNION ALL
-  SELECT 'VX2', l.adv_id, l.adv_name, l.l1, l.l2, l.l3, c.media, c.month, sum(c.s) FROM cwm c LEFT JOIN lv2 l ON l.creative_id = c.creative_id GROUP BY ALL),
-lfr AS (SELECT *, dense_rank() OVER (PARTITION BY tax ORDER BY tot DESC, adv_id) rk
-  FROM (SELECT *, sum(s) OVER (PARTITION BY tax, adv_id) tot FROM lf WHERE adv_id IS NOT NULL)),
-lfo AS (
-  SELECT tax, CASE WHEN rk <= ${SANKEY_ADVERTISERS} THEN adv_id ELSE 'OTHER' END a, CASE WHEN rk <= ${SANKEY_ADVERTISERS} THEN adv_name END n, l1, l2, l3, media, month, s FROM lfr
-  UNION ALL
-  SELECT tax, '', NULL, l1, l2, l3, media, month, s FROM lf WHERE adv_id IS NULL)${childCol ? `,
-ch AS (SELECT n.${childCol} k, a.media, a.month, sum(a.spend) s FROM a
+ac AS (SELECT a.creative_id, a.media, a.month, a.spend, ${childCol ? `coalesce(n.${childCol}, '')` : "''"} child, c.primary_product_id vx0
+  FROM a
   JOIN mrdpp_prod.global_catalog.product p ON p.product_id = a.product_id
   LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = p.taxonomy_node_id
-  GROUP BY ALL)` : ''}
+  LEFT JOIN mrdpp_prod.gold.creative c ON c.creative_id = a.creative_id),
+lf AS (
+  SELECT 'VX1' tax, x.child, l.l1, l.l2, l.l3, x.media, x.month, sum(x.spend) s FROM ac x LEFT JOIN lv1 l ON l.creative_id = x.creative_id GROUP BY ALL
+  UNION ALL
+  SELECT 'VX2', x.child, l.l1, l.l2, l.l3, x.media, x.month, sum(x.spend) FROM ac x LEFT JOIN lv2 l ON l.creative_id = x.creative_id GROUP BY ALL)
 SELECT t.gby, cast(t.k AS string) key,
   CASE WHEN t.gby = 'product' THEN pr.product_name ELSE coalesce(e.display_name, e.legal_name) END name,
   t.media, cast(t.month AS string) month, t.s spend
@@ -804,10 +797,10 @@ SELECT 'count', gby, NULL, NULL, NULL, cast(count(DISTINCT k) AS double) FROM v 
 UNION ALL
 SELECT CASE WHEN k LIKE 'VX0|%' THEN 'vx0' ELSE 'legacy' END, CASE WHEN k LIKE 'VX0|%' THEN substr(k, 5) ELSE k END, n, NULL, NULL, s FROM leg
 UNION ALL
-SELECT 'lflow', concat_ws(chr(31), tax, a, coalesce(l1, ''), coalesce(l2, ''), coalesce(l3, '')), max(n), media, cast(month AS string), sum(s)
-  FROM lfo GROUP BY tax, a, l1, l2, l3, media, month${childCol ? `
+SELECT 'lflow', concat_ws(chr(31), tax, child, coalesce(l1, ''), coalesce(l2, ''), coalesce(l3, '')), NULL, media, cast(month AS string), sum(s)
+  FROM lf GROUP BY tax, child, l1, l2, l3, media, month
 UNION ALL
-SELECT 'child', coalesce(k, ''), NULL, media, cast(month AS string), sum(s) FROM ch GROUP BY k, media, month` : ''}`
+SELECT 'cvx0', concat_ws(chr(31), child, cast(vx0 AS string)), NULL, NULL, NULL, sum(spend) FROM ac WHERE vx0 IS NOT NULL GROUP BY child, vx0`
   const rows = await dbxQuery(config(), sql, [], { onWait, large: true })
   return rows.map((r) => ({ gby: r.gby!, key: r.key, name: r.name, media: r.media, month: r.month, spend: Number(r.spend ?? 0) }))
 }

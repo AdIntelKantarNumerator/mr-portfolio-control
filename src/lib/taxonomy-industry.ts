@@ -11,8 +11,8 @@
  */
 import { eq, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { classicBrandProducts, classicBrandSpend, classicCategories, classicVxCategories, taxonomyIndustry } from '@/db/schema'
-import { childColumn, dbxLegacyNodeName, dbxLegacySpenders, dbxNodeSpenders, dbxTaxonomyTree, SANKEY_ADVERTISERS, type NodeSpenderRaw } from './taxonomy-dbx'
+import { classicBrandSpend, classicCategories, classicVxCategories, taxonomyIndustry } from '@/db/schema'
+import { childColumn, dbxLegacyNodeName, dbxLegacySpenders, dbxNodeSpenders, dbxTaxonomyTree, type NodeSpenderRaw } from './taxonomy-dbx'
 import {
   industryResult,
   outdated,
@@ -22,8 +22,6 @@ import {
   legacyPlacement,
   type NodeFlow,
   type NodeSankey,
-  type Cell,
-  type IndustryRow,
   pathTo,
   type IndustryResult,
   type LegacyTaxonomy,
@@ -224,45 +222,37 @@ async function classicPlacement(rows: readonly NodeSpenderRaw[]): Promise<{ tax:
 
 /**
  * A node's Sankey from its read (Scott, 16 November 2026): VX1 and VX2 as the
- * query gave them ("lflow" rows: taxonomy, advertiser, three levels, by month
- * and media), Classic placed from the snapshot by each creative's VX0 product
- * - advertiser and category, split evenly where a product maps to several -
- * and the node's children ("child" rows) for the left bar.
+ * query gave them ("lflow" rows: taxonomy, GPC child, three legacy levels, by
+ * month and media), Classic placed from the snapshot by each creative's VX0
+ * product ("cvx0" rows: child and product) - its category, split evenly where
+ * a product maps to several.
  */
 async function nodeSankey(raw: readonly NodeSpenderRaw[]): Promise<NodeSankey> {
   const flows: NodeSankey['flows'] = { VX1: [], VX2: [] }
   for (const r of raw) {
     if (r.gby !== 'lflow' || !r.key || !r.spend) continue
-    const [tax, adv, l1, l2, l3] = r.key.split('\u001f')
+    const [tax, child, l1, l2, l3] = r.key.split('\u001f')
     if (tax !== 'VX1' && tax !== 'VX2') continue
     const month = r.month ? (`${r.month.slice(0, 4)}-${r.month.slice(4, 6)}` as NodeFlow['month']) : null
-    flows[tax]!.push({ adv: adv ?? '', advName: r.name, l1: l1 || null, l2: l2 || null, l3: l3 || null, media: (r.media as NodeFlow['media']) ?? null, month, spend: r.spend })
+    flows[tax]!.push({ child: child ?? '', l1: l1 || null, l2: l2 || null, l3: l3 || null, media: (r.media as NodeFlow['media']) ?? null, month, spend: r.spend })
   }
-  flows.Classic = await classicNodeFlows(raw.filter((r) => r.gby === 'vx0'))
-
-  const kids = new Map<string, IndustryRow>()
-  for (const r of raw) {
-    if (r.gby !== 'child' || !r.spend || !r.media || !r.month) continue
-    const key = r.key || 'Unclassified'
-    const row = kids.get(key) ?? { key, label: key, cells: [] }
-    row.cells.push({ media: r.media as Cell['media'], month: `${r.month.slice(0, 4)}-${r.month.slice(4, 6)}` as Cell['month'], spend: r.spend })
-    kids.set(key, row)
-  }
-  return { flows, children: [...kids.values()] }
+  flows.Classic = await classicNodeFlows(raw.filter((r) => r.gby === 'cvx0'))
+  return { version: 2, flows }
 }
 
-/** Classic's side of a node's Sankey, from the VX0 products its creatives carry. */
+/** Classic's side of a node's Sankey: each child's VX0 products placed in Classic's categories. */
 async function classicNodeFlows(rows: readonly NodeSpenderRaw[]): Promise<NodeFlow[]> {
-  const spendOf = new Map<number, number>()
-  for (const r of rows) if (r.key && /^\d+$/.test(r.key)) spendOf.set(Number(r.key), (spendOf.get(Number(r.key)) ?? 0) + r.spend)
-  if (!spendOf.size) return []
-  const ids = [...spendOf.keys()]
+  const parts = rows.flatMap((r) => {
+    const [child, vx0] = (r.key ?? '').split('\u001f')
+    return vx0 && /^\d+$/.test(vx0) && r.spend ? [{ child: child ?? '', pid: Number(vx0), spend: r.spend }] : []
+  })
+  if (!parts.length) return []
+  const ids = [...new Set(parts.map((p) => p.pid))]
   const catsOf = new Map<number, number[]>()
-  const advsOf = new Map<number, number[]>()
   for (let i = 0; i < ids.length; i += 5000) {
-    const part = ids.slice(i, i + 5000)
-    for (const r of await db.select().from(classicVxCategories).where(inArray(classicVxCategories.vxProductId, part))) catsOf.set(r.vxProductId, [...(catsOf.get(r.vxProductId) ?? []), r.categoryId])
-    for (const r of await db.select().from(classicBrandProducts).where(inArray(classicBrandProducts.vxProductId, part))) advsOf.set(r.vxProductId, [...(advsOf.get(r.vxProductId) ?? []), r.advertiserId])
+    for (const r of await db.select().from(classicVxCategories).where(inArray(classicVxCategories.vxProductId, ids.slice(i, i + 5000)))) {
+      catsOf.set(r.vxProductId, [...(catsOf.get(r.vxProductId) ?? []), r.categoryId])
+    }
   }
   const cats = new Map((await db.select().from(classicCategories)).map((c) => [c.id, c]))
   const levels = (id: number): [string | null, string | null, string | null] => {
@@ -275,37 +265,16 @@ async function classicNodeFlows(rows: readonly NodeSpenderRaw[]): Promise<NodeFl
     const at = (d: number) => chain.find((x) => x.depth === d)?.name ?? null
     return [at(1), at(2), at(3)]
   }
-  // Spend per advertiser and category path, then the biggest advertisers by name.
-  const acc = new Map<string, { adv: number | null; l: [string | null, string | null, string | null]; spend: number }>()
-  for (const [pid, spend] of spendOf) {
-    const advs: (number | null)[] = advsOf.get(pid)?.length ? advsOf.get(pid)! : [null]
-    const paths = catsOf.get(pid)?.length ? catsOf.get(pid)!.map(levels) : [[null, null, null] as [string | null, string | null, string | null]]
-    for (const adv of advs) {
-      for (const l of paths) {
-        const k = JSON.stringify([adv, l])
-        const prior = acc.get(k) ?? { adv, l, spend: 0 }
-        prior.spend += spend / (advs.length * paths.length)
-        acc.set(k, prior)
-      }
-    }
-  }
-  const totals = new Map<number, number>()
-  for (const v of acc.values()) if (v.adv != null) totals.set(v.adv, (totals.get(v.adv) ?? 0) + v.spend)
-  const named = new Set([...totals].sort((a, b) => b[1] - a[1]).slice(0, SANKEY_ADVERTISERS).map(([id]) => id))
-  const names = new Map<number, string>()
-  const namedIds = [...named]
-  if (namedIds.length) {
-    for (const r of await db.selectDistinct({ id: classicBrandSpend.advertiserId, name: classicBrandSpend.advertiserName }).from(classicBrandSpend).where(inArray(classicBrandSpend.advertiserId, namedIds))) {
-      names.set(r.id, r.name)
-    }
-  }
   const out = new Map<string, NodeFlow>()
-  for (const v of acc.values()) {
-    const adv = v.adv == null ? '' : named.has(v.adv) ? String(v.adv) : 'OTHER'
-    const k = JSON.stringify([adv, v.l])
-    const prior = out.get(k)
-    if (prior) prior.spend += v.spend
-    else out.set(k, { adv, advName: v.adv != null && named.has(v.adv) ? (names.get(v.adv) ?? `Classic company ${v.adv}`) : null, l1: v.l[0], l2: v.l[1], l3: v.l[2], media: null, month: null, spend: v.spend })
+  for (const p of parts) {
+    const paths = catsOf.get(p.pid)?.length ? catsOf.get(p.pid)!.map(levels) : [[null, null, null] as [string | null, string | null, string | null]]
+    for (const [l1, l2, l3] of paths) {
+      const k = JSON.stringify([p.child, l1, l2, l3])
+      const prior = out.get(k)
+      const spend = p.spend / paths.length
+      if (prior) prior.spend += spend
+      else out.set(k, { child: p.child, l1, l2, l3, media: null, month: null, spend })
+    }
   }
   return [...out.values()]
 }
