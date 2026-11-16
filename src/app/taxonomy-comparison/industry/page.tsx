@@ -9,7 +9,7 @@
 import { Kicker } from '@/components/ui'
 import { editor } from '@/lib/auth/editor'
 import type { IndustryResult, TaxNode } from '@/lib/taxonomy-industry-rules'
-import { nodeKey, readIndustry, startIndustry, TREE_KEY } from '@/lib/taxonomy-industry'
+import { nodeKey, outdated, readIndustry, startIndustry, TREE_KEY } from '@/lib/taxonomy-industry'
 import { TaxonomyTabs } from '../tabs'
 import { IndustryExplorer } from './industry'
 
@@ -29,7 +29,13 @@ export default async function IndustryViewPage({ searchParams }: { searchParams:
     await startIndustry(TREE_KEY, who.ok ? who.name : null, true)
     tree = await readIndustry<TaxNode[]>(TREE_KEY)
   }
-  const node = nodeId ? await readIndustry<IndustryResult>(nodeKey(nodeId)) : null
+  let node = nodeId ? await readIndustry<IndustryResult>(nodeKey(nodeId)) : null
+  // Opened by its address: one read before the Sankey existed is read again now (lib/taxonomy-industry.ts outdated).
+  if (nodeId && node?.status === 'done' && outdated(nodeKey(nodeId), node.result)) {
+    const who = await editor()
+    await startIndustry(nodeKey(nodeId), who.ok ? who.name : null)
+    node = await readIndustry<IndustryResult>(nodeKey(nodeId))
+  }
 
   return (
     <div className="stack">

@@ -99,3 +99,11 @@ test("a node's Sankey: legacy advertisers as the target, OTHER named, filters wh
   assert.deepEqual(nodeChildren(sankey, { media: 'Digital' }), [])
   assert.equal(nodeChildren(sankey)[0]!.spend, 30)
 })
+
+test('the reported case: a node read before the Sankey is read again when opened; one with it, or a legacy node, is kept', async () => {
+  const { outdated } = await import('../src/lib/taxonomy-industry-rules')
+  assert.equal(outdated('node:104', { name: 'Streaming Media', views: {} }), true)
+  assert.equal(outdated('node:104', { name: 'Streaming Media', sankey: { flows: {}, children: [] } }), false)
+  assert.equal(outdated('legacy:VX1:major:7', { name: 'TV' }), false)
+  assert.equal(outdated('node:104', null), false)
+})

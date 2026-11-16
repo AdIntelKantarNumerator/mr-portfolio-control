@@ -15,6 +15,7 @@ import { classicBrandProducts, classicBrandSpend, classicCategories, classicVxCa
 import { childColumn, dbxLegacyNodeName, dbxLegacySpenders, dbxNodeSpenders, dbxTaxonomyTree, SANKEY_ADVERTISERS, type NodeSpenderRaw } from './taxonomy-dbx'
 import {
   industryResult,
+  outdated,
   KEPT_SPENDERS,
   LEGACY_LABEL,
   LEGACY_LEVELS,
@@ -30,6 +31,7 @@ import {
 } from './taxonomy-industry-rules'
 import type { Step } from './taxonomy-rules'
 
+export { outdated }
 export const TREE_KEY = 'tree'
 export const nodeKey = (id: string) => `node:${id}`
 /** A legacy node read for "Compare to": "legacy:VX1:industry:123", "legacy:Classic:2:4165". */
@@ -96,7 +98,7 @@ export async function startIndustry(key: string, askedBy: string | null, again =
   if (key !== TREE_KEY && !/^node:\d{1,12}$/.test(key) && !LEGACY_KEY.test(key)) throw new Error(`Not something the Industry View reads: ${key}`)
   const now = await readIndustry(key)
   if (now?.status === 'running' && Date.now() - Date.parse(now.updatedAt) < STALE_MS) return
-  if (now?.status === 'done' && !again) return
+  if (now?.status === 'done' && !again && !outdated(key, now.result)) return
 
   const steps = stepsFor(key)
   const values = { key, status: 'running', progress: JSON.stringify(steps), result: null, error: null, askedBy, updatedAt: new Date() }

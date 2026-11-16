@@ -353,3 +353,13 @@ export function nodeChildren(sankey: NodeSankey, f: FlowFilter = {}): { key: str
 
 /** Whether a taxonomy's slices can follow the media and month filters (Classic's cannot). */
 export const sankeyFiltered = (sankey: NodeSankey, tax: LegacyTaxonomy) => (sankey.flows[tax] ?? []).every((r) => r.media != null)
+
+/**
+ * A GPC node read before its Sankey was part of the read (16 November 2026)
+ * is read again when it is opened, rather than kept: the page would show the
+ * lists without the Sankey, and a small "re-read" note under them was easy
+ * to miss (Scott: "I don't see the industry sankey diagram").
+ */
+export function outdated(key: string, result: unknown): boolean {
+  return key.startsWith('node:') && !!result && !(result as { sankey?: unknown }).sankey
+}
