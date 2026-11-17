@@ -176,6 +176,8 @@ function fromCreativesSql(from: FromTaxonomy, ids: string[], classicProducts: Ma
     const parents = ids.filter((id) => id.startsWith('P') && isInt(id.slice(1))).map((id) => id.slice(1))
     // A brand (360's brand, VX1 product.brand_id), id "B<brand_id>": for the 360 import (12 November 2026).
     const brands = ids.filter((id) => id.startsWith('B') && isInt(id.slice(1))).map((id) => id.slice(1))
+    // A product (360's product, VX1 source_product_id), id "V<id>": the creative names it directly (17 November 2026).
+    const products = ids.filter((id) => id.startsWith('V') && isInt(id.slice(1))).map((id) => id.slice(1))
     return `
 bc_prod AS (SELECT source_product_id vx1_product_id, max(advertiser_id) a, max(parent_company_id) parent_id, max(brand_id) brand_id FROM mrdpp_prod.brandcentral.product WHERE record_status_flag = 'ACTIVE' GROUP BY 1),
 bc_adv AS (SELECT advertiser_id, source_advertiser_id FROM mrdpp_prod.brandcentral.advertiser WHERE record_status_flag = 'ACTIVE' AND source_advertiser_id IN (${inList(adv)})),
@@ -187,7 +189,10 @@ from_crtv AS (
     JOIN bc_prod p ON p.vx1_product_id = c.vx1_product_id WHERE p.parent_id IN (${inList(parents)})
   UNION
   SELECT DISTINCT concat('B', p.brand_id), c.creative_id FROM mrdpp_prod.gold.creative c
-    JOIN bc_prod p ON p.vx1_product_id = c.vx1_product_id WHERE p.brand_id IN (${inList(brands)}))`
+    JOIN bc_prod p ON p.vx1_product_id = c.vx1_product_id WHERE p.brand_id IN (${inList(brands)})
+  UNION
+  SELECT DISTINCT concat('V', c.vx1_product_id), c.creative_id FROM mrdpp_prod.gold.creative c
+    WHERE c.vx1_product_id IN (${inList(products)}))`
   }
   if (from === 'VX2') {
     return `

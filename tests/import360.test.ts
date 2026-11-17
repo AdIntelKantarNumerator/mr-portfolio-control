@@ -10,9 +10,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { describe, dayIso, type Lookup, type Raw360Spec } from '../src/lib/import360/decode'
-import { convert360, gpcSpelling, looseKey, similarNames, type Candidate, type Matcher } from '../src/lib/import360/convert'
+import { convert360, gpcSpelling, looseKey, productAlternatives, sameProductLine, similarNames, type Candidate, type Matcher } from '../src/lib/import360/convert'
 import { normName, type DimKey } from '../src/lib/report-builder/data/types'
-import { decide, landingOf } from '../src/lib/import360/creatives'
+import { decide, FOLLOWS, landingOf } from '../src/lib/import360/creatives'
 
 const NAMES: Record<string, string> = {
   '139:7298430': 'Tremfya',
@@ -244,4 +244,57 @@ test('markets match by id, which 360 and GPC share; a name that differs too much
   assert.deepEqual((c.spec.filters as Record<string, string[]>).market, ['market:91', 'market:7'])
   assert.ok(c.notes.some((n) => /differ in GPC/.test(n.what) && /BOSTON,MA → Seattle/.test(n.did)))
   assert.ok(c.notes.some((n) => /not found in GPC \(NOWHERE,ZZ\)/.test(n.what)), 'an id GPC lacks still falls back to the name, and is said')
+})
+
+// ---------------------------------------------------------------- 360 products (17 November 2026)
+
+test('a 360 product whose product half is generic is found by its whole name or its advertiser half', async () => {
+  // Scott's import: both were dropped as "not found", searched for as just "Personal Credit Card".
+  const amex: Lookup = {
+    ...look,
+    name: (e, id) => (e === 100 ? ({ 1: 'American Express Platinum : Personal Credit Card', 2: 'American Express Gold : Personal Credit Card', 3: 'Acme Widgets : Gadget' } as Record<number, string>)[id] : look.name(e, id)),
+  }
+  const gpc: Partial<Record<DimKey, Candidate[]>> = {
+    product: [
+      { id: 'product:25888', name: 'American Express Platinum', context: 'American Express', spend: 77_674_957 },
+      { id: 'product:29539', name: 'American Express Gold Card', context: 'American Express', spend: 4_532_557 },
+      { id: 'product:64933', name: 'American Express Business Gold Card', context: 'American Express', spend: 2_555_010 },
+    ],
+  }
+  const m: Matcher = {
+    async match(dim, names) {
+      const out = new Map<string, Candidate[]>()
+      const want = new Set(names.map(normName))
+      for (const c of gpc[dim] ?? []) if (want.has(normName(c.name))) out.set(normName(c.name), [...(out.get(normName(c.name)) ?? []), c])
+      return out
+    },
+    async search(dim, text) {
+      return (gpc[dim] ?? []).filter((c) => c.name.toLowerCase().includes(text.toLowerCase()))
+    },
+  }
+  const spec: Raw360Spec = {
+    rpttype: 2307,
+    title: null,
+    cols: [{ type: 1, entmaj: 100, entmin: 2, order: 1, sort: 0, total: 0, calc: 0, demo: 0, name: 'Product' }, { type: 3, entmaj: 800, entmin: 36, order: 2, sort: 0, total: 0, calc: 0, demo: 0, name: '$' }],
+    opts: [],
+    sel: [{ mpt: 3, e: 100, ids: [1, 2, 3] }],
+  }
+  const c = await convert360(describe(spec, amex), m)
+  assert.deepEqual((c.spec.filters as Record<string, string[]>).product, ['product:25888', 'product:29539'], 'Platinum exactly; Gold as "Gold Card"; not Business Gold')
+  assert.ok(c.notes.some((n) => /matched by the whole 360 name/.test(n.what) && /Platinum : Personal Credit Card → American Express Platinum/.test(n.did)))
+  assert.deepEqual(c.unresolved.map((u) => [u.e, u.name]), [[100, 'Acme Widgets : Gadget']], 'a product still not found goes to the creative lookup')
+})
+
+test('the creative lookup follows a 360 product and takes the GPC products holding most of its spend', () => {
+  assert.deepEqual(FOLLOWS[100], { prefix: 'V', level: 'product' })
+  const flows = landingOf([
+    { gpcId: '1', gpcName: 'American Express', gpcProductId: '26383', gpcProductName: 'American Express Platinum Card', spend: 900 },
+    { gpcId: '1', gpcName: 'American Express', gpcProductId: '60474', gpcProductName: 'American Express Business Platinum Card', spend: 100 },
+  ])
+  const r = decide(100, flows)
+  assert.equal(r.status, 'matched')
+  assert.deepEqual(r.pick!.ids, ['product:26383'])
+  assert.deepEqual(productAlternatives('Hims', 'Online'), ['Hims Online', 'Hims'])
+  assert.ok(sameProductLine('American Express Gold Card', 'American Express Gold'))
+  assert.ok(!sameProductLine('American Express Business Gold Card', 'American Express Gold'))
 })

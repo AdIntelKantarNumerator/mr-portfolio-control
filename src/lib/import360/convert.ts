@@ -94,6 +94,21 @@ export const coreName = (s: string) =>
     .split(/\s+/)
     .filter(Boolean)
     .sort((a, b) => b.length - a.length)[0] ?? s
+/**
+ * Other GPC spellings of a 360 product not found by its product half: the whole name as one
+ * ("American Express Platinum Personal Credit Card"), then the advertiser half alone ("American
+ * Express Platinum"), which is how GPC names a card or a model line. In that order: the more specific first.
+ */
+export function productAlternatives(context: string, product: string): string[] {
+  return [`${context} ${product}`, context].filter((x, i, a) => x.trim() && a.indexOf(x) === i)
+}
+
+/** A GPC product that is the 360 advertiser half with at most a trailing "Card" / "Credit Card": "American Express Gold Card". */
+export function sameProductLine(gpcName: string, context: string): boolean {
+  const k = looseKey(context)
+  return !!k && looseKey(gpcName.replace(/\s+(credit\s+)?card\s*$/i, '')) === k
+}
+
 /** A product's advertiser, when 360 gave one, must agree with GPC's: the first word of one in the other. */
 function fitsContext(h: Candidate, context: string | null): boolean {
   if (!context) return true
@@ -110,7 +125,7 @@ export type Choice = { ids: string[]; names: string[]; how: 'creatives' | 'picke
 export type Choices = Record<string, Choice>
 
 /** 360 entity types whose unmatched names can be looked up by their creatives (lib/import360/creatives.ts). */
-export const LOOKUP_TYPES = [118, 102, 139]
+export const LOOKUP_TYPES = [118, 102, 139, 100]
 
 export interface Converted {
   /** ok: nothing to report; partial: imported with notes; refused: the type cannot be built (nearest offered). */
@@ -459,6 +474,38 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
         }
       }
     }
+    // 360 products are "Advertiser : Product", and the product half is often generic: Scott's
+    // "American Express Platinum : Personal Credit Card" was searched for as "Personal Credit Card" and
+    // dropped (17 November 2026), while GPC has "American Express Platinum" at $77.7M. So a product still
+    // not found is tried as its whole name, then as its advertiser half, exactly; then the advertiser half
+    // loosely, where a GPC name differs only by a trailing "Card" ("American Express Gold Card").
+    const whole: string[] = []
+    if (m.dim === 'product' && left.size) {
+      const alts = new Map<string, string[]>()
+      for (const [name, v] of left) if (v.context) alts.set(name, productAlternatives(v.context, v.name))
+      const found = alts.size ? await matcher.match('product', [...new Set([...alts.values()].flat())]) : new Map<string, Candidate[]>()
+      for (const [name, cands] of alts) {
+        for (const c of cands) {
+          const hits = (found.get(normName(c)) ?? []).filter((h) => h.spend > 0)
+          if (hits.length) {
+            take('product', name, hits)
+            whole.push(`${name} → ${hits.map((h) => h.name).join(', ')}`)
+            break
+          }
+        }
+      }
+      if (matcher.search)
+        for (const [name, v] of [...left]) {
+          const ctx = v.context
+          if (!ctx) continue
+          const hits = (await matcher.search('product', coreName(ctx))).filter((h) => h.spend > 0 && sameProductLine(h.name, ctx))
+          if (hits.length) {
+            take('product', name, hits)
+            whole.push(`${name} → ${hits.map((h) => h.name).join(', ')}`)
+          }
+        }
+    }
+    if (whole.length) note('approximate', `${s.label}: ${plural(whole.length, 'name')} matched by the whole 360 name`, 'In 360 the product is the part after the colon; GPC names these by the part before it.', `Matched ${list(whole, 3)}.`)
     for (const [kind, ids] of picked) filters[kind] = [...new Set([...(filters[kind] ?? []), ...ids])]
     lists.push({ label: s.label, from: s.picked.map((p) => p.name), to: [...to].map(([id, name]) => ({ id, name })) })
     if (unlike.length) note('approximate', `${s.label}: ${plural(unlike.length, 'name')} differ in GPC`, `Matched by id, which 360 and GPC share, but GPC names ${unlike.length === 1 ? 'it' : 'them'} differently.`, `Matched ${list(unlike, 3)}.`)

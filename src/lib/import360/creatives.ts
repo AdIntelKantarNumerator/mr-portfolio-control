@@ -22,6 +22,12 @@ export const FOLLOWS: Record<number, { prefix: string; level: 'advertiser' | 'to
   118: { prefix: '', level: 'advertiser' },
   102: { prefix: 'P', level: 'top_parent' },
   139: { prefix: 'B', level: 'product' },
+  // A 360 product, id "V<VX1 source_product_id>" (17 November 2026). Left out at first, so Scott's
+  // "American Express Platinum : Personal Credit Card" was dropped without its creatives being looked
+  // at. 360's product id is VX1's product id (checked on eight snapshot products, all eight matching,
+  // the VX1 name being the part before the colon), and gold.creative carries vx1_product_id itself, so
+  // this is the most direct lookup of the four.
+  100: { prefix: 'V', level: 'product' },
 }
 
 export interface Landed {

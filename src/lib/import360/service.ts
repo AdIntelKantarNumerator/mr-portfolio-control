@@ -201,7 +201,7 @@ async function spendOf(engine: ReportEngine, id: string): Promise<number | undef
  */
 export async function resolve360(engine: ReportEngine, e: number, id: number, name: string): Promise<Resolution & { error?: string }> {
   const f = FOLLOWS[e]
-  if (!f) throw new Error('Only advertisers, parents and brands can be looked up by their creatives.')
+  if (!f) throw new Error('Only advertisers, parents, brands and products can be looked up by their creatives.')
   let r: Resolution & { error?: string }
   try {
     const fromId = `${f.prefix}${id}`
