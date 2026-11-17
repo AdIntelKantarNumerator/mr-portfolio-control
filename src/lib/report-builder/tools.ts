@@ -67,7 +67,8 @@ export interface ToolContext {
   /** Switches this chat, and the person's default, to a mode. */
   setMode?: (m: IntelMode) => void
   /** Builds the download link for a report: the portfolio's own address. */
-  downloadUrl: (spec: Spec, name: string) => string
+  /** The download link; it may store the spec first (lib/report-builder/agent.ts downloadUrl). */
+  downloadUrl: (spec: Spec, name: string) => string | Promise<string>
   /** What the last tool produced, for a page to draw (the Prototypes page). Chat hosts ignore it. */
   view?: View
 }
@@ -419,6 +420,7 @@ export async function expandRow(engine: ReportEngine, spec: Spec, path: string[]
 }
 
 async function shown(ctx: ToolContext, result: Result, spec: Spec, name: string) {
+  const link = await ctx.downloadUrl(spec, name)
   ctx.view = {
     kind: 'run',
     title: result.summary,
@@ -427,7 +429,7 @@ async function shown(ctx: ToolContext, result: Result, spec: Spec, name: string)
     period: `${result.period.label} (${result.period.how})`,
     dataThrough: result.data_through_label,
     notes: result.notes,
-    downloadUrl: ctx.downloadUrl(spec, name),
+    downloadUrl: link,
   }
   return {
     summary: result.summary,
@@ -436,7 +438,7 @@ async function shown(ctx: ToolContext, result: Result, spec: Spec, name: string)
     rows_in_report: result.row_count,
     table_markdown: markdown(result, RUN_ROWS),
     notes: result.notes,
-    download_url: ctx.downloadUrl(spec, name),
+    download_url: link,
   }
 }
 

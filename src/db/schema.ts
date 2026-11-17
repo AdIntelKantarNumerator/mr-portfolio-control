@@ -2494,3 +2494,17 @@ export const reportBuilderChats = pgTable('report_builder_chats', {
   state: jsonb('state').notNull(),
   updatedAt: updatedAt(),
 })
+
+/**
+ * The report behind each download link (17 November 2026). The link used to
+ * carry the whole spec, base64 in the address; a report imported from 360
+ * carries its import notes and long selections too, and Scott's "FinServ Top
+ * 50" link outgrew the server's header limit (HTTP 431) before the app saw it.
+ * Now the link carries only `key`, a hash of the spec, so one report is one
+ * row however often it is run. Rows are never edited and are small.
+ */
+export const reportBuilderExports = pgTable('report_builder_exports', {
+  key: text('key').primaryKey(),
+  spec: jsonb('spec').notNull(),
+  createdAt: createdAt(),
+})

@@ -1,7 +1,8 @@
 /**
  * A Report Builder report as a file, from the download links in the chat.
  *
- *   GET /prototypes/report-builder/export?r=<report>&name=<file name>&format=csv|xlsx|pdf
+ *   GET /prototypes/report-builder/export?k=<key>&name=<file name>&format=csv|xlsx|pdf
+ *   (older links: r=<report>, the spec itself, base64url)
  *
  * Laid out as 360 lays out its CSV, Excel and PDF (lib/report-builder/export/files.ts).
  *
@@ -13,7 +14,7 @@
  */
 import { currentAccess } from '@/lib/auth/access'
 import { getAuthConfig } from '@/lib/auth/config'
-import { engineFor, loadUser } from '@/lib/report-builder/agent'
+import { engineFor, exportSpec, loadUser } from '@/lib/report-builder/agent'
 import { csvFile, FORMATS, pdfFile, xlsxFile, type FileFormat, type FileMeta } from '@/lib/report-builder/export/files'
 import { describeReport } from '@/lib/report-builder/page-view'
 import { emptyChat } from '@/lib/report-builder/tools'
@@ -29,7 +30,11 @@ export async function GET(req: Request) {
   const url = new URL(req.url)
   let spec: Spec
   try {
-    spec = JSON.parse(Buffer.from(url.searchParams.get('r') ?? '', 'base64url').toString('utf8')) as Spec
+    // k: the stored report's key (links since 17 November 2026); r: the spec itself, as older links carry it.
+    const key = url.searchParams.get('k')
+    const stored = key ? await exportSpec(key) : null
+    if (key && !stored) return new Response('That download link has expired or is damaged. Ask Report Builder to run the report again.', { status: 404 })
+    spec = stored ?? (JSON.parse(Buffer.from(url.searchParams.get('r') ?? '', 'base64url').toString('utf8')) as Spec)
     if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw new Error('not a report')
   } catch {
     return new Response('That download link is damaged. Ask Report Builder to run the report again.', { status: 400 })

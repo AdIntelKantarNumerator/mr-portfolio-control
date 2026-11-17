@@ -13,9 +13,10 @@
  * mean different things in the two, so a saved report or chat from the other
  * source is set aside rather than run against the wrong data.
  */
+import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { reportBuilderChats, reportBuilderUsers } from '@/db/schema'
+import { reportBuilderChats, reportBuilderExports, reportBuilderUsers } from '@/db/schema'
 import type { EngineState, Spec } from './engine'
 import { dataSource, engineFor as pickEngine, type ReportEngine } from './engines'
 import { entitlementsFor } from './data/entitlements'
@@ -90,10 +91,35 @@ async function saveChat(chatId: string, email: string, state: ChatState) {
   await db.insert(reportBuilderChats).values({ chatId, email, state: stamped }).onConflictDoUpdate({ target: reportBuilderChats.chatId, set: { email, state: stamped, updatedAt: new Date() } })
 }
 
-/** The download link for a report: the spec rides in the link, and is recomputed for whoever opens it. */
-export function downloadUrl(base: string, spec: Spec, name: string): string {
-  const r = Buffer.from(JSON.stringify(spec)).toString('base64url')
-  return `${base.replace(/\/+$/, '')}/prototypes/report-builder/export?r=${r}&name=${encodeURIComponent(name.slice(0, 80))}`
+/**
+ * The download link for a report, recomputed for whoever opens it.
+ *
+ * The spec is kept in report_builder_exports under a hash of itself and the
+ * link carries only that key (17 November 2026). It used to ride in the link,
+ * base64; a report imported from 360 carries its import notes and long
+ * selections, and Scott's "FinServ Top 50" link outgrew the server's header
+ * limit (HTTP 431) in every format. If the store cannot be written, the old
+ * long link is still better than none.
+ */
+export async function downloadUrl(base: string, spec: Spec, name: string): Promise<string> {
+  const root = `${base.replace(/\/+$/, '')}/prototypes/report-builder/export`
+  const label = `name=${encodeURIComponent(name.slice(0, 80))}`
+  const json = JSON.stringify(spec)
+  const key = createHash('sha256').update(json).digest('base64url').slice(0, 22)
+  try {
+    await db.insert(reportBuilderExports).values({ key, spec }).onConflictDoNothing()
+    return `${root}?k=${key}&${label}`
+  } catch (err) {
+    console.error('[report-builder] could not store the export spec; using a long link', err)
+    return `${root}?r=${Buffer.from(json).toString('base64url')}&${label}`
+  }
+}
+
+/** The spec behind a download link's key, or null when there is none. */
+export async function exportSpec(key: string): Promise<Spec | null> {
+  if (!/^[A-Za-z0-9_-]{10,64}$/.test(key)) return null
+  const [row] = await db.select({ spec: reportBuilderExports.spec }).from(reportBuilderExports).where(eq(reportBuilderExports.key, key)).limit(1)
+  return (row?.spec as Spec | undefined) ?? null
 }
 
 export interface TurnInput {
