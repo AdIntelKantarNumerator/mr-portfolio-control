@@ -940,7 +940,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
       // Two of the newer breakouts, chosen by the kind of report, ahead of the everyday ones.
       const used = new Set(dimsOf(spec))
       const fits = (d: Dim) => !used.has(d) && !data.supports?.([...used, d])
-      const likely: Dim[] = spec.zero_share ? ['daypart', 'program', 'market'] : spec.compare ? ['length', 'market', 'daypart'] : ['market', 'daypart', 'length']
+      const likely: Dim[] = spec.zero_share ? ['daypart', 'program', 'market'] : spec.compare ? ['creative', 'length', 'market', 'daypart'] : ['market', 'daypart', 'creative', 'length']
       for (const d of likely.filter(fits).slice(0, 2)) add(`Break out by ${DIMS[d].label.toLowerCase()}`, { add: { rows: [d] } })
       if (!spec.rows.includes('product')) add('Break out by product', { add: { rows: ['product'] } })
       if (!spec.rows.includes('media_type') && spec.columns !== 'media_type') add('Break out by media type', { add: { rows: ['media_type'] } })

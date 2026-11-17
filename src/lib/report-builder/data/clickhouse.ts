@@ -23,13 +23,22 @@
  *   - Daypart and league (the sports entity) are recorded only in the daily
  *     tables (TV and live streaming), so any query that reads them is answered
  *     from the daily tables, even for a whole month (Scott, 12 November 2026).
- *   - Spot length is recorded only in the creative summaries
- *     (gpc_creative.creative_product_media_summary_month and _daily), which
- *     add up to within 0.4% of the monthly table (October 2026) but have no
- *     market, master property, program, genre, direct/indirect, daypart or
- *     league, and no promo or PSA flags. A query that reads spot length is
- *     answered from them; one that also reads any of those is refused, through
- *     supports(), before it runs.
+ *   - Spot length and the creative itself are recorded only in the creative
+ *     summaries, which add up to within 0.4% of the monthly table (October
+ *     2026). A query that reads either is answered from them:
+ *       gpc_creative.creative_product_media_summary_month / _daily, the
+ *         smaller, when nothing else is needed;
+ *       gpc_creative.creative_product_summary_month / _daily, about nine times
+ *         larger, when the query also reads market or master property, which
+ *         only these record (17 November 2026, for creative rows: a quarter of
+ *         360 reports have them, beside market and property).
+ *     Neither records program, genre, direct/indirect, daypart or league; a
+ *     query that also reads any of those is refused, through supports(), before
+ *     it runs. They have no promo or PSA flags either: a creative whose TV spend
+ *     in the months read is mostly flagged as promo or PSA is left out instead
+ *     (the flag is only on TV airings), within about 1% of the exact figure.
+ *   - A creative's name is its title, from gpc_creative.creative, looked up
+ *     after the query (creativeInfo): the summaries carry only its id.
  */
 import { chQuery, clickhouseConfig, ClickHouseError, type ClickHouseConfig } from '@/lib/clickhouse'
 import { DIMENSIONS, dimOf, normName, queryDims, type AggregateQuery, type AggregateResult, type Availability, type Cond, type DataAdapter, type DimKey, type MeasureKey, type NameHit, type SearchRequest } from './types'
@@ -37,11 +46,20 @@ import { DIMENSIONS, dimOf, normName, queryDims, type AggregateQuery, type Aggre
 const MONTH_TABLE = 'gpc_summary.property_product_summary_month'
 const CREATIVE_MONTH = 'gpc_creative.creative_product_media_summary_month'
 const CREATIVE_DAY = 'gpc_creative.creative_product_media_summary_daily'
+const CREATIVE_FULL_MONTH = 'gpc_creative.creative_product_summary_month'
+const CREATIVE_FULL_DAY = 'gpc_creative.creative_product_summary_daily'
+/** What only the fuller creative summaries record. */
+const FULL_ONLY: DimKey[] = ['market', 'master_property']
 /** Where search and labels look up a dimension that the monthly table does not record. */
-const LOOKUP_TABLE: Partial<Record<DimKey, string>> = { daypart: 'gpc_summary.tv_product_summary_daily', league: 'gpc_summary.tv_product_summary_daily', length: CREATIVE_MONTH }
-/** What the creative summaries do not record. */
-const NOT_IN_CREATIVE: DimKey[] = ['market', 'master_property', 'program', 'program_genre', 'direct_indirect', 'daypart', 'league']
-const CREATIVE_NOTE = 'Spot length comes from the creative data, which cannot leave out promos and public service announcements, so totals can run slightly higher than other reports (about 0.4% in October 2026).'
+const LOOKUP_TABLE: Partial<Record<DimKey, string>> = { daypart: 'gpc_summary.tv_product_summary_daily', league: 'gpc_summary.tv_product_summary_daily', length: CREATIVE_MONTH, creative: CREATIVE_MONTH }
+/** What no creative summary records. */
+const NOT_IN_CREATIVE: DimKey[] = ['program', 'program_genre', 'direct_indirect', 'daypart', 'league']
+const CREATIVE_NOTE = 'Spot length and creatives come from the creative data, which has no promo flag; a creative whose TV spend is mostly promos or public service announcements is left out instead, so totals can differ slightly from other reports.'
+/** Creatives that are mostly promos or PSAs in these months (the flag is only on TV airings): left out of creative-data queries. */
+const notPromoCreative = (fromYm: number, toYm: number) =>
+  `creative_id NOT IN (SELECT creative_id FROM gpc_detail.tv_product_detail WHERE year_month BETWEEN ${fromYm} AND ${toYm}
+     GROUP BY creative_id HAVING 2 * sumIf(cost_share_v, coalesce(is_promo, 0) = 1 OR coalesce(is_psa, 0) = 1) >= sum(cost_share_v)
+       AND countIf(coalesce(is_promo, 0) = 1 OR coalesce(is_psa, 0) = 1) > 0)`
 
 type Source = 'month' | 'daily' | 'creative_month' | 'creative_daily'
 /** Which table answers a query: spot length needs the creative data, daypart and league (and days and weeks) the daily data. */
@@ -76,6 +94,8 @@ const SQL: Record<DimKey, { id: string; name: string; context: string }> = {
   language: { id: 'coalesce(language_id, 0)', name: 'language_name', context: "'Language'" },
   direct_indirect: { id: 'coalesce(direct_indirect_id, 0)', name: 'direct_indirect_name', context: "'Buying type'" },
   length: { id: 'coalesce(length_v, 0)', name: "if(length_v IS NULL, '', concat(toString(length_v), ' sec'))", context: "'Spot length'" },
+  // The summaries carry only the id; the title replaces this name after the query (creativeInfo).
+  creative: { id: 'creative_id', name: 'toString(creative_id)', context: "coalesce(creative_type, '')" },
   month: { id: "concat(toString(intDiv(year_month, 100)), '-', leftPad(toString(year_month % 100), 2, '0'))", name: "''", context: "''" },
   quarter: { id: "concat(toString(intDiv(year_month, 100)), '-Q', toString(intDiv(year_month % 100 + 2, 3)))", name: "''", context: "''" },
   year: { id: 'toString(intDiv(year_month, 100))', name: "''", context: "''" },
@@ -231,9 +251,16 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
     const time = isDaily
       ? `year_month BETWEEN ${ymShift(ymOf(from), -1)} AND ${ymShift(ymOf(to), 1)} AND start_date BETWEEN '${from}' AND '${to}'`
       : `year_month BETWEEN ${ymOf(from)} AND ${ymOf(to)}`
-    const source = src === 'daily' ? daily! : src === 'creative_daily' ? CREATIVE_DAY : src === 'creative_month' ? CREATIVE_MONTH : MONTH_TABLE
-    // The creative data has no promo or PSA flags; a query that reads it says so (aggregate's notes).
-    const promos = q.includePromos || src.startsWith('creative') ? '' : NO_PROMOS
+    // Market and master property are only in the fuller creative summaries; the smaller ones answer the rest faster.
+    const full = [...queryDims(q)].some((d) => FULL_ONLY.includes(d))
+    const source =
+      src === 'daily' ? daily! : src === 'creative_daily' ? (full ? CREATIVE_FULL_DAY : CREATIVE_DAY) : src === 'creative_month' ? (full ? CREATIVE_FULL_MONTH : CREATIVE_MONTH) : MONTH_TABLE
+    // The creative data has no promo or PSA flags: mostly-promo creatives are left out by their TV airings instead.
+    const promos = q.includePromos
+      ? ''
+      : src.startsWith('creative')
+        ? notPromoCreative(isDaily ? ymShift(ymOf(from), -1) : ymOf(from), isDaily ? ymShift(ymOf(to), 1) : ymOf(to))
+        : NO_PROMOS
     const where = [time, promos, q.where ? condSql(q.where) : ''].filter(Boolean).join(' AND ')
     const selects: string[] = []
     for (const d of q.groupBy) {
@@ -279,7 +306,7 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
       if (!dims.some((d) => DIMENSIONS[d]?.creative)) return null
       const conflicts = dims.filter((d) => NOT_IN_CREATIVE.includes(d))
       return conflicts.length
-        ? { conflicts, reason: `Spot length comes from the creative data, which does not record ${conflicts.map((d) => DIMENSIONS[d].label.toLowerCase()).join(', ')}.` }
+        ? { conflicts, reason: `${creativeLabels(dims)} from the creative data, which does not record ${conflicts.map((d) => DIMENSIONS[d].label.toLowerCase()).join(', ')}.` }
         : null
     },
 
@@ -299,6 +326,14 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
           values: Object.fromEntries(q.measures.map((m) => [m.as, Number(r[alias(m.as)] ?? 0)])),
         })),
       }
+      if (q.groupBy.includes('creative')) {
+        const info = await creativeInfo(out.rows.map((r) => r.keys.creative?.id).filter((x): x is string => Boolean(x)))
+        for (const r of out.rows) {
+          const k = r.keys.creative
+          const i = k && info.get(k.id)
+          if (k && i) Object.assign(k, { name: i.name, ...(q.context ? { context: i.context } : {}) })
+        }
+      }
       if (src.startsWith('creative')) out.notes = [CREATIVE_NOTE]
       if (q.withCount) out.count = Number(totals[0]?.n ?? 0)
       if (q.withTotals) out.totals = Object.fromEntries(q.measures.map((m) => [m.as, Number(totals[0]?.[alias(m.as)] ?? 0)]))
@@ -309,7 +344,9 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
       const params: Record<string, string> = {}
       const ym = ymOf(`${req.month}-01`)
       const extra = req.where ? ` AND ${condSql(req.where)}` : ''
-      const parts = req.parts.map((p, i) => {
+      // Creatives are found by their title, which only gpc_creative.creative holds.
+      const creatives = await Promise.all(req.parts.filter((p) => p.dim === 'creative').map((p) => searchCreatives(p.text, ym, extra, req.limit)))
+      const parts = req.parts.filter((p) => p.dim !== 'creative').map((p, i) => {
         const d = SQL[p.dim]
         let match = ''
         if (p.text != null) {
@@ -319,9 +356,8 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
         return `SELECT '${p.dim}' AS dim, toString(${d.id}) AS id, any(${d.name}) AS name, any(${d.context}) AS ctx, toFloat64(sum(cost_share_v)) AS spend
           FROM ${LOOKUP_TABLE[p.dim] ?? MONTH_TABLE} WHERE year_month = ${ym} AND ${d.name} != ''${match}${extra} GROUP BY id ORDER BY spend DESC LIMIT ${Math.max(1, Math.floor(req.limit))}`
       })
-      if (!parts.length) return []
-      const rows = await query<{ dim: DimKey; id: string; name: string; ctx: string; spend: number }>(`SELECT * FROM (${parts.map((p) => `(${p})`).join(' UNION ALL ')})`, params)
-      return rows.map((r) => ({ id: `${r.dim}:${r.id}`, dim: r.dim, name: r.name, context: r.ctx, spend: Number(r.spend) }))
+      const rows = parts.length ? await query<{ dim: DimKey; id: string; name: string; ctx: string; spend: number }>(`SELECT * FROM (${parts.map((p) => `(${p})`).join(' UNION ALL ')})`, params) : []
+      return [...rows.map((r) => ({ id: `${r.dim}:${r.id}`, dim: r.dim, name: r.name, context: r.ctx, spend: Number(r.spend) })), ...creatives.flat()]
     },
 
     async labels(ids) {
@@ -329,13 +365,56 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
       for (const id of ids) {
         const d = dimOf(id) as DimKey
         const n = num(id)
-        if (!DIMENSIONS[d] || DIMENSIONS[d].time || n === null) continue
+        if (!DIMENSIONS[d] || DIMENSIONS[d].time || n === null || d === 'creative') continue
         by.set(d, [...(by.get(d) ?? []), n])
       }
+      const creatives = [...(await creativeInfo(ids.filter((id) => dimOf(id) === 'creative')))].map(([id, i]) => ({ id, name: i.name, context: i.context }))
       const parts = [...by].map(([d, nums]) => `SELECT '${d}' AS dim, toString(${SQL[d].id}) AS id, any(${SQL[d].name}) AS name, any(${SQL[d].context}) AS ctx FROM ${LOOKUP_TABLE[d] ?? MONTH_TABLE} WHERE ${SQL[d].id} IN (${nums.join(',')}) AND year_month >= 202601 GROUP BY id`)
-      if (!parts.length) return []
+      if (!parts.length) return creatives
       const rows = await query<{ dim: string; id: string; name: string; ctx: string }>(parts.join(' UNION ALL '))
-      return rows.filter((r) => r.name).map((r) => ({ id: `${r.dim}:${r.id}`, name: r.name, context: r.ctx }))
+      return [...rows.filter((r) => r.name).map((r) => ({ id: `${r.dim}:${r.id}`, name: r.name, context: r.ctx })), ...creatives]
     },
   }
+
+  /**
+   * Each creative's name and a line of context, by id ("creative:123"): its
+   * title (or lead text), and its media, length and first airing. Without a
+   * title it is "Creative 123", so a row is never blank.
+   */
+  async function creativeInfo(ids: string[]): Promise<Map<string, { name: string; context: string }>> {
+    const nums = [...new Set(ids.map(num).filter((n): n is number => n !== null))]
+    const out = new Map<string, { name: string; context: string }>()
+    for (let i = 0; i < nums.length; i += 5000) {
+      const rows = await query<{ id: string; title: string; media: string; secs: number | null; first: string | null }>(
+        `SELECT toString(creative_id) AS id, coalesce(nullIf(trim(title), ''), nullIf(trim(lead_text), ''), '') AS title, coalesce(first_seen_media, '') AS media,
+                duration AS secs, toString(toDate(first_seen_occurrence_timestamp)) AS first
+         FROM gpc_creative.creative WHERE creative_id IN (${nums.slice(i, i + 5000).join(',')})`,
+      )
+      for (const r of rows) {
+        const context = [r.media, r.secs ? `${r.secs}s` : '', r.first ? `first seen ${r.first}` : ''].filter(Boolean).join(' · ')
+        out.set(`creative:${r.id}`, { name: r.title || `Creative ${r.id}`, context })
+      }
+    }
+    for (const n of nums) if (!out.has(`creative:${n}`)) out.set(`creative:${n}`, { name: `Creative ${n}`, context: '' })
+    return out
+  }
+
+  /** Creatives by title (or the biggest, with no text), ranked by the month's spend. */
+  async function searchCreatives(text: string | null, ym: number, extra: string, limit: number): Promise<NameHit[]> {
+    const params: Record<string, string> = text != null ? { t: text } : {}
+    const byTitle = text != null ? ` AND creative_id IN (SELECT creative_id FROM gpc_creative.creative WHERE positionCaseInsensitiveUTF8(coalesce(title, ''), {t:String}) > 0)` : ''
+    const rows = await query<{ id: string; spend: number }>(
+      `SELECT toString(creative_id) AS id, toFloat64(sum(cost_share_v)) AS spend FROM ${CREATIVE_MONTH}
+       WHERE year_month = ${ym}${byTitle}${extra} GROUP BY id ORDER BY spend DESC LIMIT ${Math.max(1, Math.floor(limit))}`,
+      params,
+    )
+    const info = await creativeInfo(rows.map((r) => `creative:${r.id}`))
+    return rows.map((r) => ({ id: `creative:${r.id}`, dim: 'creative' as DimKey, name: info.get(`creative:${r.id}`)?.name ?? `Creative ${r.id}`, context: info.get(`creative:${r.id}`)?.context ?? '', spend: Number(r.spend) }))
+  }
+}
+
+/** "Spot length comes" or "Spot length and Creative come": what a query reads from the creative data. */
+function creativeLabels(dims: DimKey[]): string {
+  const c = dims.filter((d) => DIMENSIONS[d]?.creative).map((d) => DIMENSIONS[d].label)
+  return `${c.join(' and ')} ${c.length > 1 ? 'come' : 'comes'}`
 }

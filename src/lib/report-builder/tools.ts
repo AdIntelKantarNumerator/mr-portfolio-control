@@ -129,7 +129,7 @@ export interface ToolDef {
 
 const PREVIEW_ROWS = 10
 const RUN_ROWS = 25
-const NAME_TYPES = ['top_parent', 'advertiser', 'product', 'industry', 'category', 'subcategory', 'media_type', 'media_owner', 'property', 'master_property', 'market', 'country', 'program', 'program_genre', 'league', 'daypart', 'language', 'direct_indirect', 'length']
+const NAME_TYPES = ['top_parent', 'advertiser', 'product', 'industry', 'category', 'subcategory', 'media_type', 'media_owner', 'property', 'master_property', 'market', 'country', 'program', 'program_genre', 'league', 'daypart', 'language', 'direct_indirect', 'length', 'creative']
 const COMP_TYPES = ['property', 'media_type', 'media_owner', 'market']
 const USE_USUAL = 'Yes, use it'
 

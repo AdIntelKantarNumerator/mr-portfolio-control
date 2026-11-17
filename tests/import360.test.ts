@@ -100,7 +100,7 @@ test('a stored 360 spec reads as its type, layout, measures, selections and peri
 test('the Tremfya report becomes a GPC trend, and every change is explained', async () => {
   const c = await convert360(describe(TREMFYA, look), matcher)
   assert.equal(c.verdict, 'partial')
-  assert.deepEqual(c.spec.rows, ['product', 'media_type'])
+  assert.deepEqual(c.spec.rows, ['product', 'media_type', 'creative'], 'creative rows are kept since 17 November 2026')
   assert.equal(c.spec.columns, 'month')
   assert.deepEqual(c.spec.measures, ['spend'])
   assert.deepEqual(c.spec.calcs, ['share_across'], 'horizontal % is % across')
@@ -110,7 +110,7 @@ test('the Tremfya report becomes a GPC trend, and every change is explained', as
   assert.deepEqual(filters.media_type, ['media_type:101', 'media_type:106'], '"Span Lang Net TV" is Spanish Language Network TV')
   const say = (re: RegExp) => c.notes.find((n) => re.test(n.what))
   assert.equal(say(/^Brand$/), undefined, "GPC's product is the brand: no caveat")
-  assert.equal(say(/Creative rows/)!.impact, 'dropped')
+  assert.equal(say(/Creative rows/), undefined, 'creative rows are imported, not dropped')
   assert.match(say(/^GRPs$/)!.why, /no ratings/)
   assert.equal(say(/^Media: Search/)!.impact, 'dropped')
   assert.match(say(/matched more than one GPC entity/)!.did, /All of them are included/)
@@ -297,4 +297,24 @@ test('the creative lookup follows a 360 product and takes the GPC products holdi
   assert.deepEqual(productAlternatives('Hims', 'Online'), ['Hims Online', 'Hims'])
   assert.ok(sameProductLine('American Express Gold Card', 'American Express Gold'))
   assert.ok(!sameProductLine('American Express Business Gold Card', 'American Express Gold'))
+})
+
+test('360 creative rows import as creative rows; program beside them gives way, and is said', async () => {
+  const spec: Raw360Spec = {
+    rpttype: 2307,
+    title: null,
+    cols: [
+      { type: 1, entmaj: 118, entmin: 2, order: 1, sort: 0, total: 0, calc: 0, demo: 0, name: 'Advertiser' },
+      { type: 1, entmaj: 460, entmin: 2, order: 2, sort: 0, total: 0, calc: 0, demo: 0, name: 'Creative' },
+      { type: 1, entmaj: 460, entmin: 3, order: 3, sort: 0, total: 0, calc: 0, demo: 0, name: 'Hidden Creative ID' },
+      { type: 1, entmaj: 309, entmin: 2, order: 4, sort: 0, total: 0, calc: 0, demo: 0, name: 'Program' },
+      { type: 3, entmaj: 800, entmin: 36, order: 5, sort: 0, total: 0, calc: 0, demo: 0, name: '$' },
+    ],
+    opts: [],
+    sel: [],
+  }
+  const c = await convert360(describe(spec, { ...look, type: (e) => ({ 118: 'Advertiser', 460: 'Creative', 309: 'Program' })[e] ?? look.type(e) }), matcher)
+  assert.deepEqual(c.spec.rows, ['advertiser', 'creative'], 'both 460 columns are one creative row; program gives way')
+  const n = c.notes.find((x) => /program with creatives/i.test(x.what))
+  assert.ok(n && n.impact === 'dropped' && /creative rows are kept/.test(n.did), c.notes.map((x) => x.what).join('; '))
 })

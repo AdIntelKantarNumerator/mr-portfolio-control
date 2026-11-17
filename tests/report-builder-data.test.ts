@@ -224,10 +224,32 @@ test('daypart and league switch a report to the daily tables, as a breakout or o
   const byDaypart = ch.sqlFor({ period: m, groupBy: ['daypart'], measures: spend }, '(DAILY)')
   assert.match(byDaypart.rows, /FROM \(DAILY\) WHERE year_month BETWEEN 202609 AND 202611 AND start_date BETWEEN '2026-10-01' AND '2026-10-31' AND coalesce\(is_promo/)
   const byLength = ch.sqlFor({ period: m, groupBy: ['length'], measures: spend })
-  assert.match(byLength.rows, /FROM gpc_creative\.creative_product_media_summary_month WHERE year_month BETWEEN 202610 AND 202610 GROUP BY k_length/)
-  assert.doesNotMatch(byLength.rows, /is_promo/, 'the creative data has no promo flags')
+  assert.match(byLength.rows, /FROM gpc_creative\.creative_product_media_summary_month WHERE year_month BETWEEN 202610 AND 202610 AND creative_id NOT IN \(SELECT creative_id FROM gpc_detail\.tv_product_detail/, 'the creative data has no promo flags: mostly-promo creatives are left out by their TV airings')
+  assert.doesNotMatch(byLength.rows, /coalesce\(is_promo, 0\) = 0/)
   assert.equal(ch.supports!(['length', 'advertiser', 'media_type']), null)
-  assert.deepEqual(ch.supports!(['length', 'program', 'market'])!.conflicts, ['program', 'market'])
+  // Market is in the fuller creative summaries (17 November 2026); program is in none.
+  assert.deepEqual(ch.supports!(['length', 'program', 'market'])!.conflicts, ['program'])
+})
+
+test('creatives: rows from the creative data, the fuller tables when market is read, titles for names', async () => {
+  const m = { from: '2026-10-01', to: '2026-10-31' }
+  const spend = [{ as: 'v', measure: 'spend' as const }]
+  assert.equal(sourceFor({ period: m, groupBy: ['creative'], measures: spend }), 'creative_month')
+  const sent: string[] = []
+  const ch = clickhouseAdapter({
+    query: async <T,>(sql: string) => {
+      sent.push(sql)
+      if (sql.includes('FROM gpc_creative.creative WHERE')) return [{ id: '25103620826', title: 'Support Childhood Cancer Research', media: 'TV', secs: 120, first: '2026-10-03' }] as T[]
+      if (sql.includes('k_creative')) return [{ k_creative: '25103620826', n_creative: '25103620826', m_v: 6260648 }, { k_creative: '99', n_creative: '99', m_v: 5 }] as T[]
+      return [] as T[]
+    },
+  })
+  assert.match(ch.sqlFor({ period: m, groupBy: ['creative'], measures: spend }).rows, /FROM gpc_creative\.creative_product_media_summary_month /)
+  assert.match(ch.sqlFor({ period: m, groupBy: ['creative', 'market'], measures: spend }).rows, /FROM gpc_creative\.creative_product_summary_month /, 'market needs the fuller creative table')
+  const r = await ch.aggregate({ period: m, groupBy: ['creative'], context: true, measures: spend })
+  assert.deepEqual(r.rows[0]!.keys.creative, { id: 'creative:25103620826', name: 'Support Childhood Cancer Research', context: 'TV · 120s · first seen 2026-10-03' })
+  assert.equal(r.rows[1]!.keys.creative!.name, 'Creative 99', 'no title: never a blank row')
+  assert.match(ch.supports!(['creative', 'daypart'])!.reason, /^Creative comes from the creative data, which does not record daypart/)
 })
 
 const CC = (dim: string, id: number, name: string) => ({ id: `${dim}:${id}`, name })

@@ -38,6 +38,7 @@ export type DimKey =
   | 'language'
   | 'direct_indirect'
   | 'length'
+  | 'creative'
   | 'month'
   | 'quarter'
   | 'year'
@@ -87,6 +88,8 @@ export const DIMENSIONS: Record<DimKey, DimInfo> = {
   language: { label: 'Language', plural: 'languages', group: 'detail' },
   direct_indirect: { label: 'Direct / indirect', plural: 'buying types', group: 'detail' },
   length: { label: 'Spot length', plural: 'spot lengths', group: 'detail', creative: true },
+  // One ad (17 November 2026): a quarter of the 360 reports in use list creatives as rows.
+  creative: { label: 'Creative', plural: 'creatives', group: 'detail', creative: true },
   month: { label: 'Month', plural: 'months', group: 'when', time: true },
   quarter: { label: 'Quarter', plural: 'quarters', group: 'when', time: true },
   year: { label: 'Year', plural: 'years', group: 'when', time: true },

@@ -124,6 +124,9 @@ function fitsContext(h: Candidate, context: string | null): boolean {
 export type Choice = { ids: string[]; names: string[]; how: 'creatives' | 'picked'; why?: string } | null
 export type Choices = Record<string, Choice>
 
+/** What GPC creative data does not record, so cannot sit beside creative rows (lib/report-builder/data/clickhouse.ts). */
+const CREATIVE_CANNOT: DimKey[] = ['program', 'program_genre', 'daypart', 'league', 'direct_indirect']
+
 /** 360 entity types whose unmatched names can be looked up by their creatives (lib/import360/creatives.ts). */
 export const LOOKUP_TYPES = [118, 102, 139, 100]
 
@@ -204,7 +207,9 @@ export const ENTITY: Record<number, Map360> = {
   746: { dim: 'day' },
   747: { dim: 'day' },
   // Not available.
-  460: NOT_IN_RB('creative'),
+  // Creative rows (17 November 2026): 360's Creative and its "Hidden Creative ID" are both 460, and
+  // become one creative row. 322 and 438 are other creative views no report in the snapshot uses.
+  460: { dim: 'creative' },
   322: NOT_IN_RB('creative'),
   438: NOT_IN_RB('creative'),
   320: NOT_IN_RB('creative first appearance'),
@@ -533,6 +538,22 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
   // ---- the period, and promos
   note('changed', `Period: ${d.time.label ?? 'as set in 360'}`, 'GPC data covers all media from August 2026.', `Set to ${PERIOD_LABEL}.`)
   if (d.includePromos) note('changed', 'Including promos', 'Report Builder always leaves out promos and public service announcements.', 'Promos are not included.')
+
+  // Creatives come from the creative data, which records no program, genre, daypart, league or
+  // direct/indirect: those breakouts and selections give way to the creative rows, which are the
+  // point of such a report, rather than leaving a report that will not run (17 November 2026: 164
+  // of the 616 360 reports with creative rows also have program).
+  if (rows.includes('creative') || columns === 'creative') {
+    const away = CREATIVE_CANNOT.filter((dim) => rows.includes(dim) || columns === dim || filters[dim]?.length)
+    if (away.length) {
+      for (const dim of away) {
+        if (rows.includes(dim)) rows.splice(rows.indexOf(dim), 1)
+        if (columns === dim) columns = null
+        delete filters[dim]
+      }
+      note('dropped', `${list(away.map((x) => x.replace(/_/g, ' ')))} with creatives`, 'GPC creative data does not record these, so they cannot be shown beside creative rows.', 'Left out; the creative rows are kept.')
+    }
+  }
 
   const who = ['advertiser', 'top_parent', 'product', 'industry', 'category', 'subcategory'].some((k) => filters[k]?.length)
   const spec: Record<string, unknown> = {
