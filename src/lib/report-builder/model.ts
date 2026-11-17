@@ -12,10 +12,19 @@
  *                everything else (lib/openrouter.ts), plus require_parameters
  *                so a provider that cannot call tools is never chosen. Its own
  *                REPORT_BUILDER_MODEL and REPORT_BUILDER_PROVIDERS, so it does
- *                not move with the everyday or advanced model. Claude through
- *                OpenRouter on Bedrock is the intended setting:
- *                  REPORT_BUILDER_MODEL=anthropic/claude-sonnet-5.5
- *                  REPORT_BUILDER_PROVIDERS=amazon-bedrock/us-east-1,azure/us
+ *                not move with the everyday or advanced model. The live setting
+ *                (Scott, 17 November 2026):
+ *                  REPORT_BUILDER_MODEL=deepseek/deepseek-v4.1-flash
+ *                  REPORT_BUILDER_PROVIDERS=Together,Fireworks,DeepInfra,Baseten,CoreWeave
+ *                It was Claude Sonnet 5.5 on amazon-bedrock/us-east-1,azure/us
+ *                until the OpenRouter workspace's guardrail started blocking
+ *                every Claude model, which failed every turn with a 404. In a
+ *                four-conversation comparison on live data V4.1 Flash matched
+ *                GPT-6.1 Terra (azure/us, also allowed) on every report at about
+ *                a third of the cost; DeepSeek V3.1, the everyday model, answered
+ *                in text instead of calling the tool, so it is not a fallback to
+ *                rely on. The reasoning and temperature choices in loopOpenRouter
+ *                below were made for Claude and work unchanged for V4.1 Flash.
  *                Unset, it falls back to the advanced model, then the everyday.
  *
  * REPORT_BUILDER_PROVIDER forces anthropic or openrouter.

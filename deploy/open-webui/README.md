@@ -137,20 +137,24 @@ picker; if they ask it something, it tells them it is not switched on for them.
 
 To turn it on in Azure:
 
-1. Give Report Builder a model that can call tools. The intended one is
-   Claude through the portfolio's existing OpenRouter key, on the US Bedrock
-   and Azure hosts already on the verified list (the same route Yaara uses for
-   her advanced model). Its own settings, so the everyday and advanced models
-   do not move:
+1. Give Report Builder a model that can call tools, through the portfolio's
+   existing OpenRouter key, on providers already on the verified US list. Its
+   own settings, so the everyday and advanced models do not move. The live
+   setting since 17 November 2026:
 
    ```powershell
    az webapp config appsettings set -g rg-mr-portfolio-control -n mr-portfolio-control --settings `
-     REPORT_BUILDER_MODEL=anthropic/claude-sonnet-5.5 `
-     REPORT_BUILDER_PROVIDERS=amazon-bedrock/us-east-1,azure/us
+     REPORT_BUILDER_MODEL=deepseek/deepseek-v4.1-flash `
+     REPORT_BUILDER_PROVIDERS=Together,Fireworks,DeepInfra,Baseten,CoreWeave
    ```
 
-   `anthropic/claude-haiku-5.5` is the cheaper choice (about a twentieth of
-   the price) and follows the interview less reliably. An Anthropic key of its
+   It was `anthropic/claude-sonnet-5.5` on `amazon-bedrock/us-east-1,azure/us`
+   until the OpenRouter workspace's guardrail started blocking every Claude
+   model ("Model blocked by guardrail", a 404 on every turn). Of the models the
+   guardrail allows, `openai/gpt-6.1-terra` on `azure/us` did as well in a
+   four-conversation test at about three times the price; DeepSeek V3.1 did
+   not call the tool at all. If the guardrail allows Claude again, the old
+   values can go back. An Anthropic key of its
    own (`ANTHROPIC_API_KEY`) also works and takes precedence;
    `REPORT_BUILDER_PROVIDER` forces one or the other. With no model that can
    run it, Report Builder is not listed.
