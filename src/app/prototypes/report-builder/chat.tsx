@@ -136,17 +136,22 @@ function stackedMeasures(cols: Col[], dcols: DCol[]): string[] {
 const numCls = (type: string, v: unknown) => 'rb-n' + (type === 'change' && v != null ? (Number(v) >= 0 ? ' rb-up' : ' rb-down') : '')
 
 function Cell({ cols, d, row }: { cols: Col[]; d: DCol; row: unknown[] }) {
+  // A column the row's table does not have draws as an empty cell. The tree draws an expanded row
+  // against the top level's columns; when the two disagreed (17 November 2026: a daily report with 92
+  // day columns, expanded rows capped at 60) reading `.type` of the missing column threw and took the
+  // whole page down. An empty cell is the honest rendering of "not in this row's data".
   if (d.idx.length === 1) {
     const i = d.idx[0]!
-    const t = cols[i]!.type
-    return <td className={t === 'text' ? '' : numCls(t, row[i])}>{cell(t, row[i])}</td>
+    const c = cols[i]
+    if (!c) return <td />
+    return <td className={c.type === 'text' ? '' : numCls(c.type, row[i])}>{cell(c.type, row[i])}</td>
   }
   return (
     <td className="rb-n">
       <span className="rb-stack">
         {d.idx.map((i, k) => (
           <span key={i} className={`rb-m${k}`}>
-            {cell(cols[i]!.type, row[i])}
+            {cols[i] ? cell(cols[i]!.type, row[i]) : null}
           </span>
         ))}
       </span>

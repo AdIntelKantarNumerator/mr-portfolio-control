@@ -92,7 +92,11 @@ export async function POST(req: Request) {
   if (body.expand && typeof body.expand === 'object') {
     const e = body.expand as { spec?: unknown; path?: unknown; colIds?: unknown }
     const path = Array.isArray(e.path) ? e.path.filter((p): p is string => typeof p === 'string').slice(0, 8) : []
-    const colIds = Array.isArray(e.colIds) ? e.colIds.filter((c): c is string => typeof c === 'string').slice(0, 60) : null
+    // Every column the table has. This was capped at 60, and a daily report has a column per day (92 for
+    // August to October), so an expanded row came back narrower than the table and the page crashed
+    // drawing the missing columns (Scott, 17 November 2026: McDonald's by product, daily). 400 covers a
+    // year of days; the cap only stops a malformed request from asking for thousands.
+    const colIds = Array.isArray(e.colIds) ? e.colIds.filter((c): c is string => typeof c === 'string').slice(0, 400) : null
     if (!e.spec || typeof e.spec !== 'object' || !path.length) return Response.json({ error: 'Nothing to expand.' }, { status: 400 })
     try {
       return Response.json(await reportBuilderExpand(email, e.spec as Record<string, unknown>, path, colIds))
