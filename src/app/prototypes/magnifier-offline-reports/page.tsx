@@ -14,6 +14,7 @@ import { Suspense } from 'react'
 import * as data from '@/lib/magnifier-reports/data'
 import { addDays, dayLabel, monthLabel, trail, type Level } from '@/lib/magnifier-reports/rules'
 import { FilterBar, type PillSpec } from './filter-bar'
+import { LinkPending } from './pending'
 import { CategoryPicker } from './picker'
 import { href, readState, TABS, type State } from './state'
 import { ReportView, type Ctx } from './views'
@@ -121,7 +122,9 @@ export default async function MagnifierOfflineReportsPage({ searchParams }: { se
         {path.slice(0, -1).map((p) => (
           <span key={p.id} style={{ display: 'contents' }}>
             <span className="sep">›</span>
-            <Link href={href({ ...st, node: p.id, adv: null })}>{p.name}</Link>
+            <Link href={href({ ...st, node: p.id, adv: null })} prefetch={false}>
+              {p.name} <LinkPending />
+            </Link>
           </span>
         ))}
         <span className="mor-chip">{node.level}</span>
@@ -134,8 +137,8 @@ export default async function MagnifierOfflineReportsPage({ searchParams }: { se
       <FilterBar pills={pills} focus={focusName ? { name: focusName, clear: href(st, { adv: null }) } : null} excel={excel} />
       <nav className="mor-tabs" aria-label="Report sections">
         {TABS.map((t) => (
-          <Link key={t.id} href={href(st, { tab: t.id })} className={t.id === st.tab ? 'on' : undefined} scroll={false}>
-            {t.label}
+          <Link key={t.id} href={href(st, { tab: t.id })} className={t.id === st.tab ? 'on' : undefined} scroll={false} prefetch={false}>
+            {t.label} <LinkPending />
           </Link>
         ))}
       </nav>

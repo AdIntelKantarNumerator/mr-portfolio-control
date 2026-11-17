@@ -19,7 +19,16 @@
  *
  * Spend cells hold real dollars, shown in thousands by the number format
  * (#,##0,), so a sum or a pivot built on them is exact.
+ *
+ * MEMORY (17 November 2026): the first version built each workbook whole in
+ * memory, and a download for a big category ran the site's Node process out
+ * of heap (B1 plan, about 1 GB) and took the site down. Workbooks are now
+ * written with ExcelJS's streaming writer straight to the response: a big
+ * table's rows are committed (flushed) as they are written, so memory holds
+ * the rows read from ClickHouse, not the spreadsheet. The route also builds
+ * one workbook at a time.
  */
+import type { Writable } from 'node:stream'
 import ExcelJS from 'exceljs'
 import * as data from './data'
 import {
@@ -32,6 +41,8 @@ const SUB = 'FFDCE6F1'
 const BAR = 'FF2A78D6'
 const ROW_CAP = 100_000
 const LINK_CAP = 60_000
+/** A table longer than this is flushed row by row; shorter ones (the dashboards) stay editable until the sheet is done. */
+const FLUSH_FROM = 300
 
 type Fmt = 'usd' | 'pct' | 'int' | 'pts' | 'text' | 'date'
 interface Col {
@@ -55,19 +66,25 @@ export interface ReportInput {
 }
 
 class Book {
-  wb = new ExcelJS.Workbook()
+  wb: ExcelJS.stream.xlsx.WorkbookWriter
+  private current: ExcelJS.Worksheet | null = null
   constructor(
     private kind: string,
     private input: ReportInput,
     private periodText: string,
+    stream: Writable,
   ) {
+    this.wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream, useStyles: true, useSharedStrings: false })
     this.wb.creator = 'MR Portfolio Control · Magnifier Offline Reports (prototype)'
     this.wb.created = new Date()
   }
 
   /** A sheet with the report header, as the samples have it. Returns the first free row. */
   sheet(name: string, title: string, note = 'Dollars shown in thousands'): { ws: ExcelJS.Worksheet; row: number } {
+    // The streaming writer writes one sheet at a time: finish the last one first.
+    this.current?.commit()
     const ws = this.wb.addWorksheet(name, { views: [{ showGridLines: false }] })
+    this.current = ws
     const put = (r: number, v: string, size: number, bold = false) => {
       const c = ws.getCell(r, 1)
       c.value = v
@@ -82,7 +99,7 @@ class Book {
   }
 
   /** A table: navy header row, then rows; `kinds` marks subtotal and total rows. Returns the next free row. */
-  table(ws: ExcelJS.Worksheet, at: number, cols: Col[], rows: Cell[][], opts: { kinds?: Kind[]; filter?: boolean; freeze?: boolean; bars?: number[] } = {}): number {
+  async table(ws: ExcelJS.Worksheet, at: number, cols: Col[], rows: Cell[][], opts: { kinds?: Kind[]; filter?: boolean; freeze?: boolean; bars?: number[] } = {}): Promise<number> {
     cols.forEach((c, i) => {
       const col = ws.getColumn(i + 1)
       const want = c.w ?? (c.f === 'text' || !c.f ? 22 : 13)
@@ -97,9 +114,15 @@ class Book {
       cell.alignment = { vertical: 'middle', horizontal: c.f && c.f !== 'text' && c.f !== 'date' ? 'right' : 'left', wrapText: true }
     })
     head.height = 26
+    // Frozen panes go out with the sheet's first flushed row, so they are set before any row is written.
+    if (opts.freeze) ws.views.splice(0, ws.views.length, { state: 'frozen', ySplit: at, showGridLines: false })
+    const flush = rows.length > FLUSH_FROM
     // Excel refuses to open a sheet with more than 65,530 hyperlinks; past the cap an ad code is plain text.
     let links = 0
-    rows.forEach((r, ri) => {
+    for (let ri = 0; ri < rows.length; ri++) {
+      const r = rows[ri]
+      // Let the server answer other requests, and the file flow out, while a long table is written.
+      if (ri && ri % 1000 === 0) await new Promise((done) => setImmediate(done))
       const row = ws.getRow(at + 1 + ri)
       const kind = opts.kinds?.[ri]
       r.forEach((v0, ci) => {
@@ -113,9 +136,9 @@ class Book {
         if (kind === 'sub' || kind === 'me') cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SUB } }
         if (kind === 'total') cell.border = { top: { style: 'thin' } }
       })
-    })
+      if (flush) row.commit()
+    }
     const end = at + rows.length
-    if (opts.freeze) ws.views = [{ state: 'frozen', ySplit: at, showGridLines: false }]
     if (opts.filter && rows.length) ws.autoFilter = { from: { row: at, column: 1 }, to: { row: end, column: cols.length } }
     for (const ci of opts.bars ?? []) {
       if (!rows.length) continue
@@ -162,8 +185,10 @@ class Book {
     line('', '© 2026 MediaRadar, Inc. and affiliates. Prototype; figures on development data can change.')
   }
 
-  async buffer(): Promise<Buffer> {
-    return Buffer.from(await this.wb.xlsx.writeBuffer())
+  /** Finish the last sheet and the file; the stream ends when this resolves. */
+  async done(): Promise<void> {
+    this.current?.commit()
+    await this.wb.commit()
   }
 }
 
@@ -178,7 +203,7 @@ const adLink = (app: string, id: string): Cell => ({ text: id, hyperlink: `${app
 const mediaParam = (s: data.Scope) => s.media ?? 'All media'
 
 /** Advertiser x media blocks: spending, mix (row %) and share of voice (column %). */
-function mediaSheets(book: Book, rows: CubeRow[], who: Who) {
+async function mediaSheets(book: Book, rows: CubeRow[], who: Who) {
   const mm = mediaMatrix(rows, null, who)
   const people = mm.people.slice(0, 1000)
   const total = mm.media.reduce((a, m) => a + m.spend, 0)
@@ -187,11 +212,11 @@ function mediaSheets(book: Book, rows: CubeRow[], who: Who) {
   const tKinds = (n: number): Kind[] => [...Array(n).fill(undefined), 'total']
 
   let { ws, row } = book.sheet('MediaType', 'Spending by Media Type')
-  book.table(ws, row, cols, [...people.map((p) => [p.name, ...mm.media.map((m) => mm.at(p.key, m.key)), p.spend]), ['Grand Total', ...mm.media.map((m) => m.spend), total]], { kinds: tKinds(people.length), freeze: true })
+  await book.table(ws, row, cols, [...people.map((p) => [p.name, ...mm.media.map((m) => mm.at(p.key, m.key)), p.spend]), ['Grand Total', ...mm.media.map((m) => m.spend), total]], { kinds: tKinds(people.length), freeze: true })
   ;({ ws, row } = book.sheet('MediaMix', 'Percent Media Mix', "Each advertiser's media mix; each row adds to 100%"))
-  book.table(ws, row, pc, [...people.map((p) => [p.name, ...mm.media.map((m) => share(mm.at(p.key, m.key), p.spend)), 1]), ['Grand Total', ...mm.media.map((m) => share(m.spend, total)), 1]], { kinds: tKinds(people.length), freeze: true })
+  await book.table(ws, row, pc, [...people.map((p) => [p.name, ...mm.media.map((m) => share(mm.at(p.key, m.key), p.spend)), 1]), ['Grand Total', ...mm.media.map((m) => share(m.spend, total)), 1]], { kinds: tKinds(people.length), freeze: true })
   ;({ ws, row } = book.sheet('MediaSOV', 'Share of Voice by Media', "Each advertiser's share of each media; each column adds to 100%"))
-  book.table(ws, row, pc, [...people.map((p) => [p.name, ...mm.media.map((m) => share(mm.at(p.key, m.key), m.spend)), share(p.spend, total)]), ['Grand Total', ...mm.media.map(() => 1), 1]], { kinds: tKinds(people.length), freeze: true })
+  await book.table(ws, row, pc, [...people.map((p) => [p.name, ...mm.media.map((m) => share(mm.at(p.key, m.key), m.spend)), share(p.spend, total)]), ['Grand Total', ...mm.media.map(() => 1), 1]], { kinds: tKinds(people.length), freeze: true })
 }
 
 /** Product rows grouped by advertiser with a total under each, and a grand total (Product|Campaign, SpendingTrend, ...). */
@@ -232,14 +257,14 @@ const CREATIVE_COLS: Col[] = [
   { h: 'Ad Spend', f: 'usd' }, { h: 'Occ.Count', f: 'int' }, { h: 'Title', w: 40, f: 'text' }, { h: 'Lead', w: 60, f: 'text' },
 ]
 
-function pivotDetail(book: Book, det: { rows: data.DetailRow[]; more: boolean }, weekly: boolean) {
+async function pivotDetail(book: Book, det: { rows: data.DetailRow[]; more: boolean }, weekly: boolean) {
   const { ws, row } = book.sheet('PivotTableDetail', 'Pivot Table Detail', det.more ? `The first ${ROW_CAP.toLocaleString('en-US')} rows · dollars shown in thousands` : 'Dollars shown in thousands · filter or pivot from this table')
   const cols: Col[] = [
     { h: 'Advertiser', w: 34, f: 'text' }, { h: 'Parent', w: 28, f: 'text' }, { h: 'Category', w: 26, f: 'text' }, { h: 'Subcategory', w: 26, f: 'text' }, { h: 'Product/Campaign', w: 34, f: 'text' },
     { h: 'Media Type', w: 18, f: 'text' }, { h: 'Market', w: 18, f: 'text' }, { h: 'MediaOutlet', w: 28, f: 'text' },
     ...(weekly ? [{ h: 'Week of', w: 12, f: 'text' as Fmt }] : []), { h: 'Month', w: 8, f: 'text' }, { h: 'Quarter', w: 8, f: 'text' }, { h: 'Year', w: 8, f: 'int' }, { h: 'AdSpend', f: 'usd' }, { h: 'Occ.Count', f: 'int' },
   ]
-  book.table(
+  await book.table(
     ws,
     row,
     cols,
@@ -253,7 +278,7 @@ function pivotDetail(book: Book, det: { rows: data.DetailRow[]; more: boolean },
 }
 
 /** Market position against the leader, as the dashboards open (rank, SOV, dollars, gap). */
-function positionBlock(book: Book, ws: ExcelJS.Worksheet, at: number, title: string, ranked: Ranked[], focus: Ranked | null): number {
+async function positionBlock(book: Book, ws: ExcelJS.Worksheet, at: number, title: string, ranked: Ranked[], focus: Ranked | null): Promise<number> {
   at = book.heading(ws, at, title)
   const leader = ranked[0]
   const cols: Col[] = [{ h: '', w: 34, f: 'text' }, { h: leader?.name ?? 'Leader', w: 30, f: 'text' }]
@@ -264,12 +289,12 @@ function positionBlock(book: Book, ws: ExcelJS.Worksheet, at: number, title: str
     ['SOV', `${((leader?.sov ?? 0) * 100).toFixed(0)}%`, ...(focus ? [`${(focus.sov * 100).toFixed(0)}%`, `${((focus.sov - leader.sov) * 100).toFixed(0)} Points`] : [])],
     ['Dollars ($000s)', usd(leader?.spend ?? 0), ...(focus ? [usd(focus.spend), usd(focus.spend - leader.spend)] : [])],
   ]
-  return book.table(ws, at, cols, rows)
+  return await book.table(ws, at, cols, rows)
 }
 
 // ================================================================== Summary Report
 
-export async function summaryReport(input: ReportInput, window: number[], ym: number): Promise<Buffer> {
+export async function summaryReport(input: ReportInput, window: number[], ym: number, out: Writable): Promise<void> {
   // Every sheet covers the whole market; the focus advertiser is only highlighted, as in today's reports.
   const market = { ...input.scope, adv: null }
   const s = market
@@ -288,20 +313,20 @@ export async function summaryReport(input: ReportInput, window: number[], ym: nu
   const totals = monthTotals(rows, window)
   const prior = window.length > 1 ? window.at(-2)! : null
   const focus = input.scope.adv ? ranked.find((r) => r.key === input.scope.adv) ?? null : null
-  const book = new Book('Competitive Spending Summary Report', input, periodText)
+  const book = new Book('Competitive Spending Summary Report', input, periodText, out)
 
   // Dashboard
   {
     const { ws, row } = book.sheet('Dashboard', `${monthLabel(ym)} Ad Spending: ${input.focusName ?? input.node.name}`, `Period: ${monthLabel(ym)} · dollars in thousands unless noted`)
-    let r = positionBlock(book, ws, row, `${focus ? `${focus.name} vs. ` : ''}${monthLabel(ym)} Market Leader`, ranked.filter((x) => x.spend > 0), focus)
+    let r = await positionBlock(book, ws, row, `${focus ? `${focus.name} vs. ` : ''}${monthLabel(ym)} Market Leader`, ranked.filter((x) => x.spend > 0), focus)
     r = book.heading(ws, r, 'Total Market Spending Trend')
-    r = book.table(ws, r, [{ h: 'Month', w: 34, f: 'text' }, { h: 'Spending', f: 'usd' }, { h: 'Change', f: 'pct' }], window.map((m, i) => [monthLabel(m), totals[i], i ? share(totals[i] - totals[i - 1], totals[i - 1]) : null]), { bars: [1] })
+    r = await book.table(ws, r, [{ h: 'Month', w: 34, f: 'text' }, { h: 'Spending', f: 'usd' }, { h: 'Change', f: 'pct' }], window.map((m, i) => [monthLabel(m), totals[i], i ? share(totals[i] - totals[i - 1], totals[i - 1]) : null]), { bars: [1] })
     if (prior) {
       r = book.heading(ws, r, `${monthLabel(prior, true)} to ${monthLabel(ym, true)} Spending Shifts`)
-      r = book.table(ws, r, [{ h: 'Advertiser', w: 34, f: 'text' }, { h: monthLabel(prior, true), f: 'usd' }, { h: monthLabel(ym, true), f: 'usd' }, { h: 'Change', f: 'usd' }, { h: '% Change', f: 'pct' }], shifts(ranked, 10).map((x) => [x.name, x.prior, x.spend, x.spend - x.prior, x.delta]), { bars: [3] })
+      r = await book.table(ws, r, [{ h: 'Advertiser', w: 34, f: 'text' }, { h: monthLabel(prior, true), f: 'usd' }, { h: monthLabel(ym, true), f: 'usd' }, { h: 'Change', f: 'usd' }, { h: '% Change', f: 'pct' }], shifts(ranked, 10).map((x) => [x.name, x.prior, x.spend, x.spend - x.prior, x.delta]), { bars: [3] })
     }
     r = book.heading(ws, r, `${monthLabel(ym)} Advertiser Rankings`)
-    r = book.table(
+    r = await book.table(
       ws, r,
       [{ h: whoLabel(who), w: 34, f: 'text' }, { h: 'Rank', f: 'int', w: 8 }, { h: 'Spending', f: 'usd' }, { h: 'SOV', f: 'pct' }, { h: 'Prior SOV', f: 'pct' }, { h: '% Change', f: 'pct' }],
       ranked.filter((x) => x.spend > 0).slice(0, 15).map((x) => [x.name, x.rank, x.spend, x.sov, x.priorSov, x.delta]),
@@ -310,18 +335,20 @@ export async function summaryReport(input: ReportInput, window: number[], ym: nu
     const mm = mediaMatrix(rows, ym, who)
     const mt = mm.media.reduce((a, m) => a + m.spend, 0)
     r = book.heading(ws, r, `${monthLabel(ym)} Media Allocation: Total Market`)
-    r = book.table(ws, r, [{ h: 'Media', w: 34, f: 'text' }, { h: 'Spending', f: 'usd' }, { h: 'Share', f: 'pct' }], mm.media.map((m) => [m.key, m.spend, share(m.spend, mt)]), { bars: [1] })
+    r = await book.table(ws, r, [{ h: 'Media', w: 34, f: 'text' }, { h: 'Spending', f: 'usd' }, { h: 'Share', f: 'pct' }], mm.media.map((m) => [m.key, m.spend, share(m.spend, mt)]), { bars: [1] })
     const kids = sumBy(rows, (x) => x.cid, (x) => x.cname, (x) => x.ym === ym).filter((k) => k.spend > 0)
     r = book.heading(ws, r, `${monthLabel(ym)} ${LEVEL_SQL[input.node.level as Level].child.label} Allocation: Total Market`)
-    r = book.table(ws, r, [{ h: LEVEL_SQL[input.node.level as Level].child.label, w: 34, f: 'text' }, { h: 'Spending', f: 'usd' }, { h: 'Share', f: 'pct' }], kids.slice(0, 25).map((k) => [k.name, k.spend, share(k.spend, totals.at(-1) ?? 0)]), { bars: [1] })
+    r = await book.table(ws, r, [{ h: LEVEL_SQL[input.node.level as Level].child.label, w: 34, f: 'text' }, { h: 'Spending', f: 'usd' }, { h: 'Share', f: 'pct' }], kids.slice(0, 25).map((k) => [k.name, k.spend, share(k.spend, totals.at(-1) ?? 0)]), { bars: [1] })
     const monthAds = await data.creatives(market, { months: [ym] }, 120)
     const seen = new Set<number>()
     const top = monthAds.filter((a) => (seen.has(a.aid) || seen.size >= 8 ? false : (seen.add(a.aid), true)))
     r = book.heading(ws, r, 'Creative Messaging Highlights for the Month: most heavily run message')
-    book.table(
+    await book.table(
       ws, r,
       [{ h: 'Advertiser', w: 34, f: 'text' }, { h: 'Ad Code', w: 14, f: 'text' }, { h: 'Media', w: 26, f: 'text' }, { h: 'Title', w: 40, f: 'text' }, { h: 'Lead', w: 60, f: 'text' }, { h: 'Spend', f: 'usd' }, { h: '% of Advertiser', f: 'pct' }, { h: 'New This Month', w: 14, f: 'text' }],
-      top.map((a) => [a.advertiser, adLink(input.appUrl, a.id), a.media.join(', '), a.title, a.lead, a.spend, share(a.spend, a.advTotal), a.firstSeen && a.firstSeen >= `${String(ym).slice(0, 4)}-${String(ym).slice(4)}-01` ? 'New' : '']),
+      // A plain ad code here: the streaming writer puts links ahead of the data bars on this sheet, an
+      // order Excel refuses to open (17 November 2026). The Creatives sheet links every ad.
+      top.map((a) => [a.advertiser, a.id, a.media.join(', '), a.title, a.lead, a.spend, share(a.spend, a.advTotal), a.firstSeen && a.firstSeen >= `${String(ym).slice(0, 4)}-${String(ym).slice(4)}-01` ? 'New' : '']),
     )
   }
 
@@ -332,7 +359,7 @@ export async function summaryReport(input: ReportInput, window: number[], ym: nu
     const cols: Col[] = [{ h: whoLabel(who), w: 40, f: 'text' }, { h: `${monthLabel(first, true)}–${tm} Total`, f: 'usd' }, { h: tm, f: 'usd' }, { h: pm, f: 'usd' }, { h: '% Change', f: 'pct' }, { h: `SOV ${tm}`, f: 'pct' }, { h: `SOV ${pm}`, f: 'pct' }, { h: 'Change (pts)', f: 'pts' }]
     const list = ranked.slice(0, 2000)
     const t = totals.at(-1) ?? 0, pt = prior ? totals.at(-2)! : 0
-    book.table(ws, row, cols, [
+    await book.table(ws, row, cols, [
       ...list.map((x) => [x.name, x.trend.reduce((a, b) => a + b, 0), x.spend, x.prior, x.delta, x.sov, x.priorSov, (x.sov - x.priorSov) * 100]),
       ['Grand Total', totals.reduce((a, b) => a + b, 0), t, pt, pt ? t / pt - 1 : null, 1, 1, 0],
     ], { kinds: [...list.map((x) => (x.key === focus?.key ? 'me' as Kind : undefined)), 'total'], freeze: true })
@@ -342,35 +369,35 @@ export async function summaryReport(input: ReportInput, window: number[], ym: nu
   {
     const { ws, row } = book.sheet('Product|Campaign', 'Monthly Spending Trend by Product/Campaign')
     const b = productBlock(prods, window, (p) => [p.advertiser, p.category, p.subcategory, p.product], (n) => [n, '', '', ''])
-    book.table(ws, row, [{ h: 'Advertiser', w: 34, f: 'text' }, { h: 'Category', w: 24, f: 'text' }, { h: 'Subcategory', w: 26, f: 'text' }, { h: 'Product/Campaign', w: 36, f: 'text' }, ...window.map((m) => ({ h: monthLabel(m, true), f: 'usd' as Fmt })), { h: 'Total', f: 'usd' }], b.rows, { kinds: b.kinds, freeze: true })
+    await book.table(ws, row, [{ h: 'Advertiser', w: 34, f: 'text' }, { h: 'Category', w: 24, f: 'text' }, { h: 'Subcategory', w: 26, f: 'text' }, { h: 'Product/Campaign', w: 36, f: 'text' }, ...window.map((m) => ({ h: monthLabel(m, true), f: 'usd' as Fmt })), { h: 'Total', f: 'usd' }], b.rows, { kinds: b.kinds, freeze: true })
   }
 
-  mediaSheets(book, rows, who)
+  await mediaSheets(book, rows, who)
 
   // Product|Media|Trend
   {
     const { ws, row } = book.sheet('Product|Media|Trend', 'Monthly Trend by Product and Media Type')
     const b = productBlock(prodsByMedia, window, (p) => [p.advertiser, p.category, p.subcategory, p.product, p.media], (n) => [n, '', '', '', ''])
-    book.table(ws, row, [{ h: 'Advertiser', w: 34, f: 'text' }, { h: 'Category', w: 24, f: 'text' }, { h: 'Subcategory', w: 26, f: 'text' }, { h: 'Product/Campaign', w: 36, f: 'text' }, { h: 'Media', w: 20, f: 'text' }, ...window.map((m) => ({ h: monthLabel(m, true), f: 'usd' as Fmt })), { h: 'Total', f: 'usd' }], b.rows, { kinds: b.kinds, freeze: true })
+    await book.table(ws, row, [{ h: 'Advertiser', w: 34, f: 'text' }, { h: 'Category', w: 24, f: 'text' }, { h: 'Subcategory', w: 26, f: 'text' }, { h: 'Product/Campaign', w: 36, f: 'text' }, { h: 'Media', w: 20, f: 'text' }, ...window.map((m) => ({ h: monthLabel(m, true), f: 'usd' as Fmt })), { h: 'Total', f: 'usd' }], b.rows, { kinds: b.kinds, freeze: true })
   }
 
   // Creatives
   {
     const { ws, row } = book.sheet('Creatives', 'Creative List With Ad Spend and Occurrences', 'Initially sorted by ad spend · click an Ad Code to see the ad · dollars shown in thousands')
-    book.table(ws, row, CREATIVE_COLS, creativeRows(ads, input.appUrl, startIso), { filter: true, freeze: true })
+    await book.table(ws, row, CREATIVE_COLS, creativeRows(ads, input.appUrl, startIso), { filter: true, freeze: true })
   }
 
   // AdvertiserQuickPivot
   {
     const { ws, row } = book.sheet('AdvertiserQuickPivot', 'Sum of AdSpend by Advertiser and Month')
     const list = ranked.slice(0, 2000).sort((a, b) => a.name.localeCompare(b.name))
-    book.table(ws, row, [{ h: whoLabel(who), w: 40, f: 'text' }, ...window.map((m) => ({ h: monthLabel(m, true), f: 'usd' as Fmt })), { h: 'Grand Total', f: 'usd' }], [
+    await book.table(ws, row, [{ h: whoLabel(who), w: 40, f: 'text' }, ...window.map((m) => ({ h: monthLabel(m, true), f: 'usd' as Fmt })), { h: 'Grand Total', f: 'usd' }], [
       ...list.map((x) => [x.name, ...x.trend, x.trend.reduce((a, b) => a + b, 0)]),
       ['Grand Total', ...totals, totals.reduce((a, b) => a + b, 0)],
     ], { kinds: [...list.map(() => undefined), 'total'], freeze: true })
   }
 
-  pivotDetail(book, det, false)
+  await pivotDetail(book, det, false)
 
   book.notes(
     [['Media:', mediaParam(input.scope)], ['Period:', periodText], ['Report month:', monthLabel(ym)], ['Advertiser level:', whoLabel(who)], ...(input.focusName ? [['Focus advertiser:', input.focusName] as [string, string]] : [])],
@@ -387,19 +414,19 @@ export async function summaryReport(input: ReportInput, window: number[], ym: nu
       ['PivotTableDetail', 'The table the pivots are built from'],
     ],
   )
-  return book.buffer()
+  return book.done()
 }
 
 // ================================================================== Occurrence Table
 
-export async function occurrenceTable(input: ReportInput, week: string): Promise<Buffer> {
+export async function occurrenceTable(input: ReportInput, week: string, out: Writable): Promise<void> {
   const end = addDays(week, 6)
   const market = { ...input.scope, adv: null }
   const { rows, more } = await data.occurrences(market, week, end, ROW_CAP)
   const periodText = `${fullDate(week)} - ${fullDate(end)}`
-  const book = new Book('Occurrence Table', input, periodText)
+  const book = new Book('Occurrence Table', input, periodText, out)
   const { ws, row } = book.sheet('Occurrences', 'Occurrence List', more ? `The latest ${ROW_CAP.toLocaleString('en-US')} rows · dollars shown in thousands` : 'Run pivot tables from this list for further analysis · dollars shown in thousands')
-  book.table(
+  await book.table(
     ws, row,
     [
       { h: 'Advertiser', w: 34, f: 'text' }, { h: 'Ad Code', w: 14, f: 'text' }, { h: 'Media Type', w: 18, f: 'text' }, { h: 'Title', w: 40, f: 'text' }, { h: 'Subcategory', w: 26, f: 'text' },
@@ -409,12 +436,12 @@ export async function occurrenceTable(input: ReportInput, week: string): Promise
     { filter: true, freeze: true },
   )
   book.notes([['Media:', mediaParam(input.scope)], ['Period:', periodText], ['Rows:', `${rows.length.toLocaleString('en-US')}${more ? ' (capped)' : ''}`]], [['Occurrences', 'One row per ad, outlet, market and run date, with spend']])
-  return book.buffer()
+  return book.done()
 }
 
 // ================================================================== Weekly FastTrack
 
-export async function fastTrack(input: ReportInput, weeks: string[], week: string): Promise<Buffer> {
+export async function fastTrack(input: ReportInput, weeks: string[], week: string, out: Writable): Promise<void> {
   const upto = weeks.filter((w) => w <= week)
   const prevW = upto.length > 1 ? upto.at(-2)! : null
   const start = upto[0]
@@ -440,24 +467,24 @@ export async function fastTrack(input: ReportInput, weeks: string[], week: strin
   const focus = input.scope.adv ? ranked.find((r) => r.key === input.scope.adv) ?? null : null
   const periodText = `${fullDate(start)} - ${fullDate(end)}`
   const weekText = `${fullDate(week)} - ${fullDate(end)}`
-  const book = new Book('MediaRadar Weekly FastTrack Report', input, periodText)
+  const book = new Book('MediaRadar Weekly FastTrack Report', input, periodText, out)
 
   // Dashboard
   {
     const { ws, row } = book.sheet('Dashboard', `Weekly FastTrack: ${input.focusName ?? input.node.name}`, `Week Ending: ${fullDate(end)} · all dollars in thousands`)
-    let r = positionBlock(book, ws, row, 'Current Week Spending vs. Leader', ranked.filter((x) => x.spend > 0), focus)
+    let r = await positionBlock(book, ws, row, 'Current Week Spending vs. Leader', ranked.filter((x) => x.spend > 0), focus)
     const ptd = ranked.map((x) => ({ ...x, spend: x.trend.reduce((a, b) => a + b, 0) })).sort((a, b) => b.spend - a.spend)
     const ptdTotal = ptd.reduce((a, x) => a + x.spend, 0)
     ptd.forEach((x, i) => { x.rank = i + 1; x.sov = share(x.spend, ptdTotal) })
-    r = positionBlock(book, ws, r, `Period-to-Date Spending vs. Leader (since ${fullDate(start)})`, ptd, focus ? ptd.find((x) => x.key === focus.key) ?? null : null)
+    r = await positionBlock(book, ws, r, `Period-to-Date Spending vs. Leader (since ${fullDate(start)})`, ptd, focus ? ptd.find((x) => x.key === focus.key) ?? null : null)
     r = book.heading(ws, r, 'Total Market Spending Trend')
-    r = book.table(ws, r, [{ h: 'Week of', w: 34, f: 'text' }, { h: 'Spending', f: 'usd' }, { h: 'Change', f: 'pct' }], upto.map((w, i) => [dayLabel(w), totals[i], i ? share(totals[i] - totals[i - 1], totals[i - 1]) : null]), { bars: [1] })
+    r = await book.table(ws, r, [{ h: 'Week of', w: 34, f: 'text' }, { h: 'Spending', f: 'usd' }, { h: 'Change', f: 'pct' }], upto.map((w, i) => [dayLabel(w), totals[i], i ? share(totals[i] - totals[i - 1], totals[i - 1]) : null]), { bars: [1] })
     if (prevW) {
       r = book.heading(ws, r, 'Week to Week Spending Shifts')
-      r = book.table(ws, r, [{ h: 'Advertiser', w: 34, f: 'text' }, { h: 'Last Week', f: 'usd' }, { h: 'This Week', f: 'usd' }, { h: 'Change', f: 'usd' }, { h: '% Change', f: 'pct' }], shifts(ranked, 10).map((x) => [x.name, x.prior, x.spend, x.spend - x.prior, x.delta]), { bars: [3] })
+      r = await book.table(ws, r, [{ h: 'Advertiser', w: 34, f: 'text' }, { h: 'Last Week', f: 'usd' }, { h: 'This Week', f: 'usd' }, { h: 'Change', f: 'usd' }, { h: '% Change', f: 'pct' }], shifts(ranked, 10).map((x) => [x.name, x.prior, x.spend, x.spend - x.prior, x.delta]), { bars: [3] })
     }
     r = book.heading(ws, r, 'Weekly Advertiser Rankings')
-    book.table(ws, r, [{ h: whoLabel(who), w: 34, f: 'text' }, { h: 'Rank', f: 'int', w: 8 }, { h: 'This Week', f: 'usd' }, { h: 'SOV', f: 'pct' }, { h: '% Change', f: 'pct' }], ranked.filter((x) => x.spend > 0).slice(0, 15).map((x) => [x.name, x.rank, x.spend, x.sov, x.delta]), { bars: [2] })
+    await book.table(ws, r, [{ h: whoLabel(who), w: 34, f: 'text' }, { h: 'Rank', f: 'int', w: 8 }, { h: 'This Week', f: 'usd' }, { h: 'SOV', f: 'pct' }, { h: '% Change', f: 'pct' }], ranked.filter((x) => x.spend > 0).slice(0, 15).map((x) => [x.name, x.rank, x.spend, x.sov, x.delta]), { bars: [2] })
   }
 
   // WeekAtAGlance
@@ -480,7 +507,7 @@ export async function fastTrack(input: ReportInput, weeks: string[], week: strin
       line([`${g[0].advertiser} Total`, '', '', ''], g.reduce((a, p) => a + (p.byMonth[tw] ?? 0), 0), g.reduce((a, p) => a + (p.byMonth[pw] ?? 0), 0), 'sub')
     }
     line(['Grand Total', '', '', ''], t, pt, 'total')
-    book.table(ws, row, [
+    await book.table(ws, row, [
       { h: 'Advertiser', w: 34, f: 'text' }, { h: 'Category', w: 24, f: 'text' }, { h: 'Subcategory', w: 26, f: 'text' }, { h: 'Product/Campaign', w: 36, f: 'text' },
       { h: 'This Week', f: 'usd' }, { h: 'Prev Week', f: 'usd' }, { h: '$ Change', f: 'usd' }, { h: '% Change', f: 'pct' }, { h: 'SOV This Week', f: 'pct' }, { h: 'SOV Prev Week', f: 'pct' },
     ], out, { kinds, freeze: true })
@@ -490,7 +517,7 @@ export async function fastTrack(input: ReportInput, weeks: string[], week: strin
   {
     const { ws, row } = book.sheet('SpendingTrend', 'Weekly Spending Trend', `${periodText} · dollars shown in thousands`)
     const b = productBlock(trend, nums, (p) => [p.advertiser, p.category, p.subcategory, p.product], (n) => [n, '', '', ''], true)
-    book.table(ws, row, [{ h: 'Advertiser', w: 34, f: 'text' }, { h: 'Category', w: 24, f: 'text' }, { h: 'Subcategory', w: 26, f: 'text' }, { h: 'Product/Campaign', w: 36, f: 'text' }, { h: 'PTD Total', f: 'usd' }, ...upto.map((w, i) => ({ h: `Wk ${i + 1} (${dayLabel(w)})`, f: 'usd' as Fmt }))], b.rows, { kinds: b.kinds, freeze: true })
+    await book.table(ws, row, [{ h: 'Advertiser', w: 34, f: 'text' }, { h: 'Category', w: 24, f: 'text' }, { h: 'Subcategory', w: 26, f: 'text' }, { h: 'Product/Campaign', w: 36, f: 'text' }, { h: 'PTD Total', f: 'usd' }, ...upto.map((w, i) => ({ h: `Wk ${i + 1} (${dayLabel(w)})`, f: 'usd' as Fmt }))], b.rows, { kinds: b.kinds, freeze: true })
   }
 
   // WeeklyMediaUsage: product x media this week.
@@ -517,7 +544,7 @@ export async function fastTrack(input: ReportInput, weeks: string[], week: strin
       out.push([`${g[0].adv} Total`, '', ...media.map((m) => g.reduce((a, p) => a + (p.m[m] ?? 0), 0)), g.reduce((a, p) => a + p.total, 0)]); kinds.push('sub')
     }
     out.push(['Grand Total', '', ...media.map((m) => list.reduce((a, p) => a + (p.m[m] ?? 0), 0)), list.reduce((a, p) => a + p.total, 0)]); kinds.push('total')
-    book.table(ws, row, [{ h: 'Advertiser', w: 34, f: 'text' }, { h: 'Product/Campaign', w: 36, f: 'text' }, ...media.map((m) => ({ h: m, f: 'usd' as Fmt })), { h: 'Total', f: 'usd' }], out, { kinds, freeze: true })
+    await book.table(ws, row, [{ h: 'Advertiser', w: 34, f: 'text' }, { h: 'Product/Campaign', w: 36, f: 'text' }, ...media.map((m) => ({ h: m, f: 'usd' as Fmt })), { h: 'Total', f: 'usd' }], out, { kinds, freeze: true })
   }
 
   // MediaTrendSummary: advertiser x media x week.
@@ -543,7 +570,7 @@ export async function fastTrack(input: ReportInput, weeks: string[], week: strin
       out.push([`${p.name} Total`, '', p.trend.reduce((a, b) => a + b, 0), ...p.trend]); kinds.push('sub')
     }
     out.push(['Grand Total', '', totals.reduce((a, b) => a + b, 0), ...totals]); kinds.push('total')
-    book.table(ws, row, [{ h: whoLabel(who), w: 34, f: 'text' }, { h: 'MediaType', w: 22, f: 'text' }, { h: 'PTD Total', f: 'usd' }, ...upto.map((w, i) => ({ h: `Wk ${i + 1} (${dayLabel(w)})`, f: 'usd' as Fmt }))], out, { kinds, freeze: true })
+    await book.table(ws, row, [{ h: whoLabel(who), w: 34, f: 'text' }, { h: 'MediaType', w: 22, f: 'text' }, { h: 'PTD Total', f: 'usd' }, ...upto.map((w, i) => ({ h: `Wk ${i + 1} (${dayLabel(w)})`, f: 'usd' as Fmt }))], out, { kinds, freeze: true })
   }
 
   // MediaOutlet: this week, outlets x the week's top advertisers.
@@ -551,7 +578,7 @@ export async function fastTrack(input: ReportInput, weeks: string[], week: strin
     const { ws, row } = book.sheet('MediaOutlet', 'Current Week Spending by Media Outlet', `${weekText} · dollars shown in thousands`)
     const top = ranked.filter((x) => x.spend > 0).slice(0, 10)
     const cols = focus && !top.includes(focus) ? [focus, ...top.slice(0, 9)] : top
-    book.table(
+    await book.table(
       ws, row,
       [{ h: 'MediaType', w: 20, f: 'text' }, { h: 'Market', w: 18, f: 'text' }, { h: 'MediaOutlet', w: 30, f: 'text' }, ...cols.map((c) => ({ h: c.name, f: 'usd' as Fmt })), { h: 'Others', f: 'usd' as Fmt }, { h: 'Total', f: 'usd' }],
       outlets.map((o) => {
@@ -565,13 +592,13 @@ export async function fastTrack(input: ReportInput, weeks: string[], week: strin
   // Creatives
   {
     const { ws, row } = book.sheet('Creatives', 'Creative List With Ad Spend and Occurrences', 'New creatives for the week are marked New · click an Ad Code to see the ad · dollars shown in thousands')
-    book.table(ws, row, CREATIVE_COLS.map((c) => (c.h === 'New/Carryover' ? { ...c, h: 'New This Week' } : c)), creativeRows(ads, input.appUrl, week).map((r) => { r[2] = r[2] === 'New' ? 'New' : ''; return r }), { filter: true, freeze: true })
+    await book.table(ws, row, CREATIVE_COLS.map((c) => (c.h === 'New/Carryover' ? { ...c, h: 'New This Week' } : c)), creativeRows(ads, input.appUrl, week).map((r) => { r[2] = r[2] === 'New' ? 'New' : ''; return r }), { filter: true, freeze: true })
   }
 
   // Detail: the week's occurrences.
   {
     const { ws, row } = book.sheet('Detail', 'Occurrence List', `${weekText} · ${occ.more ? `the latest ${ROW_CAP.toLocaleString('en-US')} rows · ` : ''}dollars shown in thousands`)
-    book.table(
+    await book.table(
       ws, row,
       [{ h: 'Advertiser', w: 34, f: 'text' }, { h: 'Ad Code', w: 14, f: 'text' }, { h: 'Media', w: 18, f: 'text' }, { h: 'Title', w: 40, f: 'text' }, { h: 'Subcategory', w: 26, f: 'text' }, { h: 'Product/Campaign', w: 34, f: 'text' }, { h: 'Market', w: 18, f: 'text' }, { h: 'RunDate', w: 12, f: 'text' }, { h: 'MediaOutlet', w: 28, f: 'text' }, { h: 'AdSpend', f: 'usd' }, { h: '1stRunDate', w: 12, f: 'text' }, { h: 'Occ.Count', f: 'int' }],
       occ.rows.map((o) => [o.advertiser, adLink(input.appUrl, o.creative), o.media, o.title, o.subcategory, o.product, o.market, o.date, o.outlet, o.spend, o.firstSeen, o.occ]),
@@ -583,10 +610,10 @@ export async function fastTrack(input: ReportInput, weeks: string[], week: strin
   {
     const { ws, row } = book.sheet('AdvertiserQuickPivot', 'Sum of AdSpend by Advertiser', `${periodText} · dollars shown in thousands`)
     const list = [...ranked].sort((a, b) => a.name.localeCompare(b.name))
-    book.table(ws, row, [{ h: whoLabel(who), w: 40, f: 'text' }, { h: 'Total', f: 'usd' }], [...list.map((x) => [x.name, x.trend.reduce((a, b) => a + b, 0)]), ['Grand Total', totals.reduce((a, b) => a + b, 0)]], { kinds: [...list.map(() => undefined), 'total'], freeze: true })
+    await book.table(ws, row, [{ h: whoLabel(who), w: 40, f: 'text' }, { h: 'Total', f: 'usd' }], [...list.map((x) => [x.name, x.trend.reduce((a, b) => a + b, 0)]), ['Grand Total', totals.reduce((a, b) => a + b, 0)]], { kinds: [...list.map(() => undefined), 'total'], freeze: true })
   }
 
-  pivotDetail(book, det, true)
+  await pivotDetail(book, det, true)
 
   book.notes(
     [['Media:', mediaParam(input.scope)], ['Week:', weekText], ['Project start date:', fullDate(start)], ['Advertiser level:', whoLabel(who)], ...(input.focusName ? [['Focus advertiser:', input.focusName] as [string, string]] : [])],
@@ -603,7 +630,7 @@ export async function fastTrack(input: ReportInput, weeks: string[], week: strin
       ['PivotTableDetail', 'The table the pivots are built from'],
     ],
   )
-  return book.buffer()
+  return book.done()
 }
 
 /** A file name like today's: "Hospitals-Health-Systems-Clinics-SummaryReport-202610.xlsx". */

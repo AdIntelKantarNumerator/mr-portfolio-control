@@ -28,7 +28,13 @@ const SETTINGS = { max_execution_time: '90', max_bytes_before_external_group_by:
 const TTL = 30 * 60_000
 
 const cache = new Map<string, { at: number; value: Promise<unknown> }>()
-function kept<T>(key: string, read: () => Promise<T>): Promise<T> {
+/**
+ * A read kept for half an hour. `big` reads (the Excel downloads' detail
+ * tables, up to 100,000 rows) are never kept: holding them is what a small
+ * App Service plan cannot afford (17 November 2026).
+ */
+function kept<T>(key: string, read: () => Promise<T>, big = false): Promise<T> {
+  if (big) return read()
   const hit = cache.get(key)
   if (hit && Date.now() - hit.at < TTL) return hit.value as Promise<T>
   const value = read()
@@ -41,10 +47,13 @@ function kept<T>(key: string, read: () => Promise<T>): Promise<T> {
 
 export const configured = () => Boolean(clickhouseConfig('dev'))
 
-function q<T>(sql: string, params: Record<string, string> = {}): Promise<T[]> {
+/** The Excel downloads' big reads (a whole industry group, every week since August) get four minutes, not one and a half. */
+const LONG = { ...SETTINGS, max_execution_time: '240' }
+
+function q<T>(sql: string, params: Record<string, string> = {}, long = false): Promise<T[]> {
   const c = clickhouseConfig('dev')
   if (!c) throw new ClickHouseError('Dev ClickHouse is not configured (CLICKHOUSE_DEV_URL).')
-  return chQuery<T>(c, sql, params, SETTINGS)
+  return chQuery<T>(c, sql, params, long ? LONG : SETTINGS)
 }
 
 const n = (v: unknown) => Number(v) || 0
@@ -257,6 +266,7 @@ export function creatives(s: Scope, p: Period, limit = 60): Promise<CreativeRow[
                   FROM gpc_creative.creative WHERE creative_id IN (SELECT creative_id FROM top)) AS c ON c.creative_id = top.creative_id
        ORDER BY spend DESC`,
       { ...w.params, ...sp.params },
+      limit >= 1000,
     )
     return rows.map((r) => ({
       id: String(r.id), aid: n(r.aid), advertiser: String(r.advertiser ?? ''), product: String(r.product ?? ''), subcategory: String(r.subcategory ?? ''),
@@ -264,7 +274,7 @@ export function creatives(s: Scope, p: Period, limit = 60): Promise<CreativeRow[
       firstSeen: r.first_seen ? String(r.first_seen) : null, spend: n(r.spend), occ: n(r.occ), advTotal: n(r.adv_total),
       title: String(r.title ?? '').trim(), lead: String(r.lead ?? '').trim(), summary: String(r.summary ?? '').trim(), format: String(r.format ?? ''),
     }))
-  })
+  }, limit >= 1000)
 }
 
 export interface ProductRow {
@@ -292,6 +302,7 @@ export function products(s: Scope, p: Period, byMedia: boolean, limit = 400): Pr
        FROM ${sp.table} WHERE ${sp.cond} AND ${w.sql}
        GROUP BY aid, pid, media, ym`,
       { ...w.params, ...sp.params },
+      limit >= 1000,
     )
     const m = new Map<string, ProductRow>()
     for (const r of rows) {
@@ -308,7 +319,7 @@ export function products(s: Scope, p: Period, byMedia: boolean, limit = 400): Pr
       .filter((e) => e.total > 0)
       .sort((a, b) => advTotal.get(b.aid)! - advTotal.get(a.aid)! || a.aid - b.aid || b.total - a.total)
       .slice(0, limit)
-  })
+  }, limit >= 1000)
 }
 
 export interface OutletRow {
@@ -336,6 +347,7 @@ export function outlets(s: Scope, p: Period, limit = 150): Promise<OutletRow[]> 
        top AS (SELECT media, market, outlet FROM o GROUP BY media, market, outlet ORDER BY sum(spend) DESC LIMIT ${whole(limit)})
        SELECT o.* FROM o INNER JOIN top USING (media, market, outlet)`,
       { ...w.params, ...sp.params },
+      limit >= 1000,
     )
     const m = new Map<string, OutletRow>()
     for (const r of rows) {
@@ -346,7 +358,7 @@ export function outlets(s: Scope, p: Period, limit = 150): Promise<OutletRow[]> 
       m.set(k, e)
     }
     return [...m.values()].sort((a, b) => b.total - a.total)
-  })
+  }, limit >= 1000)
 }
 
 export interface DetailRow {
@@ -379,6 +391,7 @@ export function detail(s: Scope, p: Period, limit = 100_000): Promise<{ rows: De
        ORDER BY advertiser, product, media, period, spend DESC
        LIMIT ${whole(limit) + 1}`,
       { ...w.params, ...sp.params },
+      limit >= 1000,
     )
     const list = rows.map((r) => ({
       advertiser: String(r.advertiser ?? ''), parent: String(r.parent || r.advertiser || ''), category: String(r.category ?? ''), subcategory: String(r.subcategory ?? ''),
@@ -386,7 +399,7 @@ export function detail(s: Scope, p: Period, limit = 100_000): Promise<{ rows: De
       period: n(r.period), spend: n(r.spend), occ: n(r.occ),
     }))
     return { rows: list.slice(0, limit), more: list.length > limit }
-  })
+  }, limit >= 1000)
 }
 
 export interface OccurrenceRow {
@@ -429,6 +442,7 @@ export function occurrences(s: Scope, from: string, to: string, limit = 500): Pr
          ON c.creative_id = o.creative_id
        ORDER BY d DESC, spend DESC`,
       { ...w.params, ymFrom: String(ymFrom), ymTo: String(ymTo), from, to },
+      limit >= 1000,
     )
     const list = rows.map((r) => ({
       date: String(r.date), advertiser: String(r.advertiser ?? ''), creative: String(r.creative), title: String(r.title ?? '').trim(),
@@ -437,7 +451,7 @@ export function occurrences(s: Scope, from: string, to: string, limit = 500): Pr
       spend: n(r.spend), occ: n(r.occ),
     }))
     return { rows: list.slice(0, limit), more: list.length > limit }
-  })
+  }, limit >= 1000)
 }
 
 function titleCase(s: string) {

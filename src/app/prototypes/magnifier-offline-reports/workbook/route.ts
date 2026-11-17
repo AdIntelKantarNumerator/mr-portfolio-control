@@ -6,7 +6,14 @@
  * the Summary Report from the monthly tabs, the Occurrence Table from the
  * Occurrences tab, the Weekly FastTrack from the weekly tab. Behind the same
  * "Sees prototypes" switch as the page.
+ *
+ * 17 November 2026: a download for a big category ran the site out of memory
+ * and took it down. The workbook is now streamed to the browser as it is
+ * written (lib/magnifier-reports/workbook.ts), and only one is built at a
+ * time per server: a second request while one is building is turned away
+ * with a "try again" rather than doubling the memory.
  */
+import { PassThrough, Readable } from 'node:stream'
 import { currentAccess } from '@/lib/auth/access'
 import { getAuthConfig } from '@/lib/auth/config'
 import * as data from '@/lib/magnifier-reports/data'
@@ -20,6 +27,9 @@ export const maxDuration = 300
 
 const KINDS = { summary: 'SummaryReport', occurrences: 'OccurrenceTable', fasttrack: 'FastTrack' } as const
 
+/** The workbook being built on this server, if any. */
+let building: string | null = null
+
 export async function GET(req: Request) {
   const access = await currentAccess()
   if (getAuthConfig().enabled && !access.canSeePrototypes) return new Response('Prototypes are not switched on for you.', { status: 403 })
@@ -29,6 +39,7 @@ export async function GET(req: Request) {
   const kind = url.searchParams.get('kind') as keyof typeof KINDS | null
   if (!kind || !(kind in KINDS)) return new Response('Ask for kind=summary, occurrences or fasttrack.', { status: 400 })
   const s = readState(Object.fromEntries(url.searchParams))
+  if (building) return new Response(`Another workbook (${building}) is being prepared. Try again in a minute.`, { status: 429, headers: { 'retry-after': '60' } })
 
   try {
     const months = await data.months()
@@ -46,23 +57,37 @@ export async function GET(req: Request) {
     }
     const input: ReportInput = { node, trail: trail(tax.nodes, node.id), scope, who: s.who, focusName, appUrl: process.env.APP_URL?.trim().replace(/\/+$/, '') || url.origin }
 
-    let file: Buffer
     let stamp: string
+    let write: (out: PassThrough) => Promise<void>
     if (kind === 'summary') {
       const ym = s.m != null && months.includes(s.m) ? s.m : months.at(-1)!
-      file = await summaryReport(input, months.filter((m) => m <= ym), ym)
+      write = (out) => summaryReport(input, months.filter((m) => m <= ym), ym, out)
       stamp = String(ym)
     } else {
       const weeks = await data.weeks(months[0])
       const week = s.w && weeks.includes(s.w) ? s.w : weeks.at(-1)
       if (!week) return new Response('No whole week of data yet.', { status: 404 })
-      file = kind === 'fasttrack' ? await fastTrack(input, weeks, week) : await occurrenceTable(input, week)
+      write = (out) => (kind === 'fasttrack' ? fastTrack(input, weeks, week, out) : occurrenceTable(input, week, out))
       stamp = week
     }
-    return new Response(new Uint8Array(file), {
+
+    // The file goes to the browser as it is written. If building fails part way, the download fails
+    // rather than handing over a broken file.
+    const name = fileName(node, KINDS[kind], stamp)
+    building = name
+    const out = new PassThrough()
+    write(out)
+      .catch((err) => {
+        console.error('[magnifier workbook] build failed', name, err)
+        out.destroy(err as Error)
+      })
+      .finally(() => {
+        building = null
+      })
+    return new Response(Readable.toWeb(out) as ReadableStream<Uint8Array>, {
       headers: {
         'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'content-disposition': `attachment; filename="${fileName(node, KINDS[kind], stamp)}"`,
+        'content-disposition': `attachment; filename="${name}"`,
         'cache-control': 'private, no-store',
       },
     })

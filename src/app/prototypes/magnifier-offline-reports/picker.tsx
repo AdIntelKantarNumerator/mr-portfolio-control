@@ -7,6 +7,7 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { money, type TaxNode } from '@/lib/magnifier-reports/rules'
+import { LinkPending } from './pending'
 
 interface Branch extends TaxNode {
   children: Branch[]
@@ -31,6 +32,8 @@ export function CategoryPicker({ nodes, spend, monthName }: { nodes: TaxNode[]; 
   }, [nodes, spend])
 
   const [open, setOpen] = useState<Set<number>>(new Set())
+  // The category being opened: its dashboard can take several seconds to read, so say so.
+  const [opening, setOpening] = useState<string | null>(null)
   const [find, setFind] = useState('')
   const q = find.trim().toLowerCase()
   const keep = useMemo(() => {
@@ -71,8 +74,8 @@ export function CategoryPicker({ nodes, spend, monthName }: { nodes: TaxNode[]; 
                 ) : (
                   <span />
                 )}
-                <Link className="name" href={`?node=${b.id}`} title={`Open the ${b.level.toLowerCase()} dashboard`}>
-                  {b.name}
+                <Link className="name" href={`?node=${b.id}`} prefetch={false} onClick={() => setOpening(b.name)} title={`Open the ${b.level.toLowerCase()} dashboard`}>
+                  {b.name} <LinkPending />
                 </Link>
                 <span className="lvl">{b.level}</span>
                 <span className="amt" title={`Spend in ${monthName}`}>
@@ -88,6 +91,11 @@ export function CategoryPicker({ nodes, spend, monthName }: { nodes: TaxNode[]; 
 
   return (
     <div className="mor-pick">
+      {opening ? (
+        <div className="mor-opening" role="status">
+          <span className="mor-spin on" aria-hidden /> Opening {opening}…
+        </div>
+      ) : null}
       <input className="mor-find" type="search" placeholder="Find an industry, category or subcategory" value={find} onChange={(e) => setFind(e.target.value)} autoFocus />
       <div className="mor-card w12">{render(roots, 0)}</div>
     </div>
