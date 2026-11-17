@@ -8,9 +8,10 @@
  * it affects, and sends them here (app/api/agent/releases). The calendar
  * places each on its target date.
  *
- * A release is announced in #mr-production-deployments when it is first seen
- * and whenever its target date moves. What was last announced is kept as a
- * key - the date, or "none" - so the decision is a comparison, made here, and
+ * A release is announced in #mr-production-deployments when it is first seen,
+ * whenever its target date moves, and whenever its Linear status changes
+ * (Scott, 16 November 2026). What was last announced is kept as keys - the
+ * date or "none", and the status - so the decision is a comparison, made here, and
  * Yaara posts only what this says to post. She confirms each post afterwards;
  * a post that failed is still owed, and goes on the next pass.
  *
@@ -95,21 +96,50 @@ export const releaseName = (r: { kind?: string | null; identifier: string; title
 /** The key an announcement is kept under: the date, or "none". */
 export const announceKey = (targetDate: string | null) => targetDate ?? 'none'
 
-export type Announce = 'new' | 'date' | null
+/** The key a status is announced under: Linear's state name, or "none". */
+export const statusKey = (status: string | null) => status ?? 'none'
+
+/** new: never announced. date: its date moved. status: only its Linear status changed. */
+export type Announce = 'new' | 'date' | 'status' | null
+
+type AnnouncedRow = { announcedKey: string | null; announcedStatus?: string | null }
 
 /**
- * Whether a release is owed an announcement: never announced (new), or its
- * date is not the one announced (moved). Nothing for a release that is done
- * or cancelled - a closed ticket is not a planned release.
+ * Whether its Linear status is not the one last announced (Scott, 16
+ * November 2026: a post whenever the ticket's status changes). Only for a
+ * caller that says it can post status changes, and only once a status has
+ * been announced - releases announced before this was kept were given their
+ * status then by drizzle/0047, so nothing is announced for the past.
  */
-export function announceFor(row: { announcedKey: string | null } | null, r: Pick<IncomingRelease, 'targetDate' | 'statusType'>): Announce {
-  if (r.statusType === 'completed' || r.statusType === 'canceled') return null
-  if (!row || row.announcedKey == null) return 'new'
-  return row.announcedKey !== announceKey(r.targetDate) ? 'date' : null
+const statusMoved = (row: AnnouncedRow | null, r: Pick<IncomingRelease, 'status'>, statuses: boolean) =>
+  statuses && row?.announcedStatus != null && row.announcedStatus !== statusKey(r.status)
+
+/**
+ * Whether a release is owed an announcement: never announced (new), its date
+ * is not the one announced (moved), or its status is not (status). A release
+ * that is done or cancelled is not announced as new or moved - a closed
+ * ticket is not a planned release - but closing it is a status change, and is
+ * announced.
+ */
+export function announceFor(
+  row: AnnouncedRow | null,
+  r: Pick<IncomingRelease, 'targetDate' | 'statusType'> & Partial<Pick<IncomingRelease, 'status'>>,
+  statuses = false,
+): Announce {
+  const closed = r.statusType === 'completed' || r.statusType === 'canceled'
+  const status = statusMoved(row, { status: r.status ?? null }, statuses)
+  if (!row || row.announcedKey == null) return closed ? null : 'new'
+  if (closed) return status ? 'status' : null
+  if (row.announcedKey !== announceKey(r.targetDate)) return 'date'
+  return status ? 'status' : null
 }
 
 /** The date announced before, for "moved from"; null when there was none. */
 export const previousDate = (row: { announcedKey: string | null } | null) => (row?.announcedKey && row.announcedKey !== 'none' ? row.announcedKey : null)
+
+/** The status announced before, when it is not the status now; null otherwise. A date post says it too when both changed. */
+export const previousStatus = (row: AnnouncedRow | null, r: Pick<IncomingRelease, 'status'>, statuses = false) =>
+  statusMoved(row, r, statuses) && row!.announcedStatus !== 'none' ? row!.announcedStatus! : null
 
 // --- the calendar ------------------------------------------------------------
 

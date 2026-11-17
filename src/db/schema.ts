@@ -2387,6 +2387,8 @@ export const releases = pgTable(
     contactSlackUrl: text('contact_slack_url'),
     /** The target date last announced in the channel ("none" for no date); null until announced. */
     announcedKey: text('announced_key'),
+    /** The Linear status last announced ("none" for no status); null until one is (drizzle/0047). */
+    announcedStatus: text('announced_status'),
     announcedAt: timestamp('announced_at', { withTimezone: true }),
     /** No longer labelled as a release, or gone from Linear. Hidden, kept. */
     removedAt: timestamp('removed_at', { withTimezone: true }),

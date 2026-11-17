@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { addMonths, announceFor, announceKey, monthGrid, parseRelease, previousDate, rangeOf, releaseName, step, weekStart } from '../src/lib/release-rules'
+import { addMonths, announceFor, announceKey, monthGrid, parseRelease, previousDate, previousStatus, rangeOf, releaseName, statusKey, step, weekStart } from '../src/lib/release-rules'
 
 // MED-339, the first one: Scott's own, 7 December 2026.
 const med339 = {
@@ -59,6 +59,29 @@ test('announced once when new, again only when the date moves; never for a done 
   assert.equal(announceKey(null), 'none')
   assert.equal(previousDate({ announcedKey: '2026-12-07' }), '2026-12-07')
   assert.equal(previousDate({ announcedKey: 'none' }), null)
+})
+
+test('a status change is announced, only to a caller that asks, and only once a status has been announced', () => {
+  const r = { ...med339, status: 'In Progress', statusType: 'started' }
+  const row = { announcedKey: '2026-12-07', announcedStatus: 'Todo' }
+  assert.equal(announceFor(row, r, true), 'status')
+  assert.equal(previousStatus(row, r, true), 'Todo')
+  assert.equal(announceFor(row, r), null, 'a caller that did not ask is never told "status"')
+  assert.equal(previousStatus(row, r), null)
+  assert.equal(announceFor({ ...row, announcedStatus: 'In Progress' }, r, true), null, 'unchanged: nothing to say')
+  assert.equal(announceFor({ announcedKey: '2026-12-07', announcedStatus: null }, r, true), null, 'no status announced yet: no baseline, no post')
+  // Date and status both changed: one date post, which also carries the old status.
+  const movedToo = { ...r, targetDate: '2026-12-14' }
+  assert.equal(announceFor(row, movedToo, true), 'date')
+  assert.equal(previousStatus(row, movedToo, true), 'Todo')
+  // Closing a ticket is a status change, announced; closed and never announced is still nothing.
+  assert.equal(announceFor(row, { ...r, status: 'Done', statusType: 'completed' }, true), 'status')
+  assert.equal(announceFor(row, { ...r, status: 'Done', statusType: 'completed', targetDate: '2026-12-14' }, true), 'status', 'a closed ticket is not announced as moved')
+  assert.equal(announceFor(null, { ...r, status: 'Canceled', statusType: 'canceled' }, true), null)
+  // Losing its status: announced, from what it was.
+  assert.equal(announceFor(row, { ...r, status: null }, true), 'status')
+  assert.equal(statusKey(null), 'none')
+  assert.equal(previousStatus({ announcedKey: 'none', announcedStatus: 'none' }, r, true), null, '"none" is not a status to show')
 })
 
 test('the default view is this month and next; month, week (Sunday first) and day are what they say', () => {

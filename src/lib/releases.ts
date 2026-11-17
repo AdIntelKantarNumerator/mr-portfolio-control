@@ -7,11 +7,11 @@
  * and the announcements need, and the one thing Linear cannot know: what was
  * last said about it in Slack.
  */
-import { and, eq, inArray, isNull, notInArray } from 'drizzle-orm'
+import { and, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { initiatives, objectives, projects, releases, sourceRecords } from '@/db/schema'
 import { logChange } from './portfolio'
-import { announceFor, announceKey, previousDate, releaseName, type Announce, type IncomingRelease } from './release-rules'
+import { announceFor, announceKey, previousDate, previousStatus, releaseName, statusKey, type Announce, type IncomingRelease } from './release-rules'
 
 export interface ReleaseLinks {
   project: { id: string; name: string } | null
@@ -24,10 +24,12 @@ export interface ReleaseLinks {
 export interface ReleaseOutcome {
   linearId: string
   identifier: string
-  /** Post it: first seen, or its date moved since the last post. */
+  /** Post it: first seen, its date moved, or its status changed since the last post. */
   announce: Announce
   /** The date announced before, when it moved. */
   previousDate: string | null
+  /** The status announced before, when it changed; only for a caller that asked for status changes. */
+  previousStatus: string | null
   links: ReleaseLinks
 }
 
@@ -74,7 +76,7 @@ const NO_LINKS: ReleaseLinks = { project: null, initiative: null, objective: nul
  * there is: anything not in it is no longer one (unlabelled, deleted) and is
  * hidden from the calendar. Returns what to announce.
  */
-export async function saveReleases(list: IncomingRelease[], complete: boolean): Promise<{ outcomes: ReleaseOutcome[]; removed: number }> {
+export async function saveReleases(list: IncomingRelease[], complete: boolean, statuses = false): Promise<{ outcomes: ReleaseOutcome[]; removed: number }> {
   const existing = list.length ? await db.select().from(releases).where(inArray(releases.linearId, list.map((r) => r.linearId))) : []
   const before = new Map(existing.map((r) => [r.linearId, r]))
   const links = await linksFor(list.flatMap((r) => (r.projectLinearId ? [r.projectLinearId] : [])))
@@ -113,11 +115,15 @@ export async function saveReleases(list: IncomingRelease[], complete: boolean): 
     } else if (prior.targetDate !== r.targetDate) {
       await logChange({ actor: 'Yaara', kind: 'release', summary: `Release ${releaseName(r)} moved: ${prior.targetDate ?? 'no date'} → ${r.targetDate ?? 'no date'}` })
     }
+    if (prior && (prior.status ?? null) !== r.status) {
+      await logChange({ actor: 'Yaara', kind: 'release', summary: `Release ${releaseName(r)} status: ${prior.status ?? 'none'} → ${r.status ?? 'none'}` })
+    }
     outcomes.push({
       linearId: r.linearId,
       identifier: r.identifier,
-      announce: announceFor(prior, r),
+      announce: announceFor(prior, r, statuses),
       previousDate: previousDate(prior),
+      previousStatus: previousStatus(prior, r, statuses),
       links: (r.projectLinearId && links.get(r.projectLinearId)) || NO_LINKS,
     })
   }
@@ -135,13 +141,21 @@ export async function saveReleases(list: IncomingRelease[], complete: boolean): 
   return { outcomes, removed }
 }
 
-/** Yaara posted these: record the date each post announced, so it is not posted again. */
-export async function markAnnounced(posted: { linearId: string; targetDate: string | null }[]): Promise<number> {
+/**
+ * Yaara posted these: record the date and status each post announced, so
+ * neither is posted again. A caller that sends no status (one not yet
+ * redeployed) records the status stored this pass, which is what it saw.
+ */
+export async function markAnnounced(posted: { linearId: string; targetDate: string | null; status?: string | null }[]): Promise<number> {
   let n = 0
   for (const p of posted) {
     const done = await db
       .update(releases)
-      .set({ announcedKey: announceKey(p.targetDate), announcedAt: new Date() })
+      .set({
+        announcedKey: announceKey(p.targetDate),
+        announcedStatus: p.status !== undefined ? statusKey(p.status) : sql`coalesce(${releases.status}, 'none')`,
+        announcedAt: new Date(),
+      })
       .where(eq(releases.linearId, p.linearId))
       .returning({ id: releases.linearId })
     n += done.length
