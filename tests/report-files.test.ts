@@ -121,7 +121,7 @@ test('creative rows link to the ad itself: a last CSV column and the Excel name 
   assert.match(csv, /"ADVERTISER","CREATIVE","Spend","AD LINK"/)
   assert.match(csv, /"Win Prizes Instantly",8515868,"https:\/\/portfolio\.example\/taxonomy-comparison\/creative\/25104795245\?type=creative"/)
   const wb = new ExcelJS.Workbook()
-  await wb.xlsx.load(await xlsxFile(r, meta))
+  await wb.xlsx.load((await xlsxFile(r, meta)) as unknown as ArrayBuffer)
   const cell = wb.getWorksheet('Report')!.getCell('B9')
   assert.equal((cell.value as { text: string }).text, 'Win Prizes Instantly')
   assert.equal((cell.value as { hyperlink: string }).hyperlink, 'https://portfolio.example/taxonomy-comparison/creative/25104795245?type=creative')

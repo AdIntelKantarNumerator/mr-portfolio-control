@@ -299,7 +299,7 @@ test('the creative lookup follows a 360 product and takes the GPC products holdi
   assert.ok(!sameProductLine('American Express Business Gold Card', 'American Express Gold'))
 })
 
-test('360 creative rows import as creative rows; program beside them gives way, and is said', async () => {
+test('360 creative rows import as creative rows, with program beside them (read from the airings)', async () => {
   const spec: Raw360Spec = {
     rpttype: 2307,
     title: null,
@@ -314,7 +314,6 @@ test('360 creative rows import as creative rows; program beside them gives way, 
     sel: [],
   }
   const c = await convert360(describe(spec, { ...look, type: (e) => ({ 118: 'Advertiser', 460: 'Creative', 309: 'Program' })[e] ?? look.type(e) }), matcher)
-  assert.deepEqual(c.spec.rows, ['advertiser', 'creative'], 'both 460 columns are one creative row; program gives way')
-  const n = c.notes.find((x) => /program with creatives/i.test(x.what))
-  assert.ok(n && n.impact === 'dropped' && /creative rows are kept/.test(n.did), c.notes.map((x) => x.what).join('; '))
+  assert.deepEqual(c.spec.rows, ['advertiser', 'creative', 'program'], 'both 460 columns are one creative row; program is kept')
+  assert.ok(!c.notes.some((x) => /with creatives/i.test(x.what)), c.notes.map((x) => x.what).join('; '))
 })

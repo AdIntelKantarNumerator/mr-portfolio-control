@@ -32,11 +32,21 @@
  *         larger, when the query also reads market or master property, which
  *         only these record (17 November 2026, for creative rows: a quarter of
  *         360 reports have them, beside market and property).
- *     Neither records program, genre, direct/indirect, daypart or league; a
- *     query that also reads any of those is refused, through supports(), before
- *     it runs. They have no promo or PSA flags either: a creative whose TV spend
- *     in the months read is mostly flagged as promo or PSA is left out instead
- *     (the flag is only on TV airings), within about 1% of the exact figure.
+ *     Neither records program, genre, daypart or league; a creative meets those
+ *     only through its airings (Scott, 17 November 2026). So a query that reads
+ *     creative or spot length together with any of them is answered from the
+ *     airings themselves (AIRINGS): gpc_detail.tv_product_detail, which adds up
+ *     exactly to the summaries' six TV media, and live_stream_product_detail, to
+ *     Live Streaming Sports (October 2026; sports_ and tv_clearance_ overlap them
+ *     and are left out). Each row is one occurrence. The airings carry ids, not
+ *     names: names come from labels() after the query. Only TV and live sports
+ *     are in such a report, which is where programs are anyway. Direct/indirect,
+ *     digital only, is in no creative table: a query that reads it with creative
+ *     or spot length is refused, through supports(), before it runs.
+ *     The summaries have no promo or PSA flags: a creative whose TV spend in the
+ *     months read is mostly flagged as promo or PSA is left out instead (the flag
+ *     is only on TV airings), within about 1% of the exact figure. The airings
+ *     carry the flag, so they leave promos out exactly.
  *   - A creative's name is its title, from gpc_creative.creative, looked up
  *     after the query (creativeInfo): the summaries carry only its id.
  */
@@ -52,8 +62,30 @@ const CREATIVE_FULL_DAY = 'gpc_creative.creative_product_summary_daily'
 const FULL_ONLY: DimKey[] = ['market', 'master_property']
 /** Where search and labels look up a dimension that the monthly table does not record. */
 const LOOKUP_TABLE: Partial<Record<DimKey, string>> = { daypart: 'gpc_summary.tv_product_summary_daily', league: 'gpc_summary.tv_product_summary_daily', length: CREATIVE_MONTH, creative: CREATIVE_MONTH }
-/** What no creative summary records. */
-const NOT_IN_CREATIVE: DimKey[] = ['program', 'program_genre', 'direct_indirect', 'daypart', 'league']
+/** What a creative meets only through its airings (TV and live sports). */
+const AIRING_ONLY: DimKey[] = ['program', 'program_genre', 'daypart', 'league']
+/** What no creative data records at all. */
+const NOT_IN_CREATIVE: DimKey[] = ['direct_indirect']
+const AIRINGS_NOTE = 'Creatives with program, genre, daypart or league come from TV and live-sports airings, so other media are not in this report.'
+/**
+ * The airings as one source in the summaries' shape: the ids they carry, the date, one occurrence a
+ * row, and every name the SQL map reads, empty (names come from labels() after the query).
+ */
+const AIRING_COLS = (date: string) =>
+  // The summaries copy a level down where a product has none ("QSRs" is category and subcategory 404);
+  // the airings leave it empty. Copied the same way, every category and subcategory matches the
+  // summaries to the dollar (TV, October 2026).
+  `year_month, ${date} AS start_date, industry_id, coalesce(category_id, industry_id) AS category_id, coalesce(subcategory_id, category_id, industry_id) AS subcategory_id,
+   entity_id, entity_parent_id, product_id, media_id, media_root_entity_id, media_entity_id,
+   property_market_id, country_id, master_property_id, show_id, show_type_id, daypart_id, sports_entity_id, language_id, length_v, creative_id,
+   cost_share_v, toUInt64(1) AS occurrences, impressions_share_v, is_promo, is_psa,
+   '' AS industry_name, '' AS category_name, '' AS subcategory_name, '' AS entity_name, '' AS entity_parent_name, '' AS product_name, '' AS media_name,
+   '' AS media_root_entity_name, '' AS media_entity_name, '' AS property_market_name, '' AS country_name, '' AS country_iso_2_code, '' AS master_property_name,
+   '' AS show_display_name, '' AS show_type_name, '' AS sports_entity_name, '' AS daypart_name, '' AS language_name,
+   CAST(NULL AS Nullable(Int32)) AS direct_indirect_id, '' AS direct_indirect_name, '' AS creative_type`
+// TV files an airing under its broadcast date; live streaming has only the capture date.
+const AIRINGS = `(SELECT ${AIRING_COLS('broadcast_date')} FROM gpc_detail.tv_product_detail UNION ALL SELECT ${AIRING_COLS('capture_date')} FROM gpc_detail.live_stream_product_detail)`
+const AIRING_TIME: DimKey[] = ['day', 'week', 'broadcast_week', 'broadcast_month']
 const CREATIVE_NOTE = 'Spot length and creatives come from the creative data, which has no promo flag; a creative whose TV spend is mostly promos or public service announcements is left out instead, so totals can differ slightly from other reports.'
 /** Creatives that are mostly promos or PSAs in these months (the flag is only on TV airings): left out of creative-data queries. */
 const notPromoCreative = (fromYm: number, toYm: number) =>
@@ -61,12 +93,19 @@ const notPromoCreative = (fromYm: number, toYm: number) =>
      GROUP BY creative_id HAVING 2 * sumIf(cost_share_v, coalesce(is_promo, 0) = 1 OR coalesce(is_psa, 0) = 1) >= sum(cost_share_v)
        AND countIf(coalesce(is_promo, 0) = 1 OR coalesce(is_psa, 0) = 1) > 0)`
 
-type Source = 'month' | 'daily' | 'creative_month' | 'creative_daily'
-/** Which table answers a query: spot length needs the creative data, daypart and league (and days and weeks) the daily data. */
+type Source = 'month' | 'daily' | 'creative_month' | 'creative_daily' | 'airings'
+/**
+ * Which table answers a query: spot length and creative need the creative data, daypart and league
+ * (and days and weeks) the daily data, and creative or spot length with program, genre, daypart or
+ * league the airings.
+ */
 export function sourceFor(q: Pick<AggregateQuery, 'groupBy' | 'where' | 'measures' | 'period'>): Source {
   const dims = [...queryDims(q)]
   const daily = Boolean(q.period.daily) || dims.some((d) => DIMENSIONS[d].daily)
-  if (dims.some((d) => DIMENSIONS[d].creative)) return daily ? 'creative_daily' : 'creative_month'
+  if (dims.some((d) => DIMENSIONS[d].creative)) {
+    if (dims.some((d) => AIRING_ONLY.includes(d))) return 'airings'
+    return daily ? 'creative_daily' : 'creative_month'
+  }
   return daily ? 'daily' : 'month'
 }
 const NO_PROMOS = 'coalesce(is_promo, 0) = 0 AND coalesce(is_psa, 0) = 0'
@@ -245,7 +284,8 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
   /** The two statements for a query: its rows, and its totals and count. */
   function sqlFor(q: AggregateQuery, daily?: string): { rows: string; totals: string } {
     const src = sourceFor(q)
-    const isDaily = src === 'daily' || src === 'creative_daily'
+    // The airings hold both year_month and the day: read by day only when the query asks for days or weeks.
+    const isDaily = src === 'daily' || src === 'creative_daily' || (src === 'airings' && (Boolean(q.period.daily) || [...queryDims(q)].some((d) => AIRING_TIME.includes(d))))
     const from = q.period.from
     const to = q.period.to
     const time = isDaily
@@ -254,7 +294,15 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
     // Market and master property are only in the fuller creative summaries; the smaller ones answer the rest faster.
     const full = [...queryDims(q)].some((d) => FULL_ONLY.includes(d))
     const source =
-      src === 'daily' ? daily! : src === 'creative_daily' ? (full ? CREATIVE_FULL_DAY : CREATIVE_DAY) : src === 'creative_month' ? (full ? CREATIVE_FULL_MONTH : CREATIVE_MONTH) : MONTH_TABLE
+      src === 'airings'
+        ? AIRINGS
+        : src === 'daily'
+          ? daily!
+          : src === 'creative_daily'
+            ? (full ? CREATIVE_FULL_DAY : CREATIVE_DAY)
+            : src === 'creative_month'
+              ? (full ? CREATIVE_FULL_MONTH : CREATIVE_MONTH)
+              : MONTH_TABLE
     // The creative data has no promo or PSA flags: mostly-promo creatives are left out by their TV airings instead.
     const promos = q.includePromos
       ? ''
@@ -334,7 +382,21 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
           if (k && i) Object.assign(k, { name: i.name, ...(q.context ? { context: i.context } : {}) })
         }
       }
-      if (src.startsWith('creative')) out.notes = [CREATIVE_NOTE]
+      // The airings carry ids only: every other name, and its context, from labels().
+      if (src === 'airings') {
+        const want = new Set<string>()
+        for (const r of out.rows) for (const d of q.groupBy) if (!DIMENSIONS[d].time && d !== 'creative' && d !== 'length' && r.keys[d]) want.add(r.keys[d]!.id)
+        const named = new Map((await labelsOf([...want])).map((l) => [l.id, l]))
+        for (const r of out.rows)
+          for (const d of q.groupBy) {
+            const k = r.keys[d]
+            if (!k || DIMENSIONS[d].time || d === 'creative' || d === 'length') continue
+            const l = named.get(k.id)
+            k.name = l?.name ?? ''
+            if (q.context) k.context = l?.context ?? ''
+          }
+        out.notes = [AIRINGS_NOTE]
+      } else if (src.startsWith('creative')) out.notes = [CREATIVE_NOTE]
       if (q.withCount) out.count = Number(totals[0]?.n ?? 0)
       if (q.withTotals) out.totals = Object.fromEntries(q.measures.map((m) => [m.as, Number(totals[0]?.[alias(m.as)] ?? 0)]))
       return out
@@ -360,7 +422,12 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
       return [...rows.map((r) => ({ id: `${r.dim}:${r.id}`, dim: r.dim, name: r.name, context: r.ctx, spend: Number(r.spend) })), ...creatives.flat()]
     },
 
-    async labels(ids) {
+    labels: labelsOf,
+  }
+
+  /** Names and context for ids; unknown ids are left out. */
+  async function labelsOf(ids: string[]): Promise<Array<{ id: string; name: string; context: string }>> {
+    {
       const by = new Map<DimKey, number[]>()
       for (const id of ids) {
         const d = dimOf(id) as DimKey
@@ -373,7 +440,7 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
       if (!parts.length) return creatives
       const rows = await query<{ dim: string; id: string; name: string; ctx: string }>(parts.join(' UNION ALL '))
       return [...rows.filter((r) => r.name).map((r) => ({ id: `${r.dim}:${r.id}`, name: r.name, context: r.ctx })), ...creatives]
-    },
+    }
   }
 
   /**

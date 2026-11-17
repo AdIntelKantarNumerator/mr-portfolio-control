@@ -227,8 +227,9 @@ test('daypart and league switch a report to the daily tables, as a breakout or o
   assert.match(byLength.rows, /FROM gpc_creative\.creative_product_media_summary_month WHERE year_month BETWEEN 202610 AND 202610 AND creative_id NOT IN \(SELECT creative_id FROM gpc_detail\.tv_product_detail/, 'the creative data has no promo flags: mostly-promo creatives are left out by their TV airings')
   assert.doesNotMatch(byLength.rows, /coalesce\(is_promo, 0\) = 0/)
   assert.equal(ch.supports!(['length', 'advertiser', 'media_type']), null)
-  // Market is in the fuller creative summaries (17 November 2026); program is in none.
-  assert.deepEqual(ch.supports!(['length', 'program', 'market'])!.conflicts, ['program'])
+  // Market is in the fuller creative summaries, program in the airings (17 November 2026); direct/indirect in neither.
+  assert.equal(ch.supports!(['length', 'program', 'market']), null)
+  assert.deepEqual(ch.supports!(['length', 'direct_indirect'])!.conflicts, ['direct_indirect'])
 })
 
 test('creatives: rows from the creative data, the fuller tables when market is read, titles for names', async () => {
@@ -249,7 +250,7 @@ test('creatives: rows from the creative data, the fuller tables when market is r
   const r = await ch.aggregate({ period: m, groupBy: ['creative'], context: true, measures: spend })
   assert.deepEqual(r.rows[0]!.keys.creative, { id: 'creative:25103620826', name: 'Support Childhood Cancer Research', context: 'TV · 120s · first seen 2026-10-03' })
   assert.equal(r.rows[1]!.keys.creative!.name, 'Creative 99', 'no title: never a blank row')
-  assert.match(ch.supports!(['creative', 'daypart'])!.reason, /^Creative comes from the creative data, which does not record daypart/)
+  assert.match(ch.supports!(['creative', 'direct_indirect'])!.reason, /^Creative comes from the creative data, which does not record direct \/ indirect/)
 })
 
 const CC = (dim: string, id: number, name: string) => ({ id: `${dim}:${id}`, name })
@@ -274,14 +275,16 @@ test('details each narrow on their own: Prime Time and Spanish means both, and t
   assert.deepEqual(grid.rows[0], ['Prime Time', 200, 20, 220])
 })
 
-test('spot length with program cannot be read together: a problem with both fixes, and suggestions skip what would clash', async () => {
+test('spot length with direct/indirect cannot be read together: a problem with both fixes, and suggestions skip what would clash', async () => {
   const ch = clickhouseAdapter({ query: async () => [] })
   const adapter = { ...memoryAdapter(world(), AVAIL), supports: ch.supports }
   const engine = engineOn(adapter)
-  const v = await engine.validate({ template: 'x', rows: ['length', 'program'], measures: ['spend'], scope: 'all', time: OCT })
+  // Program beside spot length is read from the airings since 17 November 2026; direct/indirect still clashes.
+  assert.equal((await engine.validate({ template: 'x', rows: ['length', 'program'], measures: ['spend'], scope: 'all', time: OCT })).errors.find((e) => e.code === 'cannot_combine'), undefined)
+  const v = await engine.validate({ template: 'x', rows: ['length', 'direct_indirect'], measures: ['spend'], scope: 'all', time: OCT })
   assert.equal(v.errors[0]!.code, 'cannot_combine')
-  assert.match(v.errors[0]!.message, /Spot length comes from the creative data, which does not record program/)
-  assert.deepEqual(v.errors[0]!.fixes.map((f) => f.label), ['Drop spot length', 'Drop program'])
+  assert.match(v.errors[0]!.message, /Spot length comes from the creative data, which does not record direct \/ indirect/)
+  assert.deepEqual(v.errors[0]!.fixes.map((f) => f.label), ['Drop spot length', 'Drop direct / indirect'])
   const fixed = await engine.validate(v.spec, v.errors[0]!.fixes[1]!.patch)
   assert.deepEqual(fixed.spec.rows, ['length'])
 
@@ -290,4 +293,29 @@ test('spot length with program cannot be read together: a problem with both fixe
   assert.ok(labels.includes('Break out by daypart') && labels.includes('Break out by program'), labels.join(' | '))
   const buyer = await engine.validate({ template: 'share_of_voice', rows: ['advertiser'], measures: ['spend'], calcs: ['share'], compare: { mine: ['advertiser:1'], rivals: ['advertiser:2'] }, time: OCT })
   assert.ok(buyer.refinements.some((r) => r.label === 'Break out by spot length'))
+})
+
+test('creative with program or daypart: answered from the airings, one occurrence a row, names filled in after', async () => {
+  const m = { from: '2026-10-01', to: '2026-10-31' }
+  const spend = [{ as: 'v', measure: 'spend' as const }]
+  assert.equal(sourceFor({ period: m, groupBy: ['creative', 'program'], measures: spend }), 'airings')
+  assert.equal(sourceFor({ period: m, groupBy: ['length'], where: { in: 'daypart', values: ['daypart:3'] }, measures: spend }), 'airings', 'a filter alone is enough')
+  assert.equal(sourceFor({ period: m, groupBy: ['creative', 'market'], measures: spend }), 'creative_month', 'market stays with the creative summaries')
+  const ch = clickhouseAdapter({
+    query: async <T,>(sql: string) => {
+      if (sql.includes('FROM gpc_creative.creative WHERE')) return [{ id: '5', title: 'Big Game Spot', media: 'TV', secs: 30, first: '2026-10-01' }] as T[]
+      if (sql.includes('k_creative')) return [{ k_creative: '5', n_creative: '5', k_program: '47555', n_program: '', m_v: 100 }] as T[]
+      if (sql.includes("'program' AS dim")) return [{ dim: 'program', id: '47555', name: 'Sunday Night Football', ctx: 'NBC' }] as T[]
+      return [] as T[]
+    },
+  })
+  const sql = ch.sqlFor({ period: m, groupBy: ['creative', 'program'], measures: spend }).rows
+  assert.match(sql, /FROM gpc_detail\.tv_product_detail UNION ALL SELECT [\s\S]* FROM gpc_detail\.live_stream_product_detail/)
+  assert.match(sql, /broadcast_date AS start_date/)
+  assert.match(sql, /coalesce\(is_promo, 0\) = 0/, 'the airings carry the promo flag: promos out exactly')
+  assert.doesNotMatch(sql, /start_date BETWEEN/, 'a month is read by year_month')
+  const r = await ch.aggregate({ period: m, groupBy: ['creative', 'program'], measures: spend })
+  assert.equal(r.rows[0]!.keys.creative!.name, 'Big Game Spot')
+  assert.equal(r.rows[0]!.keys.program!.name, 'Sunday Night Football')
+  assert.match(r.notes![0]!, /TV and live-sports airings/)
 })

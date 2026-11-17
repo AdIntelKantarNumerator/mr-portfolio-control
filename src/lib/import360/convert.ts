@@ -124,8 +124,12 @@ function fitsContext(h: Candidate, context: string | null): boolean {
 export type Choice = { ids: string[]; names: string[]; how: 'creatives' | 'picked'; why?: string } | null
 export type Choices = Record<string, Choice>
 
-/** What GPC creative data does not record, so cannot sit beside creative rows (lib/report-builder/data/clickhouse.ts). */
-const CREATIVE_CANNOT: DimKey[] = ['program', 'program_genre', 'daypart', 'league', 'direct_indirect']
+/**
+ * What GPC creative data does not record, so cannot sit beside creative rows
+ * (lib/report-builder/data/clickhouse.ts). Program, genre, daypart and league can since 17 November
+ * 2026, from the TV and live-sports airings; direct/indirect, digital only, still cannot.
+ */
+const CREATIVE_CANNOT: DimKey[] = ['direct_indirect']
 
 /** 360 entity types whose unmatched names can be looked up by their creatives (lib/import360/creatives.ts). */
 export const LOOKUP_TYPES = [118, 102, 139, 100]
@@ -539,10 +543,9 @@ export async function convert360(d: Described, matcher: Matcher, opts: { nearest
   note('changed', `Period: ${d.time.label ?? 'as set in 360'}`, 'GPC data covers all media from August 2026.', `Set to ${PERIOD_LABEL}.`)
   if (d.includePromos) note('changed', 'Including promos', 'Report Builder always leaves out promos and public service announcements.', 'Promos are not included.')
 
-  // Creatives come from the creative data, which records no program, genre, daypart, league or
-  // direct/indirect: those breakouts and selections give way to the creative rows, which are the
-  // point of such a report, rather than leaving a report that will not run (17 November 2026: 164
-  // of the 616 360 reports with creative rows also have program).
+  // Creatives come from the creative data, which records no direct/indirect: that breakout or
+  // selection gives way to the creative rows, which are the point of such a report, rather than
+  // leaving a report that will not run. (Program beside creatives is read from the airings.)
   if (rows.includes('creative') || columns === 'creative') {
     const away = CREATIVE_CANNOT.filter((dim) => rows.includes(dim) || columns === dim || filters[dim]?.length)
     if (away.length) {
