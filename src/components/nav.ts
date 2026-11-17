@@ -153,6 +153,12 @@ export const NAV: NavSection[] = [
         icon: IconReportBuilder,
         hint: 'Set up custom reports and data extracts by conversation',
       },
+      {
+        href: '/prototypes/magnifier-offline-reports',
+        label: 'Magnifier Offline Reports',
+        icon: IconTimeline,
+        hint: 'The Magnifier offline Excel reports as a dashboard, on GPC data',
+      },
     ],
   },
   {

@@ -1,0 +1,179 @@
+/* Magnifier Offline Reports (Prototypes). Every class starts mor- so none can
+   collide with the site's. The look follows Insights Studio: warm paper
+   surfaces, 12px cards with a hairline border, one blue accent. Series
+   colours are the dataviz skill's validated categorical palette, in fixed
+   order, light and dark each validated against its own surface. */
+.mor {
+  --mor-page: #f4f2ee;
+  --mor-card: #fbfaf7;
+  --mor-line: #dcd6cb;
+  --mor-grid: #e1e0d9;
+  --mor-ink: #1f1b16;
+  --mor-ink-2: #52514e;
+  --mor-muted: #898781;
+  --mor-accent: #2747c4;
+  --mor-accent-soft: #e6eafa;
+  --mor-up: #2a78d6;
+  --mor-down: #eb6834;
+  --mor-s1: #2a78d6; --mor-s2: #eb6834; --mor-s3: #1baf7a; --mor-s4: #eda100;
+  --mor-s5: #e87ba4; --mor-s6: #008300; --mor-s7: #6250d6; --mor-s8: #e34948;
+  --mor-s0: #c3c2b7;
+  font-family: 'Instrument Sans', system-ui, sans-serif;
+  color: var(--mor-ink);
+  background: var(--mor-page);
+  margin: -8px -8px 0;
+  padding: 20px 22px 32px;
+  border-radius: 14px;
+  min-height: calc(100vh - 120px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .mor {
+    --mor-page: #121210; --mor-card: #1a1a19; --mor-line: #383835; --mor-grid: #2c2c2a;
+    --mor-ink: #f0efec; --mor-ink-2: #c3c2b7; --mor-muted: #898781;
+    --mor-accent: #7d95f0; --mor-accent-soft: #232a45; --mor-up: #3987e5; --mor-down: #d95926;
+    --mor-s1: #3987e5; --mor-s2: #d95926; --mor-s3: #199e70; --mor-s4: #c98500;
+    --mor-s5: #d55181; --mor-s6: #0ca30c; --mor-s7: #9085e9; --mor-s8: #e66767; --mor-s0: #4a4945;
+  }
+}
+:root[data-theme='dark'] .mor {
+  --mor-page: #121210; --mor-card: #1a1a19; --mor-line: #383835; --mor-grid: #2c2c2a;
+  --mor-ink: #f0efec; --mor-ink-2: #c3c2b7; --mor-muted: #898781;
+  --mor-accent: #7d95f0; --mor-accent-soft: #232a45; --mor-up: #3987e5; --mor-down: #d95926;
+  --mor-s1: #3987e5; --mor-s2: #d95926; --mor-s3: #199e70; --mor-s4: #c98500;
+  --mor-s5: #d55181; --mor-s6: #0ca30c; --mor-s7: #9085e9; --mor-s8: #e66767; --mor-s0: #4a4945;
+}
+.mor a { color: inherit; text-decoration: none; }
+.mor .s1 { --c: var(--mor-s1); } .mor .s2 { --c: var(--mor-s2); } .mor .s3 { --c: var(--mor-s3); } .mor .s4 { --c: var(--mor-s4); }
+.mor .s5 { --c: var(--mor-s5); } .mor .s6 { --c: var(--mor-s6); } .mor .s7 { --c: var(--mor-s7); } .mor .s8 { --c: var(--mor-s8); }
+.mor .s0 { --c: var(--mor-s0); }
+
+/* header */
+.mor-kicker { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--mor-ink-2); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.mor-kicker a:hover { color: var(--mor-accent); }
+.mor-kicker .sep { color: var(--mor-muted); }
+.mor-chip { font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--mor-accent); background: var(--mor-accent-soft); border-radius: 999px; padding: 2px 9px; }
+.mor-title { font-size: 30px; font-weight: 650; letter-spacing: -.01em; margin: 6px 0 2px; line-height: 1.15; }
+.mor-sub { color: var(--mor-ink-2); font-size: 14px; margin: 0 0 14px; }
+.mor-bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: stretch; background: var(--mor-card); border: 1px solid var(--mor-line); border-radius: 12px; padding: 10px; margin-bottom: 14px; }
+.mor-pill { border: 1px solid var(--mor-line); border-radius: 8px; padding: 5px 10px; min-width: 120px; background: var(--mor-card); display: flex; flex-direction: column; justify-content: center; }
+.mor-pill .lab { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--mor-muted); }
+.mor-pill select, .mor-pill .val { font: inherit; font-size: 13.5px; font-weight: 600; color: var(--mor-ink); background: transparent; border: 0; padding: 0; cursor: pointer; }
+.mor-pill .x { margin-left: 8px; color: var(--mor-muted); font-weight: 700; }
+.mor-pill .x:hover { color: var(--mor-down); }
+.mor-pill.focus { border-color: var(--mor-accent); background: var(--mor-accent-soft); }
+.mor-bar .grow { flex: 1; }
+.mor-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--mor-line); border-radius: 8px; padding: 6px 12px; font-size: 13px; font-weight: 600; background: var(--mor-card); color: var(--mor-ink); cursor: pointer; }
+.mor-btn:hover { border-color: var(--mor-accent); color: var(--mor-accent); }
+.mor-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--mor-line); margin-bottom: 16px; overflow-x: auto; }
+.mor-tabs a { padding: 9px 14px; font-size: 14px; font-weight: 600; color: var(--mor-ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.mor-tabs a:hover { color: var(--mor-ink); }
+.mor-tabs a.on { color: var(--mor-accent); border-bottom-color: var(--mor-accent); }
+
+/* cards and grid */
+.mor-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; }
+.mor-card { grid-column: span 6; background: var(--mor-card); border: 1px solid var(--mor-line); border-radius: 12px; padding: 14px 16px; box-shadow: 0 1px 2px rgba(0,0,0,.05); min-width: 0; }
+.mor-card.w12 { grid-column: span 12; } .mor-card.w8 { grid-column: span 8; } .mor-card.w4 { grid-column: span 4; } .mor-card.w3 { grid-column: span 3; }
+@media (max-width: 1100px) { .mor-card, .mor-card.w8, .mor-card.w4 { grid-column: span 12; } .mor-card.w3 { grid-column: span 6; } }
+@media (max-width: 640px) { .mor-card.w3 { grid-column: span 12; } .mor { padding: 14px 12px 24px; } .mor-title { font-size: 24px; } }
+.mor-card h3 { font-size: 15px; font-weight: 650; margin: 0 0 10px; display: flex; align-items: baseline; gap: 8px; }
+.mor-card h3 .more { margin-left: auto; font-size: 12.5px; font-weight: 600; color: var(--mor-accent); }
+.mor-card h3 .more:hover { text-decoration: underline; }
+.mor-card h3 .note { font-size: 12px; font-weight: 500; color: var(--mor-muted); }
+
+/* KPI tiles */
+.mor-kpi .lab { font-size: 12px; font-weight: 600; color: var(--mor-ink-2); }
+.mor-kpi .big { font-size: 30px; font-weight: 650; letter-spacing: -.01em; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+.mor-kpi .big.name { font-size: 20px; line-height: 1.2; margin: 8px 0 4px; }
+.mor-kpi .foot { font-size: 12.5px; color: var(--mor-ink-2); }
+.mor-up { color: var(--mor-up); font-weight: 600; } .mor-down { color: var(--mor-down); font-weight: 600; }
+
+/* column chart */
+.mor-cols { display: flex; align-items: flex-end; gap: 8px; height: 190px; padding-top: 18px; border-bottom: 1px solid var(--mor-muted); }
+.mor-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; }
+.mor-col .v { font-size: 11.5px; color: var(--mor-ink-2); margin-bottom: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mor-col .b { width: 100%; max-width: 56px; background: var(--mor-s0); border-radius: 4px 4px 0 0; min-height: 1px; }
+.mor-col.on .b { background: var(--mor-accent); }
+.mor-col:hover .b { opacity: .85; }
+.mor-xlab { display: flex; gap: 8px; margin-top: 5px; }
+.mor-xlab span { flex: 1; text-align: center; font-size: 11.5px; color: var(--mor-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* stacked share */
+.mor-stack { display: flex; height: 26px; gap: 2px; border-radius: 4px; overflow: hidden; }
+.mor-stack > * { background: var(--c, var(--mor-s0)); min-width: 2px; }
+.mor-stackrow { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 10px; align-items: center; margin-bottom: 8px; font-size: 12.5px; color: var(--mor-ink-2); }
+.mor-stackrow.tall .mor-stack { height: 34px; }
+.mor-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; margin-top: 10px; color: var(--mor-ink-2); }
+.mor-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.mor-legend i, .mor-dot { width: 10px; height: 10px; border-radius: 3px; background: var(--c, var(--mor-s0)); display: inline-block; flex: none; }
+.mor-legend b { color: var(--mor-ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* horizontal bars */
+.mor-hbars { display: grid; grid-template-columns: minmax(0, 38%) minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; font-size: 13px; }
+.mor-hbars .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mor-hbars a.n:hover { color: var(--mor-accent); }
+.mor-hbars .t { height: 14px; background: transparent; }
+.mor-hbars .t > i { display: block; height: 100%; border-radius: 0 4px 4px 0; background: var(--c, var(--mor-s1)); min-width: 2px; }
+.mor-hbars .v { font-variant-numeric: tabular-nums; color: var(--mor-ink-2); text-align: right; white-space: nowrap; }
+
+/* diverging shifts */
+.mor-shift { display: grid; grid-template-columns: minmax(0, 34%) minmax(0, 1fr) minmax(0, 1fr) 72px; gap: 6px 0; align-items: center; font-size: 13px; }
+.mor-shift .n { padding-right: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mor-shift .l, .mor-shift .r { height: 14px; display: flex; }
+.mor-shift .l { justify-content: flex-end; border-right: 1px solid var(--mor-muted); }
+.mor-shift .l i { background: var(--mor-down); border-radius: 4px 0 0 4px; }
+.mor-shift .r i { background: var(--mor-up); border-radius: 0 4px 4px 0; }
+.mor-shift .v { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* tables */
+.mor-tablewrap { overflow-x: auto; }
+.mor-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.mor-table th { text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--mor-muted); padding: 8px 10px; border-bottom: 1px solid var(--mor-line); white-space: nowrap; position: sticky; top: 0; background: var(--mor-card); }
+.mor-table td { padding: 8px 10px; border-bottom: 1px solid var(--mor-grid); vertical-align: middle; }
+.mor-table td.num, .mor-table th.num { text-align: right; white-space: nowrap; }
+.mor-table tr.sub td { font-weight: 650; background: color-mix(in srgb, var(--mor-accent-soft) 50%, transparent); }
+.mor-table tr.total td { font-weight: 700; border-top: 1px solid var(--mor-line); }
+.mor-table tr.me td { background: var(--mor-accent-soft); }
+.mor-table tbody tr:hover td { background: color-mix(in srgb, var(--mor-accent-soft) 60%, transparent); }
+.mor-table a:hover { color: var(--mor-accent); text-decoration: underline; }
+.mor-table .muted { color: var(--mor-muted); }
+.mor-table .zero { color: var(--mor-muted); }
+.mor-table .wrap { white-space: normal; min-width: 220px; }
+.mor-table .heat { background: color-mix(in srgb, var(--mor-s1) calc(var(--h, 0) * 70%), transparent); }
+.mor-name { display: inline-flex; align-items: center; gap: 8px; }
+.mor-badge { font-size: 10.5px; font-weight: 700; border-radius: 999px; padding: 1px 7px; background: var(--mor-accent-soft); color: var(--mor-accent); margin-left: 6px; white-space: nowrap; }
+.mor-thumb { width: 72px; height: 48px; object-fit: cover; border-radius: 6px; background: var(--mor-grid); display: block; }
+.mor-spark { display: block; }
+.mor-spark polyline { fill: none; stroke: var(--c, var(--mor-ink-2)); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+
+/* creative highlight cards */
+.mor-ads { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.mor-ad { border: 1px solid var(--mor-line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; background: var(--mor-card); }
+.mor-ad img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--mor-grid); display: block; }
+.mor-ad .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--mor-ink-2); }
+.mor-ad .who { font-size: 12px; font-weight: 700; color: var(--mor-ink); display: flex; align-items: center; gap: 6px; }
+.mor-ad .t { font-size: 14px; font-weight: 650; color: var(--mor-ink); line-height: 1.3; }
+.mor-ad .lead { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mor-ad .money { margin-top: auto; padding-top: 4px; color: var(--mor-ink); font-weight: 600; }
+
+/* picker */
+.mor-pick { max-width: 860px; }
+.mor-find { width: 100%; font: inherit; font-size: 15px; padding: 10px 14px; border: 1px solid var(--mor-line); border-radius: 10px; background: var(--mor-card); color: var(--mor-ink); margin-bottom: 12px; }
+.mor-tree { list-style: none; margin: 0; padding: 0; }
+.mor-tree .row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 6px 10px 6px calc(10px + var(--depth, 0) * 22px); border-radius: 8px; font-size: 14px; }
+.mor-tree .row:hover { background: var(--mor-accent-soft); }
+.mor-tree .caret { border: 0; background: transparent; color: var(--mor-muted); cursor: pointer; font-size: 13px; padding: 0; width: 22px; }
+.mor-tree .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mor-tree .name:hover { color: var(--mor-accent); }
+.mor-tree .lvl { font-size: 11px; color: var(--mor-muted); }
+.mor-tree .amt { font-size: 12.5px; color: var(--mor-ink-2); font-variant-numeric: tabular-nums; min-width: 70px; text-align: right; }
+.mor-tree .row.empty .name, .mor-tree .row.empty .amt { color: var(--mor-muted); font-weight: 500; }
+
+.mor-empty { padding: 30px; text-align: center; color: var(--mor-ink-2); font-size: 14px; }
+.mor-foot { margin-top: 18px; font-size: 12px; color: var(--mor-muted); }
+.mor-loading { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; }
+.mor-loading > div { grid-column: span 6; height: 220px; border-radius: 12px; border: 1px solid var(--mor-line); background: linear-gradient(90deg, var(--mor-card), var(--mor-grid), var(--mor-card)); background-size: 200% 100%; animation: mor-shimmer 1.4s ease-in-out infinite; }
+.mor-loading > div.w12 { grid-column: span 12; height: 120px; }
+@keyframes mor-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .mor-loading > div { animation: none; } }
+.mor-table .date { white-space: nowrap; }
+.mor-tabs { scrollbar-width: none; }
