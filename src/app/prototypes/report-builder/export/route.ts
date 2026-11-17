@@ -56,6 +56,8 @@ export async function GET(req: Request) {
     summary: panel.rows.concat(panel.period ? [{ label: 'Period', value: panel.period }] : []),
     ...(access.email ? { owner: access.email } : {}),
     ...(imp ? { imported: { client: imp.client, user: imp.user, report: imp.report, notes: imp.notes ?? [] } } : {}),
+    // Absolute, so a creative row's link to the ad still works from the downloaded file.
+    appUrl: process.env.APP_URL?.trim().replace(/\/+$/, '') || url.origin,
   }
   let body: string | Uint8Array
   try {

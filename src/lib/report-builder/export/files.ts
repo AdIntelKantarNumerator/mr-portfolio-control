@@ -54,7 +54,26 @@ export interface FileMeta {
   owner?: string
   /** For a report imported from 360: what the import changed. */
   imported?: { client: string; user: string; report: string; notes: Array<{ impact: string; what: string; did: string }> }
+  /** The site's address: with it, each creative row links to the ad itself (Excel, CSV). */
+  appUrl?: string
 }
+
+/**
+ * Each row's link to its creative's own file, when the report has creative rows: the
+ * portfolio's proxy to MediaRadar's creative API (app/taxonomy-comparison/creative/[id]),
+ * which needs a portfolio sign-in. Null for a row without one (Scott, 17 November 2026).
+ */
+export function creativeLinks(result: Result, appUrl: string | undefined): Array<string | null> | null {
+  const at = result.columns.findIndex((c) => c.key === 'creative')
+  if (at < 0 || !appUrl) return null
+  const base = appUrl.replace(/\/+$/, '')
+  return result.rows.map((_, i) => {
+    const id = result.keys?.[i]?.[at]
+    return id?.startsWith('creative:') && /^\d+$/.test(id.slice(9)) ? `${base}/taxonomy-comparison/creative/${id.slice(9)}?type=creative` : null
+  })
+}
+/** Excel refuses a sheet with more than 65,530 links: past this the creative's name is plain text. */
+const XL_LINKS = 60_000
 
 const COPYRIGHT = (y: number) => `Copyright ${y} MediaRadar, Inc. and affiliates. All rights reserved.`
 
@@ -104,9 +123,11 @@ export function csvFile(result: Result, meta: FileMeta): string {
   const g = grid(result)
   const esc = (v: unknown) => (v == null ? '' : `"${String(v).replace(/"/g, '""')}"`)
   const val = (v: unknown, t: Column['type']) => (t === 'text' ? esc(v) : num(v) == null ? '' : String(num(v)))
+  const links = creativeLinks(result, meta.appUrl)
   const lines = [`${','.repeat(Math.min(3, g.cols.length - 1))}${meta.title}`, '', '', `Report Completed: ${stamp(meta.completed)}`, `Reported Time Period: ${periodSpan(result.period.start, result.period.end)}`]
-  lines.push(g.cols.map((c) => esc(c.head)).join(','))
-  for (const r of g.rows) lines.push(r.map((v, i) => val(v, g.cols[i]!.type)).join(','))
+  // A report with creative rows gets one more column, last, so the layout 360 users know is unchanged before it.
+  lines.push([...g.cols.map((c) => esc(c.head)), ...(links ? [esc('AD LINK')] : [])].join(','))
+  g.rows.forEach((r, ri) => lines.push([...r.map((v, i) => val(v, g.cols[i]!.type)), ...(links ? [esc(links[ri] ?? '')] : [])].join(',')))
   if (g.total) lines.push(g.total.map((v, i) => (i < g.dims ? (v ? esc(v) : '') : val(v, g.cols[i]!.type))).join(','))
   lines.push('', `${COPYRIGHT(meta.completed.getFullYear())} Report Builder`, `Data through ${result.data_through_label}.`, ...result.notes)
   return '﻿' + lines.join('\r\n') + '\r\n'
@@ -158,16 +179,20 @@ export async function xlsxFile(result: Result, meta: FileMeta): Promise<Buffer> 
     g.cols.map((c) => c.head),
     (c) => (c.font = bold),
   )
-  const data = (r: unknown[], isTotal: boolean) =>
+  // Creative rows link their name to the ad itself.
+  const links = creativeLinks(result, meta.appUrl)
+  const creativeAt = result.columns.findIndex((c) => c.key === 'creative')
+  const data = (r: unknown[], isTotal: boolean, link: string | null = null) =>
     put(
-      r.map((v, i) => xl(v, g.cols[i]!.type)),
+      r.map((v, i) => (link && i === creativeAt ? { text: String(v ?? ''), hyperlink: link } : xl(v, g.cols[i]!.type))),
       (cell, i) => {
         const f = XL_FORMAT[g.cols[i]!.type]
         if (f) cell.numFmt = f
         if (isTotal) cell.font = bold
+        if (link && i === creativeAt) cell.font = { color: { argb: 'FF0563C1' }, underline: true }
       },
     )
-  for (const r of g.rows) data(r, false)
+  g.rows.forEach((r, ri) => data(r, false, ri < XL_LINKS ? (links?.[ri] ?? null) : null))
   if (g.total) data(g.total, true)
   ws.commit()
 

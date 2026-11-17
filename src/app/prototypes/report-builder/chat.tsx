@@ -135,7 +135,26 @@ function stackedMeasures(cols: Col[], dcols: DCol[]): string[] {
 
 const numCls = (type: string, v: unknown) => 'rb-n' + (type === 'change' && v != null ? (Number(v) >= 0 ? ' rb-up' : ' rb-down') : '')
 
-function Cell({ cols, d, row }: { cols: Col[]; d: DCol; row: unknown[] }) {
+/**
+ * A creative's own file, through the portfolio's proxy to MediaRadar's creative API
+ * (app/taxonomy-comparison/creative/[id], the key kept server-side; open to every signed-in
+ * person). GPC creative ids are the ids that API takes (Scott, 17 November 2026).
+ */
+const creativeHref = (id: string | undefined) => (id?.startsWith('creative:') && /^\d+$/.test(id.slice(9)) ? `/taxonomy-comparison/creative/${id.slice(9)}?type=creative` : null)
+
+/** A row's name, linked to the ad itself when the row is a creative. */
+function NameText({ text, id }: { text: ReactNode; id?: string }) {
+  const href = creativeHref(id)
+  return href ? (
+    <a href={href} target="_blank" rel="noreferrer" title="Open the ad">
+      {text} <span aria-hidden>↗</span>
+    </a>
+  ) : (
+    <>{text}</>
+  )
+}
+
+function Cell({ cols, d, row, ids }: { cols: Col[]; d: DCol; row: unknown[]; ids?: string[] }) {
   // A column the row's table does not have draws as an empty cell. The tree draws an expanded row
   // against the top level's columns; when the two disagreed (17 November 2026: a daily report with 92
   // day columns, expanded rows capped at 60) reading `.type` of the missing column threw and took the
@@ -144,6 +163,8 @@ function Cell({ cols, d, row }: { cols: Col[]; d: DCol; row: unknown[] }) {
     const i = d.idx[0]!
     const c = cols[i]
     if (!c) return <td />
+    // A name column is keyed by its dimension, and the row's ids line up with the name columns.
+    if (c.key === 'creative') return <td><NameText text={cell(c.type, row[i])} id={ids?.[i]} /></td>
     return <td className={c.type === 'text' ? '' : numCls(c.type, row[i])}>{cell(c.type, row[i])}</td>
   }
   return (
@@ -295,7 +316,7 @@ function Table({ table, max }: { table: ViewTable; max: number }) {
             {rows.map((r, i) => (
               <tr key={i}>
                 {dcols.map((d) => (
-                  <Cell key={d.idx[0]} cols={table.columns} d={d} row={r} />
+                  <Cell key={d.idx[0]} cols={table.columns} d={d} row={r} ids={table.keys?.[i]} />
                 ))}
               </tr>
             ))}
@@ -499,7 +520,11 @@ function TreeTable({ tree, max }: { tree: ViewTree; max: number }) {
                 {isOpen ? '▾' : '▸'}
               </button>
             )}
-            {String(r[level] ?? '').trim() || <span className="rb-muted">Not named</span>}
+            {String(r[level] ?? '').trim() ? (
+              <NameText text={String(r[level]).trim()} id={tree.dims[level]?.key === 'creative' ? key : undefined} />
+            ) : (
+              <span className="rb-muted">Not named</span>
+            )}
           </td>
           {cols.map((d) => (
             <Cell key={d.idx[0]} cols={table.columns} d={d} row={r} />

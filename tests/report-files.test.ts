@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import ExcelJS from 'exceljs'
 import { PDFDocument } from 'pdf-lib'
-import { csvFile, pdfSafe, periodSpan, pdfFile, xlsxFile, type FileMeta } from '../src/lib/report-builder/export/files'
+import { creativeLinks, csvFile, pdfSafe, periodSpan, pdfFile, xlsxFile, type FileMeta } from '../src/lib/report-builder/export/files'
 import type { Result } from '../src/lib/report-builder/engine'
 
 const markets = ['National', 'Abilene', 'Albany, GA', 'New York']
@@ -103,4 +103,26 @@ test('big reports with names the standard PDF fonts cannot show: every format is
   assert.ok(csvFile(r, META).includes('スズキ 0'), 'and so does the CSV')
   assert.ok(Date.now() - t < 30_000, `took ${Date.now() - t} ms`)
   assert.equal(pdfSafe('スズキ Ｈｏｎｄａ café'), '??? Honda café', 'full-width letters fold; Latin-1 stays; the rest is ?')
+})
+
+test('creative rows link to the ad itself: a last CSV column and the Excel name (17 November 2026)', async () => {
+  const r: Result = {
+    ...RESULT,
+    columns: [{ key: 'advertiser', label: 'Advertiser', type: 'text' }, { key: 'creative', label: 'Creative', type: 'text' }, { key: 'total', label: 'Spend', type: 'money' }],
+    rows: [["McDonald's", 'Win Prizes Instantly', 8515868], ["McDonald's", 'Creative 7', 5]],
+    keys: [['advertiser:13663', 'creative:25104795245'], ['advertiser:13663', 'creative:7']],
+    totals: null,
+  }
+  const meta = { ...META, imported: undefined, appUrl: 'https://portfolio.example/' }
+  assert.deepEqual(creativeLinks(r, meta.appUrl), ['https://portfolio.example/taxonomy-comparison/creative/25104795245?type=creative', 'https://portfolio.example/taxonomy-comparison/creative/7?type=creative'])
+  assert.equal(creativeLinks(RESULT, meta.appUrl), null, 'no creative rows, no links')
+  assert.equal(creativeLinks(r, undefined), null, 'no address, no links')
+  const csv = csvFile(r, meta)
+  assert.match(csv, /"ADVERTISER","CREATIVE","Spend","AD LINK"/)
+  assert.match(csv, /"Win Prizes Instantly",8515868,"https:\/\/portfolio\.example\/taxonomy-comparison\/creative\/25104795245\?type=creative"/)
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.load(await xlsxFile(r, meta))
+  const cell = wb.getWorksheet('Report')!.getCell('B9')
+  assert.equal((cell.value as { text: string }).text, 'Win Prizes Instantly')
+  assert.equal((cell.value as { hyperlink: string }).hyperlink, 'https://portfolio.example/taxonomy-comparison/creative/25104795245?type=creative')
 })
