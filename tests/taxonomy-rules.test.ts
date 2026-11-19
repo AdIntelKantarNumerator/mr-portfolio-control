@@ -20,6 +20,9 @@ import {
   rankAdvertisers,
   sankeyData,
   UNCLASSIFIED,
+  UNKNOWN_PRODUCT,
+  nodeOf,
+  srcNodeOf,
   type Flow,
   type GpcTotalRow,
   matchKind,
@@ -111,6 +114,19 @@ test('the Sankey folds the tail into Other but keeps "none" and "unclassified" a
   assert.deepEqual(d.advertisers.map((r) => r.key), ['0', '1', '2', OTHER, NO_GPC])
   assert.ok(d.nodes.some((r) => r.key === UNCLASSIFIED))
   assert.equal(Math.round(d.links.reduce((a, l) => a + l.spend, 0)), Math.round(flowTotal(flows)))
+})
+
+test('a product on an industry keeps its industry, marked, below the industry level', () => {
+  const f = { ...flow('1', 'Acme', null, 10), industry: 'Legal Services', category: null, subcategory: null }
+  assert.equal(nodeOf(f, 'industry'), 'Legal Services')
+  assert.equal(nodeOf(f, 'category'), 'Legal Services (industry level)')
+  assert.equal(nodeOf(f, 'subcategory'), 'Legal Services (industry level)')
+  const unknown = { ...f, industry: UNKNOWN_PRODUCT }
+  assert.equal(nodeOf(unknown, 'category'), UNKNOWN_PRODUCT)
+  const none = { ...f, industry: null }
+  assert.equal(nodeOf(none, 'category'), UNCLASSIFIED)
+  const src = { ...f, srcIndustry: 'Media', srcCategory: 'Streaming', srcSubcategory: null }
+  assert.equal(srcNodeOf(src, 'subcategory'), 'Streaming')
 })
 
 test('filters narrow by media and month', () => {

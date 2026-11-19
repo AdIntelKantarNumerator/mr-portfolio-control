@@ -247,19 +247,26 @@ export const filterFlows = (flows: Flow[], f: FlowFilter = {}) =>
 
 export const flowTotal = (flows: Flow[]) => flows.reduce((a, x) => a + x.spend, 0)
 
-/** The GPC node a flow lands on at a level; a missing subcategory falls back to the category. */
-export function nodeOf(f: Flow, level: NodeLevel): string {
-  if (level === 'subcategory') return f.subcategory || f.category || UNCLASSIFIED
-  if (level === 'category') return f.category || UNCLASSIFIED
-  return f.industry || UNCLASSIFIED
+/** The GPC Unknown product's node label: spend whose payers own none of the creative's products. */
+export const UNKNOWN_PRODUCT = 'Unknown product'
+
+/**
+ * A node at a level, falling back upward: a missing subcategory takes the
+ * category; a missing category takes the industry, marked "(industry level)"
+ * because the product sits on the industry itself. The Unknown product has
+ * no levels below it, so it keeps its own name.
+ */
+function nodeAt(industry: string | null | undefined, category: string | null | undefined, subcategory: string | null | undefined, level: NodeLevel): string {
+  if (level === 'industry') return industry || UNCLASSIFIED
+  const cat = category || (!industry ? UNCLASSIFIED : industry === UNKNOWN_PRODUCT ? industry : `${industry} (industry level)`)
+  return level === 'subcategory' ? subcategory || cat : cat
 }
 
-/** The source side's node a flow comes from at a level; missing levels fall back as nodeOf does. */
-export function srcNodeOf(f: Flow, level: NodeLevel): string {
-  if (level === 'subcategory') return f.srcSubcategory || f.srcCategory || UNCLASSIFIED
-  if (level === 'category') return f.srcCategory || UNCLASSIFIED
-  return f.srcIndustry || UNCLASSIFIED
-}
+/** The GPC node a flow lands on at a level; missing levels fall back as nodeAt does. */
+export const nodeOf = (f: Flow, level: NodeLevel): string => nodeAt(f.industry, f.category, f.subcategory, level)
+
+/** The source side's node a flow comes from at a level; missing levels fall back as nodeAt does. */
+export const srcNodeOf = (f: Flow, level: NodeLevel): string => nodeAt(f.srcIndustry, f.srcCategory, f.srcSubcategory, level)
 
 /** The source side's nodes by spend - the left bar's breakdown - or null for a run that did not record them. */
 export function rankSrcNodes(flows: Flow[], level: NodeLevel): Ranked[] | null {

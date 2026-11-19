@@ -29,7 +29,7 @@
  * before they are written into a statement.
  */
 import { databricksConfig, DatabricksError, dbxQuery } from './databricks'
-import { compactName, MEDIA_TYPES as MEDIA, MONTHS, namePatterns, type Candidate, type Flow, type FromTaxonomy, type GpcBy, type MediaType, type Month } from './taxonomy-rules'
+import { compactName, MEDIA_TYPES as MEDIA, MONTHS, namePatterns, type Candidate, type Flow, type FromTaxonomy, type GpcBy, type MediaType, type Month, UNKNOWN_PRODUCT } from './taxonomy-rules'
 
 type OnWait = (seconds: number) => void | Promise<void>
 type VxTaxonomy = Exclude<FromTaxonomy, 'Classic'>
@@ -90,7 +90,23 @@ attr AS (
   FROM payer py LEFT ANTI JOIN closest c ON c.creative_id = py.creative_id)`
 
 /** The label a node takes when the spend went to the Unknown product. */
-const UNKNOWN_NODE = 'Unknown product'
+const UNKNOWN_NODE = UNKNOWN_PRODUCT
+
+/**
+ * Every GPC node a product can sit on, with its industry/category/subcategory
+ * names. A product can be attached at any level, but
+ * taxonomy_node_flattened_view has one row per leaf only, so a product on an
+ * industry (1.15M products, about 18% of Aug–Sep spend, 18 November 2026) or
+ * on a category that has subcategories found no row and showed as
+ * Unclassified. Those nodes are added here with the levels below left null.
+ * No product sits on an industry group.
+ */
+const FLAT = 'mrdpp_prod.global_catalog.taxonomy_node_flattened_view'
+const GPC_NODES = `(SELECT leaf_category_node_id node_id, industry_name, category_name, subcategory_name FROM ${FLAT}
+  UNION ALL SELECT DISTINCT category_id, industry_name, category_name, CAST(NULL AS string) FROM ${FLAT}
+    WHERE category_id NOT IN (SELECT leaf_category_node_id FROM ${FLAT})
+  UNION ALL SELECT DISTINCT industry_id, industry_name, CAST(NULL AS string), CAST(NULL AS string) FROM ${FLAT}
+    WHERE industry_id NOT IN (SELECT leaf_category_node_id FROM ${FLAT}))`
 
 function config() {
   const c = databricksConfig()
@@ -286,7 +302,7 @@ SELECT f.from_id, o.month, o.media, cast(g.entity_id AS string) gpc_id, e.displa
 FROM occ o JOIN from_crtv f ON f.creative_id = o.creative_id
 LEFT JOIN leg l ON l.creative_id = o.creative_id
 LEFT JOIN attr g ON g.creative_id = o.creative_id
-LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = g.taxonomy_node_id
+LEFT JOIN ${GPC_NODES} n ON n.node_id = g.taxonomy_node_id
 LEFT JOIN mrdpp_prod.global_catalog.entity e ON e.entity_id = g.entity_id
 LEFT JOIN root r ON r.entity_id = g.entity_id
 LEFT JOIN mrdpp_prod.global_catalog.entity rt ON rt.entity_id = r.root_id
@@ -366,7 +382,7 @@ SELECT cast(m.from_id AS string) from_id, o.month, o.media,
   sum(o.spend * m.w) spend
 FROM occ o JOIN mine m ON m.creative_id = o.creative_id
 LEFT JOIN leg l ON l.creative_id = o.creative_id
-LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = m.taxonomy_node_id
+LEFT JOIN ${GPC_NODES} n ON n.node_id = m.taxonomy_node_id
 GROUP BY ALL`
   const rows = await dbxQuery(config(), sql, [], { onWait })
   for (const r of rows) {
@@ -471,7 +487,7 @@ prod AS (SELECT cp.creative_id,
     array_join(array_sort(collect_set(p.product_name)), '; ') gpc_products,
     array_join(array_sort(collect_set(concat_ws(' > ', n.industry_name, n.category_name, n.subcategory_name))), '; ') gpc_nodes
   FROM mrdpp_prod.global_catalog.creative_product cp JOIN mrdpp_prod.global_catalog.product p ON p.product_id = cp.product_id
-  LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = p.taxonomy_node_id
+  LEFT JOIN ${GPC_NODES} n ON n.node_id = p.taxonomy_node_id
   WHERE cp.creative_id IN (SELECT creative_id FROM from_crtv)
   GROUP BY 1)
 SELECT f.from_id, s.creative_id, s.media, s.aug, s.sep,
@@ -786,7 +802,7 @@ ${legacySql('VX2', 'lv2')},
 ac AS (SELECT a.creative_id, a.media, a.month, ${childCol ? `coalesce(n.${childCol}, '')` : "''"} child, sum(a.spend) s
   FROM a
   JOIN mrdpp_prod.global_catalog.product p ON p.product_id = a.product_id
-  LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = p.taxonomy_node_id
+  LEFT JOIN ${GPC_NODES} n ON n.node_id = p.taxonomy_node_id
   GROUP BY ALL),
 cv AS (SELECT creative_id, primary_product_id vx0 FROM mrdpp_prod.gold.creative WHERE creative_id IN (SELECT creative_id FROM cs)),
 lfx AS (SELECT x.child, x.media, x.month, x.s, explode(array(
@@ -986,7 +1002,7 @@ a AS (SELECT o.creative_id, o.media, o.month, o.spend * coalesce(g.w, 1) spend, 
   FROM occ o
   LEFT JOIN attr g ON g.creative_id = o.creative_id
   LEFT JOIN root r ON r.entity_id = g.entity_id
-  LEFT JOIN mrdpp_prod.global_catalog.taxonomy_node_flattened_view n ON n.leaf_category_node_id = g.taxonomy_node_id),
+  LEFT JOIN ${GPC_NODES} n ON n.node_id = g.taxonomy_node_id),
 pick AS (SELECT creative_id, media, sum(spend) spend FROM a WHERE ${[cond, ...narrow].join(' AND ')} GROUP BY 1, 2),
 tp AS (SELECT creative_id, sum(spend) spend, max_by(media, spend) media FROM pick GROUP BY 1 ORDER BY spend DESC LIMIT ${SAMPLE_SIZE}),
 cr AS (SELECT c.creative_id, c.creative_type, coalesce(c.creative_title, c.creative_headline) title, c.first_seen_occurrence_timestamp first_seen
