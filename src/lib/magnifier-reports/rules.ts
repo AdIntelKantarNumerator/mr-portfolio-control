@@ -225,6 +225,26 @@ export function completeMonths(cover: Array<{ ym: number; media: number }>, toda
     .sort((a, b) => a - b)
 }
 
+/**
+ * A day range, inclusive, cut at month ends: 2026-08-03..2026-11-15 becomes
+ * four ranges, one per month. Prod ClickHouse stops any query that reads more
+ * than 46.57 GiB, and the daily creative summary for a whole industry group
+ * since August is more than that (19 November 2026), so long ranges are read a
+ * month at a time.
+ */
+export function monthSlices(from: string, to: string): Array<{ from: string; to: string }> {
+  const out: Array<{ from: string; to: string }> = []
+  let start = from
+  while (start <= to) {
+    const [y, m] = start.split('-').map(Number) as [number, number]
+    const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
+    const end = monthEnd < to ? monthEnd : to
+    out.push({ from: start, to: end })
+    start = addDays(end, 1)
+  }
+  return out
+}
+
 /** Parse a whole number from a search parameter, or null. */
 export function idParam(v: string | string[] | undefined): number | null {
   return typeof v === 'string' && /^\d{1,12}$/.test(v) ? Number(v) : null

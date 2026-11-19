@@ -74,7 +74,7 @@ test('a query becomes one grouped statement: conditional measures, having, order
     limit: 10,
   }
   const sql = ch.sqlFor(q)
-  assert.match(sql.rows, /FROM gpc_summary\.property_product_summary_month WHERE year_month BETWEEN 202608 AND 202610 AND coalesce\(is_promo, 0\) = 0/)
+  assert.match(sql.rows, /FROM summary\.property_product_summary_monthly WHERE year_month BETWEEN 202608 AND 202610 AND coalesce\(is_promo, 0\) = 0/)
   assert.match(sql.rows, /toFloat64\(sumIf\(cost_share_v, \(coalesce\(media_entity_id, 0\) IN \(1\)\)\)\) AS m_mine/)
   assert.match(sql.rows, /GROUP BY k_advertiser HAVING m_mine = 0\) ORDER BY m_spend DESC LIMIT 10$/)
   assert.match(sql.totals, /sum\(m_spend\) AS m_spend, sum\(m_mine\) AS m_mine, count\(\) AS n/)
@@ -224,7 +224,7 @@ test('daypart and league switch a report to the daily tables, as a breakout or o
   const byDaypart = ch.sqlFor({ period: m, groupBy: ['daypart'], measures: spend }, '(DAILY)')
   assert.match(byDaypart.rows, /FROM \(DAILY\) WHERE year_month BETWEEN 202609 AND 202611 AND start_date BETWEEN '2026-10-01' AND '2026-10-31' AND coalesce\(is_promo/)
   const byLength = ch.sqlFor({ period: m, groupBy: ['length'], measures: spend })
-  assert.match(byLength.rows, /FROM gpc_creative\.creative_product_media_summary_month WHERE year_month BETWEEN 202610 AND 202610 AND creative_id NOT IN \(SELECT creative_id FROM gpc_detail\.tv_product_detail/, 'the creative data has no promo flags: mostly-promo creatives are left out by their TV airings')
+  assert.match(byLength.rows, /FROM creative\.creative_product_media_summary_monthly WHERE year_month BETWEEN 202610 AND 202610 AND creative_id NOT IN \(SELECT creative_id FROM detail\.tv_product_detail/, 'the creative data has no promo flags: mostly-promo creatives are left out by their TV airings')
   assert.doesNotMatch(byLength.rows, /coalesce\(is_promo, 0\) = 0/)
   assert.equal(ch.supports!(['length', 'advertiser', 'media_type']), null)
   // Market is in the fuller creative summaries, program in the airings (17 November 2026); direct/indirect in neither.
@@ -240,13 +240,13 @@ test('creatives: rows from the creative data, the fuller tables when market is r
   const ch = clickhouseAdapter({
     query: async <T,>(sql: string) => {
       sent.push(sql)
-      if (sql.includes('FROM gpc_creative.creative WHERE')) return [{ id: '25103620826', title: 'Support Childhood Cancer Research', media: 'TV', secs: 120, first: '2026-10-03' }] as T[]
+      if (sql.includes('FROM creative.creative WHERE')) return [{ id: '25103620826', title: 'Support Childhood Cancer Research', media: 'TV', secs: 120, first: '2026-10-03' }] as T[]
       if (sql.includes('k_creative')) return [{ k_creative: '25103620826', n_creative: '25103620826', m_v: 6260648 }, { k_creative: '99', n_creative: '99', m_v: 5 }] as T[]
       return [] as T[]
     },
   })
-  assert.match(ch.sqlFor({ period: m, groupBy: ['creative'], measures: spend }).rows, /FROM gpc_creative\.creative_product_media_summary_month /)
-  assert.match(ch.sqlFor({ period: m, groupBy: ['creative', 'market'], measures: spend }).rows, /FROM gpc_creative\.creative_product_summary_month /, 'market needs the fuller creative table')
+  assert.match(ch.sqlFor({ period: m, groupBy: ['creative'], measures: spend }).rows, /FROM creative\.creative_product_media_summary_monthly /)
+  assert.match(ch.sqlFor({ period: m, groupBy: ['creative', 'market'], measures: spend }).rows, /FROM creative\.creative_product_summary_monthly /, 'market needs the fuller creative table')
   const r = await ch.aggregate({ period: m, groupBy: ['creative'], context: true, measures: spend })
   assert.deepEqual(r.rows[0]!.keys.creative, { id: 'creative:25103620826', name: 'Support Childhood Cancer Research', context: 'TV · 120s · first seen 2026-10-03' })
   assert.equal(r.rows[1]!.keys.creative!.name, 'Creative 99', 'no title: never a blank row')
@@ -303,14 +303,14 @@ test('creative with program or daypart: answered from the airings, one occurrenc
   assert.equal(sourceFor({ period: m, groupBy: ['creative', 'market'], measures: spend }), 'creative_month', 'market stays with the creative summaries')
   const ch = clickhouseAdapter({
     query: async <T,>(sql: string) => {
-      if (sql.includes('FROM gpc_creative.creative WHERE')) return [{ id: '5', title: 'Big Game Spot', media: 'TV', secs: 30, first: '2026-10-01' }] as T[]
+      if (sql.includes('FROM creative.creative WHERE')) return [{ id: '5', title: 'Big Game Spot', media: 'TV', secs: 30, first: '2026-10-01' }] as T[]
       if (sql.includes('k_creative')) return [{ k_creative: '5', n_creative: '5', k_program: '47555', n_program: '', m_v: 100 }] as T[]
       if (sql.includes("'program' AS dim")) return [{ dim: 'program', id: '47555', name: 'Sunday Night Football', ctx: 'NBC' }] as T[]
       return [] as T[]
     },
   })
   const sql = ch.sqlFor({ period: m, groupBy: ['creative', 'program'], measures: spend }).rows
-  assert.match(sql, /FROM gpc_detail\.tv_product_detail UNION ALL SELECT [\s\S]* FROM gpc_detail\.live_stream_product_detail/)
+  assert.match(sql, /FROM detail\.tv_product_detail UNION ALL SELECT [\s\S]* FROM detail\.live_stream_product_detail/)
   assert.match(sql, /broadcast_date AS start_date/)
   assert.match(sql, /coalesce\(is_promo, 0\) = 0/, 'the airings carry the promo flag: promos out exactly')
   assert.doesNotMatch(sql, /start_date BETWEEN/, 'a month is read by year_month')
@@ -318,4 +318,24 @@ test('creative with program or daypart: answered from the airings, one occurrenc
   assert.equal(r.rows[0]!.keys.creative!.name, 'Big Game Spot')
   assert.equal(r.rows[0]!.keys.program!.name, 'Sunday Night Football')
   assert.match(r.notes![0]!, /TV and live-sports airings/)
+})
+
+test('the GPC serving model is read from Prod ClickHouse, under Prod names (19 November 2026)', async () => {
+  const { GPC_ENV, GPC_TABLES, gpcDailyTable, gpcClickhouseConfig } = await import('../src/lib/gpc-clickhouse')
+  assert.equal(GPC_ENV, 'prod')
+  assert.equal(GPC_TABLES.propertyMonthly, 'summary.property_product_summary_monthly')
+  assert.equal(GPC_TABLES.creativeMonthly, 'creative.creative_product_summary_monthly')
+  assert.equal(gpcDailyTable('tv'), 'summary.tv_product_summary_daily')
+  for (const t of [...Object.values(GPC_TABLES), gpcDailyTable('video')]) assert.doesNotMatch(t, /gpc_|_month$/, `${t}: Prod has no gpc_ prefix and says _monthly`)
+  assert.equal(gpcClickhouseConfig({ CLICKHOUSE_DEV_URL: 'http://dev:8123' }), null, 'Dev alone is not enough')
+  assert.equal(gpcClickhouseConfig({ CLICKHOUSE_PROD_URL: 'http://prod:8123/' })?.url, 'http://prod:8123')
+})
+
+test('month coverage ignores a sparse month ahead of the data, and months after today', async () => {
+  const { monthCoverage } = await import('../src/lib/report-builder/data/clickhouse')
+  // Prod on 19 November 2026: all 17 media Aug-Nov (November loading), 74 forward-dated magazine rows in December.
+  const rows = [{ ym: 202607, media: 2 }, { ym: 202608, media: 17 }, { ym: 202609, media: 17 }, { ym: 202610, media: 17 }, { ym: 202611, media: 17 }, { ym: 202612, media: 1 }]
+  assert.deepEqual(monthCoverage(rows, new Date(Date.UTC(2026, 10, 19))), { first: 202608, through: 202610, prelim: 202611 })
+  // Even a full month dated after today is not used.
+  assert.deepEqual(monthCoverage([...rows.slice(0, 5), { ym: 202612, media: 17 }], new Date(Date.UTC(2026, 10, 19))), { first: 202608, through: 202610, prelim: 202611 })
 })

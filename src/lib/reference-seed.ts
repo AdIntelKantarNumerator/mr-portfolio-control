@@ -1096,20 +1096,37 @@ export const SEED_TABLE_NOTES: SeedTableNote[] = [
   // --- traps that produce a wrong number
   {
     tableRef: 'gpc_creative.creative_entity',
-    description: 'Who paid for each creative: one row per creative per participating company, with the role it played.',
+    description: 'Who took part in each creative: one row per creative per participating company, with the role it played.',
     watchOut:
-      'has_spend is the only authority on payment. gpc_reference.entity_role.is_spender_role disagrees with it: 77,534 Advertiser links never paid and 8 Retailer links did. Detail tables INNER JOIN this table, so a missing link silently drops the occurrence. Never UNION with the product axis; the same spot is counted on both.',
+      'Only Advertiser rows get spend; co-op rows do not (Scott, 19 November 2026). has_spend, which used to decide this, was dropped on 19 November 2026. About 7,000 creatives have no Advertiser row, so their spend has no advertiser. Detail tables INNER JOIN this table, so a missing link silently drops the occurrence. Never UNION with the product axis; the same spot is counted on both.',
+  },
+  {
+    tableRef: 'creative.creative_entity',
+    description: 'Who took part in each creative: one row per creative per company, marked Advertiser or Co-Op Advertiser (advertiser_type).',
+    watchOut:
+      'Only Advertiser rows get spend; co-op rows do not (Scott, 19 November 2026). has_spend, which used to decide this, was dropped on 19 November 2026. About 7,000 creatives have no Advertiser row, so their spend has no advertiser. Detail tables INNER JOIN this table, so a missing link silently drops the occurrence. Never UNION with the product axis; the same spot is counted on both.',
   },
   {
     tableRef: 'gpc_creative.creative_product',
     description: 'What each creative advertised: one row per creative per product.',
-    watchOut: 'has_spend is true on every row. product.entity_id is who makes the product, never who paid for the ad.',
+    watchOut: 'product.entity_id is who makes the product, never who paid for the ad.',
+  },
+  {
+    tableRef: 'creative.creative_product',
+    description: 'What each creative advertised: one row per creative per product.',
+    watchOut: 'product.entity_id is who makes the product, never who paid for the ad.',
   },
   {
     tableRef: 'gpc_reference.entity_role',
     description: 'Advertiser, Local Dealer, Retailer, Manufacturer, Dealer Assn.',
     watchOut:
-      'is_spender_role is a property of the role, but payment is a fact about the link. Filter on creative_entity.has_spend, never on this flag. Manufacturer has never appeared in a row.',
+      'is_spender_role is a property of the role, not of a creative, and is not the payment rule: only Advertiser links get spend (creative_entity.advertiser_type in Prod). has_spend, the old per-link flag, was dropped on 19 November 2026. Manufacturer has never appeared in a row.',
+  },
+  {
+    tableRef: 'reference.entity_role',
+    description: 'Advertiser, Local Dealer, Retailer, Manufacturer, Dealer Assn.',
+    watchOut:
+      'is_spender_role is a property of the role, not of a creative, and is not the payment rule: only Advertiser links get spend (creative_entity.advertiser_type in Prod). has_spend, the old per-link flag, was dropped on 19 November 2026. Manufacturer has never appeared in a row.',
   },
   {
     tableRef: 'gpc_summary.property_product_summary_month',
@@ -1218,11 +1235,11 @@ export const SEED_COLUMN_NOTES: SeedColumnNote[] = [
     source: 'gpc_reference.entity_role',
   },
   {
-    tableRef: 'gpc_creative.creative_entity',
-    column: 'has_spend',
-    description: 'Whether this company paid for this creative.',
-    meaning: 'The only authority on payment.',
-    watchOut: 'Do not use entity_role.is_spender_role as a proxy. Nullable: what NULL means is not stated.',
+    tableRef: 'creative.creative_entity',
+    column: 'advertiser_type',
+    description: 'Advertiser or Co-Op Advertiser.',
+    meaning: 'Who gets the spend: Advertiser rows do, Co-Op Advertiser rows do not (Scott, 19 November 2026).',
+    watchOut: 'Took over from has_spend, which was dropped on 19 November 2026. Databricks global_catalog.creative_entity names the roles instead (entity_role: Local Dealer, Dealer Assn, Retailer and so on), and the counts do not line up one to one.',
   },
   { tableRef: 'gpc_creative.creative_entity', column: 'source', description: 'How the link was made.', watchOut: 'A string while gpc_reference.source exists.' },
 

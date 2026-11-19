@@ -3,7 +3,7 @@
  *
  *   live    the report engine (live-engine.ts) on the ClickHouse data adapter
  *           (data/clickhouse.ts), when REPORT_BUILDER_DATA=gpc and
- *           CLICKHOUSE_DEV_URL are set, limited to the person's entitlements
+ *           CLICKHOUSE_PROD_URL are set, limited to the person's entitlements
  *           (data/entitlements.ts). Every number is a query.
  *   sample  engine.js: real names, illustrative figures, all in memory. Used
  *           for tests and local work without ClickHouse.

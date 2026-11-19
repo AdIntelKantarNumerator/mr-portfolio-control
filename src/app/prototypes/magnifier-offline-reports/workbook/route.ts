@@ -33,7 +33,7 @@ let building: string | null = null
 export async function GET(req: Request) {
   const access = await currentAccess()
   if (getAuthConfig().enabled && !access.canSeePrototypes) return new Response('Prototypes are not switched on for you.', { status: 403 })
-  if (!data.configured()) return new Response('Dev ClickHouse is not connected here.', { status: 503 })
+  if (!data.configured()) return new Response('Prod ClickHouse is not connected here.', { status: 503 })
 
   const url = new URL(req.url)
   const kind = url.searchParams.get('kind') as keyof typeof KINDS | null

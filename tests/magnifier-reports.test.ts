@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { change, colourSlots, completeMonths, idParam, mediaMatrix, money, monthTotals, ordinal, rank, shiftYm, shifts, trail, type CubeRow } from '../src/lib/magnifier-reports/rules'
+import { change, colourSlots, completeMonths, idParam, mediaMatrix, money, monthSlices, monthTotals, ordinal, rank, shiftYm, shifts, trail, type CubeRow } from '../src/lib/magnifier-reports/rules'
 import { href, readState } from '../src/app/prototypes/magnifier-offline-reports/state'
 
 const row = (ym: number, aid: number, media: string, spend: number, pid = aid): CubeRow => ({ ym, aid, aname: `A${aid}`, pid, pname: pid === aid ? '' : `P${pid}`, media, cid: 1, cname: 'C', spend, occ: 1 })
@@ -111,4 +111,15 @@ test('workbook: products grouped by advertiser with a total under each and a gra
   assert.equal(_test.monthEnd(202602), '2026-02-28')
   assert.equal(_test.monthEnd(202612), '2026-12-31')
   assert.equal(_test.weekIso(20261026), '2026-10-26')
+})
+
+test('a long day range is read a month at a time, with no day lost or repeated', () => {
+  assert.deepEqual(monthSlices('2026-08-03', '2026-11-15'), [
+    { from: '2026-08-03', to: '2026-08-31' },
+    { from: '2026-09-01', to: '2026-09-30' },
+    { from: '2026-10-01', to: '2026-10-31' },
+    { from: '2026-11-01', to: '2026-11-15' },
+  ])
+  assert.deepEqual(monthSlices('2026-11-09', '2026-11-15'), [{ from: '2026-11-09', to: '2026-11-15' }], 'within a month: one read')
+  assert.deepEqual(monthSlices('2026-12-28', '2027-01-03'), [{ from: '2026-12-28', to: '2026-12-31' }, { from: '2027-01-01', to: '2027-01-03' }], 'across a year end')
 })

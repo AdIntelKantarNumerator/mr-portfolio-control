@@ -240,11 +240,12 @@ test('the model can put its own which-one choices on the buttons, and picking on
   assert.match(String(picked.summary), /Quick Service Restaurants/)
 })
 
-test('live GPC data only when asked for and Dev ClickHouse is configured; the sample otherwise', () => {
+test('live GPC data only when asked for and Prod ClickHouse is configured; the sample otherwise', () => {
   assert.equal(dataSource({}), 'sample')
   assert.equal(dataSource({ REPORT_BUILDER_DATA: 'gpc' }), 'sample', 'no ClickHouse: stays on the sample')
-  assert.equal(dataSource({ CLICKHOUSE_DEV_URL: 'http://ch:8123' }), 'sample', 'ClickHouse alone does not switch it')
-  assert.equal(dataSource({ REPORT_BUILDER_DATA: 'gpc', CLICKHOUSE_DEV_URL: 'http://ch:8123' }), 'gpc')
+  assert.equal(dataSource({ CLICKHOUSE_PROD_URL: 'http://ch:8123' }), 'sample', 'ClickHouse alone does not switch it')
+  assert.equal(dataSource({ REPORT_BUILDER_DATA: 'gpc', CLICKHOUSE_DEV_URL: 'http://ch:8123' }), 'sample', 'Dev no longer holds the GPC data')
+  assert.equal(dataSource({ REPORT_BUILDER_DATA: 'gpc', CLICKHOUSE_PROD_URL: 'http://ch:8123' }), 'gpc')
 })
 
 test('several measures by month: a column per month and measure, sharing the month as a group', async () => {

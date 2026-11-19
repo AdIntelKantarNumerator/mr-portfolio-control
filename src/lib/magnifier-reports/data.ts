@@ -1,16 +1,17 @@
 /**
- * Magnifier Offline Reports: every ClickHouse read (Dev, the GPC serving model).
+ * Magnifier Offline Reports: every ClickHouse read (Prod, the GPC serving model,
+ * since 19 November 2026: Dev dropped its GPC databases; see lib/gpc-clickhouse.ts).
  *
  * All spend comes from the creative summaries, so a creative can be followed
  * from any total down to its ad:
- *   gpc_creative.creative_product_summary_month   month x creative x paying entity x product x property x market
- *   gpc_creative.creative_product_summary_daily   the same by day (weeks for FastTrack, the occurrence list)
- *   gpc_creative.creative                         title, lead text, first audio, AI summary
- *   gpc_reference.taxonomy_node                   the GPC taxonomy tree (ids match the summaries' *_id columns)
+ *   creative.creative_product_summary_monthly     month x creative x paying entity x product x property x market
+ *   creative.creative_product_summary_daily       the same by day (weeks for FastTrack, the occurrence list)
+ *   creative.creative                             title, lead text, first audio, AI summary
+ *   reference.taxonomy_node                       the GPC taxonomy tree (ids match the summaries' *_id columns)
  * Spend is cost_share_v, the spend model's share for the paying entity and
  * product. Promos and PSAs are left out the simplest way (Scott, 16 November
  * 2026: "whatever is easiest"): the flag is only on TV airings
- * (gpc_detail.tv_product_detail), so a creative is dropped when most of its TV
+ * (detail.tv_product_detail), so a creative is dropped when most of its TV
  * spend in the months read is flagged. That lands within about 1% of the
  * exact flagged spend.
  *
@@ -19,12 +20,14 @@
  * before they are used. Results are kept for half an hour per process, which
  * is plenty for a prototype on data that loads overnight.
  */
-import { chQuery, clickhouseConfig, ClickHouseError } from '@/lib/clickhouse'
-import { addDays, completeMonths, LEVEL_SQL, type CubeRow, type Level, type TaxNode, type Who } from './rules'
+import { chQuery } from '@/lib/clickhouse'
+import { GPC_TABLES, gpcClickhouseConfig, requireGpcClickhouse } from '@/lib/gpc-clickhouse'
+import { addDays, completeMonths, LEVEL_SQL, monthSlices, type CubeRow, type Level, type TaxNode, type Who } from './rules'
 
-const MONTH = 'gpc_creative.creative_product_summary_month'
-const DAILY = 'gpc_creative.creative_product_summary_daily'
-const SETTINGS = { max_execution_time: '90', max_bytes_before_external_group_by: '2000000000' }
+const MONTH = GPC_TABLES.creativeMonthly
+const DAILY = GPC_TABLES.creativeDaily
+// Prod ClickHouse refuses a max_execution_time above 60 (SETTING_CONSTRAINT_VIOLATION, 19 November 2026).
+const SETTINGS = { max_execution_time: '60', max_bytes_before_external_group_by: '2000000000' }
 const TTL = 30 * 60_000
 
 const cache = new Map<string, { at: number; value: Promise<unknown> }>()
@@ -45,15 +48,16 @@ function kept<T>(key: string, read: () => Promise<T>, big = false): Promise<T> {
   return value
 }
 
-export const configured = () => Boolean(clickhouseConfig('dev'))
+export const configured = () => Boolean(gpcClickhouseConfig())
 
-/** The Excel downloads' big reads (a whole industry group, every week since August) get four minutes, not one and a half. */
-const LONG = { ...SETTINGS, max_execution_time: '240' }
+/**
+ * The Excel downloads' big reads (a whole industry group, every week since August). They had four
+ * minutes on Dev; Prod allows no more than 60 seconds for any query, so they get the same as the rest.
+ */
+const LONG = { ...SETTINGS }
 
 function q<T>(sql: string, params: Record<string, string> = {}, long = false): Promise<T[]> {
-  const c = clickhouseConfig('dev')
-  if (!c) throw new ClickHouseError('Dev ClickHouse is not configured (CLICKHOUSE_DEV_URL).')
-  return chQuery<T>(c, sql, params, long ? LONG : SETTINGS)
+  return chQuery<T>(requireGpcClickhouse(), sql, params, long ? LONG : SETTINGS)
 }
 
 const n = (v: unknown) => Number(v) || 0
@@ -75,7 +79,7 @@ export interface Scope {
 
 /** Creatives that are mostly promos or PSAs in these months (see the note at the top). */
 const notPromo = (ms: number[]) =>
-  `creative_id NOT IN (SELECT creative_id FROM gpc_detail.tv_product_detail WHERE year_month IN (${ymList(ms)})
+  `creative_id NOT IN (SELECT creative_id FROM ${GPC_TABLES.tvAirings} WHERE year_month IN (${ymList(ms)})
      GROUP BY creative_id HAVING 2 * sumIf(cost_share_v, coalesce(is_promo, 0) = 1 OR coalesce(is_psa, 0) = 1) >= sum(cost_share_v)
        AND countIf(coalesce(is_promo, 0) = 1 OR coalesce(is_psa, 0) = 1) > 0)`
 
@@ -110,7 +114,7 @@ const scopeKey = (s: Scope) => `${s.level}:${s.node}:${s.media ?? ''}:${s.who ??
 export function months(): Promise<number[]> {
   return kept('months', async () => {
     const rows = await q<{ ym: number; media: number }>(
-      'SELECT year_month AS ym, uniqExact(media_id) AS media FROM gpc_creative.creative_product_media_summary_month GROUP BY ym ORDER BY ym',
+      `SELECT year_month AS ym, uniqExact(media_id) AS media FROM ${GPC_TABLES.creativeMediaMonthly} GROUP BY ym ORDER BY ym`,
     )
     return completeMonths(rows.map((r) => ({ ym: n(r.ym), media: n(r.media) })))
   })
@@ -122,7 +126,7 @@ export function taxonomy(ym: number): Promise<{ nodes: TaxNode[]; spend: Record<
     const [nodes, spend] = await Promise.all([
       q<{ id: number; parent: number | null; level: Level; name: string }>(
         `SELECT taxonomy_node_id AS id, parent_node_id AS parent, level, name
-         FROM gpc_reference.taxonomy_node
+         FROM ${GPC_TABLES.taxonomyNode}
          WHERE is_active AND level IN ('Industry Group', 'Industry', 'Category', 'Subcategory')
          ORDER BY name`,
       ),
@@ -241,10 +245,14 @@ export interface CreativeRow {
   format: string
 }
 
+/** The ranges a day period is read in: a month at a time when it spans more than one (see monthSlices). */
+const slicesOf = (p: Period): Period[] => ('months' in p ? [p] : monthSlices(p.from, p.to))
+
 /** The top creatives in a period, with their text. `firstSeen` within the period marks a new ad. */
 export function creatives(s: Scope, p: Period, limit = 60): Promise<CreativeRow[]> {
   const sp = span(p)
   const w = where(s, sp.ms)
+  if (slicesOf(p).length > 1) return kept(`cre:${scopeKey(s)}:${sp.key}:${limit}`, () => creativesBySlice(s, p as { from: string; to: string }, limit), limit >= 1000)
   return kept(`cre:${scopeKey(s)}:${sp.key}:${limit}`, async () => {
     const rows = await q<Record<string, unknown>>(
       `WITH base AS (
@@ -263,7 +271,7 @@ export function creatives(s: Scope, p: Period, limit = 60): Promise<CreativeRow[
        FROM top
        LEFT JOIN adv ON adv.entity_id = top.entity_id
        LEFT JOIN (SELECT creative_id, title, lead_text, first_audio, ai_summary, summary, description, ad_format
-                  FROM gpc_creative.creative WHERE creative_id IN (SELECT creative_id FROM top)) AS c ON c.creative_id = top.creative_id
+                  FROM ${GPC_TABLES.creative} WHERE creative_id IN (SELECT creative_id FROM top)) AS c ON c.creative_id = top.creative_id
        ORDER BY spend DESC`,
       { ...w.params, ...sp.params },
       limit >= 1000,
@@ -275,6 +283,75 @@ export function creatives(s: Scope, p: Period, limit = 60): Promise<CreativeRow[
       title: String(r.title ?? '').trim(), lead: String(r.lead ?? '').trim(), summary: String(r.summary ?? '').trim(), format: String(r.format ?? ''),
     }))
   }, limit >= 1000)
+}
+
+/**
+ * creatives() for a day range longer than a month: each month is grouped by
+ * creative and advertiser on its own, the months are added up here, and the
+ * text is read for the top ones only. The promo rule still looks at the whole
+ * range, so the result matches a single read.
+ */
+async function creativesBySlice(s: Scope, p: { from: string; to: string }, limit: number): Promise<CreativeRow[]> {
+  const w = where(s, span(p).ms)
+  type Agg = Omit<CreativeRow, 'advTotal' | 'title' | 'lead' | 'summary' | 'format'>
+  const by = new Map<string, Agg>()
+  for (const slice of monthSlices(p.from, p.to)) {
+    const sp = span(slice)
+    const rows = await q<Record<string, unknown>>(
+      `SELECT toString(creative_id) AS id, entity_id AS aid, any(entity_name) AS advertiser, any(product_name) AS product, any(subcategory_name) AS subcategory,
+              groupUniqArray(media_name) AS media, any(creative_type) AS type, max(length_v) AS length,
+              toString(min(first_seen_date)) AS first_seen, sum(cost_share_v) AS spend, sum(occurrences) AS occ
+       FROM ${sp.table} WHERE ${sp.cond} AND ${w.sql}
+       GROUP BY creative_id, entity_id`,
+      { ...w.params, ...sp.params },
+      true,
+    )
+    for (const r of rows) {
+      const key = `${r.id}|${r.aid}`
+      const first = r.first_seen ? String(r.first_seen) : null
+      const len = r.length == null ? null : n(r.length)
+      const e = by.get(key)
+      if (!e) {
+        by.set(key, {
+          id: String(r.id), aid: n(r.aid), advertiser: String(r.advertiser ?? ''), product: String(r.product ?? ''), subcategory: String(r.subcategory ?? ''),
+          media: [...((r.media as string[]) ?? [])], type: String(r.type ?? ''), length: len, firstSeen: first, spend: n(r.spend), occ: n(r.occ),
+        })
+        continue
+      }
+      for (const m of (r.media as string[]) ?? []) if (!e.media.includes(m)) e.media.push(m)
+      if (len != null && (e.length == null || len > e.length)) e.length = len
+      if (first && (!e.firstSeen || first < e.firstSeen)) e.firstSeen = first
+      e.spend += n(r.spend)
+      e.occ += n(r.occ)
+    }
+  }
+  const advTotal = new Map<number, number>()
+  for (const e of by.values()) advTotal.set(e.aid, (advTotal.get(e.aid) ?? 0) + e.spend)
+  const top = [...by.values()].sort((a, b) => b.spend - a.spend).slice(0, whole(limit))
+  const text = new Map<string, Record<string, unknown>>()
+  const ids = [...new Set(top.map((t) => t.id))].filter((id) => /^\d{1,20}$/.test(id))
+  for (let i = 0; i < ids.length; i += 5000) {
+    const rows = await q<Record<string, unknown>>(
+      `SELECT toString(creative_id) AS id, title, lead_text, first_audio, ai_summary, summary, description, ad_format
+       FROM ${GPC_TABLES.creative} WHERE creative_id IN (${ids.slice(i, i + 5000).join(',')})`,
+      {},
+      true,
+    )
+    for (const r of rows) text.set(String(r.id), r)
+  }
+  // The same fallbacks as the single read's SQL: the first value that is there.
+  const firstOf = (...v: unknown[]) => String(v.find((x) => x != null) ?? '')
+  return top.map((t) => {
+    const c = text.get(t.id) ?? {}
+    return {
+      ...t,
+      advTotal: advTotal.get(t.aid) ?? 0,
+      title: firstOf(c.title).trim(),
+      lead: firstOf(c.lead_text ? c.lead_text : null, c.first_audio).trim(),
+      summary: firstOf(c.ai_summary, c.summary, c.description).trim(),
+      format: firstOf(c.ad_format),
+    }
+  })
 }
 
 export interface ProductRow {
@@ -293,17 +370,24 @@ export interface ProductRow {
 /** Product x period spend (the Product|Campaign and Product|Media|Trend sheets). With `byMedia`, one row per product and media. */
 export function products(s: Scope, p: Period, byMedia: boolean, limit = 400): Promise<ProductRow[]> {
   const sp = span(p)
+  // The promo rule looks at the whole period even when it is read a month at a time.
   const w = where(s, sp.ms)
   return kept(`prod:${scopeKey(s)}:${sp.key}:${byMedia}:${limit}`, async () => {
-    const rows = await q<Record<string, unknown>>(
-      `SELECT entity_id AS aid, any(entity_name) AS advertiser, product_id AS pid, any(product_name) AS product,
-              any(category_name) AS category, any(subcategory_name) AS subcategory, ${byMedia ? 'media_name' : "''"} AS media,
-              ${sp.bucket} AS ym, sum(cost_share_v) AS spend
-       FROM ${sp.table} WHERE ${sp.cond} AND ${w.sql}
-       GROUP BY aid, pid, media, ym`,
-      { ...w.params, ...sp.params },
-      limit >= 1000,
-    )
+    const rows: Record<string, unknown>[] = []
+    for (const slice of slicesOf(p)) {
+      const ss = span(slice)
+      // A plain loop: spreading hundreds of thousands of rows into push() overflows the stack.
+      const got = await q<Record<string, unknown>>(
+          `SELECT entity_id AS aid, any(entity_name) AS advertiser, product_id AS pid, any(product_name) AS product,
+                  any(category_name) AS category, any(subcategory_name) AS subcategory, ${byMedia ? 'media_name' : "''"} AS media,
+                  ${ss.bucket} AS ym, sum(cost_share_v) AS spend
+           FROM ${ss.table} WHERE ${ss.cond} AND ${w.sql}
+           GROUP BY aid, pid, media, ym`,
+          { ...w.params, ...ss.params },
+          limit >= 1000,
+        )
+      for (const r of got) rows.push(r)
+    }
     const m = new Map<string, ProductRow>()
     for (const r of rows) {
       const k = `${r.aid}|${r.pid}|${r.media}`
@@ -438,7 +522,7 @@ export function occurrences(s: Scope, from: string, to: string, limit = 500): Pr
        )
        SELECT toString(d) AS date, toString(o.creative_id) AS creative, advertiser, media, product, subcategory, market, outlet,
               toString(first_seen) AS first_seen, spend, occ, coalesce(c.title, '') AS title
-       FROM o LEFT JOIN (SELECT creative_id, title FROM gpc_creative.creative WHERE creative_id IN (SELECT creative_id FROM o)) AS c
+       FROM o LEFT JOIN (SELECT creative_id, title FROM ${GPC_TABLES.creative} WHERE creative_id IN (SELECT creative_id FROM o)) AS c
          ON c.creative_id = o.creative_id
        ORDER BY d DESC, spend DESC`,
       { ...w.params, ymFrom: String(ymFrom), ymTo: String(ymTo), from, to },

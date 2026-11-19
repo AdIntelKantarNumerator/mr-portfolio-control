@@ -1155,7 +1155,7 @@ export function createLiveEngine(cfg: LiveEngineConfig) {
     const a = await availability()
     return {
       data: {
-        source: 'Live data (development server)',
+        source: 'Live data (production server)',
         all_media_from: monthLabel(a.firstComplete),
         final_through: monthLabel(a.through),
         current_month_loading: monthLabel(a.prelim),

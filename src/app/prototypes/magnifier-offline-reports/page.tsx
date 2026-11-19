@@ -5,7 +5,7 @@
  * Weekly FastTrack) as one dashboard on GPC data, in the look of Insights
  * Studio. First a GPC taxonomy node is picked, at any level; then the
  * dashboard opens on it, and every element drills into a tab mirroring a
- * sheet of the workbooks. Live from Dev ClickHouse (lib/magnifier-reports).
+ * sheet of the workbooks. Live from Prod ClickHouse (lib/magnifier-reports).
  *
  * Only people with "Sees prototypes" reach it (lib/access-rules.ts).
  */
@@ -31,7 +31,7 @@ export default async function MagnifierOfflineReportsPage({ searchParams }: { se
     return (
       <div className="mor">
         <h1 className="mor-title">Magnifier Offline Reports</h1>
-        <div className="mor-card w12 mor-empty">Dev ClickHouse is not connected here (CLICKHOUSE_DEV_URL).</div>
+        <div className="mor-card w12 mor-empty">Prod ClickHouse is not connected here (CLICKHOUSE_PROD_URL).</div>
       </div>
     )
   }
@@ -146,7 +146,7 @@ export default async function MagnifierOfflineReportsPage({ searchParams }: { se
         <Body ctx={ctx} />
       </Suspense>
       <p className="mor-foot">
-        Prototype on development data (GPC, Dev ClickHouse). Every media from {monthLabel(months[0])}; the current month is left out until it is complete.
+        Prototype on production GPC data (Prod ClickHouse). Every media from {monthLabel(months[0])}; the current month is left out until it is complete.
       </p>
     </div>
   )

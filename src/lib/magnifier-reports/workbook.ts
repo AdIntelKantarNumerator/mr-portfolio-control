@@ -181,7 +181,7 @@ class Book {
     ws.getCell(r++, 1).value = 'Tables in this report'
     for (const [a, b] of tables) line(a, b)
     r++
-    line('About the data:', 'GPC taxonomy, development data (Dev ClickHouse, GPC serving model). Spend is the spend model\'s share for the paying advertiser and product. Promotional and public service announcements are left out. Every media is covered from August 2026; earlier months are not shown.')
+    line('About the data:', 'GPC taxonomy, production data (Prod ClickHouse, GPC serving model). Spend is the spend model\'s share for the paying advertiser and product. Promotional and public service announcements are left out. Every media is covered from August 2026; earlier months are not shown.')
     line('', '© 2026 MediaRadar, Inc. and affiliates. Prototype; figures on development data can change.')
   }
 

@@ -2,8 +2,9 @@
  * The data adapter for ClickHouse (12 November 2026): the only place Report
  * Builder writes SQL.
  *
- * Reads the new taxonomy's summary data on Dev ClickHouse:
- * gpc_summary.property_product_summary_month (spend by month x property x
+ * Reads the new taxonomy's summary data on Prod ClickHouse (lib/gpc-clickhouse.ts,
+ * since 19 November 2026; Dev dropped its GPC databases):
+ * summary.property_product_summary_monthly (spend by month x property x
  * paying entity x product, every id with its name), and for day and week
  * detail the seven per-media daily tables, read as one union in the monthly
  * table's shape. Every request goes through lib/clickhouse.ts, which only
@@ -26,16 +27,16 @@
  *   - Spot length and the creative itself are recorded only in the creative
  *     summaries, which add up to within 0.4% of the monthly table (October
  *     2026). A query that reads either is answered from them:
- *       gpc_creative.creative_product_media_summary_month / _daily, the
+ *       creative.creative_product_media_summary_monthly / _daily, the
  *         smaller, when nothing else is needed;
- *       gpc_creative.creative_product_summary_month / _daily, about nine times
+ *       creative.creative_product_summary_monthly / _daily, about nine times
  *         larger, when the query also reads market or master property, which
  *         only these record (17 November 2026, for creative rows: a quarter of
  *         360 reports have them, beside market and property).
  *     Neither records program, genre, daypart or league; a creative meets those
  *     only through its airings (Scott, 17 November 2026). So a query that reads
  *     creative or spot length together with any of them is answered from the
- *     airings themselves (AIRINGS): gpc_detail.tv_product_detail, which adds up
+ *     airings themselves (AIRINGS): detail.tv_product_detail, which adds up
  *     exactly to the summaries' six TV media, and live_stream_product_detail, to
  *     Live Streaming Sports (October 2026; sports_ and tv_clearance_ overlap them
  *     and are left out). Each row is one occurrence. The airings carry ids, not
@@ -47,21 +48,22 @@
  *     months read is mostly flagged as promo or PSA is left out instead (the flag
  *     is only on TV airings), within about 1% of the exact figure. The airings
  *     carry the flag, so they leave promos out exactly.
- *   - A creative's name is its title, from gpc_creative.creative, looked up
+ *   - A creative's name is its title, from creative.creative, looked up
  *     after the query (creativeInfo): the summaries carry only its id.
  */
-import { chQuery, clickhouseConfig, ClickHouseError, type ClickHouseConfig } from '@/lib/clickhouse'
+import { chQuery, type ClickHouseConfig } from '@/lib/clickhouse'
+import { GPC_SUMMARY_DB, GPC_TABLES, gpcClickhouseConfig, gpcDailyTable, requireGpcClickhouse } from '@/lib/gpc-clickhouse'
 import { DIMENSIONS, dimOf, normName, queryDims, type AggregateQuery, type AggregateResult, type Availability, type Cond, type DataAdapter, type DimKey, type MeasureKey, type NameHit, type SearchRequest } from './types'
 
-const MONTH_TABLE = 'gpc_summary.property_product_summary_month'
-const CREATIVE_MONTH = 'gpc_creative.creative_product_media_summary_month'
-const CREATIVE_DAY = 'gpc_creative.creative_product_media_summary_daily'
-const CREATIVE_FULL_MONTH = 'gpc_creative.creative_product_summary_month'
-const CREATIVE_FULL_DAY = 'gpc_creative.creative_product_summary_daily'
+const MONTH_TABLE = GPC_TABLES.propertyMonthly
+const CREATIVE_MONTH = GPC_TABLES.creativeMediaMonthly
+const CREATIVE_DAY = GPC_TABLES.creativeMediaDaily
+const CREATIVE_FULL_MONTH = GPC_TABLES.creativeMonthly
+const CREATIVE_FULL_DAY = GPC_TABLES.creativeDaily
 /** What only the fuller creative summaries record. */
 const FULL_ONLY: DimKey[] = ['market', 'master_property']
 /** Where search and labels look up a dimension that the monthly table does not record. */
-const LOOKUP_TABLE: Partial<Record<DimKey, string>> = { daypart: 'gpc_summary.tv_product_summary_daily', league: 'gpc_summary.tv_product_summary_daily', length: CREATIVE_MONTH, creative: CREATIVE_MONTH }
+const LOOKUP_TABLE: Partial<Record<DimKey, string>> = { daypart: gpcDailyTable('tv'), league: gpcDailyTable('tv'), length: CREATIVE_MONTH, creative: CREATIVE_MONTH }
 /** What a creative meets only through its airings (TV and live sports). */
 const AIRING_ONLY: DimKey[] = ['program', 'program_genre', 'daypart', 'league']
 /** What no creative data records at all. */
@@ -84,12 +86,12 @@ const AIRING_COLS = (date: string) =>
    '' AS show_display_name, '' AS show_type_name, '' AS sports_entity_name, '' AS daypart_name, '' AS language_name,
    CAST(NULL AS Nullable(Int32)) AS direct_indirect_id, '' AS direct_indirect_name, '' AS creative_type`
 // TV files an airing under its broadcast date; live streaming has only the capture date.
-const AIRINGS = `(SELECT ${AIRING_COLS('broadcast_date')} FROM gpc_detail.tv_product_detail UNION ALL SELECT ${AIRING_COLS('capture_date')} FROM gpc_detail.live_stream_product_detail)`
+const AIRINGS = `(SELECT ${AIRING_COLS('broadcast_date')} FROM ${GPC_TABLES.tvAirings} UNION ALL SELECT ${AIRING_COLS('capture_date')} FROM ${GPC_TABLES.liveStreamAirings})`
 const AIRING_TIME: DimKey[] = ['day', 'week', 'broadcast_week', 'broadcast_month']
 const CREATIVE_NOTE = 'Spot length and creatives come from the creative data, which has no promo flag; a creative whose TV spend is mostly promos or public service announcements is left out instead, so totals can differ slightly from other reports.'
 /** Creatives that are mostly promos or PSAs in these months (the flag is only on TV airings): left out of creative-data queries. */
 const notPromoCreative = (fromYm: number, toYm: number) =>
-  `creative_id NOT IN (SELECT creative_id FROM gpc_detail.tv_product_detail WHERE year_month BETWEEN ${fromYm} AND ${toYm}
+  `creative_id NOT IN (SELECT creative_id FROM ${GPC_TABLES.tvAirings} WHERE year_month BETWEEN ${fromYm} AND ${toYm}
      GROUP BY creative_id HAVING 2 * sumIf(cost_share_v, coalesce(is_promo, 0) = 1 OR coalesce(is_psa, 0) = 1) >= sum(cost_share_v)
        AND countIf(coalesce(is_promo, 0) = 1 OR coalesce(is_psa, 0) = 1) > 0)`
 
@@ -219,7 +221,10 @@ function inSql(d: DimKey, values: string[]): string {
 
 // ---------------------------------------------------------------- the daily source
 
-const DAILY_TABLES = ['tv', 'video', 'avod', 'display', 'social', 'print', 'live_stream'].map((t) => `${t}_product_summary_daily`)
+const DAILY_MEDIA = ['tv', 'video', 'avod', 'display', 'social', 'print', 'live_stream']
+const DAILY_TABLES = DAILY_MEDIA.map((t) => `${t}_product_summary_daily`)
+/** The monthly table's name inside its database, which the daily union takes its column types from. */
+const MONTH_TABLE_NAME = MONTH_TABLE.split('.')[1]!
 const DAILY_COLS = [
   'year_month', 'start_date', 'industry_id', 'industry_name', 'category_id', 'category_name', 'subcategory_id', 'subcategory_name',
   'entity_id', 'entity_name', 'entity_parent_id', 'entity_parent_name', 'product_id', 'product_name',
@@ -231,24 +236,41 @@ const DAILY_COLS = [
   'daypart_id', 'daypart_name', 'sports_entity_id', 'sports_entity_name',
 ]
 
-/** Whether this deployment reads live data: REPORT_BUILDER_DATA=gpc and Dev ClickHouse configured. */
+/**
+ * Which months a report can use, from how many media each month holds.
+ * The month still loading (prelim) is the latest one with most media present,
+ * not simply the latest: Prod carries a few forward-dated magazine issues in
+ * the month after (74 rows in December 2026, read on 19 November), which made
+ * a half-loaded November look complete. Months after today are never used.
+ */
+export function monthCoverage(rows: Array<{ ym: number; media: number }>, today: Date = new Date()): { first: number; through: number; prelim: number } {
+  const thisYm = today.getUTCFullYear() * 100 + today.getUTCMonth() + 1
+  const seen = rows.filter((r) => r.ym <= thisYm)
+  const maxMedia = Math.max(1, ...seen.map((r) => r.media))
+  const complete = seen.filter((r) => r.media >= maxMedia * 0.7).map((r) => r.ym).sort((a, b) => a - b)
+  const prelim = complete.length ? complete[complete.length - 1]! : Math.max(...seen.map((r) => r.ym))
+  // The month still loading is not complete: complete months stop before it.
+  const done = complete.filter((ym) => ym < prelim)
+  const through = done.length ? done[done.length - 1]! : prelim
+  let first = through
+  for (let i = done.length - 1; i > 0 && ymShift(done[i - 1]!, 1) === done[i]!; i--) first = done[i - 1]!
+  return { first, through, prelim }
+}
+
+/** Whether this deployment reads live data: REPORT_BUILDER_DATA=gpc and Prod ClickHouse configured. */
 export function liveConfigured(env: Record<string, string | undefined> = process.env): boolean {
-  return env.REPORT_BUILDER_DATA?.trim().toLowerCase() === 'gpc' && Boolean(clickhouseConfig('dev', env))
+  return env.REPORT_BUILDER_DATA?.trim().toLowerCase() === 'gpc' && Boolean(gpcClickhouseConfig(env))
 }
 
 // ---------------------------------------------------------------- the adapter
 
 export interface ClickHouseAdapterOptions {
-  /** Sends one query. Defaults to Dev ClickHouse through lib/clickhouse.ts; tests pass their own. */
+  /** Sends one query. Defaults to Prod ClickHouse through lib/clickhouse.ts; tests pass their own. */
   query?: <T>(sql: string, params?: Record<string, string>) => Promise<T[]>
 }
 
 export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdapter & { sqlFor(q: AggregateQuery, daily?: string): { rows: string; totals: string } } {
-  const config = (): ClickHouseConfig => {
-    const c = clickhouseConfig('dev')
-    if (!c) throw new ClickHouseError('Dev ClickHouse is not configured (CLICKHOUSE_DEV_URL).')
-    return c
-  }
+  const config = (): ClickHouseConfig => requireGpcClickhouse()
   const query = opts.query ?? (<T>(sql: string, params: Record<string, string> = {}) => chQuery<T>(config(), sql, params, SETTINGS))
 
   let avail: { at: number; value: Availability } | null = null
@@ -257,11 +279,11 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
   /** The daily tables as one source in the monthly table's shape: a missing column is empty, a different type is cast. */
   function dailySource(): Promise<string> {
     dailySql ??= (async () => {
-      const tables = ['property_product_summary_month', ...DAILY_TABLES]
+      const tables = [MONTH_TABLE_NAME, ...DAILY_TABLES]
       const cols = await query<{ table: string; name: string; type: string }>(
-        `SELECT table, name, type FROM system.columns WHERE database = 'gpc_summary' AND table IN (${tables.map((t) => `'${t}'`).join(',')}) AND name IN (${DAILY_COLS.map((c) => `'${c}'`).join(',')})`,
+        `SELECT table, name, type FROM system.columns WHERE database = '${GPC_SUMMARY_DB}' AND table IN (${tables.map((t) => `'${t}'`).join(',')}) AND name IN (${DAILY_COLS.map((c) => `'${c}'`).join(',')})`,
       )
-      const want = new Map(cols.filter((c) => c.table === 'property_product_summary_month').map((c) => [c.name, c.type]))
+      const want = new Map(cols.filter((c) => c.table === MONTH_TABLE_NAME).map((c) => [c.name, c.type]))
       for (const c of cols) if (!want.has(c.name)) want.set(c.name, c.type)
       const parts = DAILY_TABLES.map((t) => {
         const have = new Map(cols.filter((c) => c.table === t).map((c) => [c.name, c.type]))
@@ -273,7 +295,7 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
           const empty = ty.includes('Nullable') ? 'NULL' : ty.includes('String') ? "''" : '0'
           return `CAST(${empty} AS ${ty}) AS ${c}`
         })
-        return `SELECT ${sel.join(', ')} FROM gpc_summary.${t}`
+        return `SELECT ${sel.join(', ')} FROM ${GPC_SUMMARY_DB}.${t}`
       })
       return `(${parts.join(' UNION ALL ')})`
     })()
@@ -334,15 +356,8 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
     async availability() {
       if (avail && Date.now() - avail.at < 10 * 60_000) return avail.value
       const rows = await query<{ ym: number; media: number }>(`SELECT year_month AS ym, uniqExact(media_id) AS media FROM ${MONTH_TABLE} GROUP BY ym ORDER BY ym`)
-      const maxMedia = Math.max(1, ...rows.map((r) => Number(r.media)))
-      const complete = rows.filter((r) => Number(r.media) >= maxMedia * 0.7).map((r) => Number(r.ym))
-      const prelim = Math.max(...rows.map((r) => Number(r.ym)))
-      // The current month is still loading: complete months stop before it.
-      const done = complete.filter((ym) => ym < prelim)
-      const through = done.length ? done[done.length - 1]! : prelim
-      let first = through
-      for (let i = done.length - 1; i > 0 && ymShift(done[i - 1]!, 1) === done[i]!; i--) first = done[i - 1]!
-      const [last] = await query<{ d: string }>(`SELECT toString(max(start_date)) AS d FROM gpc_summary.video_product_summary_daily WHERE year_month >= ${prelim}`)
+      const { first, through, prelim } = monthCoverage(rows.map((r) => ({ ym: Number(r.ym), media: Number(r.media) })))
+      const [last] = await query<{ d: string }>(`SELECT toString(max(start_date)) AS d FROM ${gpcDailyTable('video')} WHERE year_month = ${prelim}`)
       const monthEnd = new Date(Date.UTC(Math.floor(prelim / 100), prelim % 100, 0)).toISOString().slice(0, 10)
       const prelimDay = last?.d && /^\d{4}-\d{2}-\d{2}$/.test(last.d) && last.d < monthEnd ? last.d : monthEnd
       const value = { firstComplete: isoYm(first), through: isoYm(through), prelim: isoYm(prelim), prelimDay }
@@ -406,7 +421,7 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
       const params: Record<string, string> = {}
       const ym = ymOf(`${req.month}-01`)
       const extra = req.where ? ` AND ${condSql(req.where)}` : ''
-      // Creatives are found by their title, which only gpc_creative.creative holds.
+      // Creatives are found by their title, which only creative.creative holds.
       const creatives = await Promise.all(req.parts.filter((p) => p.dim === 'creative').map((p) => searchCreatives(p.text, ym, extra, req.limit)))
       const parts = req.parts.filter((p) => p.dim !== 'creative').map((p, i) => {
         const d = SQL[p.dim]
@@ -455,7 +470,7 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
       const rows = await query<{ id: string; title: string; media: string; secs: number | null; first: string | null }>(
         `SELECT toString(creative_id) AS id, coalesce(nullIf(trim(title), ''), nullIf(trim(lead_text), ''), '') AS title, coalesce(first_seen_media, '') AS media,
                 duration AS secs, toString(toDate(first_seen_occurrence_timestamp)) AS first
-         FROM gpc_creative.creative WHERE creative_id IN (${nums.slice(i, i + 5000).join(',')})`,
+         FROM ${GPC_TABLES.creative} WHERE creative_id IN (${nums.slice(i, i + 5000).join(',')})`,
       )
       for (const r of rows) {
         const context = [r.media, r.secs ? `${r.secs}s` : '', r.first ? `first seen ${r.first}` : ''].filter(Boolean).join(' · ')
@@ -469,7 +484,7 @@ export function clickhouseAdapter(opts: ClickHouseAdapterOptions = {}): DataAdap
   /** Creatives by title (or the biggest, with no text), ranked by the month's spend. */
   async function searchCreatives(text: string | null, ym: number, extra: string, limit: number): Promise<NameHit[]> {
     const params: Record<string, string> = text != null ? { t: text } : {}
-    const byTitle = text != null ? ` AND creative_id IN (SELECT creative_id FROM gpc_creative.creative WHERE positionCaseInsensitiveUTF8(coalesce(title, ''), {t:String}) > 0)` : ''
+    const byTitle = text != null ? ` AND creative_id IN (SELECT creative_id FROM ${GPC_TABLES.creative} WHERE positionCaseInsensitiveUTF8(coalesce(title, ''), {t:String}) > 0)` : ''
     const rows = await query<{ id: string; spend: number }>(
       `SELECT toString(creative_id) AS id, toFloat64(sum(cost_share_v)) AS spend FROM ${CREATIVE_MONTH}
        WHERE year_month = ${ym}${byTitle}${extra} GROUP BY id ORDER BY spend DESC LIMIT ${Math.max(1, Math.floor(limit))}`,
