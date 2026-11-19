@@ -14,7 +14,9 @@ const nextConfig: NextConfig = {
    * portfolio 500s. Keeping it external is the supported fix; the real-Postgres
    * driver is unaffected either way.
    */
-  serverExternalPackages: ["@electric-sql/pglite"],
+  // mssql (and its driver, tedious) reads the 360 SQL Server for the Report Builder import; kept
+  // external like PGlite so the driver loads from node_modules rather than being bundled.
+  serverExternalPackages: ["@electric-sql/pglite", "mssql", "tedious"],
   /*
    * Process Documentation uploads go through a server action, and a Claude
    * artifact with embedded images can run to megabytes; the default limit is

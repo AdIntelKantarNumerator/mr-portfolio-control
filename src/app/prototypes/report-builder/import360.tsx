@@ -6,7 +6,8 @@
  * approximate item with why - then Import, which saves it and hands it back
  * to the page to run.
  *
- * The lists come from the snapshot `npm run load:360` keeps; the preview and
+ * The lists are read live from the 360 SQL Server, or from the snapshot
+ * `npm run load:360` keeps where the server is not configured; the preview and
  * the import run on the server (lib/import360/service.ts).
  *
  * An advertiser, parent or brand not found in GPC by name is looked up by
@@ -68,7 +69,7 @@ const keyOf = (u: Unresolved) => `${u.e}:${u.id}`
 export function Import360({ onClose, onImported }: { onClose: () => void; onImported: (saved: { id: string; name: string; saved: SavedItem[] }) => void }) {
   const [step, setStep] = useState<'client' | 'user' | 'report' | 'lookup' | 'review'>('client')
   const [q, setQ] = useState('')
-  const [info, setInfo] = useState<{ reports: number; loaded: string | null } | null>(null)
+  const [info, setInfo] = useState<{ reports: number; loaded: string | null; live?: boolean } | null>(null)
   const [clients, setClients] = useState<Client[] | null>(null)
   const [client, setClient] = useState<Client | null>(null)
   const [users, setUsers] = useState<User[] | null>(null)
@@ -104,7 +105,7 @@ export function Import360({ onClose, onImported }: { onClose: () => void; onImpo
 
   useEffect(() => {
     // The client list itself loads through the search below, with an empty search.
-    void call<{ reports: number; loaded: string | null }>({ op: 'info' }).then(setInfo, (e: Error) => setError(e.message))
+    void call<{ reports: number; loaded: string | null; live?: boolean }>({ op: 'info' }).then(setInfo, (e: Error) => setError(e.message))
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     document.addEventListener('keydown', esc)
     return () => document.removeEventListener('keydown', esc)
@@ -233,7 +234,7 @@ export function Import360({ onClose, onImported }: { onClose: () => void; onImpo
       <>
         <input className="rb-imp-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients or license groups" aria-label="Search clients" autoFocus />
         <div className="rb-imp-list">
-          {clients?.length === 0 ? <p className="rb-muted">{info?.reports ? 'No client matches.' : 'No 360 reports have been copied yet. Run npm run load:360 from a machine that can reach the 360 SQL Server.'}</p> : null}
+          {clients?.length === 0 ? <p className="rb-muted">{info?.reports ? 'No client matches.' : info?.live ? 'No 360 reports were used this year.' : 'No 360 reports have been copied yet. Run npm run load:360 from a machine that can reach the 360 SQL Server.'}</p> : null}
           {clients?.map((c) => (
             <button key={c.usrsetId} type="button" className="rb-imp-item" onClick={() => pickClient(c)}>
               <b>{c.name}</b>
@@ -493,7 +494,7 @@ export function Import360({ onClose, onImported }: { onClose: () => void; onImpo
           <div>
             <div className="rb-eyebrow">Import 360 Explore report</div>
             <h2>{step === 'client' ? 'Choose the client' : step === 'user' ? 'Choose the user' : step === 'report' ? 'Choose the report' : step === 'lookup' ? 'Finding names by their creatives' : 'Review the conversion'}</h2>
-            {crumbs.length ? <p className="rb-muted rb-cap">{crumbs.join(' › ')}</p> : info ? <p className="rb-muted rb-cap">{info.reports.toLocaleString('en-US')} reports used in 2026{info.loaded ? `, copied ${info.loaded}` : ''}</p> : null}
+            {crumbs.length ? <p className="rb-muted rb-cap">{crumbs.join(' › ')}</p> : info ? <p className="rb-muted rb-cap">{info.reports.toLocaleString('en-US')} reports used in 2026{info.live ? ', live from 360' : info.loaded ? `, copied ${info.loaded}` : ''}</p> : null}
           </div>
           <button type="button" className="rb-imp-close" onClick={onClose} aria-label="Close">
             ×

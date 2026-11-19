@@ -1,11 +1,14 @@
 /**
  * The 360 import, end to end (12 November 2026): pick a client, a user and a
- * report from the snapshot `npm run load:360` keeps, see what converting it
- * to GPC changes, and import it as a saved report.
+ * report, see what converting it to GPC changes, and import it as a saved
+ * report.
  *
- * The snapshot tables are x360_users, x360_reports and x360_names
- * (drizzle/0046). Names are matched to GPC through the report engine, so the
- * matching sees only what the person is entitled to.
+ * Since 19 November 2026 every step reads the 360 SQL Server live
+ * (lib/import360/source.ts) when SQL360_SERVER and its login are configured
+ * (Scott: feed directly off SQL Server, not a snapshot). Without them it
+ * falls back to the snapshot `npm run load:360` keeps in x360_users,
+ * x360_reports and x360_names (drizzle/0046). Names are matched to GPC through
+ * the report engine, so the matching sees only what the person is entitled to.
  */
 import { desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
@@ -16,6 +19,7 @@ import { dbxFlows } from '@/lib/taxonomy-dbx'
 import { convert360, coreName, IMPORT_PERIOD, type Choices, type Converted, type Matcher, type Note } from './convert'
 import { decide, FOLLOWS, landingOf, type Resolution, type Suggestion } from './creatives'
 import { describe, type Described, type Lookup, type Raw360Spec } from './decode'
+import { live360Configured, liveClients, liveInfo, liveLookup, liveReport, liveReports, liveUsers } from './source'
 
 export interface Client360 {
   usrsetId: number
@@ -37,6 +41,7 @@ export interface Report360 {
 
 /** Clients (user sets) with reports used in 2026, biggest first; q narrows by client, license group or mnemonic. */
 export async function listClients(q: string): Promise<Client360[]> {
+  if (live360Configured()) return liveClients(q)
   const names = db
     .select({ usrsetId: x360Users.usrsetId, name: sql<string>`max(${x360Users.usrsetN})`.as('name'), lic: sql<string | null>`max(${x360Users.licensegrpN})`.as('lic'), mnemonic: sql<string>`max(${x360Users.mnemonic})`.as('mnemonic') })
     .from(x360Users)
@@ -55,6 +60,7 @@ export async function listClients(q: string): Promise<Client360[]> {
 }
 
 export async function listUsers(usrsetId: number): Promise<User360[]> {
+  if (live360Configured()) return liveUsers(usrsetId)
   const rows = await db
     .select({ usrId: x360Reports.usrId, name: sql<string | null>`max(${x360Users.usrN})`, reports: sql<number>`count(*)::int` })
     .from(x360Reports)
@@ -66,6 +72,7 @@ export async function listUsers(usrsetId: number): Promise<User360[]> {
 }
 
 export async function listReports(usrId: number): Promise<Report360[]> {
+  if (live360Configured()) return liveReports(usrId)
   const rows = await db
     .select({ key: x360Reports.reportKey, name: x360Reports.name, type: x360Names.name, lastUsed: x360Reports.lastUsed })
     .from(x360Reports)
@@ -75,8 +82,9 @@ export async function listReports(usrId: number): Promise<Report360[]> {
   return rows.map((r) => ({ key: r.key, name: r.name, type: r.type ?? 'Report', lastUsed: r.lastUsed ? r.lastUsed.toISOString().slice(0, 10) : null }))
 }
 
-/** The names a spec refers to, from the snapshot. */
+/** The names a spec refers to: live from 360, or from the snapshot. */
 async function lookupFor(raw: Raw360Spec): Promise<Lookup> {
+  if (live360Configured()) return liveLookup(raw)
   const keys = new Set<string>()
   for (const s of raw.sel) {
     keys.add(`-1:${s.e}`)
@@ -123,23 +131,25 @@ export interface Preview {
   converted: Converted
 }
 
-async function load(key: string) {
+/** One report: its name, owner and spec, live from 360 or from the snapshot. */
+async function load(key: string): Promise<{ name: string; client: string; user: string; lastUsed: Date | null; spec: Raw360Spec }> {
+  if (live360Configured()) return liveReport(key)
   const [r] = await db.select().from(x360Reports).where(eq(x360Reports.reportKey, key)).limit(1)
   if (!r) throw new Error('That report is not in the 360 snapshot. Run npm run load:360 to refresh it.')
   const [u] = await db.select().from(x360Users).where(eq(x360Users.usrId, r.usrId)).limit(1)
-  return { r, u }
+  return { name: r.name, client: u?.usrsetN ?? r.mnemonic, user: u?.usrN ?? `User ${r.usrId}`, lastUsed: r.lastUsed, spec: r.spec as Raw360Spec }
 }
 
 /** What importing this report would give, and what it would change. Nothing is saved. */
 export async function preview360(engine: ReportEngine, key: string, nearest = false, choices?: Choices): Promise<Preview> {
-  const { r, u } = await load(key)
-  const raw = r.spec as Raw360Spec
+  const r = await load(key)
+  const raw = r.spec
   const look = await lookupFor(raw)
   const described = describe(raw, look)
   const converted = await convert360(described, matcherFor(engine), { nearest, choices })
   return {
     key,
-    report: { name: r.name, client: u?.usrsetN ?? r.mnemonic, user: u?.usrN ?? `User ${r.usrId}`, type: described.type.name, lastUsed: r.lastUsed ? r.lastUsed.toISOString().slice(0, 10) : null },
+    report: { name: r.name, client: r.client, user: r.user, type: described.type.name, lastUsed: r.lastUsed ? r.lastUsed.toISOString().slice(0, 10) : null },
     described,
     converted,
   }
@@ -174,10 +184,18 @@ export async function import360(engine: ReportEngine, key: string, nearest = fal
   return { id: saved.id, name: saved.name, notes }
 }
 
-/** How many reports the snapshot holds, and when it was loaded. */
-export async function snapshotInfo(): Promise<{ reports: number; loaded: string | null }> {
+/**
+ * Where the reports come from and how many there are: read live from 360
+ * (`live`, with when the client list was read), or the snapshot and when it
+ * was loaded.
+ */
+export async function snapshotInfo(): Promise<{ reports: number; loaded: string | null; live: boolean }> {
+  if (live360Configured()) {
+    const i = await liveInfo()
+    return { reports: i.reports, loaded: i.read.slice(0, 10), live: true }
+  }
   const [r] = await db.select({ n: sql<number>`count(*)::int`, at: sql<Date | null>`max(${x360Reports.loadedAt})` }).from(x360Reports)
-  return { reports: Number(r?.n ?? 0), loaded: r?.at ? new Date(r.at).toISOString().slice(0, 10) : null }
+  return { reports: Number(r?.n ?? 0), loaded: r?.at ? new Date(r.at).toISOString().slice(0, 10) : null, live: false }
 }
 
 
