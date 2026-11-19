@@ -254,6 +254,15 @@ export const IconCost = (p: IconProps) => (
   </Glyph>
 )
 
+/** Client Evaluation — three overlapping circles, one client seen from three platforms. */
+export const IconClients = (p: IconProps) => (
+  <Glyph {...p}>
+    <circle cx="5.6" cy="6" r="3.4" />
+    <circle cx="10.4" cy="6" r="3.4" />
+    <circle cx="8" cy="10.2" r="3.4" />
+  </Glyph>
+)
+
 /** Report Builder — a sheet with rows, and a bar rising out of it. */
 export const IconReportBuilder = (p: IconProps) => (
   <Glyph {...p}>

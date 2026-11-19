@@ -337,3 +337,9 @@ export async function liveInfo(): Promise<{ reports: number; read: string }> {
   const ix = await clientIndex()
   return { reports: ix.counts.reduce((a, c) => a + c.n, 0), read: ix.at.toISOString() }
 }
+
+/** Reports used since SINCE, per client (user set) and owner, for Client Evaluation. */
+export async function liveReportCounts(): Promise<Array<{ usrsetId: number; usrId: number; n: number }>> {
+  const ix = await clientIndex()
+  return ix.counts.map(({ usrsetId, usrId, n }) => ({ usrsetId, usrId, n }))
+}

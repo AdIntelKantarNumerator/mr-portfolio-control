@@ -64,3 +64,17 @@ test('Cost Analysis is for admins only, though it sits in Reference (16 November
   assert.ok(canSee(admin, '/cost-analysis'))
   assert.ok(canSee(normalise({ role: 'product', isAdmin: true }), '/cost-analysis'))
 })
+
+test('Client Evaluation is for those ticked for it, whatever their role, and not implied by admin (19 November 2026)', () => {
+  for (const row of [{ role: 'product' }, { role: 'commercial' }, { role: 'product', isAdmin: true }]) {
+    const a = normalise(row)
+    assert.equal(a.canSeeClientEvaluation, false)
+    assert.ok(!canSee(a, '/client-evaluation'))
+    assert.ok(!canSee(a, '/client-evaluation/api'))
+  }
+  for (const role of ['product', 'commercial']) {
+    const a = normalise({ role, canSeeClientEvaluation: true })
+    assert.ok(canSee(a, '/client-evaluation'))
+    assert.ok(canSee(a, '/client-evaluation/api'))
+  }
+})

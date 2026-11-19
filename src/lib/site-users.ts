@@ -15,6 +15,7 @@ export interface SiteUser {
   isAdmin: boolean
   canEditDocs: boolean
   canSeePrototypes: boolean
+  canSeeClientEvaluation: boolean
   title: string | null
   source: string
   updatedBy: string | null
@@ -32,6 +33,7 @@ const toUser = (r: typeof siteUsers.$inferSelect): SiteUser => ({
   isAdmin: r.isAdmin,
   canEditDocs: r.isAdmin || r.canEditDocs,
   canSeePrototypes: r.canSeePrototypes,
+  canSeeClientEvaluation: r.canSeeClientEvaluation,
   title: r.title,
   source: r.source,
   updatedBy: r.updatedBy,
@@ -50,7 +52,7 @@ async function adminCount(): Promise<number> {
 /** One person's role or permissions, changed by an admin. Never leaves the site without an admin. */
 export async function updateSiteUser(
   email: string,
-  patch: { role?: Role; isAdmin?: boolean; canEditDocs?: boolean; canSeePrototypes?: boolean; name?: string },
+  patch: { role?: Role; isAdmin?: boolean; canEditDocs?: boolean; canSeePrototypes?: boolean; canSeeClientEvaluation?: boolean; name?: string },
   by: string,
 ): Promise<SiteUser> {
   const key = email.trim().toLowerCase()
@@ -62,6 +64,7 @@ export async function updateSiteUser(
   if (patch.isAdmin !== undefined) set.isAdmin = patch.isAdmin
   if (patch.canEditDocs !== undefined) set.canEditDocs = patch.canEditDocs
   if (patch.canSeePrototypes !== undefined) set.canSeePrototypes = patch.canSeePrototypes
+  if (patch.canSeeClientEvaluation !== undefined) set.canSeeClientEvaluation = patch.canSeeClientEvaluation
   if (patch.name !== undefined) set.name = patch.name.trim().slice(0, 200) || null
   const [out] = await db.update(siteUsers).set(set).where(eq(siteUsers.email, key)).returning()
   forgetAccess(key)
@@ -69,7 +72,7 @@ export async function updateSiteUser(
 }
 
 export async function addSiteUser(
-  input: { email: string; name?: string; role: Role; isAdmin?: boolean; canEditDocs?: boolean; canSeePrototypes?: boolean },
+  input: { email: string; name?: string; role: Role; isAdmin?: boolean; canEditDocs?: boolean; canSeePrototypes?: boolean; canSeeClientEvaluation?: boolean },
   by: string,
 ): Promise<SiteUser> {
   const email = input.email.trim().toLowerCase()
@@ -85,6 +88,7 @@ export async function addSiteUser(
       isAdmin: Boolean(input.isAdmin),
       canEditDocs: Boolean(input.canEditDocs),
       canSeePrototypes: Boolean(input.canSeePrototypes),
+      canSeeClientEvaluation: Boolean(input.canSeeClientEvaluation),
       source: 'admin',
       updatedBy: by,
     })

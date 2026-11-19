@@ -13,6 +13,10 @@
  *   canSeePrototypes  A flag (11 November 2026): the Prototypes section, work
  *                in trial such as Report Builder. Independent of role, and not
  *                implied by admin: each person is switched on deliberately.
+ *   canSeeClientEvaluation  A flag (19 November 2026): Reference > Client
+ *                Evaluation, the client-migration view across 360, Classic and
+ *                Magnifier. Like prototypes: independent of role, not implied by
+ *                admin, and hidden from the rail of everyone without it.
  */
 
 export type Role = 'product' | 'commercial'
@@ -22,6 +26,7 @@ export interface Access {
   isAdmin: boolean
   canEditDocs: boolean
   canSeePrototypes: boolean
+  canSeeClientEvaluation: boolean
 }
 
 export const ROLE_LABEL: Record<Role, string> = {
@@ -30,13 +35,13 @@ export const ROLE_LABEL: Record<Role, string> = {
 }
 
 /** Nobody has said what this person is: the least they could need. */
-export const NO_ROLE: Access = { role: 'commercial', isAdmin: false, canEditDocs: false, canSeePrototypes: false }
+export const NO_ROLE: Access = { role: 'commercial', isAdmin: false, canEditDocs: false, canSeePrototypes: false, canSeeClientEvaluation: false }
 
 /** Everything, for local development where sign-in is switched off. */
-export const EVERYTHING: Access = { role: 'product', isAdmin: true, canEditDocs: true, canSeePrototypes: true }
+export const EVERYTHING: Access = { role: 'product', isAdmin: true, canEditDocs: true, canSeePrototypes: true, canSeeClientEvaluation: true }
 
 export function normalise(
-  row: { role?: string | null; isAdmin?: boolean | null; canEditDocs?: boolean | null; canSeePrototypes?: boolean | null } | null | undefined,
+  row: { role?: string | null; isAdmin?: boolean | null; canEditDocs?: boolean | null; canSeePrototypes?: boolean | null; canSeeClientEvaluation?: boolean | null } | null | undefined,
 ): Access {
   if (!row) return NO_ROLE
   const isAdmin = Boolean(row.isAdmin)
@@ -45,6 +50,7 @@ export function normalise(
     isAdmin,
     canEditDocs: isAdmin || Boolean(row.canEditDocs),
     canSeePrototypes: Boolean(row.canSeePrototypes),
+    canSeeClientEvaluation: Boolean(row.canSeeClientEvaluation),
   }
 }
 
@@ -61,6 +67,9 @@ export const ADMIN_PATHS = ['/admin', '/cost-analysis']
 /** The Prototypes section: whoever has the flag, whatever their role. */
 export const PROTOTYPE_PATHS = ['/prototypes']
 
+/** Client Evaluation: whoever has the flag, whatever their role. */
+export const CLIENT_EVALUATION_PATHS = ['/client-evaluation']
+
 const under = (pathname: string, prefixes: readonly string[]) =>
   prefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 
@@ -71,6 +80,7 @@ const under = (pathname: string, prefixes: readonly string[]) =>
 export function canSee(access: Access, pathname: string): boolean {
   if (under(pathname, ADMIN_PATHS)) return access.isAdmin
   if (under(pathname, PROTOTYPE_PATHS)) return access.canSeePrototypes
+  if (under(pathname, CLIENT_EVALUATION_PATHS)) return access.canSeeClientEvaluation
   if (access.role === 'product') return true
   return under(pathname, REFERENCE_PATHS)
 }

@@ -351,6 +351,13 @@
       "when": 1794900000000,
       "tag": "0049_dictionary_database_env",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795000000000,
+      "tag": "0050_client_evaluation",
+      "breakpoints": true
     }
   ]
 }

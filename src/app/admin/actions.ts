@@ -27,11 +27,12 @@ export async function changeAccess(input: {
   isAdmin?: boolean
   canEditDocs?: boolean
   canSeePrototypes?: boolean
+  canSeeClientEvaluation?: boolean
 }): Promise<AdminState> {
   try {
     const by = await admin()
     if (input.role !== undefined && !isRole(input.role)) return { error: 'Unknown role.' }
-    const user = await updateSiteUser(input.email, { role: input.role as Role | undefined, isAdmin: input.isAdmin, canEditDocs: input.canEditDocs, canSeePrototypes: input.canSeePrototypes }, by)
+    const user = await updateSiteUser(input.email, { role: input.role as Role | undefined, isAdmin: input.isAdmin, canEditDocs: input.canEditDocs, canSeePrototypes: input.canSeePrototypes, canSeeClientEvaluation: input.canSeeClientEvaluation }, by)
     const what =
       input.role !== undefined
         ? `role ${ROLE_LABEL[user.role]}`
@@ -39,7 +40,9 @@ export async function changeAccess(input: {
           ? input.isAdmin ? 'made an admin' : 'no longer an admin'
           : input.canSeePrototypes !== undefined
             ? input.canSeePrototypes ? 'sees prototypes' : 'no longer sees prototypes'
-            : input.canEditDocs ? 'may edit documentation' : 'may no longer edit documentation'
+            : input.canSeeClientEvaluation !== undefined
+              ? input.canSeeClientEvaluation ? 'sees Client Evaluation' : 'no longer sees Client Evaluation'
+              : input.canEditDocs ? 'may edit documentation' : 'may no longer edit documentation'
     await logChange({ actor: by, kind: 'change', summary: `Access: ${user.name ?? user.email} — ${what}` })
     revalidatePath('/admin')
     return { ok: true, user }
@@ -48,11 +51,11 @@ export async function changeAccess(input: {
   }
 }
 
-export async function addPerson(input: { email: string; name: string; role: string; isAdmin: boolean; canEditDocs: boolean; canSeePrototypes?: boolean }): Promise<AdminState> {
+export async function addPerson(input: { email: string; name: string; role: string; isAdmin: boolean; canEditDocs: boolean; canSeePrototypes?: boolean; canSeeClientEvaluation?: boolean }): Promise<AdminState> {
   try {
     const by = await admin()
     if (!isRole(input.role)) return { error: 'Pick a role.' }
-    const user = await addSiteUser({ email: input.email, name: input.name, role: input.role, isAdmin: input.isAdmin, canEditDocs: input.canEditDocs, canSeePrototypes: input.canSeePrototypes }, by)
+    const user = await addSiteUser({ email: input.email, name: input.name, role: input.role, isAdmin: input.isAdmin, canEditDocs: input.canEditDocs, canSeePrototypes: input.canSeePrototypes, canSeeClientEvaluation: input.canSeeClientEvaluation }, by)
     await logChange({ actor: by, kind: 'change', summary: `Access: added ${user.name ?? user.email} as ${ROLE_LABEL[user.role]}${user.isAdmin ? ', admin' : ''}` })
     revalidatePath('/admin')
     return { ok: true, user }

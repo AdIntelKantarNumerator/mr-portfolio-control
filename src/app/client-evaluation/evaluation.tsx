@@ -1,0 +1,794 @@
+'use client'
+
+/**
+ * Client Evaluation's page: the snapshots and their refresh, the client list,
+ * and the popups for a client's people, a 360 user's reports, a report's spec,
+ * and an account's entitlements. Everything is read from ./api.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Modal } from '@/components/items/parts'
+import type { Described } from '@/lib/import360/decode'
+import type { RelSummary } from '@/lib/client-eval/rel'
+import type { ClientRow, PersonRow, SourceInfo } from '@/lib/client-eval/store'
+import { PLATFORM_LABEL, SNAPSHOT_ONLY, type Ent360, type EntClassic, type EntMagnifier, type Entitlements, type Platform } from '@/lib/client-eval/types'
+
+type Source = SourceInfo & { refreshable: boolean }
+const API = '/client-evaluation/api'
+
+async function get<T>(params: Record<string, string>): Promise<T> {
+  const res = await fetch(`${API}?${new URLSearchParams(params)}`, { cache: 'no-store' })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`)
+  return body as T
+}
+async function post(body: Record<string, unknown>) {
+  const res = await fetch(API, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(out.error ?? `Request failed (${res.status})`)
+  return out
+}
+
+const n = (x: number) => x.toLocaleString('en-US')
+const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—')
+
+function Badge({ p, onClick, title }: { p: Platform; onClick?: () => void; title?: string }) {
+  const cls = `ce-badge ce-${p}`
+  return onClick ? (
+    <button type="button" className={cls} onClick={onClick} title={title ?? `${PLATFORM_LABEL[p]} entitlements`}>
+      {PLATFORM_LABEL[p]}
+    </button>
+  ) : (
+    <span className={cls} title={title}>
+      {PLATFORM_LABEL[p]}
+    </span>
+  )
+}
+
+// ------------------------------------------------------------------ the snapshots
+
+function Sources({ contact, onReady }: { contact: string; onReady: () => void }) {
+  const [list, setList] = useState<Source[] | null>(null)
+  const [confirm, setConfirm] = useState<Platform | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const running = list?.some((s) => s.status === 'running') ?? false
+  const was = useRef(false)
+
+  const load = useCallback(async () => {
+    try {
+      setList((await get<{ sources: Source[] }>({ op: 'sources' })).sources)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }, [])
+  useEffect(() => {
+    get<{ sources: Source[] }>({ op: 'sources' }).then(
+      (r) => setList(r.sources),
+      (e) => setError((e as Error).message),
+    )
+  }, [])
+  useEffect(() => {
+    if (!running) {
+      if (was.current) onReady()
+      was.current = false
+      return
+    }
+    was.current = true
+    const t = setInterval(load, 2000)
+    return () => clearInterval(t)
+  }, [running, load, onReady])
+
+  async function refresh(p: Platform) {
+    setConfirm(null)
+    setError(null)
+    try {
+      await post({ op: 'refresh', platform: p })
+      await load()
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  return (
+    <>
+      <div className="ce-sources">
+        {(list ?? []).map((s) => {
+          const pct = s.total ? Math.round((100 * s.done) / s.total) : null
+          return (
+            <div key={s.platform} className={`ce-source ce-st-${s.status}`}>
+              <div className="ce-source-head">
+                <Badge p={s.platform} />
+                {SNAPSHOT_ONLY[s.platform] ? <span className="ce-snaponly" title={`Refreshed from a laptop. Ask ${contact} if you need it refreshed.`}>Snapshot only</span> : null}
+                {s.refreshable && s.status !== 'running' ? (
+                  <button type="button" className="btn ce-refresh" onClick={() => setConfirm(s.platform)}>
+                    Refresh
+                  </button>
+                ) : null}
+              </div>
+              {s.status === 'running' ? (
+                <div className="ce-progress">
+                  <div className="ce-progress-step">{s.step ?? 'Working'}…</div>
+                  <div className="ce-track">
+                    <div className={`ce-bar${pct === null ? ' ce-indet' : ''}`} style={pct === null ? undefined : { width: `${Math.max(4, pct)}%` }} />
+                  </div>
+                </div>
+              ) : s.status === 'empty' ? (
+                <div className="ce-source-meta">Not loaded yet.</div>
+              ) : (
+                <div className="ce-source-meta">
+                  {s.counts ? (
+                    <b>
+                      {n(s.counts.accounts ?? 0)} accounts · {n(s.counts.users ?? 0)} users
+                    </b>
+                  ) : null}
+                  <span>As of {when(s.loadedAt)}</span>
+                  {s.status === 'failed' ? <span className="ce-bad">Last refresh failed: {s.error}</span> : null}
+                </div>
+              )}
+              {SNAPSHOT_ONLY[s.platform] ? <div className="ce-source-note">Ping {contact} to refresh.</div> : null}
+            </div>
+          )
+        })}
+      </div>
+      {error ? <p className="mr-said mr-bad">{error}</p> : null}
+      {confirm ? (
+        <Modal title={`Refresh ${PLATFORM_LABEL[confirm]}?`} onClose={() => setConfirm(null)}>
+          <p>This reads every {PLATFORM_LABEL[confirm]} client, user and entitlement again and rebuilds the client list. It takes a few minutes. The current snapshot stays on screen until it finishes.</p>
+          <div className="pd-actions">
+            <button type="button" className="btn" onClick={() => setConfirm(null)}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => void refresh(confirm)}>
+              Refresh
+            </button>
+          </div>
+        </Modal>
+      ) : null}
+    </>
+  )
+}
+
+// ------------------------------------------------------------------ the list
+
+type Popup =
+  | { kind: 'account'; key: string }
+  | { kind: 'people'; client: ClientRow }
+  | { kind: 'reports'; usrId: number; who: string }
+  | { kind: 'report'; key: string }
+  | { kind: 'merge'; client: ClientRow }
+
+export function ClientEvaluation({ contact }: { contact: string }) {
+  const [q, setQ] = useState('')
+  const [platform, setPlatform] = useState('all')
+  const [sort, setSort] = useState('reports')
+  const [active, setActive] = useState(true)
+  const [internal, setInternal] = useState(false)
+  const [rows, setRows] = useState<ClientRow[]>([])
+  const [total, setTotal] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState<string | null>(null)
+  const [stack, setStack] = useState<Popup[]>([])
+  const [tick, setTick] = useState(0)
+  const push = (p: Popup) => setStack((s) => [...s, p])
+  const pop = () => setStack((s) => s.slice(0, -1))
+
+  const params = useMemo(() => ({ op: 'clients', q, platform, sort, active: active ? '1' : '0', internal: internal ? '1' : '0' }), [q, platform, sort, active, internal])
+  useEffect(() => {
+    let live = true
+    const t = setTimeout(async () => {
+      setBusy(true)
+      try {
+        const r = await get<{ rows: ClientRow[]; total: number }>(params)
+        if (live) {
+          setRows(r.rows)
+          setTotal(r.total)
+          setError(null)
+        }
+      } catch (e) {
+        if (live) setError((e as Error).message)
+      } finally {
+        if (live) setBusy(false)
+      }
+    }, 200)
+    return () => {
+      live = false
+      clearTimeout(t)
+    }
+  }, [params, tick])
+
+  async function more() {
+    const r = await get<{ rows: ClientRow[]; total: number }>({ ...params, offset: String(rows.length) })
+    setRows((x) => [...x, ...r.rows])
+  }
+  const reload = useCallback(() => setTick((t) => t + 1), [])
+
+  async function split(member: string) {
+    try {
+      await post({ op: 'split', member })
+      reload()
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  const top = stack[stack.length - 1]
+  return (
+    <div className="ce">
+      <Sources contact={contact} onReady={reload} />
+
+      <div className="ce-controls">
+        <input id="ce-q" className="ce-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients" aria-label="Search clients" />
+        <select id="ce-platform" value={platform} onChange={(e) => setPlatform(e.target.value)} aria-label="Platform">
+          <option value="all">All platforms</option>
+          <option value="360">360</option>
+          <option value="classic">Classic</option>
+          <option value="magnifier">Magnifier</option>
+          <option value="multi">On 2+ platforms</option>
+        </select>
+        <select id="ce-sort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
+          <option value="reports">Most 360 reports</option>
+          <option value="users">Most users</option>
+          <option value="name">A–Z</option>
+        </select>
+        <label className="ce-tick">
+          <input id="ce-active" type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Active only
+        </label>
+        <label className="ce-tick">
+          <input id="ce-internal" type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Show internal
+        </label>
+        <span className="ce-count">{busy ? 'Loading…' : `${n(total)} clients`}</span>
+      </div>
+      {error ? <p className="mr-said mr-bad">{error}</p> : null}
+
+      <div className="ce-table">
+        <table className="dtable">
+          <thead>
+            <tr>
+              <th>Client</th>
+              <th>Platforms</th>
+              <th className="ce-num" title="Distinct people across the platforms, by email. Active / all.">Users</th>
+              <th className="ce-num" title="360 reports used in 2026">360 reports</th>
+              <th>Entitlements</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((c) => {
+              const isOpen = open === c.id
+              const byPlatform = (p: Platform) => c.members.filter((m) => m.platform === p)
+              return [
+                <tr key={c.id} className={isOpen ? 'ce-open' : undefined}>
+                  <td>
+                    <button type="button" className="ce-name" onClick={() => setOpen(isOpen ? null : c.id)} aria-expanded={isOpen}>
+                      <span className="ce-caret">{isOpen ? '▾' : '▸'}</span>
+                      <b>{c.name}</b>
+                    </button>
+                    <div className="ce-sub">
+                      {c.members.length > 1 ? `${c.members.length} accounts` : '1 account'}
+                      {c.company ? ` · 360 company: ${c.company}` : ''}
+                      {!c.active ? ' · inactive' : ''}
+                      {c.internal ? ' · internal' : ''}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="ce-badges">
+                      {c.platforms.map((p) => (
+                        <Badge key={p} p={p} onClick={() => push({ kind: 'account', key: byPlatform(p)[0]!.key })} />
+                      ))}
+                    </div>
+                  </td>
+                  <td className="ce-num">
+                    <button type="button" className="ce-link" onClick={() => push({ kind: 'people', client: c })} title="See the people">
+                      {n(c.activeUsers)}
+                      <span className="ce-of"> / {n(c.users)}</span>
+                    </button>
+                  </td>
+                  <td className="ce-num">{c.reports ? n(c.reports) : <span className="ce-muted">—</span>}</td>
+                  <td className="ce-ents">
+                    {c.platforms.map((p) => {
+                      const ms = byPlatform(p)
+                      return (
+                        <button key={p} type="button" className="ce-ent" onClick={() => push({ kind: 'account', key: ms[0]!.key })}>
+                          <Badge p={p} />
+                          <span>{ms[0]!.summary ?? '—'}</span>
+                          {ms.length > 1 ? <span className="ce-muted"> +{ms.length - 1} more</span> : null}
+                        </button>
+                      )
+                    })}
+                  </td>
+                </tr>,
+                isOpen ? (
+                  <tr key={`${c.id}-m`} className="ce-members-row">
+                    <td colSpan={5}>
+                      <div className="ce-members">
+                        {c.members.map((m) => (
+                          <div key={m.key} className="ce-member">
+                            <Badge p={m.platform} />
+                            <span className="ce-member-name">
+                              {m.name} <span className="ce-muted">{m.accountId}</span>
+                              {!m.active ? <span className="ce-muted"> · inactive</span> : null}
+                            </span>
+                            <span className="ce-muted">
+                              {n(m.activeUsers)}/{n(m.users)} users{m.platform === '360' && m.reports ? ` · ${n(m.reports)} reports` : ''}
+                              {m.platform === 'magnifier' && m.reports ? ` · ${n(m.reports)} reports` : ''}
+                            </span>
+                            <span className="ce-member-acts">
+                              <button type="button" className="btn ce-sm" onClick={() => push({ kind: 'account', key: m.key })}>
+                                Entitlements
+                              </button>
+                              {c.members.length > 1 ? (
+                                <button type="button" className="btn ce-sm" onClick={() => void split(m.key)} title="Take this account out of this client. Kept through refreshes.">
+                                  Split out
+                                </button>
+                              ) : null}
+                            </span>
+                          </div>
+                        ))}
+                        <div className="ce-how">
+                          {c.how.length ? (
+                            <>
+                              <b>Why together:</b> {[...new Set(c.how.map((h) => h.why))].slice(0, 6).join(' · ')}
+                              {new Set(c.how.map((h) => h.why)).size > 6 ? ' …' : ''}
+                            </>
+                          ) : (
+                            <span className="ce-muted">Matched to nothing on another platform.</span>
+                          )}
+                          <button type="button" className="btn ce-sm" onClick={() => push({ kind: 'merge', client: c })}>
+                            Merge with another client…
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ) : null,
+              ]
+            })}
+          </tbody>
+        </table>
+        {!rows.length && !busy ? <p className="tile-empty">No clients match.</p> : null}
+      </div>
+      {rows.length < total ? (
+        <button type="button" className="btn ce-more" onClick={() => void more()}>
+          Show more ({n(total - rows.length)} left)
+        </button>
+      ) : null}
+
+      {top?.kind === 'account' ? <AccountPopup k={top.key} onClose={pop} /> : null}
+      {top?.kind === 'people' ? <PeoplePopup client={top.client} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} /> : null}
+      {top?.kind === 'reports' ? <ReportsPopup usrId={top.usrId} who={top.who} onClose={pop} onReport={(key) => push({ kind: 'report', key })} /> : null}
+      {top?.kind === 'report' ? <ReportPopup k={top.key} onClose={pop} /> : null}
+      {top?.kind === 'merge' ? (
+        <MergePopup
+          client={top.client}
+          onClose={pop}
+          onMerged={() => {
+            pop()
+            setOpen(null)
+            reload()
+          }}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+// ------------------------------------------------------------------ people
+
+function PeoplePopup({ client, onClose, onReports }: { client: ClientRow; onClose: () => void; onReports: (usrId: number, who: string) => void }) {
+  const [data, setData] = useState<{ name: string; people: PersonRow[] } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [q, setQ] = useState('')
+  const [sort, setSort] = useState('reports')
+  const [activeOnly, setActiveOnly] = useState(false)
+  useEffect(() => {
+    get<{ name: string; people: PersonRow[] }>({ op: 'people', client: client.id }).then(setData, (e) => setError((e as Error).message))
+  }, [client.id])
+
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return (data?.people ?? [])
+      .filter((p) => (!activeOnly || p.active) && (!needle || `${p.name} ${p.email ?? ''} ${p.accounts.map((a) => a.login ?? '').join(' ')}`.toLowerCase().includes(needle)))
+      .sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name) : b.reports - a.reports || Number(b.active) - Number(a.active) || a.name.localeCompare(b.name)))
+  }, [data, q, sort, activeOnly])
+
+  return (
+    <Modal title={`People at ${client.name}`} onClose={onClose}>
+      <div className="ce-pop">
+        <div className="ce-controls">
+          <input id="ce-people-q" className="ce-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people" aria-label="Search people" autoFocus />
+          <select id="ce-people-sort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort people">
+            <option value="reports">Most 360 reports</option>
+            <option value="name">A–Z</option>
+          </select>
+          <label className="ce-tick">
+            <input id="ce-people-active" type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} /> Active only
+          </label>
+          <span className="ce-count">{data ? `${n(shown.length)} of ${n(data.people.length)}` : 'Loading…'}</span>
+        </div>
+        {error ? <p className="mr-said mr-bad">{error}</p> : null}
+        <div className="ce-table ce-scroll">
+          <table className="dtable">
+            <thead>
+              <tr>
+                <th>Person</th>
+                <th>Platforms</th>
+                <th>Last seen</th>
+                <th className="ce-num">360 reports</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.slice(0, 500).map((p) => (
+                <tr key={p.key} className={p.active ? undefined : 'ce-inactive'}>
+                  <td>
+                    <b>{p.name}</b>
+                    {!p.active ? <span className="ce-muted"> · inactive</span> : null}
+                    <div className="ce-sub">{p.email ?? p.accounts[0]?.login ?? ''}</div>
+                  </td>
+                  <td>
+                    <div className="ce-accts">
+                      {p.accounts.map((a) => (
+                        <span key={`${a.platform}:${a.accountId}:${a.userId}`} className={`ce-acct${a.active ? '' : ' ce-off'}`} title={`${a.accountName}${a.login ? ` · login ${a.login}` : ''}${a.active ? '' : ' · inactive'}`}>
+                          <Badge p={a.platform} />
+                          <span>{a.accountName}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td>{p.lastSeen ?? <span className="ce-muted">—</span>}</td>
+                  <td className="ce-num">
+                    {p.accounts
+                      .filter((a) => a.platform === '360' && a.reports > 0)
+                      .map((a) => (
+                        <button key={a.userId} type="button" className="ce-link" onClick={() => onReports(Number(a.userId), p.name)}>
+                          {n(a.reports)}
+                        </button>
+                      ))}
+                    {!p.reports ? <span className="ce-muted">—</span> : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {shown.length > 500 ? <p className="ce-muted">Showing the first 500. Search to narrow.</p> : null}
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ------------------------------------------------------------------ 360 reports
+
+function ReportsPopup({ usrId, who, onClose, onReport }: { usrId: number; who: string; onClose: () => void; onReport: (key: string) => void }) {
+  const [list, setList] = useState<Array<{ key: string; name: string; type: string; lastUsed: string | null }> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [sort, setSort] = useState('recent')
+  useEffect(() => {
+    get<{ reports: typeof list }>({ op: 'reports', user: String(usrId) }).then((r) => setList(r.reports), (e) => setError((e as Error).message))
+  }, [usrId])
+  const shown = [...(list ?? [])].sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name) : (b.lastUsed ?? '').localeCompare(a.lastUsed ?? '')))
+  return (
+    <Modal title={`${who}'s 360 reports used in 2026`} onClose={onClose}>
+      <div className="ce-pop">
+        <div className="ce-controls">
+          <select id="ce-reports-sort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort reports">
+            <option value="recent">Last used</option>
+            <option value="name">A–Z</option>
+          </select>
+          <span className="ce-count">{list ? `${n(list.length)} reports, read live from 360` : 'Reading 360…'}</span>
+        </div>
+        {error ? <p className="mr-said mr-bad">{error}</p> : null}
+        <div className="ce-table ce-scroll">
+          <table className="dtable">
+            <tbody>
+              {shown.map((r) => (
+                <tr key={r.key}>
+                  <td>
+                    <button type="button" className="ce-link" onClick={() => onReport(r.key)}>
+                      {r.name}
+                    </button>
+                    <div className="ce-sub">{r.type}</div>
+                  </td>
+                  <td className="ce-num">{r.lastUsed ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function ReportPopup({ k, onClose }: { k: string; onClose: () => void }) {
+  const [r, setR] = useState<{ name: string; client: string; user: string; lastUsed: string | null; described: Described } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState<string | null>(null)
+  useEffect(() => {
+    get<NonNullable<typeof r>>({ op: 'report', key: k }).then(setR, (e) => setError((e as Error).message))
+  }, [k])
+  const d = r?.described
+  const sel = d?.selections.find((s) => `${s.mpt}:${s.e}` === open)
+  return (
+    <Modal title={r?.name ?? 'Report'} onClose={onClose}>
+      <div className="ce-pop">
+        {error ? <p className="mr-said mr-bad">{error}</p> : null}
+        {!r && !error ? <p className="ce-muted">Reading the report from 360…</p> : null}
+        {r && d ? (
+          <>
+            <p className="ce-muted">
+              {r.client} · {r.user} · last used {r.lastUsed ?? '—'}
+            </p>
+            <dl className="ce-dl">
+              <dt>Type</dt>
+              <dd>{d.type.name}</dd>
+              <dt>Rows</dt>
+              <dd>{[...d.pages, ...d.rows].map((x) => x.label).join(' › ') || '—'}</dd>
+              <dt>Columns</dt>
+              <dd>{d.columns.map((x) => x.label).join(', ') || '—'}</dd>
+              <dt>Data</dt>
+              <dd>{d.data.map((x) => x.label).join(', ') || '—'}</dd>
+              <dt>Period</dt>
+              <dd>{d.time.label ?? '—'}</dd>
+              <dt>Selections</dt>
+              <dd>
+                {d.selections.length ? (
+                  <div className="ce-chips">
+                    {d.selections.map((s) => (
+                      <button key={`${s.mpt}:${s.e}`} type="button" className={`ce-chip${open === `${s.mpt}:${s.e}` ? ' ce-on' : ''}`} onClick={() => setOpen(open === `${s.mpt}:${s.e}` ? null : `${s.mpt}:${s.e}`)}>
+                        {s.label}: {s.picked.length}
+                        {s.excluded.length ? ` (−${s.excluded.length})` : ''}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </dl>
+            {sel ? (
+              <div className="ce-list">
+                <b>{sel.label}</b>
+                <ul>
+                  {sel.picked.slice(0, 300).map((p) => (
+                    <li key={p.id}>{p.name}</li>
+                  ))}
+                  {sel.excluded.slice(0, 100).map((p) => (
+                    <li key={`x${p.id}`} className="ce-bad">
+                      not {p.name}
+                    </li>
+                  ))}
+                </ul>
+                {sel.picked.length > 300 ? <p className="ce-muted">and {n(sel.picked.length - 300)} more</p> : null}
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </Modal>
+  )
+}
+
+// ------------------------------------------------------------------ entitlements
+
+interface AccountDetail {
+  key: string
+  platform: Platform
+  accountId: string
+  name: string
+  company: string | null
+  active: boolean
+  users: number
+  activeUsers: number
+  reports: number
+  summary: string | null
+  entitlements: Entitlements
+  info: Record<string, unknown>
+  magnifierReports: Array<{ id: string; name: string; kind: string | null; detail: { schema: string | null; country: string | null; description: string | null; rel: { id: string | null; name: string | null; end: string | null; summary: RelSummary; raw: string }; defaultRel: { id: string | null; name: string | null; summary: RelSummary } } }>
+}
+
+function AccountPopup({ k, onClose }: { k: string; onClose: () => void }) {
+  const [a, setA] = useState<AccountDetail | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    get<AccountDetail>({ op: 'account', key: k }).then(setA, (e) => setError((e as Error).message))
+  }, [k])
+  return (
+    <Modal title={a ? `${a.name} · ${PLATFORM_LABEL[a.platform]}` : 'Entitlements'} onClose={onClose}>
+      <div className="ce-pop">
+        {error ? <p className="mr-said mr-bad">{error}</p> : null}
+        {a ? (
+          <>
+            <p className="ce-muted">
+              Account {a.accountId}
+              {a.company ? ` · 360 company ${a.company}` : ''} · {a.active ? 'active' : 'inactive'} · {n(a.activeUsers)} of {n(a.users)} users active
+            </p>
+            {a.entitlements.kind === '360' ? <Ent360View e={a.entitlements} /> : null}
+            {a.entitlements.kind === 'classic' ? <EntClassicView e={a.entitlements} /> : null}
+            {a.entitlements.kind === 'magnifier' ? <EntMagnifierView e={a.entitlements} reports={a.magnifierReports} /> : null}
+          </>
+        ) : !error ? (
+          <p className="ce-muted">Loading…</p>
+        ) : null}
+      </div>
+    </Modal>
+  )
+}
+
+function Ent360View({ e }: { e: Ent360 }) {
+  return (
+    <>
+      <dl className="ce-dl">
+        <dt>Application</dt>
+        <dd>{e.application}</dd>
+        <dt>History</dt>
+        <dd>{e.years ? `${e.years} years` : '—'}</dd>
+        <dt>Features</dt>
+        <dd>{e.features.length ? e.features.join(', ') : 'None'}</dd>
+      </dl>
+      <h3 className="ce-h3">Restrictions</h3>
+      {e.filters.length ? (
+        <div className="ce-filters">
+          {e.filters.map((f) => (
+            <details key={f.type} className="ce-filter">
+              <summary>
+                <b>{f.type}</b> <span className="ce-muted">{n(f.count)}</span>
+              </summary>
+              {f.include.length ? <p>{f.include.join(', ')}{f.count > f.include.length + f.exclude.length ? ' …' : ''}</p> : null}
+              {f.exclude.length ? <p className="ce-bad">Not: {f.exclude.join(', ')}</p> : null}
+            </details>
+          ))}
+        </div>
+      ) : (
+        <p className="ce-muted">No restrictions: everything in the application.</p>
+      )}
+    </>
+  )
+}
+
+function EntClassicView({ e }: { e: EntClassic }) {
+  return (
+    <>
+      <dl className="ce-dl">
+        <dt>Account type</dt>
+        <dd>
+          {e.accountType}
+          {e.subAccountType ? ` · ${e.subAccountType}` : ''}
+        </dd>
+        <dt>Side</dt>
+        <dd>{e.side ?? '—'}</dd>
+        <dt>Expires</dt>
+        <dd>{e.expires ?? '—'}</dd>
+        {e.media.length ? (
+          <>
+            <dt>Media</dt>
+            <dd>{e.media.join(', ')}</dd>
+          </>
+        ) : null}
+        <dt>Owned properties</dt>
+        <dd>{e.owned.length ? e.owned.map((o) => `${o.format} ${n(o.count)}`).join(', ') : 'None'}</dd>
+        <dt>Extra access</dt>
+        <dd>{e.extra.length ? e.extra.map((x) => `${x.what}: ${n(x.items)} (${n(x.users)} users)`).join(' · ') : 'None'}</dd>
+        <dt>Features</dt>
+        <dd>{e.features.length ? e.features.join(', ') : 'None'}</dd>
+      </dl>
+      <p className="ce-muted">Classic has no category or product restrictions: media only. A publisher&apos;s media follow the properties it owns.</p>
+    </>
+  )
+}
+
+function EntMagnifierView({ e, reports }: { e: EntMagnifier; reports: AccountDetail['magnifierReports'] }) {
+  const [open, setOpen] = useState<string | null>(null)
+  return (
+    <>
+      <dl className="ce-dl">
+        <dt>Contract</dt>
+        <dd>{e.contract.start || e.contract.end ? `${e.contract.start ?? '…'} to ${e.contract.end ?? '…'}` : '—'}</dd>
+        <dt>Switched on</dt>
+        <dd>{e.flags.length ? e.flags.join(', ') : 'None'}</dd>
+        <dt>Countries</dt>
+        <dd>{e.countries.length ? e.countries.join(', ') : '—'}</dd>
+        <dt>Media in RELs</dt>
+        <dd>{e.media.length ? e.media.join(', ') : '—'}</dd>
+        <dt>User media codes</dt>
+        <dd>
+          {e.userMedia.length
+            ? e.userMedia.map((m) => `${m.media} ${Object.entries(m.codes).sort((a, b) => b[1] - a[1]).map(([c, k]) => `${c}×${k}`).join(' ')}`).join(' · ')
+            : '—'}
+          <div className="ce-muted">USER_ACCOUNT REPORTS_* codes for active users, as stored. What S, M and N mean is not yet confirmed.</div>
+        </dd>
+      </dl>
+      <h3 className="ce-h3">Reports and their RELs</h3>
+      {reports.length ? (
+        <div className="ce-filters">
+          {reports.map((r) => (
+            <div key={r.id} className="ce-filter">
+              <button type="button" className="ce-link" onClick={() => setOpen(open === r.id ? null : r.id)}>
+                {r.name}
+              </button>{' '}
+              <span className="ce-muted">
+                {r.kind ?? ''} · {r.detail.country ?? r.detail.schema ?? ''}
+              </span>
+              <div className="ce-sub">
+                {r.detail.rel.summary.fields.map((f) => `${f.label} ${n(f.codes)}${f.excluded ? ` (−${n(f.excluded)})` : ''}`).join(' · ') || 'No restrictions'}
+                {r.detail.rel.summary.media.length ? ` · ${r.detail.rel.summary.media.join(', ')}` : ''}
+              </div>
+              {open === r.id ? (
+                <div className="ce-rel">
+                  <p>
+                    <b>REL</b> {r.detail.rel.name ?? r.detail.rel.id} {r.detail.rel.end ? `· ends ${r.detail.rel.end}` : ''}
+                  </p>
+                  {r.detail.rel.summary.dates.map((d, i) => (
+                    <p key={i}>
+                      Dates ({d.for}): {d.from} to {d.to}
+                    </p>
+                  ))}
+                  {r.detail.rel.summary.fields.map((f) => (
+                    <p key={f.field}>
+                      <b>{f.label}</b>: {f.sample.join(' ')}
+                      {f.codes > f.sample.length ? ` … (${n(f.codes)})` : ''}
+                    </p>
+                  ))}
+                  {r.detail.rel.summary.notes ? <p className="ce-muted">{r.detail.rel.summary.notes}</p> : null}
+                  {r.detail.defaultRel.id ? (
+                    <p className="ce-muted">
+                      Default REL {r.detail.defaultRel.name ?? r.detail.defaultRel.id}: {r.detail.defaultRel.summary.fields.map((f) => `${f.label} ${n(f.codes)}`).join(' · ') || 'no restrictions'}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="ce-muted">No reports configured.</p>
+      )}
+    </>
+  )
+}
+
+// ------------------------------------------------------------------ merging by hand
+
+function MergePopup({ client, onClose, onMerged }: { client: ClientRow; onClose: () => void; onMerged: () => void }) {
+  const [q, setQ] = useState('')
+  const [found, setFound] = useState<ClientRow[]>([])
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (q.trim().length < 2) return
+    const t = setTimeout(() => {
+      get<{ rows: ClientRow[] }>({ op: 'clients', q, platform: 'all', sort: 'name', active: '0', internal: '1' }).then(
+        (r) => setFound(r.rows.filter((x) => x.id !== client.id).slice(0, 20)),
+        (e) => setError((e as Error).message),
+      )
+    }, 250)
+    return () => clearTimeout(t)
+  }, [q, client.id])
+  async function merge(target: ClientRow) {
+    try {
+      await post({ op: 'merge', member: client.members[0]!.key, withMember: target.members[0]!.key })
+      onMerged()
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+  return (
+    <Modal title={`Merge ${client.name} with…`} onClose={onClose}>
+      <div className="ce-pop">
+        <p className="ce-muted">The merge is kept through refreshes. Split an account out again from the client&apos;s row.</p>
+        <input id="ce-merge-q" className="ce-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find the other client" aria-label="Find the other client" autoFocus />
+        {error ? <p className="mr-said mr-bad">{error}</p> : null}
+        <div className="ce-merge-list">
+          {(q.trim().length < 2 ? [] : found).map((c) => (
+            <button key={c.id} type="button" className="ce-merge-pick" onClick={() => void merge(c)}>
+              <b>{c.name}</b>
+              <span className="ce-badges">
+                {c.platforms.map((p) => (
+                  <Badge key={p} p={p} />
+                ))}
+              </span>
+              <span className="ce-muted">{c.members.map((m) => m.name).slice(0, 3).join(' · ')}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </Modal>
+  )
+}

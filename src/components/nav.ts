@@ -27,6 +27,7 @@ import type { ComponentType, SVGProps } from 'react'
 import {
   IconActions,
   IconActivity,
+  IconClients,
   IconCompare,
   IconCost,
   IconConversations,
@@ -146,6 +147,14 @@ export const NAV: NavSection[] = [
         label: 'Cost Analysis',
         icon: IconCost,
         hint: 'What a decision does to cloud cost',
+      },
+      {
+        // Only people with "Sees Client Evaluation" ticked in Admin (Scott,
+        // 19 November 2026): CLIENT_EVALUATION_PATHS in lib/access-rules.ts.
+        href: '/client-evaluation',
+        label: 'Client Evaluation',
+        icon: IconClients,
+        hint: 'Clients across 360, Classic and Magnifier, for migrations',
       },
     ],
   },

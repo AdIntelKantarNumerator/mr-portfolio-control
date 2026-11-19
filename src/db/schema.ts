@@ -22,6 +22,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  serial,
   text,
   timestamp,
   uniqueIndex,
@@ -2182,6 +2183,8 @@ export const siteUsers = pgTable('site_users', {
   canEditDocs: boolean('can_edit_docs').notNull().default(false),
   /** Sees the Prototypes section (drizzle/0042_prototypes.sql). Not implied by admin. */
   canSeePrototypes: boolean('can_see_prototypes').notNull().default(false),
+  /** Sees Reference > Client Evaluation (drizzle/0050_client_evaluation.sql). Not implied by admin. */
+  canSeeClientEvaluation: boolean('can_see_client_evaluation').notNull().default(false),
   /** Their Slack title, when the Slack pass found one. */
   title: text('title'),
   /** seed | slack | admin: where this person's access came from. */
@@ -2517,4 +2520,122 @@ export const reportBuilderExports = pgTable('report_builder_exports', {
   key: text('key').primaryKey(),
   spec: jsonb('spec').notNull(),
   createdAt: createdAt(),
+})
+
+// ---------------------------------------------------------------------------
+// Client Evaluation (drizzle/0050_client_evaluation.sql). Snapshots of each
+// client platform, the consolidated client list built from them, and the
+// merges and splits made by hand. lib/client-eval/.
+// ---------------------------------------------------------------------------
+
+/** One row per platform: what its snapshot holds, and a refresh in progress. */
+export const ceSources = pgTable('ce_sources', {
+  /** 360 | classic | magnifier */
+  platform: text('platform').primaryKey(),
+  /** empty | running | ready | failed */
+  status: text('status').notNull().default('empty'),
+  step: text('step'),
+  done: integer('done').notNull().default(0),
+  total: integer('total').notNull().default(0),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  loadedAt: timestamp('loaded_at', { withTimezone: true }),
+  loadedBy: text('loaded_by'),
+  error: text('error'),
+  counts: jsonb('counts'),
+})
+
+/** A client account on one platform: a 360 user set, a Classic customer account, a Magnifier account. */
+export const ceAccounts = pgTable(
+  'ce_accounts',
+  {
+    platform: text('platform').notNull(),
+    accountId: text('account_id').notNull(),
+    name: text('name').notNull(),
+    /** The company above the account, where the platform has one (360's license group). */
+    company: text('company'),
+    active: boolean('active').notNull(),
+    users: integer('users').notNull().default(0),
+    activeUsers: integer('active_users').notNull().default(0),
+    /** 360: reports used in 2026. Magnifier: reports configured for the account. */
+    reports: integer('reports').notNull().default(0),
+    /** Users' email domains and how many users have each. */
+    domains: jsonb('domains').notNull(),
+    /** One line for the table. */
+    summary: text('summary'),
+    /** The platform's own entitlement detail, for the popup: lib/client-eval/types.ts Entitlements. */
+    entitlements: jsonb('entitlements').notNull(),
+    info: jsonb('info').notNull(),
+  },
+  (t) => [primaryKey({ name: 'ce_accounts_pk', columns: [t.platform, t.accountId] })],
+)
+
+export const ceUsers = pgTable(
+  'ce_users',
+  {
+    platform: text('platform').notNull(),
+    accountId: text('account_id').notNull(),
+    userId: text('user_id').notNull(),
+    name: text('name').notNull(),
+    login: text('login'),
+    /** Lowercased. */
+    email: text('email'),
+    active: boolean('active').notNull(),
+    /** Last sign-in or use, YYYY-MM-DD, where the platform records it. */
+    lastSeen: text('last_seen'),
+    reports: integer('reports').notNull().default(0),
+  },
+  (t) => [primaryKey({ name: 'ce_users_pk', columns: [t.platform, t.accountId, t.userId] }), index('ce_users_email_idx').on(t.email)],
+)
+
+/** Magnifier's configured reports and their RELs. 360's are read live. */
+export const ceReports = pgTable(
+  'ce_reports',
+  {
+    platform: text('platform').notNull(),
+    reportId: text('report_id').notNull(),
+    accountId: text('account_id').notNull(),
+    name: text('name').notNull(),
+    kind: text('kind'),
+    detail: jsonb('detail').notNull(),
+  },
+  (t) => [primaryKey({ name: 'ce_reports_pk', columns: [t.platform, t.accountId, t.reportId] })],
+)
+
+/** The consolidated list: one client, its accounts on each platform ("platform:account_id"). */
+export const ceClients = pgTable('ce_clients', {
+  clientId: text('client_id').primaryKey(),
+  name: text('name').notNull(),
+  members: jsonb('members').notNull(),
+  platforms: jsonb('platforms').notNull(),
+  /** Distinct people across the platforms: by email, else one per platform login. */
+  users: integer('users').notNull().default(0),
+  activeUsers: integer('active_users').notNull().default(0),
+  /** 360 reports used in 2026. */
+  reports: integer('reports').notNull().default(0),
+  active: boolean('active').notNull(),
+  /** Every account is ours: staff, demo, development (lib/client-eval/match.ts isInternal). Hidden unless asked for. */
+  internal: boolean('internal').notNull().default(false),
+  /** 360's license group, when the client has one. */
+  company: text('company'),
+  /** Why the accounts were put together: lib/client-eval/match.ts Link[]. */
+  how: jsonb('how').notNull(),
+})
+
+/** Merges and splits made by hand. Keyed by member, so they survive a refresh. */
+export const ceOverrides = pgTable('ce_overrides', {
+  id: serial('id').primaryKey(),
+  /** merge: member goes with with_member's client. split: member stands on its own. */
+  kind: text('kind').notNull(),
+  member: text('member').notNull(),
+  withMember: text('with_member'),
+  by: text('by'),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** The model's verdict on a pair of accounts ("a|b", sorted), kept so a refresh does not ask again. */
+export const ceJudgments = pgTable('ce_judgments', {
+  pair: text('pair').primaryKey(),
+  same: boolean('same').notNull(),
+  why: text('why'),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
 })
