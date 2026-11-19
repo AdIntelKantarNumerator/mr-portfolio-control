@@ -12,6 +12,17 @@ export type Environment = (typeof ENVIRONMENTS)[number]
 export const ENV_LABEL: Record<Environment, string> = { dev: 'Dev', prod: 'Prod' }
 
 /**
+ * The database notes for one environment, by name. Each environment keeps its
+ * own status and description: Prod's GPC databases share names with Dev's
+ * legacy ones, so "creative" is the contract on Prod and being eliminated on
+ * Dev (19 November 2026). A row with no env is read as Dev's, as all rows
+ * written before then were.
+ */
+export function databaseNotesFor<T extends { name: string; env?: string | null }>(rows: T[], env: Environment): Map<string, T> {
+  return new Map(rows.filter((r) => (r.env ?? 'dev') === env).map((r) => [r.name, r]))
+}
+
+/**
  * Prod is what the dictionary describes (Scott, 2 November 2026: "pivot the
  * data dictionary to point to the production ClickHouse instance now that we
  * have it"). Dev stays one click away for comparison.

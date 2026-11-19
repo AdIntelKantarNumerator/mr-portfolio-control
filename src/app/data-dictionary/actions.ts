@@ -29,6 +29,7 @@ import {
   readEnvironment,
   readIntent,
   DATABASE_STATUS_LABEL,
+  ENV_LABEL,
 } from '@/lib/dictionary-rules'
 import { logChange } from '@/lib/portfolio'
 
@@ -260,24 +261,31 @@ export async function saveDatabaseNote(_prev: DictState, fd: FormData): Promise<
   const who = await editor()
   if (!who.ok) return { error: who.error }
   const name = text(fd, 'name', 200)
+  const env = fd.get('env')
   const status = readDatabaseStatus(fd.get('status'))
   if (!name) return { error: 'Which database?' }
+  // Each environment keeps its own status; a form without one says nothing about which.
+  if (env !== 'dev' && env !== 'prod') return { error: 'Which environment? Reload the page.' }
   if (!status) return { fieldErrors: { status: 'Pick a status.' } }
   const description = text(fd, 'description')
 
-  const [before] = await db.select().from(dictionaryDatabases).where(eq(dictionaryDatabases.name, name)).limit(1)
+  const [before] = await db
+    .select()
+    .from(dictionaryDatabases)
+    .where(and(eq(dictionaryDatabases.env, env), eq(dictionaryDatabases.name, name)))
+    .limit(1)
   await db
     .insert(dictionaryDatabases)
-    .values({ name, status, description, updatedBy: who.name })
-    .onConflictDoUpdate({ target: dictionaryDatabases.name, set: { status, description, updatedBy: who.name, updatedAt: new Date() } })
+    .values({ env, name, status, description, updatedBy: who.name })
+    .onConflictDoUpdate({ target: [dictionaryDatabases.env, dictionaryDatabases.name], set: { status, description, updatedBy: who.name, updatedAt: new Date() } })
 
   if (before?.status !== status || (before?.description ?? null) !== description) {
     await logChange({
       actor: who.name,
-      summary: `Data dictionary: database ${name} ${before?.status !== status ? `is now ${DATABASE_STATUS_LABEL[status].toLowerCase()}` : 'description edited'}`,
+      summary: `Data dictionary: ${ENV_LABEL[env]} database ${name} ${before?.status !== status ? `is now ${DATABASE_STATUS_LABEL[status].toLowerCase()}` : 'description edited'}`,
       detail: before && before.status !== status ? `${DATABASE_STATUS_LABEL[readDatabaseStatus(before.status) ?? 'unreviewed']} → ${DATABASE_STATUS_LABEL[status]}` : null,
       entityType: 'database',
-      entityId: name,
+      entityId: `${env}:${name}`,
     })
   }
   refresh()

@@ -32,6 +32,7 @@ import {
   readEnvironment,
   readableBytes,
   tableRef,
+  databaseNotesFor,
 } from '@/lib/dictionary-rules'
 import { ConnectionNote, DictionaryHeader } from '../../header'
 import { ColumnTable, TableNoteEditor, type ColumnRow } from '../../editors'
@@ -72,7 +73,7 @@ export default async function TablePage({ params, searchParams }: { params: Para
   const blocked = facts ? previewProblem(facts.engine) : null
   const preview: PreviewResult | null = pane === 'preview' && facts && !blocked ? await readPreview(env, database, table) : null
   const note = notes.tables.find((t) => t.tableRef === ref)
-  const dbStatus = readDatabaseStatus(notes.databases.find((d) => d.name === database)?.status) ?? 'unreviewed'
+  const dbStatus = readDatabaseStatus(databaseNotesFor(notes.databases, env).get(database)?.status) ?? 'unreviewed'
   const datasets = notes.datasets.filter((d) => d.tables.includes(ref))
   const reason = readEmptyReason(note?.emptyReason)
   const rule = excludedByRule(table)

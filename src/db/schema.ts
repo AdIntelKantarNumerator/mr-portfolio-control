@@ -1921,14 +1921,24 @@ export const dictionaryDatasetTables = pgTable(
  * database with no row here is "unreviewed", which the screen shows as a
  * question rather than assuming either way.
  */
-export const dictionaryDatabases = pgTable('dictionary_databases', {
-  name: text('name').primaryKey(),
-  /** contract | internal | transition | superseded | excluded | unreviewed */
-  status: text('status').notNull().default('unreviewed'),
-  description: text('description'),
-  updatedBy: text('updated_by'),
-  updatedAt: updatedAt(),
-})
+export const dictionaryDatabases = pgTable(
+  'dictionary_databases',
+  {
+    /**
+     * dev | prod. Each environment has its own status: Prod's GPC databases
+     * share names with Dev's legacy ones (creative, summary, reference...), which
+     * are being eliminated on Dev and are the contract on Prod (19 November 2026).
+     */
+    env: text('env').notNull().default('dev'),
+    name: text('name').notNull(),
+    /** contract | internal | transition | superseded | excluded | unreviewed */
+    status: text('status').notNull().default('unreviewed'),
+    description: text('description'),
+    updatedBy: text('updated_by'),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ name: 'dictionary_databases_pk', columns: [t.env, t.name] })],
+)
 
 /** What people know about one table. */
 export const dictionaryTables = pgTable('dictionary_tables', {

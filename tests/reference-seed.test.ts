@@ -72,7 +72,10 @@ test('the map', async (t) => {
 })
 
 test('the dictionary', async (t) => {
-  const status = new Map(SEED_DATABASES.map((d) => [d.name, d.status]))
+  // Each environment has its own statuses: Prod's GPC databases share names with Dev's legacy ones.
+  const statusIn = (env: 'dev' | 'prod') => new Map(SEED_DATABASES.filter((d) => d.env === env).map((d) => [d.name, d.status]))
+  const status = statusIn('dev')
+  const prod = statusIn('prod')
 
   await t.test('the client contract, as decided', () => {
     for (const db of ['gpc_reference', 'gpc_mapping', 'gpc_creative', 'gpc_detail', 'gpc_summary', 'gpc_entitlement', 'entitlement', 'entitlement_ref']) {
@@ -82,6 +85,17 @@ test('the dictionary', async (t) => {
 
   await t.test('VX1 serving is being eliminated, not part of the contract', () => {
     for (const db of ['summary', 'detail', 'reference', 'creative', 'control']) assert.equal(status.get(db), 'transition', db)
+  })
+
+  await t.test('on Prod the same names are the GPC contract, not VX1 serving (19 November 2026)', () => {
+    for (const db of ['reference', 'mapping', 'creative', 'detail', 'summary', 'entitlement', 'entitlement_ref']) assert.equal(prod.get(db), 'contract', db)
+    for (const db of ['raw', 'control']) assert.equal(prod.get(db), 'internal', db)
+    assert.equal(status.get('creative'), 'transition', 'Dev keeps its own status for the same name')
+  })
+
+  await t.test('no database is listed twice in one environment', () => {
+    const keys = SEED_DATABASES.map((d) => `${d.env}:${d.name}`)
+    assert.equal(new Set(keys).size, keys.length)
   })
 
   await t.test('the superseded entitlement models and the stale databases are out', () => {
@@ -110,11 +124,13 @@ test('the dictionary', async (t) => {
   })
 
   await t.test('no dataset is built on a database that is being eliminated', () => {
+    // A name Prod describes is judged by Prod's status; one only Dev has (gpc_*) by Dev's.
     for (const d of SEED_DATASETS) {
       for (const ref of d.tables) {
         const db = parseTableRef(ref)!.database
-        assert.notEqual(status.get(db), 'transition', `${d.name} includes ${ref}`)
-        assert.notEqual(status.get(db), 'superseded', `${d.name} includes ${ref}`)
+        const s = prod.get(db) ?? status.get(db)
+        assert.notEqual(s, 'transition', `${d.name} includes ${ref}`)
+        assert.notEqual(s, 'superseded', `${d.name} includes ${ref}`)
       }
     }
   })

@@ -35,6 +35,7 @@ import {
   type DatabaseStatus,
   type EmptyReason,
   DEFAULT_ENV,
+  databaseNotesFor,
 } from '@/lib/dictionary-rules'
 import { ConnectionNote, DictionaryHeader } from './header'
 import { DatasetBoard, type DatasetTile } from './board'
@@ -74,8 +75,9 @@ export default async function DataDictionaryPage({ searchParams }: { searchParam
 
   const [result, notes, described] = await Promise.all([readCatalog(view.env), readDictionaryNotes(), describedColumnCounts()])
 
-  const statusOf = new Map(notes.databases.map((d) => [d.name, readDatabaseStatus(d.status) ?? 'unreviewed']))
-  const dbNote = new Map(notes.databases.map((d) => [d.name, d]))
+  // Each environment has its own database statuses: the same name can be the contract on Prod and legacy on Dev.
+  const dbNote = databaseNotesFor(notes.databases, view.env)
+  const statusOf = new Map([...dbNote].map(([name, d]) => [name, readDatabaseStatus(d.status) ?? 'unreviewed']))
   const tableNote = new Map(notes.tables.map((t) => [t.tableRef, t]))
   const emptyReasons = new Map<string, EmptyReason>()
   for (const t of notes.tables) {
@@ -273,6 +275,7 @@ function SchemasTab({
               view.edit ? (
                 <DatabaseRow
                   key={r.name}
+                  env={view.env}
                   name={r.name}
                   status={r.status}
                   description={r.fromComment ? '' : (r.description ?? '')}

@@ -49,7 +49,7 @@ import {
 import { getScoringContext, scoreForRequest } from './scoring'
 import { readWorkflowMap } from './workflow'
 import { readCatalog, readDictionaryNotes } from './dictionary'
-import { DATABASE_STATUS_LABEL, DATASET_STATUS_LABEL, DEFAULT_ENV, ENV_LABEL, INTENT_LABEL, datasetStatus, readDatabaseStatus, readEmptyReason, readIntent, type EmptyReason } from './dictionary-rules'
+import { DATABASE_STATUS_LABEL, DATASET_STATUS_LABEL, DEFAULT_ENV, databaseNotesFor, ENV_LABEL, INTENT_LABEL, datasetStatus, readDatabaseStatus, readEmptyReason, readIntent, type EmptyReason } from './dictionary-rules'
 import { KIND_LABEL } from './workflow-map'
 import { LIMIT, filterLines, line, type LookupArea } from './agent-lookup-rules'
 
@@ -211,7 +211,8 @@ async function dictionary(): Promise<{ lines: string[]; note: string | null }> {
       ),
     )
   }
-  for (const db_ of notes.databases) {
+  // Only this environment's database statuses: the same name can mean different things on Dev and Prod.
+  for (const db_ of databaseNotesFor(notes.databases, env).values()) {
     lines.push(line(`Schema ${db_.name}`, DATABASE_STATUS_LABEL[readDatabaseStatus(db_.status) ?? 'unreviewed'], db_.description))
   }
   for (const t of notes.tables.filter((t) => t.watchOut || t.description)) {

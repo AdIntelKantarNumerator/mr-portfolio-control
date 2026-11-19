@@ -16,6 +16,7 @@ import {
   parseTableRef,
   readEnvironment,
   type EmptyReason,
+  databaseNotesFor,
 } from '../src/lib/dictionary-rules'
 
 test('tables hidden by rule', async (t) => {
@@ -172,4 +173,16 @@ test('putting tables into a dataset from the Tables tab', async (t) => {
   await t.test('a new name that is already a dataset points you at it instead', () => {
     assert.match(assignProblem({ datasetId: null, newName: 'sports sponsorship', refs, datasets })!, /choose it from the list/)
   })
+})
+
+test('each environment reads its own database notes; a row without one is Dev', () => {
+  const rows = [
+    { env: 'dev', name: 'creative', status: 'transition' },
+    { env: 'prod', name: 'creative', status: 'contract' },
+    { env: null, name: 'gpc_creative', status: 'contract' },
+  ]
+  assert.equal(databaseNotesFor(rows, 'prod').get('creative')?.status, 'contract')
+  assert.equal(databaseNotesFor(rows, 'dev').get('creative')?.status, 'transition')
+  assert.ok(databaseNotesFor(rows, 'dev').has('gpc_creative'))
+  assert.ok(!databaseNotesFor(rows, 'prod').has('gpc_creative'))
 })

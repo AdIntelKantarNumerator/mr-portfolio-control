@@ -15,6 +15,7 @@ import {
   EMPTY_REASONS,
   EMPTY_REASON_LABEL,
   type DatabaseStatus,
+  type Environment,
 } from '@/lib/dictionary-rules'
 import { saveColumnNote, saveDatabaseNote, saveTableNote, type DictState } from './actions'
 
@@ -27,7 +28,9 @@ export function DatabaseRow({
   placeholder,
   stats,
   tablesHref,
+  env,
 }: {
+  env: Environment
   name: string
   status: DatabaseStatus
   description: string
@@ -36,13 +39,14 @@ export function DatabaseRow({
   tablesHref: string
 }) {
   const [state, save, saving] = useActionState(saveDatabaseNote, EMPTY)
-  const formId = `db-${name}`
+  const formId = `db-${env}-${name}`
   return (
     <tr className="dd-editrow">
       <td className="dd-mono">
         <Link href={tablesHref}>{name}</Link>
         <form id={formId} action={save}>
           <input type="hidden" name="name" value={name} />
+          <input type="hidden" name="env" value={env} />
         </form>
       </td>
       <td>
