@@ -38,8 +38,11 @@ type VxTaxonomy = Exclude<FromTaxonomy, 'Classic'>
  * Who a creative's dollars belong to in GPC, as the serving model attributes
  * them (Scott, 4 November 2026):
  *
- *   1. Payers: the creative's creative_entity rows with has_spend. The
- *      product-level flag is ignored on purpose.
+ *   1. Payers: the creative's creative_entity rows whose entity_role is
+ *      Advertiser (PAYER_ROLE). Co-op roles - Local Dealer, Dealer Assn,
+ *      Retailer, Manufacturer - get no spend (Scott, 19 November 2026, after
+ *      has_spend was dropped from creative_entity that day). The product-level
+ *      flag is ignored on purpose.
  *   2. Products: the creative's creative_product rows; each product's owner is
  *      product.entity_id.
  *   3. A payer qualifies for a product when it is the owner (distance 0) or an
@@ -71,9 +74,11 @@ chain AS (SELECT e0.entity_id, array(e0.entity_id, e0.par${Array.from({ length: 
   FROM ent e0${Array.from({ length: ANCESTRY_DEPTH - 1 }, (_, i) => ` LEFT JOIN ent e${i + 1} ON e${i + 1}.entity_id = e${i}.par`).join('')}),
 anc AS (SELECT entity_id descendant, a ancestor, d distance FROM chain LATERAL VIEW posexplode(up) t AS d, a WHERE a IS NOT NULL),
 root AS (SELECT descendant entity_id, max_by(ancestor, distance) root_id FROM anc GROUP BY 1)`
+/** The creative_entity rows that pay: the Advertiser role only; co-op roles get no spend. */
+const PAYER_ROLE = "entity_role = 'Advertiser'"
 const ATTRIBUTION = `
 payer AS (SELECT DISTINCT creative_id, entity_id payer FROM mrdpp_prod.global_catalog.creative_entity
-  WHERE has_spend AND creative_id IN (SELECT creative_id FROM cs)),
+  WHERE ${PAYER_ROLE} AND creative_id IN (SELECT creative_id FROM cs)),
 prods AS (SELECT DISTINCT cp.creative_id, cp.product_id, p.entity_id owner, p.product_name, p.taxonomy_node_id
   FROM mrdpp_prod.global_catalog.creative_product cp JOIN mrdpp_prod.global_catalog.product p ON p.product_id = cp.product_id
   WHERE cp.creative_id IN (SELECT creative_id FROM cs)),
@@ -369,7 +374,7 @@ export async function dbxFlowsFromGpc(to: FromTaxonomy, ids: string[], onWait?: 
 WITH ${ANCESTRY},
 sub AS (SELECT ancestor from_id, descendant entity_id FROM anc WHERE ancestor IN (${inList(picked)})),
 cand AS (SELECT DISTINCT creative_id FROM mrdpp_prod.global_catalog.creative_entity
-  WHERE has_spend AND entity_id IN (SELECT entity_id FROM sub)),
+  WHERE ${PAYER_ROLE} AND entity_id IN (SELECT entity_id FROM sub)),
 ${occSql('SELECT creative_id FROM cand')},
 cs AS (SELECT DISTINCT creative_id FROM occ),
 ${ATTRIBUTION},
@@ -551,7 +556,7 @@ function gpcTotalsSql(from: FromTaxonomy, advIds: string[], parentIds: string[])
   return `
 WITH ${ANCESTRY},
 targets AS (SELECT descendant entity_id FROM anc WHERE ancestor IN (${inList(parentIds)}) UNION SELECT entity_id FROM ent WHERE entity_id IN (${inList(advIds)})),
-cs AS (SELECT DISTINCT creative_id FROM mrdpp_prod.global_catalog.creative_entity WHERE has_spend AND entity_id IN (SELECT entity_id FROM targets)),
+cs AS (SELECT DISTINCT creative_id FROM mrdpp_prod.global_catalog.creative_entity WHERE ${PAYER_ROLE} AND entity_id IN (SELECT entity_id FROM targets)),
 ${occSql('SELECT creative_id FROM cs')},
 ${ATTRIBUTION},
 g AS (
