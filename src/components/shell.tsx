@@ -45,6 +45,7 @@ export function Shell({
   user,
   chatUrl = null,
   sections,
+  hidden = [],
   yaara = true,
 }: {
   children: ReactNode
@@ -52,6 +53,8 @@ export function Shell({
   chatUrl?: string | null
   /** The nav section ids this person's role may see; 'top' for the ungrouped items. */
   sections?: string[]
+  /** Pages inside a visible section this person may still not open (Cost Analysis for non-admins). */
+  hidden?: string[]
   yaara?: boolean
 }) {
   const pathname = usePathname()
@@ -143,7 +146,7 @@ export function Shell({
                 )}
                 {open && (
                   <ul>
-                    {section.items.map((item) => {
+                    {section.items.filter((item) => !hidden.includes(item.href)).map((item) => {
                       const active = isActive(item.href, pathname)
                       const Icon = item.icon
                       return (

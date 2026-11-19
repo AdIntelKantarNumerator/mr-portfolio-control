@@ -245,6 +245,15 @@ export const IconCompare = (p: IconProps) => (
   </Glyph>
 )
 
+/** Cost Analysis — a coin, and an arrow showing which way a decision moves it. */
+export const IconCost = (p: IconProps) => (
+  <Glyph {...p}>
+    <circle cx="6.5" cy="9" r="4.5" />
+    <path d="M6.5 7v4M5.3 7.8c0-.5.5-.8 1.2-.8s1.2.3 1.2.8-.5.7-1.2.8-1.2.3-1.2.8.5.8 1.2.8 1.2-.3 1.2-.8" />
+    <path d="M11 5.5l2.5-2.5M11.5 3h2v2" />
+  </Glyph>
+)
+
 /** Report Builder — a sheet with rows, and a bar rising out of it. */
 export const IconReportBuilder = (p: IconProps) => (
   <Glyph {...p}>

@@ -51,8 +51,12 @@ export function normalise(
 /** The Reference section's pages, and the raw artifact pages they show. */
 export const REFERENCE_PATHS = ['/process-docs', '/docs-raw', '/templates', '/workflow', '/data-dictionary', '/taxonomy-comparison']
 
-/** The Admin section. */
-export const ADMIN_PATHS = ['/admin']
+/**
+ * Admins only, whatever their role: the Admin section, and Cost Analysis
+ * (Scott, 16 November 2026: "only available to admins for now"), which sits
+ * in the Reference section but is hidden from everyone else there.
+ */
+export const ADMIN_PATHS = ['/admin', '/cost-analysis']
 
 /** The Prototypes section: whoever has the flag, whatever their role. */
 export const PROTOTYPE_PATHS = ['/prototypes']

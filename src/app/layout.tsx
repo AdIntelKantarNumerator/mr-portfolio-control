@@ -4,7 +4,7 @@ import { Shell } from '@/components/shell'
 import { BRAND_NAME } from '@/lib/brand'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { currentAccess } from '@/lib/auth/access'
-import { navSectionsFor } from '@/lib/access-rules'
+import { ADMIN_PATHS, navSectionsFor } from '@/lib/access-rules'
 
 export const metadata: Metadata = {
   title: { default: BRAND_NAME, template: `%s · ${BRAND_NAME}` },
@@ -28,6 +28,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // it; this only keeps the nav to what they can open.
   const access = await currentAccess()
   const sections = [...navSectionsFor(access)].map((s) => s ?? 'top')
+  // Admin-only pages that sit inside a section others can see (Cost Analysis).
+  const hidden = access.isAdmin ? [] : ADMIN_PATHS
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -59,6 +61,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body suppressHydrationWarning>
         <Shell
+          hidden={hidden}
           user={{
             name: user.name,
             email: user.email,

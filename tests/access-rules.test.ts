@@ -52,3 +52,15 @@ test('the proxy leaves the embedded database of local development alone', async 
   assert.equal(usesEmbeddedDb({ DATABASE_URL: 'postgres://u:p@host/db' }), false)
   assert.equal(usesEmbeddedDb({ DATABASE_URL: 'postgresql://u:p@host/db' }), false)
 })
+
+test('Cost Analysis is for admins only, though it sits in Reference (16 November 2026)', () => {
+  const product = normalise({ role: 'product' })
+  const commercial = normalise({ role: 'commercial' })
+  const admin = normalise({ role: 'commercial', isAdmin: true })
+  for (const a of [product, commercial]) {
+    assert.ok(!canSee(a, '/cost-analysis'))
+    assert.ok(!canSee(a, '/cost-analysis/anything'))
+  }
+  assert.ok(canSee(admin, '/cost-analysis'))
+  assert.ok(canSee(normalise({ role: 'product', isAdmin: true }), '/cost-analysis'))
+})

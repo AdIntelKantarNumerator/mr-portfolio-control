@@ -28,6 +28,7 @@ import {
   IconActions,
   IconActivity,
   IconCompare,
+  IconCost,
   IconConversations,
   IconDecisions,
   IconDependencies,
@@ -137,6 +138,14 @@ export const NAV: NavSection[] = [
         label: 'Taxonomy Comparison',
         icon: IconCompare,
         hint: 'Advertiser spend across VX1, VX2, GPC and Classic',
+      },
+      {
+        // Admins only for now (Scott, 16 November 2026): ADMIN_PATHS in
+        // lib/access-rules.ts, and hidden from everyone else's rail.
+        href: '/cost-analysis',
+        label: 'Cost Analysis',
+        icon: IconCost,
+        hint: 'What a decision does to cloud cost',
       },
     ],
   },
