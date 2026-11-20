@@ -21,6 +21,7 @@ import { db } from '@/db/client'
 import { currentAccess } from '@/lib/auth/access'
 import { describe } from '@/lib/import360/decode'
 import { live360Configured, liveLookup, liveReport, liveReports } from '@/lib/import360/source'
+import { ensureExport } from '@/lib/client-eval/export-cache'
 import { liveProfiles } from '@/lib/client-eval/profiles'
 import { canRefreshHere, startRefresh } from '@/lib/client-eval/refresh'
 import { accountDetail, addOverride, clientPeople, listClients, sources } from '@/lib/client-eval/store'
@@ -113,6 +114,8 @@ export async function POST(req: Request) {
       if (!parseMember(member) || (withMember !== null && !parseMember(withMember))) return bad('Unknown account.')
       if (member === withMember) return bad('That is the same account.')
       await addOverride(db, { kind: body.op, member, withMember, by })
+      // The clients changed: rebuild the kept export in the background.
+      void ensureExport(by).catch((err) => console.error('[client-eval] export after override', err))
       return NextResponse.json({ ok: true })
     }
     return bad('Unknown request.')

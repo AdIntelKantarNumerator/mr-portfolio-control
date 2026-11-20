@@ -10,6 +10,7 @@ import { db } from '@/db/client'
 import { live360Configured } from '@/lib/import360/source'
 import { load360 } from './load-360'
 import { connectMagnifier, loadMagnifier, magnifierConfig } from './load-magnifier'
+import { ensureExport } from './export-cache'
 import { buildClients, markFailed, markReady, markRunning, progressWriter, saveSnapshot } from './store'
 import { PLATFORM_LABEL, REFRESH_CONTACT, SNAPSHOT_ONLY, type Platform } from './types'
 
@@ -46,6 +47,8 @@ async function run(p: Platform, by: string | null) {
     await saveSnapshot(db, p, snap, by, { rebuilding: true })
     await buildClients(db, { progress: (step, done = 0, total = 0) => progress(step, done, total) })
     await markReady(db, p)
+    // New data: build the export people download, in the background (export-cache.ts).
+    void ensureExport(by).catch((err) => console.error('[client-eval] export after refresh', err))
   } catch (err) {
     console.error(`[client-eval] ${p} refresh failed`, err)
     await markFailed(db, p, err).catch(() => {})

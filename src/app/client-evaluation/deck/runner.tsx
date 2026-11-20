@@ -25,6 +25,7 @@ export function useJob() {
   /** Checks are failing for now (the server is busy); still trying. */
   const [waiting, setWaiting] = useState(false)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
+  const downloadWhenDone = useRef(true)
 
   useEffect(() => () => {
     if (timer.current) clearInterval(timer.current)
@@ -40,8 +41,15 @@ export function useJob() {
       setError(out.error ?? 'That could not be started.')
       return
     }
-    const id = String(out.id)
-    setJob({ id, status: 'running', step: 'Starting', done: 0, total: 0, error: null, fileName: null })
+    follow(String(out.id), true)
+  }
+
+  /** Follow a job already running; download its file when it is done, if asked to. */
+  function follow(id: string, download: boolean) {
+    downloadWhenDone.current = download
+    setError(null)
+    setStarted((s) => s ?? Date.now())
+    setJob((j) => (j?.id === id ? j : { id, status: 'running', step: 'Starting', done: 0, total: 0, error: null, fileName: null }))
     if (timer.current) clearInterval(timer.current)
     // A check can fail while the server is busy (another export writing, a
     // restart): keep checking, and give up only after three minutes of failures.
@@ -59,7 +67,7 @@ export function useJob() {
         setJob({ ...j, id })
         if (j.status !== 'running') {
           if (timer.current) clearInterval(timer.current)
-          if (j.status === 'done') {
+          if (j.status === 'done' && downloadWhenDone.current) {
             // A file, not a page: a link the browser downloads.
             const a = document.createElement('a')
             a.href = `/client-evaluation/jobs?id=${id}&file=1`
@@ -81,7 +89,11 @@ export function useJob() {
       }
     }, 2000)
   }
-  return { job, error, started, start, waiting }
+  /** Download when the followed job is done (a background build the person has now asked for). */
+  function wantDownload() {
+    downloadWhenDone.current = true
+  }
+  return { job, error, started, start, follow, wantDownload, waiting }
 }
 
 export function JobProgress({ job, error, started, what, waiting = false }: { job: JobState | null; error: string | null; started: number | null; what: string; waiting?: boolean }) {

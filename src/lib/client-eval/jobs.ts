@@ -12,7 +12,7 @@
  * and streamed back on download, and the work itself pauses often (export.ts).
  */
 import { randomUUID } from 'node:crypto'
-import { and, asc, eq, inArray, lt } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, lt } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { ceJobChunks, ceJobs } from '@/db/schema'
 
@@ -51,13 +51,21 @@ export async function startJob(
   by: string | null,
   work: (progress: JobProgress, out: JobOutput) => Promise<{ fileName: string; fileType: string }>,
 ): Promise<string> {
+  // Old jobs go, except the export kept ready for download (export-cache.ts).
+  const [kept] = await db
+    .select({ id: ceJobs.id })
+    .from(ceJobs)
+    .where(and(eq(ceJobs.kind, 'export'), eq(ceJobs.status, 'done')))
+    .orderBy(desc(ceJobs.updatedAt))
+    .limit(1)
+    .catch(() => [])
   const old = await db
     .select({ id: ceJobs.id })
     .from(ceJobs)
     .where(lt(ceJobs.createdAt, new Date(Date.now() - 24 * 3600_000)))
     .catch(() => [])
-  if (old.length) {
-    const ids = old.map((o) => o.id)
+  if (old.some((o) => o.id !== kept?.id)) {
+    const ids = old.map((o) => o.id).filter((id) => id !== kept?.id)
     await db.delete(ceJobChunks).where(inArray(ceJobChunks.jobId, ids)).catch(() => {})
     await db.delete(ceJobs).where(inArray(ceJobs.id, ids)).catch(() => {})
   }

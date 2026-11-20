@@ -2,7 +2,7 @@
  * Client Evaluation's background jobs (lib/client-eval/jobs.ts).
  *
  *   POST { kind: 'deck', scope }   start an Impact Deck for a client, account or person
- *   POST { kind: 'export' }        start the client and user export
+ *   POST { kind: 'export' }        the kept client and user export: { ready, building }, a build started if it is behind
  *   GET  ?id=<job>                 how far along it is
  *   GET  ?id=<job>&file=1          the finished file: the PowerPoint or the workbook
  *
@@ -11,12 +11,11 @@
  * gate does not enforce roles on the embedded local database.
  */
 import { NextResponse } from 'next/server'
-import { db } from '@/db/client'
 import { currentAccess } from '@/lib/auth/access'
 import { buildDeck } from '@/lib/client-eval/deck-pptx'
 import { deckData, type DeckScope } from '@/lib/client-eval/deck-data'
-import { buildExport } from '@/lib/client-eval/export'
-import { readJob, readJobFile, runningJob, startJob } from '@/lib/client-eval/jobs'
+import { ensureExport } from '@/lib/client-eval/export-cache'
+import { readJob, readJobFile, startJob } from '@/lib/client-eval/jobs'
 import { parseMember } from '@/lib/client-eval/types'
 
 export const runtime = 'nodejs'
@@ -55,14 +54,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ id })
     }
     if (body.kind === 'export') {
-      // One export at a time: it is the same file for everyone, and two at once slow the server for every other request.
-      const already = await runningJob('export')
-      if (already) return NextResponse.json({ id: already })
-      const id = await startJob('export', 'Clients and users export', {}, by, async (progress, out) => {
-        await buildExport(db, progress, out)
-        return { fileName: `Client Evaluation - clients and users ${day}.xlsx`, fileType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
-      })
-      return NextResponse.json({ id })
+      // Kept ready after each change of the data (export-cache.ts): one build at a time, the same file for everyone.
+      return NextResponse.json(await ensureExport(by))
     }
     return bad('Unknown request.')
   } catch (err) {

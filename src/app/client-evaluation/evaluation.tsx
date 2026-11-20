@@ -165,6 +165,77 @@ function Sources({ contact, onReady }: { contact: string; onReady: () => void })
   )
 }
 
+// ------------------------------------------------------------------ the export
+
+interface ExportState {
+  ready: { id: string; fileName: string; builtAt: string; current: boolean } | null
+  building: string | null
+}
+
+/**
+ * The client and user export, kept ready after each change of the data
+ * (lib/client-eval/export-cache.ts): a download at once when it is current;
+ * while a new one builds, its progress, and the download when it is done.
+ */
+function ExportButton() {
+  const [state, setState] = useState<ExportState | null>(null)
+  const [asked, setAsked] = useState(false)
+  const run = useJob()
+  const { follow, wantDownload } = run
+  useEffect(() => {
+    // Asking also starts a build when the kept one is behind the data (a Classic refresh from the laptop).
+    fetch('/client-evaluation/jobs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'export' }) })
+      .then((r) => r.json())
+      .then((s: ExportState) => {
+        setState(s)
+        if (s.building) follow(s.building, false)
+      })
+      .catch(() => setState({ ready: null, building: null }))
+    // Once, when the page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const building = run.job?.status === 'running' ? run.job : null
+  const builtNow = run.job?.status === 'done' ? { id: run.job.id, fileName: run.job.fileName ?? 'export.xlsx' } : null
+  const ready = builtNow ?? (state?.ready?.current ? state.ready : null)
+  const when = (iso: string) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  if (ready)
+    return (
+      <a className="btn ce-sm" href={`/client-evaluation/jobs?id=${ready.id}&file=1`} download title="Every client, every user in each account, and each user's last login, as an Excel workbook">
+        Export clients and users
+      </a>
+    )
+  if (building || state?.building)
+    return (
+      <span className="ce-tick" title="The export is rebuilt after each refresh, and kept ready">
+        {asked ? (
+          <span className="ce-muted">Preparing the export… it downloads when ready</span>
+        ) : (
+          <button
+            type="button"
+            className="btn ce-sm"
+            onClick={() => {
+              setAsked(true)
+              wantDownload()
+            }}
+          >
+            Export clients and users
+          </button>
+        )}
+        <JobProgress job={run.job} error={run.error} started={run.started} what="The export" waiting={run.waiting} />
+        {state?.ready && !asked ? (
+          <a className="ce-link" href={`/client-evaluation/jobs?id=${state.ready.id}&file=1`} download>
+            or the one from {when(state.ready.builtAt)}
+          </a>
+        ) : null}
+      </span>
+    )
+  return (
+    <button type="button" className="btn ce-sm" disabled>
+      Export clients and users
+    </button>
+  )
+}
+
 // ------------------------------------------------------------------ the list
 
 type Popup =
@@ -190,7 +261,6 @@ export function ClientEvaluation({ contact }: { contact: string }) {
   const [stack, setStack] = useState<Popup[]>([])
   const [tick, setTick] = useState(0)
   const push = (p: Popup) => setStack((s) => [...s, p])
-  const exp = useJob()
   const pop = () => setStack((s) => s.slice(0, -1))
 
   const params = useMemo(() => ({ op: 'clients', q, platform, sort, active: active ? '1' : '0', internal: internal ? '1' : '0' }), [q, platform, sort, active, internal])
@@ -258,11 +328,8 @@ export function ClientEvaluation({ contact }: { contact: string }) {
           <input id="ce-internal" type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Show internal
         </label>
         <span className="ce-count">{busy ? 'Loading…' : `${n(total)} clients`}</span>
-        <button type="button" className="btn ce-sm" disabled={exp.job?.status === 'running'} onClick={() => void exp.start({ kind: 'export' })} title="Every client, every user in each account, and each user's last login, as an Excel workbook">
-          Export clients and users
-        </button>
+        <ExportButton />
       </div>
-      <JobProgress job={exp.job} error={exp.error} started={exp.started} what="The export" waiting={exp.waiting} />
       {error ? <p className="mr-said mr-bad">{error}</p> : null}
 
       <div className="ce-table">
