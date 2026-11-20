@@ -386,6 +386,13 @@
       "when": 1795400000000,
       "tag": "0054_report_builder_schedules",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1795500000000,
+      "tag": "0055_client_eval_recent_logins",
+      "breakpoints": true
     }
   ]
 }

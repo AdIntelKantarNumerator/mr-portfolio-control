@@ -95,6 +95,8 @@ export interface UserSnap {
   reports: number
   /** 360 reporting profiles. */
   profiles?: number
+  /** Logins in the 30 days before the snapshot. */
+  logins30?: number
 }
 
 export interface ReportSnap {

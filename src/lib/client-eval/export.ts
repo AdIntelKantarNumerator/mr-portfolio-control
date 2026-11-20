@@ -37,7 +37,7 @@ async function yieldTo(since: number): Promise<number> {
   return Date.now()
 }
 
-type UserRow = Pick<typeof ceUsers.$inferSelect, 'platform' | 'accountId' | 'userId' | 'name' | 'login' | 'email' | 'active' | 'lastSeen' | 'reports' | 'profiles'>
+type UserRow = Pick<typeof ceUsers.$inferSelect, 'platform' | 'accountId' | 'userId' | 'name' | 'login' | 'email' | 'active' | 'lastSeen' | 'reports' | 'profiles' | 'logins30'>
 
 /** The users of these clients' accounts, read per platform. */
 async function usersOf(d: Database, clients: Array<{ members: unknown }>): Promise<Map<string, UserRow[]>> {
@@ -53,7 +53,7 @@ async function usersOf(d: Database, clients: Array<{ members: unknown }>): Promi
     if (!ids?.length) continue
     for (let i = 0; i < ids.length; i += 500) {
       const rows = await d
-        .select({ platform: ceUsers.platform, accountId: ceUsers.accountId, userId: ceUsers.userId, name: ceUsers.name, login: ceUsers.login, email: ceUsers.email, active: ceUsers.active, lastSeen: ceUsers.lastSeen, reports: ceUsers.reports, profiles: ceUsers.profiles })
+        .select({ platform: ceUsers.platform, accountId: ceUsers.accountId, userId: ceUsers.userId, name: ceUsers.name, login: ceUsers.login, email: ceUsers.email, active: ceUsers.active, lastSeen: ceUsers.lastSeen, reports: ceUsers.reports, profiles: ceUsers.profiles, logins30: ceUsers.logins30 })
         .from(ceUsers)
         .where(and(eq(ceUsers.platform, p), inArray(ceUsers.accountId, ids.slice(i, i + 500))))
       for (const u of rows) {
@@ -150,6 +150,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
     { header: 'Active', key: 'active', width: 8 },
     { header: 'Platforms', key: 'platforms', width: 22 },
     { header: 'Last login (any app)', key: 'last', width: 18 },
+    { header: 'Logins, last 30 days', key: 'logins30', width: 18 },
     { header: 'Last login 360', key: 'last360', width: 15 },
     { header: 'Last login Classic', key: 'lastClassic', width: 17 },
     { header: '360 user sets', key: 'sets', width: 40 },
@@ -165,7 +166,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
     const part = sorted.slice(b, b + BATCH)
     const users = await usersOf(d, part)
     for (const c of part) {
-      const people = new Map<string, { name: string; email: string | null; active: boolean; platforms: Set<Platform>; last: string; last360: string; lastClassic: string; sets: Set<string>; logins: Set<string>; mag: Set<string>; classic: Set<string>; reports: number; profiles: number }>()
+      const people = new Map<string, { name: string; email: string | null; active: boolean; platforms: Set<Platform>; last: string; last360: string; lastClassic: string; sets: Set<string>; logins: Set<string>; mag: Set<string>; classic: Set<string>; reports: number; profiles: number; recent: Map<string, number> }>()
       for (const k of c.members as string[])
         for (const u of users.get(k) ?? []) {
           const p = u.platform as Platform
@@ -173,9 +174,14 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
           const x =
             people.get(key) ??
             people
-              .set(key, { name: u.name, email: u.email, active: false, platforms: new Set(), last: '', last360: '', lastClassic: '', sets: new Set(), logins: new Set(), mag: new Set(), classic: new Set(), reports: 0, profiles: 0 })
+              .set(key, { name: u.name, email: u.email, active: false, platforms: new Set(), last: '', last360: '', lastClassic: '', sets: new Set(), logins: new Set(), mag: new Set(), classic: new Set(), reports: 0, profiles: 0, recent: new Map() })
               .get(key)!
           x.active ||= u.active
+          // One login on several 360 user sets is one set of sessions: the busiest counts.
+          if (u.logins30) {
+            const lk = `${p}:${(u.login ?? u.userId).toLowerCase()}`
+            x.recent.set(lk, Math.max(x.recent.get(lk) ?? 0, u.logins30))
+          }
           x.platforms.add(p)
           const seen = u.lastSeen ?? ''
           if (seen > x.last) x.last = seen
@@ -199,6 +205,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
           active: x.active ? 'Yes' : 'No',
           platforms: [...x.platforms].map((p) => PLATFORM_LABEL[p]).join(', '),
           last: x.last,
+          logins30: [...x.recent.values()].reduce((a, b) => a + b, 0) || '',
           last360: x.last360,
           lastClassic: x.lastClassic,
           sets: [...x.sets].join('; '),
@@ -228,6 +235,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
     { header: 'Email', key: 'email', width: 34 },
     { header: 'User active', key: 'active', width: 11 },
     { header: 'Last login', key: 'last', width: 12 },
+    { header: 'Logins, last 30 days', key: 'logins30', width: 18 },
     { header: '360 reports (2026)', key: 'reports', width: 17 },
     { header: '360 reporting profiles', key: 'profiles', width: 20 },
   ]
@@ -255,6 +263,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
             email: u.email ?? '',
             active: u.active ? 'Yes' : 'No',
             last: u.lastSeen ?? (p === 'magnifier' ? 'not recorded' : ''),
+            logins30: p === 'magnifier' ? '' : u.logins30,
             reports: p === '360' ? u.reports : '',
             profiles: p === '360' ? u.profiles : '',
           }).commit()
@@ -268,7 +277,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
   wn.columns = [{ header: 'About this export', key: 't', width: 120 }]
   for (const text of [
     `Exported ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC from the Client Evaluation snapshots: ${sorted.length} selected client${sorted.length === 1 ? '' : 's'}.`,
-    'Last login: 360 is the latest login session since January 2025; Classic is the latest entry in its login history; Magnifier does not record logins in the tables we can read.',
+    'Last login: 360 is the latest login session since January 2025; Classic is the latest entry in its login history; Magnifier does not record logins in the tables we can read. Logins, last 30 days: as of the snapshot.',
     'People: one row per person per client, matched by email across the apps; a user with no email is their own row.',
     'Account ids: 360 user set id, Magnifier account code, Classic customer account id.',
   ])

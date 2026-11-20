@@ -306,6 +306,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
         <select id="ce-sort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
           <option value="reports">Most 360 reports</option>
           <option value="users">Most users</option>
+          <option value="logins">Most recent logins</option>
           <option value="name">A–Z</option>
         </select>
         <label className="ce-tick">
@@ -387,6 +388,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                       {n(c.activeUsers)}
                       <span className="ce-of"> / {n(c.users)}</span> ›
                     </button>
+                    {c.logins30 ? <div className="ce-sub" title="Logins in the last 30 days, 360 and Classic (Magnifier records none)">{n(c.logins30)} logins · 30 days</div> : null}
                   </td>
                   <td className="ce-num">
                     <div className="ce-reps">
@@ -532,7 +534,13 @@ function PeoplePopup({
       .map((p) => (platform === 'all' ? p : { ...p, accounts: p.accounts.filter((a) => a.platform === platform) }))
       .map((p) => (platform === 'all' ? p : { ...p, active: p.accounts.some((a) => a.active), reports: platform === '360' ? p.accounts.reduce((t, a) => t + a.reports, 0) : platform === 'magnifier' ? Math.max(0, ...p.accounts.map((a) => a.accountReports)) : 0 }))
       .filter((p) => p.accounts.length && (!activeOnly || p.active) && (!needle || `${p.name} ${p.email ?? ''} ${p.accounts.map((a) => a.login ?? '').join(' ')}`.toLowerCase().includes(needle)))
-      .sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name) : volume(b) - volume(a) || Number(b.active) - Number(a.active) || a.name.localeCompare(b.name)))
+      .sort((a, b) =>
+        sort === 'name'
+          ? a.name.localeCompare(b.name)
+          : sort === 'logins'
+            ? b.logins30 - a.logins30 || (b.lastSeen ?? '').localeCompare(a.lastSeen ?? '') || a.name.localeCompare(b.name)
+            : volume(b) - volume(a) || Number(b.active) - Number(a.active) || a.name.localeCompare(b.name),
+      )
   }, [data, q, sort, activeOnly, platform])
 
   return (
@@ -550,6 +558,7 @@ function PeoplePopup({
           <input id="ce-people-q" className="ce-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people" aria-label="Search people" autoFocus />
           <select id="ce-people-sort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort people">
             <option value="reports">Most reports</option>
+            <option value="logins">Most recent logins</option>
             <option value="name">A–Z</option>
           </select>
           <label className="ce-tick">
@@ -588,7 +597,10 @@ function PeoplePopup({
                       ))}
                     </div>
                   </td>
-                  <td>{p.lastSeen ?? <span className="ce-muted">—</span>}</td>
+                  <td>
+                    {p.lastSeen ?? <span className="ce-muted">—</span>}
+                    {p.logins30 ? <div className="ce-sub" title="Logins in the last 30 days, 360 and Classic">{n(p.logins30)} logins · 30 days</div> : null}
+                  </td>
                   <td>
                     <div className="ce-accts">
                       {p.accounts

@@ -2629,6 +2629,8 @@ export const ceUsers = pgTable(
     reports: integer('reports').notNull().default(0),
     /** 360 reporting profiles (drizzle/0051). */
     profiles: integer('profiles').notNull().default(0),
+    /** Logins in the 30 days before the snapshot (drizzle/0055): 360 sessions, Classic login history. */
+    logins30: integer('logins30').notNull().default(0),
   },
   (t) => [primaryKey({ name: 'ce_users_pk', columns: [t.platform, t.accountId, t.userId] }), index('ce_users_email_idx').on(t.email)],
 )
@@ -2658,6 +2660,8 @@ export const ceClients = pgTable('ce_clients', {
   activeUsers: integer('active_users').notNull().default(0),
   /** 360 reports used in 2026. */
   reports: integer('reports').notNull().default(0),
+  /** Logins in the last 30 days across its people (drizzle/0055). */
+  logins30: integer('logins30').notNull().default(0),
   active: boolean('active').notNull(),
   /** Every account is ours: staff, demo, development (lib/client-eval/match.ts isInternal). Hidden unless asked for. */
   internal: boolean('internal').notNull().default(false),

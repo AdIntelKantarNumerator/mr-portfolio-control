@@ -42,10 +42,14 @@ export async function load360(progress: Progress): Promise<Snapshot> {
     OUTER APPLY (SELECT TOP 1 x.masteruser_id FROM iddb_ar.dbo.MASTERUSER_XREF x WHERE x.usr_id = u.Usr_id ORDER BY x.active_f DESC) x
     LEFT JOIN iddb_ar.dbo.MASTERUSER m ON m.masteruser_id = x.masteruser_id`)
   const seen = new Map<string, string>()
-  for (const r of await q360<Row>(`SELECT username_s, MAX(created_d) AS d FROM (
+  // And how many sessions in the last 30 days (Scott, 20 November 2026: sort by recent logins).
+  const recent = new Map<string, number>()
+  for (const r of await q360<Row>(`SELECT username_s, MAX(created_d) AS d, SUM(CASE WHEN created_d >= DATEADD(day, -30, GETDATE()) THEN 1 ELSE 0 END) AS n30 FROM (
       SELECT username_s, created_d FROM iddb_ar.dbo.LOGIN_SESSION_ARCHIVE WHERE created_d >= '2025-01-01'
-      UNION ALL SELECT username_s, created_d FROM iddb_ar.dbo.LOGIN_SESSION) s GROUP BY username_s`))
+      UNION ALL SELECT username_s, created_d FROM iddb_ar.dbo.LOGIN_SESSION) s GROUP BY username_s`)) {
     seen.set(str(r.username_s).toLowerCase(), day(r.d)!)
+    if (Number(r.n30)) recent.set(str(r.username_s).toLowerCase(), Number(r.n30))
+  }
 
   await progress('Counting 360 reports used in 2026', 2, 6)
   const reportsByUser = new Map<number, number>()
@@ -127,6 +131,7 @@ export async function load360(progress: Progress): Promise<Snapshot> {
       lastSeen: seen.get(login.toLowerCase()) ?? null,
       reports: reportsByUser.get(Number(u.Usr_id)) ?? 0,
       profiles: profiles.get(Number(u.Usr_id)) ?? 0,
+      logins30: recent.get(login.toLowerCase()) ?? 0,
     })
     const t = tally.get(set) ?? tally.set(set, { users: 0, active: 0, reports: 0 }).get(set)!
     t.users++

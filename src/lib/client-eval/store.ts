@@ -152,7 +152,7 @@ export async function buildClients(d: Database, opts: { useModel?: boolean; prog
   const clusters = cluster(match.map((m) => m.key), found.links, judgments, found.ask, overrides)
 
   await opts.progress?.('Counting people across platforms')
-  const people = await d.select({ platform: ceUsers.platform, accountId: ceUsers.accountId, userId: ceUsers.userId, email: ceUsers.email, active: ceUsers.active, reports: ceUsers.reports }).from(ceUsers)
+  const people = await d.select({ platform: ceUsers.platform, accountId: ceUsers.accountId, userId: ceUsers.userId, email: ceUsers.email, login: ceUsers.login, active: ceUsers.active, reports: ceUsers.reports, logins30: ceUsers.logins30 }).from(ceUsers)
   const usersOf = new Map<string, typeof people>()
   for (const p of people) {
     const k = memberKey(p.platform as Platform, p.accountId)
@@ -169,11 +169,17 @@ export async function buildClients(d: Database, opts: { useModel?: boolean; prog
     const company = [...companies].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
     const everyone = new Map<string, boolean>()
     let reports = 0
+    // Recent logins: one login on two 360 user sets is one person's sessions, counted once.
+    const logins = new Map<string, number>()
     for (const k of c.members)
       for (const u of usersOf.get(k) ?? []) {
         const who = u.email || `${u.platform}:${u.userId}`
         everyone.set(who, everyone.get(who) === true || u.active)
         if (u.platform === '360') reports += u.reports
+        if (u.logins30) {
+          const key = `${u.platform}:${(u.login ?? u.userId).toLowerCase()}`
+          logins.set(key, Math.max(logins.get(key) ?? 0, u.logins30))
+        }
       }
     return {
       clientId: clientIdOf(c.members),
@@ -187,6 +193,7 @@ export async function buildClients(d: Database, opts: { useModel?: boolean; prog
       users: everyone.size,
       activeUsers: [...everyone.values()].filter(Boolean).length,
       reports,
+      logins30: [...logins.values()].reduce((a, b) => a + b, 0),
       active: members.some((m) => m.active),
       how: c.how as Link[],
     }
@@ -240,6 +247,8 @@ export interface ClientRow {
   activeUsers: number
   /** 360 reports used in 2026. */
   reports: number
+  /** Logins in the last 30 days across its people (360 and Classic). */
+  logins30: number
   /** Distinct Magnifier reports set up across the client's Magnifier accounts (one report can be on several). */
   magnifierReports: number
   active: boolean
@@ -251,7 +260,7 @@ export interface ClientRow {
 
 export async function listClients(
   d: Database,
-  o: { q?: string; platform?: Platform | 'all' | 'multi'; sort?: 'reports' | 'name' | 'users'; active?: boolean; internal?: boolean; limit?: number; offset?: number },
+  o: { q?: string; platform?: Platform | 'all' | 'multi'; sort?: 'reports' | 'name' | 'users' | 'logins'; active?: boolean; internal?: boolean; limit?: number; offset?: number },
 ): Promise<{ rows: ClientRow[]; total: number }> {
   const all = await d.select().from(ceClients)
   const needle = (o.q ?? '').trim().toLowerCase()
@@ -283,7 +292,7 @@ export async function listClients(
   })
   const sort = o.sort ?? 'reports'
   rows = rows.sort((a, b) =>
-    sort === 'name' ? a.name.localeCompare(b.name) : sort === 'users' ? b.users - a.users || a.name.localeCompare(b.name) : b.reports - a.reports || mcount.get(b.clientId)! - mcount.get(a.clientId)! || b.activeUsers - a.activeUsers || a.name.localeCompare(b.name),
+    sort === 'name' ? a.name.localeCompare(b.name) : sort === 'logins' ? b.logins30 - a.logins30 || b.activeUsers - a.activeUsers || a.name.localeCompare(b.name) : sort === 'users' ? b.users - a.users || a.name.localeCompare(b.name) : b.reports - a.reports || mcount.get(b.clientId)! - mcount.get(a.clientId)! || b.activeUsers - a.activeUsers || a.name.localeCompare(b.name),
   )
   const total = rows.length
   const page = rows.slice(o.offset ?? 0, (o.offset ?? 0) + (o.limit ?? 100))
@@ -296,6 +305,7 @@ export async function listClients(
       users: c.users,
       activeUsers: c.activeUsers,
       reports: c.reports,
+      logins30: c.logins30,
       magnifierReports: mcount.get(c.clientId) ?? 0,
       active: c.active,
       internal: c.internal,
@@ -329,9 +339,11 @@ export interface PersonRow {
   email: string | null
   active: boolean
   reports: number
+  /** Logins in the last 30 days, 360 and Classic together. */
+  logins30: number
   lastSeen: string | null
   /** reports: 360 reports this person used in 2026. accountReports: the reports set up for the account (Magnifier). */
-  accounts: Array<{ platform: Platform; accountId: string; accountName: string; userId: string; login: string | null; active: boolean; reports: number; accountReports: number; profiles: number; lastSeen: string | null }>
+  accounts: Array<{ platform: Platform; accountId: string; accountName: string; userId: string; login: string | null; active: boolean; reports: number; accountReports: number; profiles: number; logins30: number; lastSeen: string | null }>
 }
 
 /** A client's people across its platforms, one row per person (by email). */
@@ -349,13 +361,22 @@ export async function clientPeople(d: Database, clientId: string): Promise<{ nam
     for (const part of chunk(ids, 500))
       for (const u of await d.select().from(ceUsers).where(and(eq(ceUsers.platform, p), inArray(ceUsers.accountId, part)))) {
         const key = u.email || `${p}:${u.userId}`
-        const row = people.get(key) ?? people.set(key, { key, name: u.name, email: u.email, active: false, reports: 0, lastSeen: null, accounts: [] }).get(key)!
+        const row = people.get(key) ?? people.set(key, { key, name: u.name, email: u.email, active: false, reports: 0, logins30: 0, lastSeen: null, accounts: [] }).get(key)!
         row.active ||= u.active
         row.reports += u.reports
         if (u.lastSeen && (!row.lastSeen || u.lastSeen > row.lastSeen)) row.lastSeen = u.lastSeen
         if (row.name === row.email && u.name !== u.email) row.name = u.name
-        row.accounts.push({ platform: p, accountId: u.accountId, accountName: names.get(u.accountId) ?? u.accountId, userId: u.userId, login: u.login, active: u.active, reports: u.reports, accountReports: acctReports.get(u.accountId) ?? 0, profiles: u.profiles, lastSeen: u.lastSeen })
+        row.accounts.push({ platform: p, accountId: u.accountId, accountName: names.get(u.accountId) ?? u.accountId, userId: u.userId, login: u.login, active: u.active, reports: u.reports, accountReports: acctReports.get(u.accountId) ?? 0, profiles: u.profiles, logins30: u.logins30, lastSeen: u.lastSeen })
       }
+  }
+  // A person's recent logins: per platform, their busiest login (one login can sit on several user sets), added up.
+  for (const p of people.values()) {
+    const best = new Map<string, number>()
+    for (const a of p.accounts) {
+      const k = `${a.platform}:${(a.login ?? a.userId).toLowerCase()}`
+      best.set(k, Math.max(best.get(k) ?? 0, a.logins30))
+    }
+    p.logins30 = [...best.values()].reduce((x, y) => x + y, 0)
   }
   return { name: c.name, people: [...people.values()] }
 }

@@ -54,7 +54,7 @@ export async function GET(req: Request) {
       const filter = {
         q,
         platform: platform === 'multi' || platform === 'all' || isPlatform(platform) ? platform : 'all',
-        sort: sort === 'name' || sort === 'users' ? sort : 'reports',
+        sort: sort === 'name' || sort === 'users' || sort === 'logins' ? sort : 'reports',
         active: u.get('active') === '1',
         internal: u.get('internal') === '1',
       } as const

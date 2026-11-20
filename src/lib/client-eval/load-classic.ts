@@ -48,10 +48,11 @@ export async function loadClassic(q: Query, progress: Progress): Promise<Snapsho
     WHERE ${ACCOUNTS}`)
 
   await progress('Reading Classic users', 1, 6)
-  const users = await q(`SELECT u.userId, u.accountId, u.firstName, u.lastName, u.fullName, u.email, h.last
+  const users = await q(`SELECT u.userId, u.accountId, u.firstName, u.lastName, u.fullName, u.email, h.last, h.n30
     FROM magradar_public.users u
     JOIN magradar_public.customer_accounts a ON a.accountId = u.accountId
-    LEFT JOIN (SELECT userId, MAX(loginTime) AS last FROM magradar_public.loginHistory GROUP BY userId) h ON h.userId = u.userId
+    LEFT JOIN (SELECT userId, MAX(loginTime) AS last, SUM(CASE WHEN loginTime >= DATEADD(day, -30, GETDATE()) THEN 1 ELSE 0 END) AS n30
+      FROM magradar_public.loginHistory GROUP BY userId) h ON h.userId = u.userId
     WHERE ${ACCOUNTS}`)
 
   await progress('Reading the properties Classic accounts own', 2, 6)
@@ -146,6 +147,7 @@ export async function loadClassic(q: Query, progress: Progress): Promise<Snapsho
       active: activeAcct.get(accountId) === true,
       lastSeen: day(u.last),
       reports: 0,
+      logins30: Number(u.n30 ?? 0),
     }
   })
   await progress('Classic read', 6, 6)
