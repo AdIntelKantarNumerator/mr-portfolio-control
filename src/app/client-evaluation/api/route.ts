@@ -11,6 +11,7 @@
  *   POST { op: 'refresh', platform }          start a refresh (360, Magnifier)
  *   POST { op: 'merge', member, withMember }  put an account with another's client
  *   POST { op: 'split', member }              make an account its own client
+ *   POST { op: 'export', clients: [ids] }     the ticked clients and their users, as an Excel workbook
  *
  * Under /client-evaluation, so the request gate already requires "Sees Client
  * Evaluation"; checked again here because the gate does not enforce roles on
@@ -21,7 +22,7 @@ import { db } from '@/db/client'
 import { currentAccess } from '@/lib/auth/access'
 import { describe } from '@/lib/import360/decode'
 import { live360Configured, liveLookup, liveReport, liveReports } from '@/lib/import360/source'
-import { ensureExport } from '@/lib/client-eval/export-cache'
+import { buildExport, EXPORT_MAX } from '@/lib/client-eval/export'
 import { liveProfiles } from '@/lib/client-eval/profiles'
 import { canRefreshHere, startRefresh } from '@/lib/client-eval/refresh'
 import { accountDetail, addOverride, clientPeople, listClients, sources } from '@/lib/client-eval/store'
@@ -49,17 +50,21 @@ export async function GET(req: Request) {
     if (op === 'clients') {
       const platform = u.get('platform') ?? 'all'
       const sort = u.get('sort') ?? 'reports'
-      return NextResponse.json(
-        await listClients(db, {
-          q: (u.get('q') ?? '').slice(0, 200),
-          platform: platform === 'multi' || platform === 'all' || isPlatform(platform) ? platform : 'all',
-          sort: sort === 'name' || sort === 'users' ? sort : 'reports',
-          active: u.get('active') === '1',
-          internal: u.get('internal') === '1',
-          offset: Math.max(0, Number(u.get('offset')) || 0),
-          limit: 100,
-        }),
-      )
+      const q = (u.get('q') ?? '').slice(0, 200)
+      const filter = {
+        q,
+        platform: platform === 'multi' || platform === 'all' || isPlatform(platform) ? platform : 'all',
+        sort: sort === 'name' || sort === 'users' ? sort : 'reports',
+        active: u.get('active') === '1',
+        internal: u.get('internal') === '1',
+      } as const
+      // Select all: every client the search matches, ids and names only. Only for a search (Scott, 20 November 2026).
+      if (u.get('ids') === '1') {
+        if (!q.trim()) return bad('Search first: select all works on a searched list.')
+        const r = await listClients(db, { ...filter, offset: 0, limit: EXPORT_MAX + 1 })
+        return NextResponse.json({ total: r.total, clients: r.rows.slice(0, EXPORT_MAX).map((c) => ({ id: c.id, name: c.name })) })
+      }
+      return NextResponse.json(await listClients(db, { ...filter, offset: Math.max(0, Number(u.get('offset')) || 0), limit: 100 }))
     }
     if (op === 'account') {
       const key = u.get('key') ?? ''
@@ -100,9 +105,23 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const who = await allowed()
   if (!who) return bad('Client Evaluation is not switched on for you.', 403)
-  const body = (await req.json().catch(() => ({}))) as { op?: string; platform?: string; member?: string; withMember?: string }
+  const body = (await req.json().catch(() => ({}))) as { op?: string; platform?: string; member?: string; withMember?: string; clients?: unknown }
   const by = who.email || who.name || null
   try {
+    if (body.op === 'export') {
+      const ids = Array.isArray(body.clients) ? body.clients.filter((x): x is string => typeof x === 'string' && x.length <= 300) : []
+      if (!ids.length) return bad('Tick the clients to export.')
+      if (ids.length > EXPORT_MAX) return bad(`Export up to ${EXPORT_MAX} clients at a time.`)
+      const file = await buildExport(db, ids)
+      const name = `Client Evaluation - ${ids.length} client${ids.length === 1 ? '' : 's'} ${new Date().toISOString().slice(0, 10)}.xlsx`
+      return new Response(new Uint8Array(file), {
+        headers: {
+          'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'content-disposition': `attachment; filename="${name}"`,
+          'cache-control': 'no-store',
+        },
+      })
+    }
     if (body.op === 'refresh') {
       if (!isPlatform(body.platform)) return bad('Unknown platform.')
       const r = await startRefresh(body.platform, by)
@@ -114,8 +133,6 @@ export async function POST(req: Request) {
       if (!parseMember(member) || (withMember !== null && !parseMember(withMember))) return bad('Unknown account.')
       if (member === withMember) return bad('That is the same account.')
       await addOverride(db, { kind: body.op, member, withMember, by })
-      // The clients changed: rebuild the kept export in the background.
-      void ensureExport(by).catch((err) => console.error('[client-eval] export after override', err))
       return NextResponse.json({ ok: true })
     }
     return bad('Unknown request.')

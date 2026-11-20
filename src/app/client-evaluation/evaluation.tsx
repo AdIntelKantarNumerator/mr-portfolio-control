@@ -7,7 +7,6 @@
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '@/components/items/parts'
-import { JobProgress, useJob } from './deck/runner'
 import type { Described } from '@/lib/import360/decode'
 import type { ReadableRel } from '@/lib/client-eval/rel'
 import type { ProfileSummary } from '@/lib/client-eval/profiles'
@@ -167,72 +166,51 @@ function Sources({ contact, onReady }: { contact: string; onReady: () => void })
 
 // ------------------------------------------------------------------ the export
 
-interface ExportState {
-  ready: { id: string; fileName: string; builtAt: string; current: boolean } | null
-  building: string | null
-}
+const EXPORT_MAX = 300
 
 /**
- * The client and user export, kept ready after each change of the data
- * (lib/client-eval/export-cache.ts): a download at once when it is current;
- * while a new one builds, its progress, and the download when it is done.
+ * Export the ticked clients and their users (Scott, 20 November 2026: the
+ * whole list was too big). Built on request and downloaded straight away;
+ * nothing is kept on the server.
  */
-function ExportButton() {
-  const [state, setState] = useState<ExportState | null>(null)
-  const [asked, setAsked] = useState(false)
-  const run = useJob()
-  const { follow, wantDownload } = run
-  useEffect(() => {
-    // Asking also starts a build when the kept one is behind the data (a Classic refresh from the laptop).
-    fetch('/client-evaluation/jobs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'export' }) })
-      .then((r) => r.json())
-      .then((s: ExportState) => {
-        setState(s)
-        if (s.building) follow(s.building, false)
-      })
-      .catch(() => setState({ ready: null, building: null }))
-    // Once, when the page opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  const building = run.job?.status === 'running' ? run.job : null
-  const builtNow = run.job?.status === 'done' ? { id: run.job.id, fileName: run.job.fileName ?? 'export.xlsx' } : null
-  const ready = builtNow ?? (state?.ready?.current ? state.ready : null)
-  const when = (iso: string) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-  if (ready)
-    return (
-      <a className="btn ce-sm" href={`/client-evaluation/jobs?id=${ready.id}&file=1`} download title="Every client, every user in each account, and each user's last login, as an Excel workbook">
-        Export clients and users
-      </a>
-    )
-  if (building || state?.building)
-    return (
-      <span className="ce-tick" title="The export is rebuilt after each refresh, and kept ready">
-        {asked ? (
-          <span className="ce-muted">Preparing the export… it downloads when ready</span>
-        ) : (
-          <button
-            type="button"
-            className="btn ce-sm"
-            onClick={() => {
-              setAsked(true)
-              wantDownload()
-            }}
-          >
-            Export clients and users
-          </button>
-        )}
-        <JobProgress job={run.job} error={run.error} started={run.started} what="The export" waiting={run.waiting} />
-        {state?.ready && !asked ? (
-          <a className="ce-link" href={`/client-evaluation/jobs?id=${state.ready.id}&file=1`} download>
-            or the one from {when(state.ready.builtAt)}
-          </a>
-        ) : null}
-      </span>
-    )
+function ExportPicked({ picked, onClear }: { picked: Map<string, string>; onClear: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  if (!picked.size) return <span className="ce-muted ce-sm">Tick clients to export them</span>
+  async function exportPicked() {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch(API, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op: 'export', clients: [...picked.keys()] }) })
+      if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `The export failed (${res.status}).`)
+      const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'Client Evaluation export.xlsx'
+      const url = URL.createObjectURL(await res.blob())
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const over = picked.size > EXPORT_MAX
   return (
-    <button type="button" className="btn ce-sm" disabled>
-      Export clients and users
-    </button>
+    <span className="ce-tick">
+      <b>{n(picked.size)} selected</b>
+      <button type="button" className="btn btn-primary ce-sm" disabled={busy || over} onClick={() => void exportPicked()} title="The ticked clients, every user in each of their accounts, and each user's last login, as an Excel workbook">
+        {busy ? 'Exporting…' : 'Export selected'}
+      </button>
+      <button type="button" className="btn ce-sm" disabled={busy} onClick={onClear}>
+        Clear
+      </button>
+      {over ? <span className="ce-bad">Up to {EXPORT_MAX} at a time</span> : null}
+      {error ? <span className="ce-bad">{error}</span> : null}
+    </span>
   )
 }
 
@@ -258,6 +236,15 @@ export function ClientEvaluation({ contact }: { contact: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState<string | null>(null)
+  /** Clients ticked for export, by id, with their names; kept across searches and pages. */
+  const [picked, setPicked] = useState<Map<string, string>>(new Map())
+  const pick = (c: ClientRow, on: boolean) =>
+    setPicked((m) => {
+      const next = new Map(m)
+      if (on) next.set(c.id, c.name)
+      else next.delete(c.id)
+      return next
+    })
   const [stack, setStack] = useState<Popup[]>([])
   const [tick, setTick] = useState(0)
   const push = (p: Popup) => setStack((s) => [...s, p])
@@ -328,7 +315,29 @@ export function ClientEvaluation({ contact }: { contact: string }) {
           <input id="ce-internal" type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Show internal
         </label>
         <span className="ce-count">{busy ? 'Loading…' : `${n(total)} clients`}</span>
-        <ExportButton />
+        {q.trim() && total > 0 ? (
+          <button
+            type="button"
+            className="btn ce-sm"
+            disabled={total > EXPORT_MAX}
+            title={total > EXPORT_MAX ? `Narrow the search: select all takes up to ${EXPORT_MAX} clients` : 'Tick every client this search finds'}
+            onClick={async () => {
+              try {
+                const r = await get<{ clients: Array<{ id: string; name: string }> }>({ ...params, ids: '1' })
+                setPicked((m) => {
+                  const next = new Map(m)
+                  for (const c of r.clients) next.set(c.id, c.name)
+                  return next
+                })
+              } catch (e) {
+                setError((e as Error).message)
+              }
+            }}
+          >
+            Select all {n(total)}
+          </button>
+        ) : null}
+        <ExportPicked picked={picked} onClear={() => setPicked(new Map())} />
       </div>
       {error ? <p className="mr-said mr-bad">{error}</p> : null}
 
@@ -336,6 +345,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
         <table className="dtable">
           <thead>
             <tr>
+              <th className="ce-pick" />
               <th>Client</th>
               <th>Platforms</th>
               <th className="ce-num" title="Distinct people across the platforms, by email. Active / all.">Users</th>
@@ -349,6 +359,9 @@ export function ClientEvaluation({ contact }: { contact: string }) {
               const byPlatform = (p: Platform) => c.members.filter((m) => m.platform === p)
               return [
                 <tr key={c.id} className={isOpen ? 'ce-open' : undefined}>
+                  <td className="ce-pick">
+                    <input id={`ce-pick-${c.id}`} type="checkbox" checked={picked.has(c.id)} onChange={(e) => pick(c, e.target.checked)} aria-label={`Tick ${c.name} for export`} />
+                  </td>
                   <td>
                     <button type="button" className="ce-name" onClick={() => setOpen(isOpen ? null : c.id)} aria-expanded={isOpen}>
                       <span className="ce-caret">{isOpen ? '▾' : '▸'}</span>
@@ -405,7 +418,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                 </tr>,
                 isOpen ? (
                   <tr key={`${c.id}-m`} className="ce-members-row">
-                    <td colSpan={5}>
+                    <td colSpan={6}>
                       <div className="ce-members">
                         {c.members.map((m) => (
                           <div key={m.key} className="ce-member">

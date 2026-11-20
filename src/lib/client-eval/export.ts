@@ -1,10 +1,10 @@
 /**
- * The client and user export (Scott, 20 November 2026): every client, every
- * user in each of its accounts, and each user's last login across the apps,
- * with the 360 user set and Magnifier account code. From the snapshots, as an
- * Excel workbook of three sheets:
+ * The client and user export (Scott, 20 November 2026): for the clients a
+ * person ticks on the list, every user in each of their accounts and each
+ * user's last login across the apps, with the 360 user set and Magnifier
+ * account code. An Excel workbook of three sheets:
  *
- *   Clients           one row per client (the consolidated list)
+ *   Clients           one row per client
  *   People            one row per person per client: their accounts across
  *                     the apps, by email, and their latest login anywhere
  *   Users by account  one row per user per platform account
@@ -12,19 +12,17 @@
  * Last login: 360's latest login session since 2025, Classic's latest login.
  * Magnifier records none we can read.
  *
- * IT MUST NOT HOLD THE SERVER. The app is one B1 instance (one core, 1.75 GB),
- * and the first version - every user read at once, sorted, the whole file in
- * memory - made it unresponsive while it ran (Scott, 20 November 2026). So:
- * clients are taken in batches and only their users are read; the work pauses
- * between batches for as long as it worked, so other requests get at least
- * half the core; and the file goes out in pieces as it is written (jobs.ts).
+ * Only ticked clients: the whole list made a 60 MB file nobody could use
+ * (Scott, 20 November 2026), so there is no whole-list export and nothing is
+ * kept on the server. A selection is built on request and sent straight back.
+ * It still reads users in batches and pauses between them, so a large
+ * selection cannot hold the one-core B1 server.
  */
 import { PassThrough } from 'node:stream'
 import { and, eq, inArray } from 'drizzle-orm'
 import ExcelJS from 'exceljs'
 import type { Database } from '@/db/client'
 import { ceAccounts, ceClients, ceUsers } from '@/db/schema'
-import type { JobOutput } from './jobs'
 import { PLATFORM_LABEL, parseMember, PLATFORMS, type Platform } from './types'
 
 type Progress = (step: string, done?: number, total?: number) => Promise<void>
@@ -67,15 +65,26 @@ async function usersOf(d: Database, clients: Array<{ members: unknown }>): Promi
   return out
 }
 
-export async function buildExport(d: Database, progress: Progress, sink: JobOutput): Promise<void> {
-  await progress('Reading clients and accounts')
-  const clients = await d.select().from(ceClients)
-  const accounts = await d.select({ platform: ceAccounts.platform, accountId: ceAccounts.accountId, name: ceAccounts.name, active: ceAccounts.active }).from(ceAccounts)
+/** The most clients one export may hold. */
+export const EXPORT_MAX = 300
+
+export async function buildExport(d: Database, clientIds: string[], progress: Progress = async () => {}): Promise<Buffer> {
+  const ids = [...new Set(clientIds)].slice(0, EXPORT_MAX)
+  if (!ids.length) throw new Error('Tick the clients to export.')
+  const clients = await d.select().from(ceClients).where(inArray(ceClients.clientId, ids))
+  if (!clients.length) throw new Error('Those clients are no longer in the list. It may have changed with a refresh.')
+  const accounts: Array<{ platform: string; accountId: string; name: string; active: boolean }> = []
+  for (const p of PLATFORMS) {
+    const mine = clients.flatMap((c) => (c.members as string[]).map(parseMember)).filter((m): m is NonNullable<ReturnType<typeof parseMember>> => m?.platform === p).map((m) => m.accountId)
+    for (let i = 0; i < mine.length; i += 500)
+      accounts.push(...(await d.select({ platform: ceAccounts.platform, accountId: ceAccounts.accountId, name: ceAccounts.name, active: ceAccounts.active }).from(ceAccounts).where(and(eq(ceAccounts.platform, p), inArray(ceAccounts.accountId, mine.slice(i, i + 500))))))
+  }
   const acct = new Map(accounts.map((a) => [`${a.platform}:${a.accountId}`, a]))
   const sorted = clients.map((c) => ({ c, k: c.name.toLowerCase() })).sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0)).map((x) => x.c)
 
   const out = new PassThrough()
-  out.on('data', (c: Buffer) => sink.write(c))
+  const chunks: Buffer[] = []
+  out.on('data', (c: Buffer) => chunks.push(c))
   const ended = new Promise<void>((resolve, reject) => {
     out.on('end', resolve)
     out.on('error', reject)
@@ -127,7 +136,6 @@ export async function buildExport(d: Database, progress: Progress, sink: JobOutp
       classic: list(c, 'classic'),
     }).commit()
     if (i % 1000 === 999) {
-      await sink.drain()
       t = await yieldTo(t)
     }
   }
@@ -201,7 +209,6 @@ export async function buildExport(d: Database, progress: Progress, sink: JobOutp
           profiles: x.profiles || '',
         }).commit()
     }
-    await sink.drain()
     t = await yieldTo(t)
   }
   await wp.commit()
@@ -253,7 +260,6 @@ export async function buildExport(d: Database, progress: Progress, sink: JobOutp
           }).commit()
         }
       }
-    await sink.drain()
     t = await yieldTo(t)
   }
   await wu.commit()
@@ -261,7 +267,7 @@ export async function buildExport(d: Database, progress: Progress, sink: JobOutp
   const wn = wb.addWorksheet('Notes')
   wn.columns = [{ header: 'About this export', key: 't', width: 120 }]
   for (const text of [
-    `Exported ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC from the Client Evaluation snapshots.`,
+    `Exported ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC from the Client Evaluation snapshots: ${sorted.length} selected client${sorted.length === 1 ? '' : 's'}.`,
     'Last login: 360 is the latest login session since January 2025; Classic is the latest entry in its login history; Magnifier does not record logins in the tables we can read.',
     'People: one row per person per client, matched by email across the apps; a user with no email is their own row.',
     'Account ids: 360 user set id, Magnifier account code, Classic customer account id.',
@@ -272,5 +278,5 @@ export async function buildExport(d: Database, progress: Progress, sink: JobOutp
   await progress('Finishing the workbook', sorted.length, sorted.length)
   await wb.commit()
   await ended
-  await sink.drain()
+  return Buffer.concat(chunks)
 }
