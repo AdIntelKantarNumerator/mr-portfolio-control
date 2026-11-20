@@ -296,7 +296,7 @@ async function retry<T>(f: () => Promise<T>): Promise<T> {
 async function follow(c: Candidates, progress: Progress, label: string): Promise<FocusEntity[]> {
   await progress(`${label}: following ${c.items.length} ${c.kind === 'advertiser' ? 'advertisers' : 'categories'} into Insights Studio (a minute or two)`)
   const ids = c.items.map((i) => i.id)
-  const flows = await retry(() => (c.kind === 'advertiser' ? dbxFlows(c.taxonomy, ids, new Map()) : dbxCategoryFlows(c.taxonomy, ids)))
+  const flows = await retry(() => (c.kind === 'advertiser' ? dbxFlows(c.taxonomy, ids, new Map(), undefined, { large: true }) : dbxCategoryFlows(c.taxonomy, ids)))
   const nameOf = new Map(c.items.map((i) => [i.id, i.name]))
   const ranked = [...flows]
     .map(([id, fl]) => ({ id, flows: fl, spend: fl.reduce((s, f) => s + f.spend, 0) }))
@@ -394,7 +394,8 @@ export async function deckData(scope: DeckScope, progress: Progress): Promise<De
         const m = await within(3 * 60_000, "Reading Magnifier's report criteria", () => candidatesMagnifier(ids))
         c = m.c
         section.focus.note = m.note
-      } else section.focus.note = 'Classic has no advertiser or category restrictions and no saved reports, so there is nothing to follow into Insights Studio: media only.'
+      }
+      // Classic never restricts advertisers or categories: its slides are media only, with no note about it.
       if (p === '360' && !c) section.focus.note = 'No advertiser or category restrictions, report selections or reporting profile lists were found.'
       if (c) {
         section.focus = { kind: c.kind, source: c.source, taxonomy: c.taxonomy, entities: await within(12 * 60_000, 'Following them into Insights Studio', () => follow(c!, progress, label)), note: null }

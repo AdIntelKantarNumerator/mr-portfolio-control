@@ -322,10 +322,12 @@ export async function dbxFlows(
   ids: string[],
   classicProducts: Map<string, number[]>,
   onWait?: OnWait,
+  /** large: over 25 MB of rows, fetched through download links (the Impact Deck follows up to 40 entities at once). */
+  opts: { large?: boolean } = {},
 ): Promise<Map<string, FlowRaw[]>> {
   const out = new Map<string, FlowRaw[]>()
   if (!ids.length) return out
-  const rows = await dbxQuery(config(), flowsSql(fromCreativesSql(from, ids, classicProducts), from), [], { onWait })
+  const rows = await dbxQuery(config(), flowsSql(fromCreativesSql(from, ids, classicProducts), from), [], { onWait, large: opts.large })
   for (const r of rows) {
     const month = `${r.month!.slice(0, 4)}-${r.month!.slice(4, 6)}` as Month
     if (!(MONTHS as readonly string[]).includes(month)) continue
@@ -394,7 +396,8 @@ from_crtv AS (
     JOIN mrdpp_prod.vx2_taxonomy.d_product p ON p.PRSEQ = c.vx2_product_id WHERE p.PRSBCAT IN (${subs.join(', ') || 'NULL'}))`
   }
   const out = new Map<string, FlowRaw[]>()
-  const rows = await dbxQuery(config(), flowsSql(cte, from), [], { onWait })
+  // A category's flows can pass Databricks' 25 MB inline limit: always fetched through download links.
+  const rows = await dbxQuery(config(), flowsSql(cte, from), [], { onWait, large: true })
   for (const r of rows) {
     const month = `${r.month!.slice(0, 4)}-${r.month!.slice(4, 6)}` as Month
     if (!(MONTHS as readonly string[]).includes(month)) continue

@@ -73,7 +73,8 @@ export async function buildDeck(d: DeckData): Promise<Buffer> {
   for (const s of d.sections) {
     mediaSlide(pptx, d, s)
     if (s.focus.entities.length) for (const e of s.focus.entities) sankeySlide(pptx, d, s, e)
-    else noteSlide(pptx, d, s)
+    // Classic never restricts advertisers or categories (Scott, 20 November 2026): its media slide says it all.
+    else if (s.platform !== 'classic') noteSlide(pptx, d, s)
   }
 
   // How this was put together
