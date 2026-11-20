@@ -7,6 +7,7 @@
  *   GET  ?op=people&client=<id>               a client's people across platforms
  *   GET  ?op=reports&user=<360 usr id>        a 360 user's reports used in 2026, live
  *   GET  ?op=report&key=<mnemonic:id>         one 360 report's spec, live, described
+ *   GET  ?op=profiles&user=<360 usr id>       a 360 user's reporting profiles, live
  *   POST { op: 'refresh', platform }          start a refresh (360, Magnifier)
  *   POST { op: 'merge', member, withMember }  put an account with another's client
  *   POST { op: 'split', member }              make an account its own client
@@ -20,6 +21,7 @@ import { db } from '@/db/client'
 import { currentAccess } from '@/lib/auth/access'
 import { describe } from '@/lib/import360/decode'
 import { live360Configured, liveLookup, liveReport, liveReports } from '@/lib/import360/source'
+import { liveProfiles } from '@/lib/client-eval/profiles'
 import { canRefreshHere, startRefresh } from '@/lib/client-eval/refresh'
 import { accountDetail, addOverride, clientPeople, listClients, sources } from '@/lib/client-eval/store'
 import { isPlatform, parseMember } from '@/lib/client-eval/types'
@@ -73,6 +75,12 @@ export async function GET(req: Request) {
       if (!Number.isInteger(usr) || usr <= 0) return bad('Unknown 360 user.')
       if (!live360Configured()) return bad('360 is not reachable from this server.')
       return NextResponse.json({ reports: await liveReports(usr) })
+    }
+    if (op === 'profiles') {
+      const usr = Number(u.get('user'))
+      if (!Number.isInteger(usr) || usr <= 0) return bad('Unknown 360 user.')
+      if (!live360Configured()) return bad('360 is not reachable from this server.')
+      return NextResponse.json({ profiles: await liveProfiles(usr) })
     }
     if (op === 'report') {
       const key = u.get('key') ?? ''

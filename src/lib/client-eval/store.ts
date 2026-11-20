@@ -331,7 +331,7 @@ export interface PersonRow {
   reports: number
   lastSeen: string | null
   /** reports: 360 reports this person used in 2026. accountReports: the reports set up for the account (Magnifier). */
-  accounts: Array<{ platform: Platform; accountId: string; accountName: string; userId: string; login: string | null; active: boolean; reports: number; accountReports: number; lastSeen: string | null }>
+  accounts: Array<{ platform: Platform; accountId: string; accountName: string; userId: string; login: string | null; active: boolean; reports: number; accountReports: number; profiles: number; lastSeen: string | null }>
 }
 
 /** A client's people across its platforms, one row per person (by email). */
@@ -354,7 +354,7 @@ export async function clientPeople(d: Database, clientId: string): Promise<{ nam
         row.reports += u.reports
         if (u.lastSeen && (!row.lastSeen || u.lastSeen > row.lastSeen)) row.lastSeen = u.lastSeen
         if (row.name === row.email && u.name !== u.email) row.name = u.name
-        row.accounts.push({ platform: p, accountId: u.accountId, accountName: names.get(u.accountId) ?? u.accountId, userId: u.userId, login: u.login, active: u.active, reports: u.reports, accountReports: acctReports.get(u.accountId) ?? 0, lastSeen: u.lastSeen })
+        row.accounts.push({ platform: p, accountId: u.accountId, accountName: names.get(u.accountId) ?? u.accountId, userId: u.userId, login: u.login, active: u.active, reports: u.reports, accountReports: acctReports.get(u.accountId) ?? 0, profiles: u.profiles, lastSeen: u.lastSeen })
       }
   }
   return { name: c.name, people: [...people.values()] }

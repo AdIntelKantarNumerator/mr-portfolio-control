@@ -166,3 +166,39 @@ test("Canada's capitalised names are title-cased; mixed case is left alone", () 
 function parseParts(lines: string[]) {
   return parseRel(lines.join(' '))
 }
+
+test('a 360 reporting profile reads as its choices, not the options it offered', async () => {
+  const { summariseProfile } = await import('../src/lib/client-eval/profiles')
+  const s = summariseProfile(
+    JSON.stringify({
+      Measures: { MeasuresList: [{ Description: 'Dollars' }, { Description: 'GRP' }], HasTVRatingsMeasures: true, MeasureFormatDesc: 'Dollars/IMPs Format: 000s' },
+      Media: {
+        AllMediaAreSelected: false,
+        MediaList: [
+          { Description: 'Network TV', MediaTypeDescription: 'TV' },
+          { Description: 'Cable TV', MediaTypeDescription: 'TV' },
+          { Description: 'Paid Social', MediaTypeDescription: 'Digital' },
+        ],
+      },
+      Markets: { AllMarketsAreSelected: false, MarketsList: [{ Name: 'LOUISVILLE', LongName: 'LOUISVILLE,KY' }] },
+      Demographics: { DemographicsList: [{ Description: 'Households' }] },
+      AvailableDemographics: { DemographicsList: [{ Description: 'Adults 18-49' }] },
+      RatingType: { Description: 'Program' },
+      DemographicMarketType: { Description: 'General' },
+      TotalColumnDesc: 'Include Total Column: Last',
+    }),
+  )
+  assert.deepEqual(s.measures, ['Dollars', 'GRP'])
+  assert.deepEqual(s.media, [
+    { type: 'TV', media: ['Network TV', 'Cable TV'] },
+    { type: 'Digital', media: ['Paid Social'] },
+  ])
+  assert.deepEqual(s.markets, ['LOUISVILLE,KY'])
+  assert.deepEqual(s.demographics, ['Households'], 'what was offered is not what was picked')
+  assert.equal(s.rating, 'Program')
+  assert.deepEqual(s.options, ['Dollars/IMPs Format: 000s', 'Include Total Column: Last'])
+  const all = summariseProfile(JSON.stringify({ Media: { AllMediaAreSelected: true }, Markets: { AllMarketsAreSelected: true } }))
+  assert.equal(all.media, null)
+  assert.equal(all.markets, null)
+  assert.equal(summariseProfile('not json').measures.length, 0)
+})

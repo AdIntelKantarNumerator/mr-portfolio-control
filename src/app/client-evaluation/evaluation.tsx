@@ -9,6 +9,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { Modal } from '@/components/items/parts'
 import type { Described } from '@/lib/import360/decode'
 import type { ReadableRel } from '@/lib/client-eval/rel'
+import type { ProfileSummary } from '@/lib/client-eval/profiles'
 import type { ClientRow, PersonRow, SourceInfo } from '@/lib/client-eval/store'
 import { PLATFORM_LABEL, SNAPSHOT_ONLY, type Ent360, type EntClassic, type EntMagnifier, type Entitlements, type Platform } from '@/lib/client-eval/types'
 
@@ -154,6 +155,7 @@ type Popup =
   | { kind: 'people'; client: ClientRow; platform?: Platform }
   | { kind: 'reports'; usrId: number; who: string }
   | { kind: 'mreports'; accountKey: string; who: string }
+  | { kind: 'profiles'; usrId: number; who: string }
   | { kind: 'report'; key: string }
   | { kind: 'merge'; client: ClientRow }
 
@@ -369,8 +371,9 @@ export function ClientEvaluation({ contact }: { contact: string }) {
 
       {top?.kind === 'account' ? <AccountPopup k={top.key} onClose={pop} /> : null}
       {top?.kind === 'people' ? (
-        <PeoplePopup client={top.client} initialPlatform={top.platform} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} onMagnifierReports={(accountKey, who) => push({ kind: 'mreports', accountKey, who })} />
+        <PeoplePopup client={top.client} initialPlatform={top.platform} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} onMagnifierReports={(accountKey, who) => push({ kind: 'mreports', accountKey, who })} onProfiles={(usrId, who) => push({ kind: 'profiles', usrId, who })} />
       ) : null}
+      {top?.kind === 'profiles' ? <ProfilesPopup usrId={top.usrId} who={top.who} onClose={pop} /> : null}
       {top?.kind === 'mreports' ? <MagnifierReportsPopup k={top.accountKey} who={top.who} onClose={pop} /> : null}
       {top?.kind === 'reports' ? <ReportsPopup usrId={top.usrId} who={top.who} onClose={pop} onReport={(key) => push({ kind: 'report', key })} /> : null}
       {top?.kind === 'report' ? <ReportPopup k={top.key} onClose={pop} /> : null}
@@ -400,12 +403,14 @@ function PeoplePopup({
   onClose,
   onReports,
   onMagnifierReports,
+  onProfiles,
 }: {
   client: ClientRow
   initialPlatform?: Platform
   onClose: () => void
   onReports: (usrId: number, who: string) => void
   onMagnifierReports: (accountKey: string, who: string) => void
+  onProfiles: (usrId: number, who: string) => void
 }) {
   const [data, setData] = useState<{ name: string; people: PersonRow[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -457,6 +462,7 @@ function PeoplePopup({
                 <th>Platforms</th>
                 <th>Last seen</th>
                 <th title="360: reports this person used in 2026. Magnifier: the reports set up for their account.">Reports</th>
+                {platform !== 'magnifier' && platform !== 'classic' ? <th title="360 reporting profiles: the measures, media, markets and demographics a person reports with">Reporting profiles</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -497,11 +503,120 @@ function PeoplePopup({
                       {!p.accounts.some((a) => (a.platform === '360' && a.reports > 0) || (a.platform === 'magnifier' && a.accountReports > 0)) ? <span className="ce-muted">—</span> : null}
                     </div>
                   </td>
+                  {platform !== 'magnifier' && platform !== 'classic' ? (
+                    <td>
+                      <div className="ce-accts">
+                        {p.accounts
+                          .filter((a) => a.platform === '360' && a.profiles > 0)
+                          .map((a) => (
+                            <button key={`rp:${a.userId}`} type="button" className="ce-pill" onClick={() => onProfiles(Number(a.userId), p.name)}>
+                              {n(a.profiles)} profile{a.profiles === 1 ? '' : 's'} ›
+                            </button>
+                          ))}
+                        {!p.accounts.some((a) => a.platform === '360' && a.profiles > 0) ? <span className="ce-muted">—</span> : null}
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
           </table>
           {shown.length > 500 ? <p className="ce-muted">Showing the first 500. Search to narrow.</p> : null}
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ------------------------------------------------------------------ 360 reporting profiles
+
+function ProfilesPopup({ usrId, who, onClose }: { usrId: number; who: string; onClose: () => void }) {
+  const [list, setList] = useState<ProfileSummary[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState<number | null>(null)
+  useEffect(() => {
+    get<{ profiles: ProfileSummary[] }>({ op: 'profiles', user: String(usrId) }).then(
+      (r) => {
+        setList(r.profiles)
+        if (r.profiles.length === 1) setOpen(r.profiles[0]!.id)
+      },
+      (e) => setError((e as Error).message),
+    )
+  }, [usrId])
+  return (
+    <Modal title={`${who}'s 360 reporting profiles`} onClose={onClose}>
+      <div className="ce-pop">
+        <span className="ce-count">{list ? `${n(list.length)} profile${list.length === 1 ? '' : 's'}, read live from 360` : 'Reading 360…'}</span>
+        {error ? <p className="mr-said mr-bad">{error}</p> : null}
+        <div className="ce-filters">
+          {(list ?? []).map((p) => (
+            <div key={p.id} className="ce-report">
+              <div>
+                <button type="button" className="ce-link" onClick={() => setOpen(open === p.id ? null : p.id)}>
+                  {open === p.id ? '▾' : '▸'} {p.name}
+                </button>{' '}
+                {p.isDefault ? <span className="ce-name-chip">Default</span> : null}{' '}
+                <span className="ce-muted">
+                  last used {p.lastUsed ?? '—'}
+                  {p.lists.length ? ` · ${p.lists.map((l) => `${l.list} ${n(l.count)}`).join(' · ')}` : ''}
+                </span>
+              </div>
+              {open === p.id ? (
+                <dl className="ce-dl">
+                  {p.description ? (
+                    <>
+                      <dt>About</dt>
+                      <dd>{p.description}</dd>
+                    </>
+                  ) : null}
+                  {p.lists.map((l) => (
+                    <Fragment key={`${l.list}|${l.type}`}>
+                      <dt>
+                        {l.list}
+                        <div className="ce-muted">{l.type}</div>
+                      </dt>
+                      <dd>
+                        <Names items={l.names} total={l.count} />
+                      </dd>
+                    </Fragment>
+                  ))}
+                  <dt>Media</dt>
+                  <dd>
+                    {p.media === null ? (
+                      'All media'
+                    ) : p.media.length ? (
+                      <div className="ce-filters">
+                        {p.media.map((g) => (
+                          <div key={g.type}>
+                            <b>{g.type}</b> <MediaChips media={g.media} />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="ce-muted">Not set</span>
+                    )}
+                  </dd>
+                  <dt>Measures</dt>
+                  <dd>{p.measures.length ? <MediaChips media={p.measures} /> : <span className="ce-muted">Not set</span>}</dd>
+                  <dt>Markets</dt>
+                  <dd>{p.markets === null ? 'All markets' : p.markets.length ? <Names items={p.markets} /> : <span className="ce-muted">Not set</span>}</dd>
+                  <dt>Demographics</dt>
+                  <dd>
+                    {p.demographics.length ? p.demographics.join(', ') : '—'}
+                    {p.demographicMarket ? <span className="ce-muted"> · {p.demographicMarket} market</span> : null}
+                  </dd>
+                  {p.rating ? (
+                    <>
+                      <dt>Ratings</dt>
+                      <dd>{p.rating}</dd>
+                    </>
+                  ) : null}
+                  <dt>Layout</dt>
+                  <dd className="ce-muted">{p.options.join(' · ') || '—'}</dd>
+                </dl>
+              ) : null}
+            </div>
+          ))}
         </div>
       </div>
     </Modal>

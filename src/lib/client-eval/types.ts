@@ -93,6 +93,8 @@ export interface UserSnap {
   active: boolean
   lastSeen: string | null
   reports: number
+  /** 360 reporting profiles. */
+  profiles?: number
 }
 
 export interface ReportSnap {

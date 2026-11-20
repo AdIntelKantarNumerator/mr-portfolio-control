@@ -14,6 +14,7 @@
  *                market...), named from iddb_master as the importer names them.
  */
 import { chunks, liveReportCounts, META_SQL, NAME_FIELDS_SQL, namesSql, q360 } from '@/lib/import360/source'
+import { profileCounts } from './profiles'
 import type { AccountSnap, Ent360, Progress, Snapshot, UserSnap } from './types'
 
 type Row = Record<string, unknown>
@@ -49,6 +50,8 @@ export async function load360(progress: Progress): Promise<Snapshot> {
   await progress('Counting 360 reports used in 2026', 2, 6)
   const reportsByUser = new Map<number, number>()
   for (const c of await liveReportCounts()) reportsByUser.set(c.usrId, (reportsByUser.get(c.usrId) ?? 0) + c.n)
+
+  const profiles = await profileCounts()
 
   await progress('Reading 360 features', 3, 6)
   const features = new Map<number, string[]>()
@@ -123,6 +126,7 @@ export async function load360(progress: Progress): Promise<Snapshot> {
       active,
       lastSeen: seen.get(login.toLowerCase()) ?? null,
       reports: reportsByUser.get(Number(u.Usr_id)) ?? 0,
+      profiles: profiles.get(Number(u.Usr_id)) ?? 0,
     })
     const t = tally.get(set) ?? tally.set(set, { users: 0, active: 0, reports: 0 }).get(set)!
     t.users++

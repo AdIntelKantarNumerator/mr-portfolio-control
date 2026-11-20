@@ -2583,6 +2583,8 @@ export const ceUsers = pgTable(
     /** Last sign-in or use, YYYY-MM-DD, where the platform records it. */
     lastSeen: text('last_seen'),
     reports: integer('reports').notNull().default(0),
+    /** 360 reporting profiles (drizzle/0051). */
+    profiles: integer('profiles').notNull().default(0),
   },
   (t) => [primaryKey({ name: 'ce_users_pk', columns: [t.platform, t.accountId, t.userId] }), index('ce_users_email_idx').on(t.email)],
 )
