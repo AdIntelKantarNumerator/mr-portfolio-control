@@ -20,6 +20,10 @@ type Row = Record<string, unknown>
 const str = (v: unknown) => (v == null ? '' : String(v).trim())
 const day = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : v ? String(v).slice(0, 10) : null)
 const LIST_CAP = 40
+const SUBMEDIA = 300
+const MEDIA = 301
+/** Restrictions not shown: data tables and time. */
+const HIDDEN = [63, 700]
 
 /** 360's own names for the restricted entity types are internal ("adtable", "time"); these read better. */
 const TYPE_LABEL: Record<number, string> = { 63: 'Data tables', 300: 'Submedia', 500: 'Markets', 700: 'Time', 102: 'Parents', 103: 'Categories', 135: 'Subcategories', 118: 'Advertisers', 139: 'Brands', 373: 'Properties' }
@@ -54,7 +58,15 @@ export async function load360(progress: Progress): Promise<Snapshot> {
   }
 
   await progress('Reading 360 restrictions', 4, 6)
-  const filters = await q360<Row>(`SELECT fs.usrset_id, f.entmaj_id, f.master_id, f.include_f FROM iddb_ar.dbo.FILTER f JOIN iddb_ar.dbo.FILTERSET fs ON fs.filterset_id = f.filterset_id WHERE fs.active_f = 1`)
+  // Data tables (63) and time (700) say nothing useful about a client (Scott, 20 November 2026): left out.
+  const filters = await q360<Row>(`SELECT fs.usrset_id, f.entmaj_id, f.master_id, f.include_f FROM iddb_ar.dbo.FILTER f JOIN iddb_ar.dbo.FILTERSET fs ON fs.filterset_id = f.filterset_id WHERE fs.active_f = 1 AND f.entmaj_id NOT IN (${HIDDEN.join(', ')})`)
+  // Submedia roll up to media (Scott: "roll it up to MEDIA, not submedia"): iddb_master submedia_ai.media_id.
+  const mediaOfSubmedia = new Map<number, string>()
+  const mediaName = new Map<number, string>()
+  for (const r of await q360<Row>(`SELECT s.submedia_id, m.media_id, m.media_n FROM iddb_master.dbo.submedia_ai s JOIN iddb_master.dbo.media m ON m.media_id = s.media_id`)) {
+    mediaOfSubmedia.set(Number(r.submedia_id), str(r.media_n))
+    mediaName.set(Number(r.media_id), str(r.media_n))
+  }
   const typeName = new Map<number, string>()
   for (const r of await q360<{ id: number; n: string }>(META_SQL.find(([e]) => e === -1)![1])) typeName.set(Number(r.id), str(r.n))
   const where = new Map((await q360<{ entmaj_id: number; table_n: string; id_field: string; name_field: string }>(NAME_FIELDS_SQL)).map((f) => [Number(f.entmaj_id), f]))
@@ -73,9 +85,19 @@ export async function load360(progress: Progress): Promise<Snapshot> {
 
   await progress('Putting 360 together', 5, 6)
   const restrict = new Map<number, Map<number, { include: string[]; exclude: string[] }>>()
+  const media = new Map<number, { include: Set<string>; exclude: Set<string> }>()
   for (const f of filters) {
     const set = Number(f.usrset_id)
     const e = Number(f.entmaj_id)
+    if (e === SUBMEDIA || e === MEDIA) {
+      const id = Number(f.master_id)
+      const m = e === SUBMEDIA ? mediaOfSubmedia.get(id) : mediaName.get(id)
+      // Three submedia ids in FILTER exist nowhere in 360 any more (retired): left out rather than shown as numbers.
+      if (!m) continue
+      const x = media.get(set) ?? media.set(set, { include: new Set(), exclude: new Set() }).get(set)!
+      ;(Number(f.include_f) === 0 ? x.exclude : x.include).add(m)
+      continue
+    }
     const bySet = restrict.get(set) ?? restrict.set(set, new Map()).get(set)!
     const r = bySet.get(e) ?? bySet.set(e, { include: [], exclude: [] }).get(e)!
     const name = names.get(`${e}:${Number(f.master_id)}`) ?? `#${f.master_id}`
@@ -116,7 +138,8 @@ export async function load360(progress: Progress): Promise<Snapshot> {
     const r = [...(restrict.get(id) ?? new Map())]
       .map(([e, v]) => ({ type: TYPE_LABEL[e] ?? (typeName.get(e) || `Entity type ${e}`), include: v.include.slice(0, LIST_CAP), exclude: v.exclude.slice(0, LIST_CAP), count: v.include.length + v.exclude.length }))
       .sort((a, b) => a.type.localeCompare(b.type))
-    const ent: Ent360 = { kind: '360', application: app, years, features: feats, filters: r }
+    const m = media.get(id)
+    const ent: Ent360 = { kind: '360', application: app, years, media: m ? { include: [...m.include].sort(), exclude: [...m.exclude].sort() } : null, features: feats, filters: r }
     const reports = tally.get(id)?.reports ?? 0
     return {
       accountId: String(id),
@@ -136,11 +159,18 @@ export async function load360(progress: Progress): Promise<Snapshot> {
 /** "Ad Insights - US - Media Buyer" -> "Media Buyer". */
 const appShort = (a: string) => a.replace(/^Ad Insights\s*-\s*(US\s*-\s*)?/i, '')
 
+/** A media restriction in a few words: what is in, or what is kept out. */
+export function media360(m: NonNullable<Ent360['media']>): string {
+  const list = (xs: string[]) => xs.slice(0, 4).join(', ') + (xs.length > 4 ? ` +${xs.length - 4}` : '')
+  if (m.include.length) return list(m.include)
+  return m.exclude.length ? `all but ${list(m.exclude)}` : 'all'
+}
+
 export function summary360(e: Ent360): string {
   const parts = [appShort(e.application)]
   if (e.years) parts.push(`${e.years} yr`)
+  parts.push(e.media ? `Media: ${media360(e.media)}` : 'All media')
   if (e.filters.length) parts.push(e.filters.map((f) => `${f.type} ${f.count}`).slice(0, 3).join(', ') + (e.filters.length > 3 ? ` +${e.filters.length - 3}` : ''))
-  else parts.push('no restrictions')
   if (e.features.length) parts.push(`${e.features.length} feature${e.features.length === 1 ? '' : 's'}`)
   return parts.join(' · ')
 }

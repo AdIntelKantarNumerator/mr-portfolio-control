@@ -6,7 +6,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { cluster, displayName, domainFitsName, isInternal, links, mainDomains, nameKey, type MatchAccount } from '../src/lib/client-eval/match'
-import { parseRel, schemaCountry } from '../src/lib/client-eval/rel'
+import { mediaOf, parseRel, readable, schemaCountry } from '../src/lib/client-eval/rel'
+import { tidy } from '../src/lib/client-eval/rel-names'
 import { memberKey, parseMember } from '../src/lib/client-eval/types'
 
 const acct = (key: string, name: string, domains: Record<string, number> = {}, company: string | null = null): MatchAccount => ({
@@ -109,7 +110,7 @@ test('member keys round-trip, and reject an unknown platform', () => {
 test('a REL reads as the fields it restricts, its media and its dates', () => {
   const rel = parseParts([
     '# McDonalds OMD # Brand Monthly # Updated on 01/07/2026 JIRA #INTS-35418',
-    'rules.ruleA1=media_t2_code:TN TP PM PN RR',
+    'rules.ruleA1=media_t2_code:TN TP PM PN RR DO # comment, not codes',
     'rules.ruleA2=DATE_RANGE:for:media_month from:01/01/2023 to:12/31/2027',
     'rules.ruleB=advertiser_code:MCD1 MCD2 MCD3',
     'rules.ruleC=category_t2_code:X1',
@@ -117,13 +118,13 @@ test('a REL reads as the fields it restricts, its media and its dates', () => {
     'rules.ruleFinal=AND:ruleA1 ruleA2 ruleB ruleN',
     'tlrs.online=ruleFinal',
   ])
-  assert.deepEqual(rel.media, ['Print', 'Radio', 'TV'])
+  assert.deepEqual(rel.media, ['Digital', 'Print', 'Radio', 'TV'])
   assert.deepEqual(rel.dates, [{ for: 'media_month', from: '01/01/2023', to: '12/31/2027' }])
   const adv = rel.fields.find((f) => f.field === 'advertiser_code')!
-  assert.equal(adv.codes, 3)
+  assert.deepEqual(adv.codes, ['MCD1', 'MCD2', 'MCD3'])
   const cat = rel.fields.find((f) => f.field === 'category_t2_code')!
-  assert.equal(cat.codes, 0)
-  assert.equal(cat.excluded, 1, 'a rule under NOT keeps codes out')
+  assert.equal(cat.codes.length, 0)
+  assert.deepEqual(cat.excluded, ['X1'], 'a rule under NOT keeps codes out')
   assert.match(rel.notes, /McDonalds OMD/)
   assert.equal(schemaCountry('brand-c.occurrence'), 'US')
   assert.equal(schemaCountry('brand-monthly.summary'), 'Canada')
@@ -134,6 +135,32 @@ test('a REL reads as the fields it restricts, its media and its dates', () => {
 test('an empty or unreadable REL is no restriction, not an error', () => {
   assert.deepEqual(parseRel(null).fields, [])
   assert.deepEqual(parseRel('just a comment').fields, [])
+})
+
+test('media roll up to media, not submedia; PS is paid social', () => {
+  assert.equal(mediaOf('media_t1_code', 'O'), 'Digital')
+  assert.equal(mediaOf('media_t1_code', 'B'), 'Digital')
+  assert.equal(mediaOf('media_t1_code', 'PS'), 'Paid social')
+  assert.equal(mediaOf('media', 'T'), 'TV')
+  assert.equal(mediaOf('media_t2_code', 'PM'), 'Print')
+  assert.equal(mediaOf('media_t2_code', 'DE'), 'Digital')
+  assert.equal(mediaOf('media_t1_code', 'Q'), null)
+})
+
+test('a REL reads as names, with wildcards and markets said plainly', () => {
+  const rel = parseRel('rules.a=advertiser_code:WALMRT *IN rules.b=dma_code:USA MIAM rules.c=subcategory_code:734831 rules.d=media_t1_code:T rules.e=media_t1_code:S rules.f=NOT:e')
+  const names: Record<string, string> = { 'advertiser:WALMRT': 'Walmart', 'industry:IN': 'Insurance', 'subcategory:734831': 'Insurance: Image' }
+  const r = readable(rel, (kind, code) => names[`${kind}:${code}`])
+  assert.deepEqual(r.media, ['TV'])
+  assert.deepEqual(r.rows.find((x) => x.label === 'Advertisers')!.items, ['All of Insurance', 'Walmart'])
+  assert.deepEqual(r.rows.find((x) => x.label === 'Markets')!.items, ['MIAM', 'National (US)'])
+  assert.deepEqual(r.rows.find((x) => x.label === 'Subcategories')!.items, ['Insurance: Image'])
+  assert.deepEqual(r.rows.find((x) => x.label === 'Media kept out')!.items, ['Social'])
+})
+
+test("Canada's capitalised names are title-cased; mixed case is left alone", () => {
+  assert.equal(tidy('TD BANK FINANCIAL GROUP'), 'TD Bank Financial Group')
+  assert.equal(tidy('McDonald’s'), 'McDonald’s')
 })
 
 function parseParts(lines: string[]) {

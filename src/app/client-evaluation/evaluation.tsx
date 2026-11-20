@@ -5,10 +5,10 @@
  * and the popups for a client's people, a 360 user's reports, a report's spec,
  * and an account's entitlements. Everything is read from ./api.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '@/components/items/parts'
 import type { Described } from '@/lib/import360/decode'
-import type { RelSummary } from '@/lib/client-eval/rel'
+import type { ReadableRel } from '@/lib/client-eval/rel'
 import type { ClientRow, PersonRow, SourceInfo } from '@/lib/client-eval/store'
 import { PLATFORM_LABEL, SNAPSHOT_ONLY, type Ent360, type EntClassic, type EntMagnifier, type Entitlements, type Platform } from '@/lib/client-eval/types'
 
@@ -153,6 +153,7 @@ type Popup =
   | { kind: 'account'; key: string }
   | { kind: 'people'; client: ClientRow }
   | { kind: 'reports'; usrId: number; who: string }
+  | { kind: 'mreports'; accountKey: string; who: string }
   | { kind: 'report'; key: string }
   | { kind: 'merge'; client: ClientRow }
 
@@ -277,12 +278,20 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                     </div>
                   </td>
                   <td className="ce-num">
-                    <button type="button" className="ce-link" onClick={() => push({ kind: 'people', client: c })} title="See the people">
+                    <button type="button" className="ce-pill" onClick={() => push({ kind: 'people', client: c })} title="People, and each person's reports">
                       {n(c.activeUsers)}
-                      <span className="ce-of"> / {n(c.users)}</span>
+                      <span className="ce-of"> / {n(c.users)}</span> ›
                     </button>
                   </td>
-                  <td className="ce-num">{c.reports ? n(c.reports) : <span className="ce-muted">—</span>}</td>
+                  <td className="ce-num">
+                    {c.reports ? (
+                      <button type="button" className="ce-pill" onClick={() => push({ kind: 'people', client: c })} title="Who saved them: open a person's reports, then a report's spec">
+                        {n(c.reports)} ›
+                      </button>
+                    ) : (
+                      <span className="ce-muted">—</span>
+                    )}
+                  </td>
                   <td className="ce-ents">
                     {c.platforms.map((p) => {
                       const ms = byPlatform(p)
@@ -353,7 +362,10 @@ export function ClientEvaluation({ contact }: { contact: string }) {
       ) : null}
 
       {top?.kind === 'account' ? <AccountPopup k={top.key} onClose={pop} /> : null}
-      {top?.kind === 'people' ? <PeoplePopup client={top.client} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} /> : null}
+      {top?.kind === 'people' ? (
+        <PeoplePopup client={top.client} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} onMagnifierReports={(accountKey, who) => push({ kind: 'mreports', accountKey, who })} />
+      ) : null}
+      {top?.kind === 'mreports' ? <MagnifierReportsPopup k={top.accountKey} who={top.who} onClose={pop} /> : null}
       {top?.kind === 'reports' ? <ReportsPopup usrId={top.usrId} who={top.who} onClose={pop} onReport={(key) => push({ kind: 'report', key })} /> : null}
       {top?.kind === 'report' ? <ReportPopup k={top.key} onClose={pop} /> : null}
       {top?.kind === 'merge' ? (
@@ -373,7 +385,17 @@ export function ClientEvaluation({ contact }: { contact: string }) {
 
 // ------------------------------------------------------------------ people
 
-function PeoplePopup({ client, onClose, onReports }: { client: ClientRow; onClose: () => void; onReports: (usrId: number, who: string) => void }) {
+function PeoplePopup({
+  client,
+  onClose,
+  onReports,
+  onMagnifierReports,
+}: {
+  client: ClientRow
+  onClose: () => void
+  onReports: (usrId: number, who: string) => void
+  onMagnifierReports: (accountKey: string, who: string) => void
+}) {
   const [data, setData] = useState<{ name: string; people: PersonRow[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [q, setQ] = useState('')
@@ -412,7 +434,7 @@ function PeoplePopup({ client, onClose, onReports }: { client: ClientRow; onClos
                 <th>Person</th>
                 <th>Platforms</th>
                 <th>Last seen</th>
-                <th className="ce-num">360 reports</th>
+                <th title="360: reports this person used in 2026. Magnifier: the reports set up for their account.">Reports</th>
               </tr>
             </thead>
             <tbody>
@@ -434,15 +456,24 @@ function PeoplePopup({ client, onClose, onReports }: { client: ClientRow; onClos
                     </div>
                   </td>
                   <td>{p.lastSeen ?? <span className="ce-muted">—</span>}</td>
-                  <td className="ce-num">
-                    {p.accounts
-                      .filter((a) => a.platform === '360' && a.reports > 0)
-                      .map((a) => (
-                        <button key={a.userId} type="button" className="ce-link" onClick={() => onReports(Number(a.userId), p.name)}>
-                          {n(a.reports)}
-                        </button>
-                      ))}
-                    {!p.reports ? <span className="ce-muted">—</span> : null}
+                  <td>
+                    <div className="ce-accts">
+                      {p.accounts
+                        .filter((a) => a.platform === '360' && a.reports > 0)
+                        .map((a) => (
+                          <button key={`360:${a.userId}`} type="button" className="ce-pill" onClick={() => onReports(Number(a.userId), p.name)}>
+                            <Badge p="360" /> {n(a.reports)} report{a.reports === 1 ? '' : 's'} ›
+                          </button>
+                        ))}
+                      {p.accounts
+                        .filter((a) => a.platform === 'magnifier' && a.accountReports > 0)
+                        .map((a) => (
+                          <button key={`m:${a.accountId}`} type="button" className="ce-pill" onClick={() => onMagnifierReports(`magnifier:${a.accountId}`, a.accountName)} title={`The reports set up for ${a.accountName}`}>
+                            <Badge p="magnifier" /> {n(a.accountReports)} report{a.accountReports === 1 ? '' : 's'} ›
+                          </button>
+                        ))}
+                      {!p.accounts.some((a) => (a.platform === '360' && a.reports > 0) || (a.platform === 'magnifier' && a.accountReports > 0)) ? <span className="ce-muted">—</span> : null}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -569,6 +600,19 @@ function ReportPopup({ k, onClose }: { k: string; onClose: () => void }) {
 
 // ------------------------------------------------------------------ entitlements
 
+type MagnifierReport = {
+  id: string
+  name: string
+  kind: string | null
+  detail: {
+    schema: string | null
+    country: string | null
+    description: string | null
+    rel: { id: string | null; name: string | null; end: string | null; readable?: ReadableRel }
+    defaultRel: { id: string | null; name: string | null; readable?: ReadableRel }
+  }
+}
+
 interface AccountDetail {
   key: string
   platform: Platform
@@ -582,7 +626,7 @@ interface AccountDetail {
   summary: string | null
   entitlements: Entitlements
   info: Record<string, unknown>
-  magnifierReports: Array<{ id: string; name: string; kind: string | null; detail: { schema: string | null; country: string | null; description: string | null; rel: { id: string | null; name: string | null; end: string | null; summary: RelSummary; raw: string }; defaultRel: { id: string | null; name: string | null; summary: RelSummary } } }>
+  magnifierReports: MagnifierReport[]
 }
 
 function AccountPopup({ k, onClose }: { k: string; onClose: () => void }) {
@@ -613,33 +657,82 @@ function AccountPopup({ k, onClose }: { k: string; onClose: () => void }) {
   )
 }
 
+function MediaChips({ media }: { media: string[] }) {
+  return (
+    <div className="ce-media">
+      {media.map((m) => (
+        <span key={m}>{m}</span>
+      ))}
+    </div>
+  )
+}
+
+/** Names as chips: all of them when there are few, the first ones and a "show all" when there are many. */
+function Names({ items, out = false, total }: { items: string[]; out?: boolean; total?: number }) {
+  const [all, setAll] = useState(false)
+  const shown = all ? items : items.slice(0, 24)
+  const more = (total ?? items.length) - shown.length
+  return (
+    <div className="ce-names">
+      {shown.map((x) => (
+        <span key={x} className={`ce-name-chip${out ? ' ce-out' : ''}`}>
+          {x}
+        </span>
+      ))}
+      {more > 0 ? (
+        all || shown.length >= items.length ? (
+          <span className="ce-muted">and {n(more)} more</span>
+        ) : (
+          <button type="button" className="ce-link" onClick={() => setAll(true)}>
+            show all {n(total ?? items.length)}
+          </button>
+        )
+      ) : null}
+    </div>
+  )
+}
+
 function Ent360View({ e }: { e: Ent360 }) {
   return (
     <>
       <dl className="ce-dl">
+        <dt>Media</dt>
+        <dd>
+          {!e.media ? (
+            'All media'
+          ) : e.media.include.length ? (
+            <MediaChips media={e.media.include} />
+          ) : (
+            <>
+              All but <MediaChips media={e.media.exclude} />
+            </>
+          )}
+        </dd>
         <dt>Application</dt>
         <dd>{e.application}</dd>
         <dt>History</dt>
         <dd>{e.years ? `${e.years} years` : '—'}</dd>
-        <dt>Features</dt>
-        <dd>{e.features.length ? e.features.join(', ') : 'None'}</dd>
+        {e.filters.map((f) => (
+          <Fragment key={f.type}>
+            <dt>{f.type}</dt>
+            <dd>
+              <Names items={f.include} total={f.count - f.exclude.length} />
+              {f.exclude.length ? (
+                <>
+                  <span className="ce-muted">Not:</span> <Names items={f.exclude} out />
+                </>
+              ) : null}
+            </dd>
+          </Fragment>
+        ))}
       </dl>
-      <h3 className="ce-h3">Restrictions</h3>
-      {e.filters.length ? (
-        <div className="ce-filters">
-          {e.filters.map((f) => (
-            <details key={f.type} className="ce-filter">
-              <summary>
-                <b>{f.type}</b> <span className="ce-muted">{n(f.count)}</span>
-              </summary>
-              {f.include.length ? <p>{f.include.join(', ')}{f.count > f.include.length + f.exclude.length ? ' …' : ''}</p> : null}
-              {f.exclude.length ? <p className="ce-bad">Not: {f.exclude.join(', ')}</p> : null}
-            </details>
-          ))}
-        </div>
-      ) : (
-        <p className="ce-muted">No restrictions: everything in the application.</p>
-      )}
+      {!e.filters.length ? <p className="ce-muted">No advertiser, category or property restrictions.</p> : null}
+      <details className="ce-filter">
+        <summary>
+          <b>Features</b> <span className="ce-muted">{n(e.features.length)}</span>
+        </summary>
+        <p>{e.features.length ? e.features.join(', ') : 'None'}</p>
+      </details>
     </>
   )
 }
@@ -648,6 +741,14 @@ function EntClassicView({ e }: { e: EntClassic }) {
   return (
     <>
       <dl className="ce-dl">
+        {e.media.length ? (
+          <>
+            <dt>Media</dt>
+            <dd>
+              <MediaChips media={e.media} />
+            </dd>
+          </>
+        ) : null}
         <dt>Account type</dt>
         <dd>
           {e.accountType}
@@ -657,91 +758,140 @@ function EntClassicView({ e }: { e: EntClassic }) {
         <dd>{e.side ?? '—'}</dd>
         <dt>Expires</dt>
         <dd>{e.expires ?? '—'}</dd>
-        {e.media.length ? (
-          <>
-            <dt>Media</dt>
-            <dd>{e.media.join(', ')}</dd>
-          </>
-        ) : null}
         <dt>Owned properties</dt>
         <dd>{e.owned.length ? e.owned.map((o) => `${o.format} ${n(o.count)}`).join(', ') : 'None'}</dd>
         <dt>Extra access</dt>
         <dd>{e.extra.length ? e.extra.map((x) => `${x.what}: ${n(x.items)} (${n(x.users)} users)`).join(' · ') : 'None'}</dd>
-        <dt>Features</dt>
-        <dd>{e.features.length ? e.features.join(', ') : 'None'}</dd>
       </dl>
+      <details className="ce-filter">
+        <summary>
+          <b>Features</b> <span className="ce-muted">{n(e.features.length)}</span>
+        </summary>
+        <p>{e.features.length ? e.features.join(', ') : 'None'}</p>
+      </details>
       <p className="ce-muted">Classic has no category or product restrictions: media only. A publisher&apos;s media follow the properties it owns.</p>
     </>
   )
 }
 
-function EntMagnifierView({ e, reports }: { e: EntMagnifier; reports: AccountDetail['magnifierReports'] }) {
-  const [open, setOpen] = useState<string | null>(null)
+function EntMagnifierView({ e, reports }: { e: EntMagnifier; reports: MagnifierReport[] }) {
   return (
     <>
       <dl className="ce-dl">
-        <dt>Contract</dt>
-        <dd>{e.contract.start || e.contract.end ? `${e.contract.start ?? '…'} to ${e.contract.end ?? '…'}` : '—'}</dd>
-        <dt>Switched on</dt>
-        <dd>{e.flags.length ? e.flags.join(', ') : 'None'}</dd>
+        <dt>Media</dt>
+        <dd>{e.media.length ? <MediaChips media={e.media} /> : e.reports ? 'Not restricted by media' : '—'}</dd>
         <dt>Countries</dt>
         <dd>{e.countries.length ? e.countries.join(', ') : '—'}</dd>
-        <dt>Media in RELs</dt>
-        <dd>{e.media.length ? e.media.join(', ') : '—'}</dd>
-        <dt>User media codes</dt>
-        <dd>
-          {e.userMedia.length
-            ? e.userMedia.map((m) => `${m.media} ${Object.entries(m.codes).sort((a, b) => b[1] - a[1]).map(([c, k]) => `${c}×${k}`).join(' ')}`).join(' · ')
-            : '—'}
-          <div className="ce-muted">USER_ACCOUNT REPORTS_* codes for active users, as stored. What S, M and N mean is not yet confirmed.</div>
-        </dd>
+        {e.access.map((x) => (
+          <Fragment key={x.label}>
+            <dt>{x.label}</dt>
+            <dd>
+              <Names items={x.items} total={x.total} />
+            </dd>
+          </Fragment>
+        ))}
+        <dt>Contract</dt>
+        <dd>{e.contract.start || e.contract.end ? `${e.contract.start ?? '…'} to ${e.contract.end ?? '…'}` : '—'}</dd>
       </dl>
-      <h3 className="ce-h3">Reports and their RELs</h3>
-      {reports.length ? (
-        <div className="ce-filters">
-          {reports.map((r) => (
-            <div key={r.id} className="ce-filter">
+      {e.namesNote ? <p className="ce-muted">{e.namesNote}</p> : null}
+      <details className="ce-filter">
+        <summary>
+          <b>Features</b> <span className="ce-muted">{n(e.flags.length)}</span>
+        </summary>
+        <p>{e.flags.length ? e.flags.join(', ') : 'None'}</p>
+      </details>
+      <h3 className="ce-h3">Reports</h3>
+      <MagnifierReportList reports={reports} />
+    </>
+  )
+}
+
+function MagnifierReportList({ reports }: { reports: MagnifierReport[] }) {
+  const [open, setOpen] = useState<string | null>(reports.length === 1 ? reports[0]!.id : null)
+  if (!reports.length) return <p className="ce-muted">No reports set up.</p>
+  return (
+    <div className="ce-filters">
+      {reports.map((r) => {
+        const rel = r.detail.rel.readable
+        return (
+          <div key={r.id} className="ce-report">
+            <div>
               <button type="button" className="ce-link" onClick={() => setOpen(open === r.id ? null : r.id)}>
-                {r.name}
+                {open === r.id ? '▾' : '▸'} {r.name}
               </button>{' '}
               <span className="ce-muted">
-                {r.kind ?? ''} · {r.detail.country ?? r.detail.schema ?? ''}
+                {[r.kind, r.detail.country].filter(Boolean).join(' · ')}
+                {rel?.media.length ? ` · ${rel.media.join(', ')}` : ''}
               </span>
-              <div className="ce-sub">
-                {r.detail.rel.summary.fields.map((f) => `${f.label} ${n(f.codes)}${f.excluded ? ` (−${n(f.excluded)})` : ''}`).join(' · ') || 'No restrictions'}
-                {r.detail.rel.summary.media.length ? ` · ${r.detail.rel.summary.media.join(', ')}` : ''}
-              </div>
-              {open === r.id ? (
-                <div className="ce-rel">
-                  <p>
-                    <b>REL</b> {r.detail.rel.name ?? r.detail.rel.id} {r.detail.rel.end ? `· ends ${r.detail.rel.end}` : ''}
-                  </p>
-                  {r.detail.rel.summary.dates.map((d, i) => (
-                    <p key={i}>
-                      Dates ({d.for}): {d.from} to {d.to}
-                    </p>
-                  ))}
-                  {r.detail.rel.summary.fields.map((f) => (
-                    <p key={f.field}>
-                      <b>{f.label}</b>: {f.sample.join(' ')}
-                      {f.codes > f.sample.length ? ` … (${n(f.codes)})` : ''}
-                    </p>
-                  ))}
-                  {r.detail.rel.summary.notes ? <p className="ce-muted">{r.detail.rel.summary.notes}</p> : null}
-                  {r.detail.defaultRel.id ? (
-                    <p className="ce-muted">
-                      Default REL {r.detail.defaultRel.name ?? r.detail.defaultRel.id}: {r.detail.defaultRel.summary.fields.map((f) => `${f.label} ${n(f.codes)}`).join(' · ') || 'no restrictions'}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
             </div>
-          ))}
-        </div>
-      ) : (
-        <p className="ce-muted">No reports configured.</p>
-      )}
-    </>
+            {open === r.id ? <RelView rel={rel} name={r.detail.rel.name} end={r.detail.rel.end} description={r.detail.description} /> : null}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function RelView({ rel, name, end, description }: { rel?: ReadableRel; name: string | null; end: string | null; description: string | null }) {
+  if (!rel) return <p className="ce-muted">This report was loaded before RELs were read into names. Refresh Magnifier to see it.</p>
+  return (
+    <dl className="ce-dl">
+      {description ? (
+        <>
+          <dt>About</dt>
+          <dd>{description}</dd>
+        </>
+      ) : null}
+      <dt>Media</dt>
+      <dd>{rel.media.length ? <MediaChips media={rel.media} /> : 'Not restricted by media'}</dd>
+      {rel.rows.map((row) => (
+        <Fragment key={row.label}>
+          <dt>{row.label}</dt>
+          <dd>
+            {row.items.length ? <Names items={row.items} total={row.total - row.excluded.length} /> : null}
+            {row.excluded.length ? (
+              <>
+                <span className="ce-muted">Not:</span> <Names items={row.excluded} out />
+              </>
+            ) : null}
+          </dd>
+        </Fragment>
+      ))}
+      {rel.dates.length ? (
+        <>
+          <dt>Dates</dt>
+          <dd>{rel.dates.join(' · ')}</dd>
+        </>
+      ) : null}
+      {!rel.rows.length ? (
+        <>
+          <dt>Restrictions</dt>
+          <dd>None beyond media and dates</dd>
+        </>
+      ) : null}
+      <dt>Criteria</dt>
+      <dd className="ce-muted">
+        {name ?? '—'}
+        {end ? ` · ends ${end}` : ''}
+      </dd>
+    </dl>
+  )
+}
+
+function MagnifierReportsPopup({ k, who, onClose }: { k: string; who: string; onClose: () => void }) {
+  const [a, setA] = useState<AccountDetail | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    get<AccountDetail>({ op: 'account', key: k }).then(setA, (e) => setError((e as Error).message))
+  }, [k])
+  return (
+    <Modal title={`Magnifier reports for ${who}`} onClose={onClose}>
+      <div className="ce-pop">
+        <p className="ce-muted">Magnifier sets reports up for the account, so everyone on it shares these.</p>
+        {error ? <p className="mr-said mr-bad">{error}</p> : null}
+        {a ? <MagnifierReportList reports={a.magnifierReports} /> : !error ? <p className="ce-muted">Loading…</p> : null}
+      </div>
+    </Modal>
   )
 }
 

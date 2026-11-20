@@ -17,11 +17,13 @@
  *                (USER_ACCOUNT_REPORTING -> REPORT_CONFIGURATION), with the
  *                client REL and the default REL (CRITERIA.RULE_RAW). SCHEMA_ID
  *                brand-c is US; brand-n and brand-monthly are Canada.
- *   entitlements The account's product switches and contract, the media and
- *                countries its RELs name, and USER_ACCOUNT's REPORTS_* codes.
+ *   entitlements The account's product switches and contract, and what its
+ *                RELs let in - media rolled up, and advertisers, categories and
+ *                products by name (rel.ts, rel-names.ts).
  */
 import type { Connection, RowDataPacket } from 'mysql2/promise'
-import { parseRel, schemaCountry } from './rel'
+import { FIELDS, parseRel, readable, schemaCountry, wildcardIndustry, type NameKind, type ReadableRel } from './rel'
+import { relNames } from './rel-names'
 import type { AccountSnap, EntMagnifier, Progress, ReportSnap, Snapshot, UserSnap } from './types'
 
 type Row = Record<string, unknown>
@@ -59,17 +61,6 @@ async function select(conn: Connection, sql: string): Promise<Row[]> {
   return rows as Row[]
 }
 
-/** USER_ACCOUNT's per-media report columns. */
-const USER_MEDIA: Array<[string, string]> = [
-  ['REPORTS_TV', 'TV'],
-  ['REPORTS_PRINT', 'Print'],
-  ['REPORTS_ONLINE', 'Online'],
-  ['REPORTS_ONLINEVIDEO', 'Online video'],
-  ['REPORTS_RADIO', 'Radio'],
-  ['REPORTS_OUTOFHOME', 'Out of home'],
-  ['REPORTS_CINEMA', 'Cinema'],
-]
-
 const FLAGS: Array<[string, string]> = [
   ['IS_AD_INTEL_SEARCH', 'Ad Intel search'],
   ['IS_AD_INTEL_FULL_VIEW', 'Ad Intel full view'],
@@ -79,22 +70,25 @@ const FLAGS: Array<[string, string]> = [
   ['OCCURRENCE_OUT_OF_ACCESS', 'Occurrences outside access'],
 ]
 
+/** How many names an account's combined access keeps per restriction. */
+const ACCESS_KEEP = 200
+
 export async function loadMagnifier(conn: Connection, progress: Progress): Promise<Snapshot> {
-  await progress('Reading Magnifier accounts', 0, 4)
+  await progress('Reading Magnifier accounts', 0, 5)
   const accts = await select(conn, `SELECT ACCOUNT_CODE, ACCOUNT_NAME, SUBSCRIBER, SUPER_CATEGORY_CODE, CONTRACT_START_DATE, CONTRACT_END_DATE, CREATION_DATE,
       SPOTFIRE_CLIENT, ${FLAGS.map(([c]) => c).join(', ')}
     FROM ACCOUNT WHERE DELETE_FLAG = 'N' AND IS_INTERNAL = 0`)
 
-  await progress('Reading Magnifier users', 1, 4)
-  const users = await select(conn, `SELECT ua.ACCOUNT_CODE, u.USER_CODE, u.FIRST_NAME, u.LAST_NAME, u.EMAIL_ADDRESS, u.COUNTRY, ua.USERGROUP_CODE,
-      (ua.STATUS = 'A' AND u.STATUS = 'A' AND CURDATE() BETWEEN u.VALID_FROM AND u.VALID_UNTIL) AS active,
-      u.VALID_UNTIL, ${USER_MEDIA.map(([c]) => `ua.${c}`).join(', ')}
+  // USER_ACCOUNT's REPORTS_<media> columns are legacy and mean nothing now (Scott, 20 November 2026): not read.
+  await progress('Reading Magnifier users', 1, 5)
+  const users = await select(conn, `SELECT ua.ACCOUNT_CODE, u.USER_CODE, u.FIRST_NAME, u.LAST_NAME, u.EMAIL_ADDRESS,
+      (ua.STATUS = 'A' AND u.STATUS = 'A' AND CURDATE() BETWEEN u.VALID_FROM AND u.VALID_UNTIL) AS active
     FROM USER_ACCOUNT ua
     JOIN \`USER\` u ON u.USER_CODE = ua.USER_CODE
     JOIN ACCOUNT a ON a.ACCOUNT_CODE = ua.ACCOUNT_CODE AND a.DELETE_FLAG = 'N' AND a.IS_INTERNAL = 0
     WHERE IFNULL(u.DELETE_FLAG, 'N') = 'N' AND IFNULL(ua.DELETE_FLAG, 'N') = 'N'`)
 
-  await progress('Reading Magnifier reports and RELs', 2, 4)
+  await progress('Reading Magnifier reports and RELs', 2, 5)
   const reports = await select(conn, `SELECT a.ACCOUNT_CODE, rc.REPORT_ID, rc.EXTERNAL_NAME, rc.DESCRIPTION, rc.SCHEMA_ID, rc.REPORT_TYPE,
       rc.CRITERIA_ID, c.NAME AS client_rel_name, c.RULE_RAW AS client_rel, c.CONTRACT_END_DATE AS rel_end,
       rc.DEFAULT_CRITERIA_ID, d.NAME AS default_rel_name, d.RULE_RAW AS default_rel
@@ -104,28 +98,40 @@ export async function loadMagnifier(conn: Connection, progress: Progress): Promi
     LEFT JOIN CRITERIA c ON c.ID = rc.CRITERIA_ID
     LEFT JOIN CRITERIA d ON d.ID = rc.DEFAULT_CRITERIA_ID`)
 
-  await progress('Putting Magnifier together', 3, 4)
-  const outReports: ReportSnap[] = reports.map((r) => {
-    const rel = parseRel(str(r.client_rel))
-    return {
-      accountId: code(r.ACCOUNT_CODE),
-      reportId: code(r.REPORT_ID),
-      name: str(r.EXTERNAL_NAME) || code(r.REPORT_ID),
-      kind: str(r.REPORT_TYPE) || null,
-      detail: {
-        description: str(r.DESCRIPTION) || null,
-        schema: str(r.SCHEMA_ID) || null,
-        country: schemaCountry(str(r.SCHEMA_ID)),
-        rel: { id: str(r.CRITERIA_ID) || null, name: str(r.client_rel_name) || null, end: day(r.rel_end), summary: rel, raw: str(r.client_rel).slice(0, 20_000) },
-        defaultRel: { id: str(r.DEFAULT_CRITERIA_ID) || null, name: str(r.default_rel_name) || null, summary: parseRel(str(r.default_rel)) },
-      },
+  // The REL codes' names, from Databricks, all at once.
+  const parsed = reports.map((r) => ({ r, rel: parseRel(str(r.client_rel)), def: parseRel(str(r.default_rel)) }))
+  const want = new Map<NameKind, Set<string>>()
+  for (const p of parsed)
+    for (const f of [...p.rel.fields, ...p.def.fields]) {
+      const kind = FIELDS[f.field]?.kind
+      if (!kind) continue
+      for (const c of [...f.codes, ...f.excluded]) {
+        const ind = kind === 'advertiser' ? wildcardIndustry(c) : null
+        const k: NameKind = ind ? 'industry' : kind
+        ;(want.get(k) ?? want.set(k, new Set()).get(k)!).add(ind ?? c)
+      }
     }
-  })
+  await progress('Naming the advertisers, categories and products in RELs', 3, 5)
+  const { lookup, error: namesError } = await relNames(want, (done, total) => progress(`Naming REL codes from Databricks (${done} of ${total})`, 3, 5))
+
+  await progress('Putting Magnifier together', 4, 5)
+  const outReports: ReportSnap[] = parsed.map(({ r, rel, def }) => ({
+    accountId: code(r.ACCOUNT_CODE),
+    reportId: code(r.REPORT_ID),
+    name: str(r.EXTERNAL_NAME) || code(r.REPORT_ID),
+    kind: str(r.REPORT_TYPE) || null,
+    detail: {
+      description: str(r.DESCRIPTION) || null,
+      schema: str(r.SCHEMA_ID) || null,
+      country: schemaCountry(str(r.SCHEMA_ID)),
+      rel: { id: str(r.CRITERIA_ID) || null, name: str(r.client_rel_name) || null, end: day(r.rel_end), readable: readable(rel, lookup) },
+      defaultRel: { id: str(r.DEFAULT_CRITERIA_ID) || null, name: str(r.default_rel_name) || null, readable: readable(def, lookup) },
+    },
+  }))
   const reportsBy = new Map<string, ReportSnap[]>()
   for (const r of outReports) (reportsBy.get(r.accountId) ?? reportsBy.set(r.accountId, []).get(r.accountId)!).push(r)
 
   const outUsers: UserSnap[] = []
-  const media = new Map<string, Map<string, Record<string, number>>>()
   const seen = new Set<string>()
   for (const u of users) {
     const accountId = code(u.ACCOUNT_CODE)
@@ -133,24 +139,16 @@ export async function loadMagnifier(conn: Connection, progress: Progress): Promi
     if (seen.has(`${accountId}|${userId}`)) continue
     seen.add(`${accountId}|${userId}`)
     const email = str(u.EMAIL_ADDRESS).toLowerCase()
-    const active = Number(u.active) === 1
     outUsers.push({
       accountId,
       userId,
       name: [str(u.FIRST_NAME), str(u.LAST_NAME)].filter(Boolean).join(' ') || email || userId,
       login: userId,
       email: email || null,
-      active,
+      active: Number(u.active) === 1,
       lastSeen: null,
       reports: 0,
     })
-    if (!active) continue
-    const byMedia = media.get(accountId) ?? media.set(accountId, new Map()).get(accountId)!
-    for (const [col, label] of USER_MEDIA) {
-      const value = str(u[col]) || '?'
-      const c = byMedia.get(label) ?? byMedia.set(label, {}).get(label)!
-      c[value] = (c[value] ?? 0) + 1
-    }
   }
   const withUsers = new Set(outUsers.map((u) => u.accountId))
   const activeBy = new Set(outUsers.filter((u) => u.active).map((u) => u.accountId))
@@ -160,14 +158,24 @@ export async function loadMagnifier(conn: Connection, progress: Progress): Promi
     .map((a) => {
       const id = code(a.ACCOUNT_CODE)
       const mine = reportsBy.get(id) ?? []
+      const rels = mine.map((r) => (r.detail as { rel: { readable: ReadableRel } }).rel.readable)
+      // The account's access across its reports: each restriction's names, together.
+      const access = new Map<string, { items: Set<string>; total: number }>()
+      for (const rr of rels)
+        for (const row of rr.rows) {
+          const x = access.get(row.label) ?? access.set(row.label, { items: new Set(), total: 0 }).get(row.label)!
+          for (const i of row.items) if (x.items.size < ACCESS_KEEP) x.items.add(i)
+          x.total = Math.max(x.total, x.items.size, row.total)
+        }
       const ent: EntMagnifier = {
         kind: 'magnifier',
         contract: { start: day(a.CONTRACT_START_DATE), end: day(a.CONTRACT_END_DATE) },
         flags: FLAGS.filter(([c]) => Number(a[c]) === 1).map(([, label]) => label),
         countries: [...new Set(mine.map((r) => (r.detail as { country: string | null }).country).filter((c): c is string => !!c))].sort(),
-        media: [...new Set(mine.flatMap((r) => (r.detail as { rel: { summary: { media: string[] } } }).rel.summary.media))].sort(),
-        userMedia: [...(media.get(id) ?? new Map<string, Record<string, number>>())].map(([m, codes]) => ({ media: m, codes })),
+        media: [...new Set(rels.flatMap((r) => r.media))].sort(),
+        access: [...access].map(([label, x]) => ({ label, items: [...x.items].sort((p, q) => p.localeCompare(q)), total: x.total })),
         reports: mine.length,
+        namesNote: mine.length ? namesError : null,
       }
       return {
         accountId: id,
@@ -181,14 +189,15 @@ export async function loadMagnifier(conn: Connection, progress: Progress): Promi
       }
     })
   const kept = new Set(accounts.map((a) => a.accountId))
-  await progress('Magnifier read', 4, 4)
+  await progress('Magnifier read', 5, 5)
   return { accounts, users: outUsers.filter((u) => kept.has(u.accountId)), reports: outReports.filter((r) => kept.has(r.accountId)) }
 }
 
 export function summaryMagnifier(e: EntMagnifier): string {
   const parts: string[] = []
+  if (e.media.length) parts.push(`Media: ${e.media.slice(0, 4).join(', ')}${e.media.length > 4 ? ` +${e.media.length - 4}` : ''}`)
+  const adv = e.access.find((x) => x.label === 'Advertisers' || x.label === 'Parent advertisers')
+  if (adv) parts.push(`${adv.label} ${adv.total.toLocaleString('en-US')}`)
   if (e.reports) parts.push(`${e.reports} report${e.reports === 1 ? '' : 's'}${e.countries.length ? ` (${e.countries.join(', ')})` : ''}`)
-  if (e.media.length) parts.push(e.media.slice(0, 4).join(', ') + (e.media.length > 4 ? ` +${e.media.length - 4}` : ''))
-  if (e.flags.length) parts.push(e.flags.slice(0, 2).join(', ') + (e.flags.length > 2 ? ` +${e.flags.length - 2}` : ''))
   return parts.join(' · ') || 'No reports'
 }

@@ -41,6 +41,15 @@ async function main() {
     Object.assign(process.env, { MAGNIFIER_MYSQL_HOST: m.MYSQL_HOST, MAGNIFIER_MYSQL_PORT: m.MYSQL_PORT, MAGNIFIER_MYSQL_USER: m.MYSQL_USER, MAGNIFIER_MYSQL_PASSWORD: m.MYSQL_PASSWORD, MAGNIFIER_MYSQL_DATABASE: m.MYSQL_DATABASE || 'competitrack_user_db' })
   }
 
+  // Magnifier's REL codes are named from Databricks (lib/client-eval/rel-names.ts).
+  if (platforms.includes('magnifier') && !process.env.DATABRICKS_HOST) {
+    try {
+      Object.assign(process.env, readEnvFile(process.env.DATABRICKS_ENV ?? join(parent, '.databricks.env')))
+    } catch {
+      console.warn('  No ../.databricks.env: Magnifier REL codes will be shown as codes.')
+    }
+  }
+
   const { db, embedded, close } = await connect()
   await warnIfServerRunning(embedded)
   const store = await import('../src/lib/client-eval/store')

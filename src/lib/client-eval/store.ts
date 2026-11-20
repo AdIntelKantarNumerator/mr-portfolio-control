@@ -314,7 +314,8 @@ export interface PersonRow {
   active: boolean
   reports: number
   lastSeen: string | null
-  accounts: Array<{ platform: Platform; accountId: string; accountName: string; userId: string; login: string | null; active: boolean; reports: number; lastSeen: string | null }>
+  /** reports: 360 reports this person used in 2026. accountReports: the reports set up for the account (Magnifier). */
+  accounts: Array<{ platform: Platform; accountId: string; accountName: string; userId: string; login: string | null; active: boolean; reports: number; accountReports: number; lastSeen: string | null }>
 }
 
 /** A client's people across its platforms, one row per person (by email). */
@@ -326,7 +327,9 @@ export async function clientPeople(d: Database, clientId: string): Promise<{ nam
   for (const p of PLATFORMS) {
     const ids = members.filter((m) => m.platform === p).map((m) => m.accountId)
     if (!ids.length) continue
-    const names = new Map((await d.select({ id: ceAccounts.accountId, name: ceAccounts.name }).from(ceAccounts).where(and(eq(ceAccounts.platform, p), inArray(ceAccounts.accountId, ids)))).map((r) => [r.id, r.name]))
+    const acctRows = await d.select({ id: ceAccounts.accountId, name: ceAccounts.name, reports: ceAccounts.reports }).from(ceAccounts).where(and(eq(ceAccounts.platform, p), inArray(ceAccounts.accountId, ids)))
+    const names = new Map(acctRows.map((r) => [r.id, r.name]))
+    const acctReports = new Map(acctRows.map((r) => [r.id, p === 'magnifier' ? r.reports : 0]))
     for (const part of chunk(ids, 500))
       for (const u of await d.select().from(ceUsers).where(and(eq(ceUsers.platform, p), inArray(ceUsers.accountId, part)))) {
         const key = u.email || `${p}:${u.userId}`
@@ -335,7 +338,7 @@ export async function clientPeople(d: Database, clientId: string): Promise<{ nam
         row.reports += u.reports
         if (u.lastSeen && (!row.lastSeen || u.lastSeen > row.lastSeen)) row.lastSeen = u.lastSeen
         if (row.name === row.email && u.name !== u.email) row.name = u.name
-        row.accounts.push({ platform: p, accountId: u.accountId, accountName: names.get(u.accountId) ?? u.accountId, userId: u.userId, login: u.login, active: u.active, reports: u.reports, lastSeen: u.lastSeen })
+        row.accounts.push({ platform: p, accountId: u.accountId, accountName: names.get(u.accountId) ?? u.accountId, userId: u.userId, login: u.login, active: u.active, reports: u.reports, accountReports: acctReports.get(u.accountId) ?? 0, lastSeen: u.lastSeen })
       }
   }
   return { name: c.name, people: [...people.values()] }

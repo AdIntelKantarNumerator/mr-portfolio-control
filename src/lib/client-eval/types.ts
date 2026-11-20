@@ -32,8 +32,10 @@ export interface Ent360 {
   application: string
   /** Years of history the client may see. */
   years: number | null
+  /** Media the client may see, rolled up from submedia; null when not restricted. */
+  media: { include: string[]; exclude: string[] } | null
   features: string[]
-  /** Restrictions by entity type: what is let in, what is kept out. Lists are capped; count is the full number. */
+  /** Other restrictions by entity type (not media, data tables or time): what is let in, what is kept out. Lists are capped; count is the full number. */
   filters: Array<{ type: string; include: string[]; exclude: string[]; count: number }>
 }
 
@@ -60,13 +62,12 @@ export interface EntMagnifier {
   /** Product switches on the account. */
   flags: string[]
   countries: string[]
-  /** Media named by the account's report RELs. */
+  /** Media its RELs let in, rolled up (TV, Print, Digital...). */
   media: string[]
-  /**
-   * USER_ACCOUNT's REPORTS_<media> code for each active user, counted per media.
-   * The codes (S, M, N) are shown as they are: what each means is not yet confirmed.
-   */
-  userMedia: Array<{ media: string; codes: Record<string, number> }>
+  /** What the account's RELs let in, together across its reports: names per restriction (capped), and how many. */
+  access: Array<{ label: string; items: string[]; total: number }>
+  /** Set when the REL codes could not all be named. */
+  namesNote: string | null
   reports: number
 }
 
