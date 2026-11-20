@@ -165,6 +165,8 @@ export interface Flow {
    */
   gpcProductId?: string | null
   gpcProductName?: string | null
+  /** GPC's industry group, above the industry (Scott, 20 November 2026). Absent on runs from before. */
+  industryGroup?: string | null
   industry: string | null
   category: string | null
   subcategory: string | null
@@ -174,6 +176,7 @@ export interface Flow {
    * GPC category when GPC is the FROM side. Drawn as the breakdown of the
    * left bar. Absent on runs from before.
    */
+  srcIndustryGroup?: string | null
   srcIndustry?: string | null
   srcCategory?: string | null
   srcSubcategory?: string | null
@@ -227,8 +230,19 @@ export const NODE_LEVELS = ['industry', 'category', 'subcategory'] as const
 export type NodeLevel = (typeof NODE_LEVELS)[number]
 export const NODE_LEVEL_LABEL: Record<NodeLevel, string> = { industry: 'Industry', category: 'Category', subcategory: 'Subcategory' }
 
-/** A level's name in a taxonomy: VX1's three are Industry, Major and Class. */
-export const levelName = (tax: FromTaxonomy | 'GPC', level: NodeLevel) => LEVEL_NAMES[tax][NODE_LEVELS.indexOf(level)]!
+/**
+ * The advertiser comparison's levels: the three node levels and, above them,
+ * the top of each taxonomy (Scott, 20 November 2026: "add Industry Group").
+ * GPC's is its industry group; VX1's its section; VX2's top level already is
+ * Omnis' industry group, and Classic's is its first level, so those two show
+ * the same nodes as Industry. The Industry View keeps the three NODE_LEVELS.
+ */
+export const CHART_LEVELS = ['group', ...NODE_LEVELS] as const
+export type ChartLevel = (typeof CHART_LEVELS)[number]
+const GROUP_NAMES: Record<FromTaxonomy | 'GPC', string> = { GPC: 'Industry Group', VX1: 'Section', VX2: 'Industry Group', Classic: 'Level 1' }
+
+/** A level's name in a taxonomy: VX1's three are Industry, Major and Class, under its Section. */
+export const levelName = (tax: FromTaxonomy | 'GPC', level: ChartLevel) => (level === 'group' ? GROUP_NAMES[tax] : LEVEL_NAMES[tax][NODE_LEVELS.indexOf(level)]!)
 
 /** "No GPC advertiser", or "No VX1 advertiser" when the target is VX1. */
 export const noneLabel = (target: FromTaxonomy | 'GPC') => (target === 'GPC' ? NO_GPC : `No ${TAXONOMY_LABEL[target]} advertiser`)
@@ -256,20 +270,22 @@ export const UNKNOWN_PRODUCT = 'Unknown product'
  * because the product sits on the industry itself. The Unknown product has
  * no levels below it, so it keeps its own name.
  */
-function nodeAt(industry: string | null | undefined, category: string | null | undefined, subcategory: string | null | undefined, level: NodeLevel): string {
+function nodeAt(group: string | null | undefined, industry: string | null | undefined, category: string | null | undefined, subcategory: string | null | undefined, level: ChartLevel): string {
+  // No group recorded (a run from before, or a taxonomy whose top is the industry): the industry stands in.
+  if (level === 'group') return group || (industry === UNKNOWN_PRODUCT ? industry : industry || UNCLASSIFIED)
   if (level === 'industry') return industry || UNCLASSIFIED
   const cat = category || (!industry ? UNCLASSIFIED : industry === UNKNOWN_PRODUCT ? industry : `${industry} (industry level)`)
   return level === 'subcategory' ? subcategory || cat : cat
 }
 
 /** The GPC node a flow lands on at a level; missing levels fall back as nodeAt does. */
-export const nodeOf = (f: Flow, level: NodeLevel): string => nodeAt(f.industry, f.category, f.subcategory, level)
+export const nodeOf = (f: Flow, level: ChartLevel): string => nodeAt(f.industryGroup, f.industry, f.category, f.subcategory, level)
 
 /** The source side's node a flow comes from at a level; missing levels fall back as nodeAt does. */
-export const srcNodeOf = (f: Flow, level: NodeLevel): string => nodeAt(f.srcIndustry, f.srcCategory, f.srcSubcategory, level)
+export const srcNodeOf = (f: Flow, level: ChartLevel): string => nodeAt(f.srcIndustryGroup, f.srcIndustry, f.srcCategory, f.srcSubcategory, level)
 
 /** The source side's nodes by spend - the left bar's breakdown - or null for a run that did not record them. */
-export function rankSrcNodes(flows: Flow[], level: NodeLevel): Ranked[] | null {
+export function rankSrcNodes(flows: Flow[], level: ChartLevel): Ranked[] | null {
   if (flows.length && flows.every((f) => f.srcIndustry === undefined)) return null
   const by = new Map<string, Ranked>()
   for (const f of flows) {
@@ -337,7 +353,7 @@ export function rankProducts(flows: Flow[]): Ranked[] | null {
 /** The GPC Unknown product's id: spend whose payers own none of the creative's products. */
 export const UNKNOWN_PRODUCT_ID = '0'
 
-export function rankNodes(flows: Flow[], level: NodeLevel): Ranked[] {
+export function rankNodes(flows: Flow[], level: ChartLevel): Ranked[] {
   const by = new Map<string, Ranked>()
   for (const f of flows) {
     const key = nodeOf(f, level)
@@ -361,7 +377,7 @@ export interface SankeyData {
  * advertiser" and "Unclassified" always stand on their own, because they are
  * the finding, not the tail.
  */
-export function sankeyData(flows: Flow[], level: NodeLevel, top = 7, gpcBy: GpcBy = 'advertiser', none: string = NO_GPC): SankeyData {
+export function sankeyData(flows: Flow[], level: ChartLevel, top = 7, gpcBy: GpcBy = 'advertiser', none: string = NO_GPC): SankeyData {
   const keep = (ranked: Ranked[], special: string) => {
     const named = ranked.filter((r) => r.key !== special && r.spend > 0)
     const kept = named.slice(0, top)
@@ -512,8 +528,8 @@ export function toCsv(from: FromTaxonomy, results: AdvertiserResult[], direction
     [
       'Advertiser (as entered)', 'FROM taxonomy', 'FROM entity', 'FROM level', 'FROM id', 'Month', 'Media type',
       `${R} advertiser`, `${R} id`, `${R} top parent`, `${R} top parent id`, `${R} product`, `${R} product id`,
-      `${R} ${levelName(right, 'industry').toLowerCase()}`, `${R} ${levelName(right, 'category').toLowerCase()}`, `${R} ${levelName(right, 'subcategory').toLowerCase()}`,
-      `FROM ${levelName(left, 'industry').toLowerCase()}`, `FROM ${levelName(left, 'category').toLowerCase()}`, `FROM ${levelName(left, 'subcategory').toLowerCase()}`,
+      `${R} ${levelName(right, 'group').toLowerCase()}`, `${R} ${levelName(right, 'industry').toLowerCase()}`, `${R} ${levelName(right, 'category').toLowerCase()}`, `${R} ${levelName(right, 'subcategory').toLowerCase()}`,
+      `FROM ${levelName(left, 'group').toLowerCase()}`, `FROM ${levelName(left, 'industry').toLowerCase()}`, `FROM ${levelName(left, 'category').toLowerCase()}`, `FROM ${levelName(left, 'subcategory').toLowerCase()}`,
       'Spend (USD)', 'Flags',
     ].join(','),
   ]
@@ -521,7 +537,7 @@ export function toCsv(from: FromTaxonomy, results: AdvertiserResult[], direction
     const flagText = r.flags.map((f) => f.text).join(' | ')
     const head = [r.input, TAXONOMY_LABEL[left], r.entity?.name ?? 'not found', r.entity?.level ?? '', r.entity?.id ?? '']
     if (!r.flows.length) {
-      lines.push([...head, '', '', '', '', '', '', '', '', '', '', '', '', '', '', 0, flagText].map(esc).join(','))
+      lines.push([...head, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 0, flagText].map(esc).join(','))
       continue
     }
     const sorted = [...r.flows].sort((a, b) => a.month.localeCompare(b.month) || a.media.localeCompare(b.media) || b.spend - a.spend)
@@ -530,8 +546,8 @@ export function toCsv(from: FromTaxonomy, results: AdvertiserResult[], direction
         [
           ...head, MONTH_LABEL[f.month], f.media, f.gpcName ?? noneLabel(right), f.gpcId ?? '', f.gpcParentName ?? '', f.gpcParentId ?? '',
           f.gpcProductName ?? '', f.gpcProductId ?? '',
-          f.industry ?? UNCLASSIFIED, f.category ?? '', f.subcategory ?? '',
-          f.srcIndustry ?? '', f.srcCategory ?? '', f.srcSubcategory ?? '', Math.round(f.spend), flagText,
+          f.industryGroup ?? '', f.industry ?? UNCLASSIFIED, f.category ?? '', f.subcategory ?? '',
+          f.srcIndustryGroup ?? '', f.srcIndustry ?? '', f.srcCategory ?? '', f.srcSubcategory ?? '', Math.round(f.spend), flagText,
         ]
           .map(esc)
           .join(','),

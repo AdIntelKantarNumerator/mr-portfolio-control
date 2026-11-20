@@ -1,6 +1,6 @@
 /**
  * GET /taxonomy-comparison/samples?run=<id>&input=<advertiser>&by=advertiser|parent&key=<GPC id>
- * GET /taxonomy-comparison/samples?run=<id>&input=<advertiser>&level=industry|category|subcategory&node=<name>
+ * GET /taxonomy-comparison/samples?run=<id>&input=<advertiser>&level=group|industry|category|subcategory&node=<name>
  *     either with &media=<Digital|Social|Linear TV|CTV> and &month=<2026-08|2026-09>, the chart's filters
  *
  * The biggest creatives behind one node of an advertiser's Sankey, under the
@@ -25,7 +25,7 @@ export async function GET(req: Request) {
   const level = q.get('level')
   let target: SampleTarget
   if ((by === 'advertiser' || by === 'parent') && q.get('key')) target = { by, key: q.get('key')!.slice(0, 200) }
-  else if ((level === 'industry' || level === 'category' || level === 'subcategory') && q.get('node')) target = { level, node: q.get('node')!.slice(0, 300) }
+  else if ((level === 'group' || level === 'industry' || level === 'category' || level === 'subcategory') && q.get('node')) target = { level, node: q.get('node')!.slice(0, 300) }
   else return Response.json({ error: 'Say which node: by and key, or level and node.' }, { status: 400 })
   try {
     const media = q.get('media')

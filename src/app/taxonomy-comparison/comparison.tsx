@@ -21,7 +21,7 @@ import {
   MONTHS,
   NO_GPC,
   UNKNOWN_PRODUCT_ID,
-  NODE_LEVELS,
+  CHART_LEVELS,
   OTHER,
   gpcTotalKey,
   gpcTotalView,
@@ -48,7 +48,7 @@ import {
   type GpcBy,
   type MediaType,
   type Month,
-  type NodeLevel,
+  type ChartLevel,
   type Ranked,
   type SankeyData,
   type GpcTotalRow,
@@ -247,7 +247,7 @@ function AdvertiserCard({
   const [error, setError] = useState<string | null>(null)
   const [media, setMedia] = useState<MediaType | ''>('')
   const [month, setMonth] = useState<Month | ''>('')
-  const [level, setLevel] = useState<NodeLevel>('category')
+  const [level, setLevel] = useState<ChartLevel>('category')
   const [gpcBy, setGpcBy] = useState<GpcBy>('advertiser')
   const [open, setOpen] = useState<string | null>(null)
   const [sample, setSample] = useState<SamplePick | null>(null)
@@ -359,7 +359,7 @@ function AdvertiserCard({
                 <Seg label="Media" value={media} onChange={(v) => setMedia(v as MediaType | '')} options={[['', 'All'], ...MEDIA_TYPES.map((m) => [m, m] as [string, string])]} />
                 <Seg label="Month" value={month} onChange={(v) => setMonth(v as Month | '')} options={[['', 'Both'], ...MONTHS.map((m) => [m, MONTH_LABEL[m].slice(0, 3)] as [string, string])]} />
                 <Seg label={`${R} advertiser`} value={gpcBy} onChange={(v) => (setGpcBy(v as GpcBy), setSample(null))} options={(['advertiser', 'parent'] as GpcBy[]).map((b) => [b, GPC_BY_LABEL[b]] as [string, string])} />
-                <Seg label={`${R} node`} value={level} onChange={(v) => (setLevel(v as NodeLevel), setSample(null))} options={NODE_LEVELS.map((l) => [l, levelName(right, l)] as [string, string])} />
+                <Seg label={`${R} node`} value={level} onChange={(v) => (setLevel(v as ChartLevel), setSample(null))} options={CHART_LEVELS.map((l) => [l, levelName(right, l)] as [string, string])} />
               </div>
               {data.total > 0 ? (
                 <>
@@ -752,7 +752,7 @@ function SamplesPanel({
   input: string
   pick: SamplePick
   gpcBy: GpcBy
-  level: NodeLevel
+  level: ChartLevel
   media: MediaType | null
   month: Month | null
   onClose: () => void

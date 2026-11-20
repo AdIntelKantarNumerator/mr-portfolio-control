@@ -108,3 +108,17 @@ test('a node read before the Sankey, or with the first one by advertiser, is rea
   assert.equal(outdated('legacy:VX1:major:7', { name: 'TV' }), false)
   assert.equal(outdated('node:104', null), false)
 })
+
+test('Industry Group sits above Industry on the comparison chart; older runs fall back to the industry (20 November 2026)', async () => {
+  const { CHART_LEVELS, levelName, nodeOf, srcNodeOf } = await import('../src/lib/taxonomy-rules')
+  assert.deepEqual([...CHART_LEVELS], ['group', 'industry', 'category', 'subcategory'])
+  assert.equal(levelName('GPC', 'group'), 'Industry Group')
+  assert.equal(levelName('VX1', 'group'), 'Section')
+  assert.equal(levelName('VX1', 'industry'), 'Industry')
+  const f = { month: '2026-08' as const, media: 'Linear TV' as const, gpcId: '1', gpcName: 'A', industryGroup: 'Consumer Goods', industry: 'Household', category: 'Cleaners', subcategory: null, srcIndustryGroup: 'Retail', srcIndustry: 'Stores', spend: 1 }
+  assert.equal(nodeOf(f, 'group'), 'Consumer Goods')
+  assert.equal(srcNodeOf(f, 'group'), 'Retail')
+  const old = { ...f, industryGroup: undefined, srcIndustryGroup: undefined }
+  assert.equal(nodeOf(old, 'group'), 'Household', 'a run from before shows its industry')
+  assert.equal(srcNodeOf(old, 'group'), 'Stores')
+})

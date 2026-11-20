@@ -107,10 +107,10 @@ const UNKNOWN_NODE = UNKNOWN_PRODUCT
  * No product sits on an industry group.
  */
 const FLAT = 'mrdpp_prod.global_catalog.taxonomy_node_flattened_view'
-const GPC_NODES = `(SELECT leaf_category_node_id node_id, industry_name, category_name, subcategory_name FROM ${FLAT}
-  UNION ALL SELECT DISTINCT category_id, industry_name, category_name, CAST(NULL AS string) FROM ${FLAT}
+const GPC_NODES = `(SELECT leaf_category_node_id node_id, industry_group_name, industry_name, category_name, subcategory_name FROM ${FLAT}
+  UNION ALL SELECT DISTINCT category_id, industry_group_name, industry_name, category_name, CAST(NULL AS string) FROM ${FLAT}
     WHERE category_id NOT IN (SELECT leaf_category_node_id FROM ${FLAT})
-  UNION ALL SELECT DISTINCT industry_id, industry_name, CAST(NULL AS string), CAST(NULL AS string) FROM ${FLAT}
+  UNION ALL SELECT DISTINCT industry_id, industry_group_name, industry_name, CAST(NULL AS string), CAST(NULL AS string) FROM ${FLAT}
     WHERE industry_id NOT IN (SELECT leaf_category_node_id FROM ${FLAT}))`
 
 function config() {
@@ -244,7 +244,7 @@ from_crtv AS (
 function legacySql(tax: FromTaxonomy, name = 'leg'): string {
   if (tax === 'VX1') {
     return `
-${name} AS (SELECT c.creative_id, f.industry_category_n l1, f.major_category_n l2, f.class_category_n l3, CAST(NULL AS bigint) vx0,
+${name} AS (SELECT c.creative_id, f.section_category_n l0, f.industry_category_n l1, f.major_category_n l2, f.class_category_n l3, CAST(NULL AS bigint) vx0,
     cast(a.source_advertiser_id AS string) adv_id, a.n adv_name,
     CASE WHEN p.par IS NULL OR p.par = 9999 THEN cast(a.source_advertiser_id AS string) ELSE 'P' || p.par END par_id,
     coalesce(co.n, a.n) par_name
@@ -260,7 +260,7 @@ ${name} AS (SELECT c.creative_id, f.industry_category_n l1, f.major_category_n l
   }
   if (tax === 'VX2') {
     return `
-${name} AS (SELECT c.creative_id, i.NAME l1, ct.NAME l2, sc.NAME l3, CAST(NULL AS bigint) vx0,
+${name} AS (SELECT c.creative_id, i.NAME l0, i.NAME l1, ct.NAME l2, sc.NAME l3, CAST(NULL AS bigint) vx0,
     cast(a.id AS string) adv_id, a.n adv_name, cast(coalesce(a.par, a.id) AS string) par_id, coalesce(pa.n, a.n) par_name
   FROM mrdpp_prod.gold.creative c
   JOIN mrdpp_prod.vx2_taxonomy.d_product p ON p.PRSEQ = c.vx2_product_id
@@ -272,7 +272,7 @@ ${name} AS (SELECT c.creative_id, i.NAME l1, ct.NAME l2, sc.NAME l3, CAST(NULL A
   WHERE c.creative_id IN (SELECT creative_id FROM cs))`
   }
   return `
-${name} AS (SELECT creative_id, CAST(NULL AS string) l1, CAST(NULL AS string) l2, CAST(NULL AS string) l3, primary_product_id vx0,
+${name} AS (SELECT creative_id, CAST(NULL AS string) l0, CAST(NULL AS string) l1, CAST(NULL AS string) l2, CAST(NULL AS string) l3, primary_product_id vx0,
     CAST(NULL AS string) adv_id, CAST(NULL AS string) adv_name, CAST(NULL AS string) par_id, CAST(NULL AS string) par_name
   FROM mrdpp_prod.gold.creative WHERE creative_id IN (SELECT creative_id FROM cs))`
 }
@@ -301,8 +301,9 @@ ${legacySql(from)}
 SELECT f.from_id, o.month, o.media, cast(g.entity_id AS string) gpc_id, e.display_name gpc_name,
   cast(rt.entity_id AS string) gpc_parent_id, rt.display_name gpc_parent_name,
   cast(g.product_id AS string) gpc_product_id, g.product_name gpc_product_name,
+  CASE WHEN g.kind = 'unknown' THEN '${UNKNOWN_NODE}' ELSE n.industry_group_name END industry_group,
   CASE WHEN g.kind = 'unknown' THEN '${UNKNOWN_NODE}' ELSE n.industry_name END industry, n.category_name category, n.subcategory_name subcategory,
-  l.l1 src_industry, l.l2 src_category, l.l3 src_subcategory, cast(l.vx0 AS string) vx0,
+  l.l0 src_industry_group, l.l1 src_industry, l.l2 src_category, l.l3 src_subcategory, cast(l.vx0 AS string) vx0,
   sum(o.spend * coalesce(g.w, 1)) spend
 FROM occ o JOIN from_crtv f ON f.creative_id = o.creative_id
 LEFT JOIN leg l ON l.creative_id = o.creative_id
@@ -343,9 +344,11 @@ export async function dbxFlows(
       gpcParentName: r.gpc_parent_name ?? r.gpc_name,
       gpcProductId: r.gpc_product_id,
       gpcProductName: r.gpc_product_name,
+      industryGroup: r.industry_group ?? null,
       industry: r.industry,
       category: r.category,
       subcategory: r.subcategory || null,
+      srcIndustryGroup: r.src_industry_group ?? null,
       srcIndustry: r.src_industry ?? null,
       srcCategory: r.src_category ?? null,
       srcSubcategory: r.src_subcategory || null,
@@ -413,9 +416,11 @@ from_crtv AS (
       gpcParentName: r.gpc_parent_name ?? r.gpc_name,
       gpcProductId: r.gpc_product_id,
       gpcProductName: r.gpc_product_name,
+      industryGroup: r.industry_group ?? null,
       industry: r.industry,
       category: r.category,
       subcategory: r.subcategory || null,
+      srcIndustryGroup: r.src_industry_group ?? null,
       srcIndustry: r.src_industry ?? null,
       srcCategory: r.src_category ?? null,
       srcSubcategory: r.src_subcategory || null,
@@ -470,7 +475,8 @@ ${legacySql(to)},
 mine AS (SELECT s.from_id, g.creative_id, g.w, g.taxonomy_node_id, g.kind FROM attr g JOIN sub s ON s.entity_id = g.entity_id)
 SELECT cast(m.from_id AS string) from_id, o.month, o.media,
   l.adv_id gpc_id, l.adv_name gpc_name, l.par_id gpc_parent_id, l.par_name gpc_parent_name,
-  l.l1 industry, l.l2 category, l.l3 subcategory, cast(l.vx0 AS string) vx0,
+  l.l0 industry_group, l.l1 industry, l.l2 category, l.l3 subcategory, cast(l.vx0 AS string) vx0,
+  CASE WHEN m.kind = 'unknown' THEN '${UNKNOWN_NODE}' ELSE n.industry_group_name END src_industry_group,
   CASE WHEN m.kind = 'unknown' THEN '${UNKNOWN_NODE}' ELSE n.industry_name END src_industry, n.category_name src_category, n.subcategory_name src_subcategory,
   sum(o.spend * m.w) spend
 FROM occ o JOIN mine m ON m.creative_id = o.creative_id
@@ -490,9 +496,11 @@ GROUP BY ALL`
       gpcName: r.gpc_name,
       gpcParentId: r.gpc_parent_id ?? r.gpc_id,
       gpcParentName: r.gpc_parent_name ?? r.gpc_name,
+      industryGroup: r.industry_group ?? null,
       industry: r.industry,
       category: r.category,
       subcategory: r.subcategory || null,
+      srcIndustryGroup: r.src_industry_group ?? null,
       srcIndustry: r.src_industry ?? null,
       srcCategory: r.src_category ?? null,
       srcSubcategory: r.src_subcategory || null,
@@ -1022,7 +1030,7 @@ export async function dbxLegacyNodeName(tax: 'VX1' | 'VX2', level: string, nodeI
 // --- sample creatives behind one Sankey node ----------------------------------------
 
 /** The node clicked on the Sankey: a GPC advertiser or top parent, or a GPC taxonomy node at a level. */
-export type SampleTarget = { by: 'advertiser' | 'parent'; key: string } | { level: 'industry' | 'category' | 'subcategory'; node: string }
+export type SampleTarget = { by: 'advertiser' | 'parent'; key: string } | { level: 'group' | 'industry' | 'category' | 'subcategory'; node: string }
 
 export interface SampleRaw {
   creativeId: string
@@ -1079,7 +1087,7 @@ export async function dbxSamples(
     else if (!isInt(target.key)) return []
     else cond = target.by === 'parent' ? `coalesce(root_id, entity_id) = ${target.key}` : `entity_id = ${target.key}`
   } else {
-    const col = target.level === 'industry' ? 'ind' : target.level === 'category' ? 'cat' : 'sub'
+    const col = target.level === 'group' ? 'grp' : target.level === 'industry' ? 'ind' : target.level === 'category' ? 'cat' : 'sub'
     params.push({ name: 'node', value: target.node }, { name: 'unclassified', value: unclassified })
     cond = `coalesce(${col}, :unclassified) = :node`
   }
@@ -1090,6 +1098,7 @@ cs AS (SELECT DISTINCT creative_id FROM occ),
 ${ANCESTRY},
 ${ATTRIBUTION},
 a AS (SELECT o.creative_id, o.media, o.month, o.spend * coalesce(g.w, 1) spend, g.entity_id, r.root_id,
+    CASE WHEN g.kind = 'unknown' THEN '${UNKNOWN_NODE}' ELSE coalesce(n.industry_group_name, n.industry_name) END grp,
     CASE WHEN g.kind = 'unknown' THEN '${UNKNOWN_NODE}' ELSE n.industry_name END ind,
     n.category_name cat, coalesce(n.subcategory_name, n.category_name) sub
   FROM occ o
