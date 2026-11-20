@@ -145,7 +145,7 @@ function groupMedia(media: GpcMedia[]): string[] {
 function noteSlide(pptx: PptxGenJS, d: DeckData, s: PlatformSection) {
   const sl = pptx.addSlide()
   const name = PLATFORM_LABEL[s.platform]
-  header(sl, `${name} advertisers and categories in GPC`, name)
+  header(sl, `${name} advertisers and categories in Insights Studio`, name)
   sl.addText(s.focus.note ?? 'Nothing to show.', { x: 0.6, y: 1.7, w: 12, h: 1.2, fontFace: FONT, fontSize: 16, color: MUTED })
   footer(sl, d)
 }
@@ -155,7 +155,7 @@ function sankeySlide(pptx: PptxGenJS, d: DeckData, s: PlatformSection, e: FocusE
   const name = PLATFORM_LABEL[s.platform]
   const what = s.focus.kind === 'advertiser' ? 'advertiser' : 'category'
   const why = s.focus.source === 'entitlement' ? 'from their entitlements' : s.focus.source === 'reports' ? 'picked in their 2026 reports' : 'from their 360 reporting profiles'
-  header(sl, `${e.name}: ${s.focus.taxonomy} → GPC`, `${name} · one of their five largest ${what === 'advertiser' ? 'advertisers' : 'categories'}, ${why}`)
+  header(sl, `${e.name}: ${name} Taxonomy → Insights Studio Taxonomy`, `${name} · one of their five largest ${what === 'advertiser' ? 'advertisers' : 'categories'}, ${why}`)
   drawSankey(sl, e.sankey, { x: 0.5, y: 1.75, w: 8.6, h: 5.0 })
 
   // The facts beside it.
@@ -166,9 +166,9 @@ function sankeySlide(pptx: PptxGenJS, d: DeckData, s: PlatformSection, e: FocusE
   if (e.gpc) {
     runs.push({ text: ' ', options: { breakLine: true } })
     runs.push({ text: `In Insights Studio: ${e.gpc.name}`, options: { bold: true, fontSize: 14, breakLine: true } })
-    runs.push({ text: `${money(e.gpc.total)} of Aug–Sep 2026 spend in GPC.`, options: { bullet: true, breakLine: true } })
+    runs.push({ text: `${money(e.gpc.total)} of Aug–Sep 2026 spend in Insights Studio.`, options: { bullet: true, breakLine: true } })
     if (e.gpc.unseen > 0)
-      runs.push({ text: `${money(e.gpc.unseen)} (${pct(e.gpc.unseen, e.gpc.total)}) has no ${s.focus.taxonomy} product, so ${name} cannot show it today.`, options: { bullet: true, breakLine: true } })
+      runs.push({ text: `${money(e.gpc.unseen)} (${pct(e.gpc.unseen, e.gpc.total)}) has no product in the ${name} Taxonomy, so ${name} cannot show it today.`, options: { bullet: true, breakLine: true } })
     runs.push({ text: `By media: ${e.gpc.byMedia.map((m) => `${m.media} ${pct(m.spend, e.gpc!.total)}`).join(', ')}.`, options: { bullet: true, breakLine: true } })
   }
   sl.addText(runs, { x: px + 0.15, y: 1.75, w: 3.15, h: 5.0, fontFace: FONT, fontSize: 12, color: INK, valign: 'top', paraSpaceAfter: 4, fit: 'shrink' })

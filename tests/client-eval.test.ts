@@ -222,8 +222,8 @@ test('media map: what stays, drops and is added, per platform (Impact Deck)', as
 test('a from → to Sankey keeps the big flows and folds slivers into Other', async () => {
   const { sankeyOf } = await import('../src/lib/client-eval/deck-sankey')
   const f = (gpc: string, cat: string, spend: number) => ({ month: '2026-08' as const, media: 'Linear TV' as const, gpcId: gpc, gpcName: gpc, gpcParentId: gpc, gpcParentName: gpc, industry: 'I', category: cat, subcategory: null, spend })
-  const s = sankeyOf('Acme', [f('Acme Inc', 'Snacks', 90), f('Acme Inc', 'Drinks', 5), f('Tiny Co', 'Snacks', 1)], 'advertiser', 'VX1')
-  assert.deepEqual(s.columns, ['VX1 advertiser', 'GPC advertiser', 'GPC category'])
+  const s = sankeyOf('Acme', [f('Acme Inc', 'Snacks', 90), f('Acme Inc', 'Drinks', 5), f('Tiny Co', 'Snacks', 1)], 'advertiser', '360')
+  assert.deepEqual(s.columns, ['360 advertiser', 'Insights Studio advertiser', 'Insights Studio category'], 'the deck never says VX1, VX2 or GPC')
   assert.deepEqual(s.nodes[1]!.map((n) => n.name), ['Acme Inc', 'Other'], 'Tiny Co is under 3%')
   assert.equal(s.nodes[0]![0]!.spend, 96)
   const flowed = s.links.filter((l) => l.col === 1).reduce((a, l) => a + l.spend, 0)

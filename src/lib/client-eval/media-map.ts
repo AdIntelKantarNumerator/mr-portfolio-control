@@ -219,5 +219,6 @@ export function mediaChange(platform: Platform, media: string[], restricted = tr
  */
 export const TROI_NOTE = {
   pct: 10,
-  text: 'Additional website coverage from TROI: about 10% more digital ad spend than BIS digital alone ($1.5B on top of $14.4B, US, Aug–Oct 2026), mostly native ads.',
+  // Client-facing wording: no provider names (TROI, BIS) in the deck.
+  text: 'Additional website coverage: about 10% more digital ad spend from newly added websites, mostly native ads ($1.5B on top of $14.4B, US, Aug–Oct 2026).',
 }

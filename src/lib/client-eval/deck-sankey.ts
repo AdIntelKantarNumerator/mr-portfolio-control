@@ -1,5 +1,6 @@
 /**
- * The Impact Deck's from → to Sankey, built from Taxonomy Comparison flows
+ * The Impact Deck's from → to Sankey, built from Taxonomy Comparison flows.
+ * Labels say 360, Magnifier and Insights Studio, never VX1, VX2 or GPC (Scott, 20 November 2026)
  * (Client Evaluation, 20 November 2026). Pure, so it can be tested without a
  * database or Databricks.
  */
@@ -20,7 +21,7 @@ export interface SankeyData {
 
 const OTHER = 'Other'
 /** The attribution's Unknown product (lib/taxonomy-dbx.ts UNKNOWN_NODE), said plainly. */
-export const UNKNOWN = 'GPC product not identified'
+export const UNKNOWN = 'Insights Studio product not identified'
 export const catLabel = (f: FlowRaw) => (f.industry === 'Unknown product' ? UNKNOWN : (f.category ?? f.industry ?? 'Unclassified'))
 
 /** The top n of a tally, the rest as Other. */
@@ -33,7 +34,7 @@ export function topN(tally: Map<string, number>, n: number, minShare = 0): { kee
 
 /** FROM entity → GPC advertiser (top parent) → GPC category; or FROM category → GPC category. */
 export function sankeyOf(name: string, flows: FlowRaw[], kind: 'advertiser' | 'category', taxonomy: string): SankeyData {
-  const advOf = (f: FlowRaw) => f.gpcParentName ?? f.gpcName ?? 'No GPC advertiser'
+  const advOf = (f: FlowRaw) => f.gpcParentName ?? f.gpcName ?? 'No Insights Studio advertiser'
   const catOf = catLabel
   const advTally = new Map<string, number>()
   const catTally = new Map<string, number>()
@@ -62,13 +63,13 @@ export function sankeyOf(name: string, flows: FlowRaw[], kind: 'advertiser' | 'c
   const catCol = order(catKeep, catSpend)
   if (kind === 'category') {
     return {
-      columns: [`${taxonomy} category`, 'GPC category'],
+      columns: [`${taxonomy} category`, 'Insights Studio category'],
       nodes: [[{ name, spend: total }], catCol.map((c) => ({ name: c, spend: catSpend.get(c)! }))],
       links: catCol.map((c, i) => ({ col: 0, from: 0, to: i, spend: catSpend.get(c)! })),
     }
   }
   return {
-    columns: [`${taxonomy} advertiser`, 'GPC advertiser', 'GPC category'],
+    columns: [`${taxonomy} advertiser`, 'Insights Studio advertiser', 'Insights Studio category'],
     nodes: [[{ name, spend: total }], advCol.map((a) => ({ name: a, spend: advSpend.get(a)! })), catCol.map((c) => ({ name: c, spend: catSpend.get(c)! }))],
     links: [
       ...advCol.map((a, i) => ({ col: 0, from: 0, to: i, spend: advSpend.get(a)! })),

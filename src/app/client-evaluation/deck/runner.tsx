@@ -124,7 +124,7 @@ export function DeckRunner({ scope, title }: { scope: string; title: string }) {
         <Kicker>Client Evaluation · Impact Deck</Kicker>
         <h1>{title || 'Impact Deck'}</h1>
         <p className="ce-lede">
-          Building a PowerPoint of what changes in media coverage and taxonomy on the move to Insights Studio. It reads 360, Magnifier and Databricks, so it takes a few minutes. Keep this window open.
+          Building a PowerPoint of what changes in media coverage and taxonomy on the move to Insights Studio. It reads each platform&apos;s data, so it takes a few minutes. Keep this window open.
         </p>
       </div>
       <JobProgress job={job} error={error} started={started} what="The deck" />

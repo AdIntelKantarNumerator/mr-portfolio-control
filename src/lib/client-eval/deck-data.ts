@@ -34,6 +34,14 @@ import { catLabel, sankeyOf, UNKNOWN, type SankeyData } from './deck-sankey'
 import { clientPeople } from './store'
 import { PLATFORM_LABEL, parseMember, PLATFORMS, type Ent360, type EntClassic, type EntMagnifier, type Platform } from './types'
 
+/** What the deck calls each taxonomy (Scott, 20 November 2026: never VX1, VX2 or GPC in the deck). */
+export const TAX_LABEL = { VX1: '360', VX2: 'Magnifier' } as const
+export const STUDIO = 'Insights Studio'
+
+/** A model's wording, with any internal name it slipped in replaced. */
+export const plainTerms = (s: string) =>
+  s.replace(/\bVX1\b/g, '360').replace(/\bVX2\b/g, 'Magnifier').replace(/\bVX0\b/g, 'legacy').replace(/\bGPC\b/g, STUDIO)
+
 export type DeckScope = { kind: 'client'; clientId: string } | { kind: 'account'; key: string } | { kind: 'person'; clientId: string; person: string }
 
 export interface FocusEntity {
@@ -238,7 +246,7 @@ async function candidatesMagnifier(accountIds: string[]): Promise<{ c: Candidate
         else if (f.field === 'subcategory_code' || f.field === 'category_t2_code') cats.set(`S${code}`, (cats.get(`S${code}`) ?? 0) + 1)
       }
     }
-  const canadaNote = canadian && !adv.size && !cats.size ? "This account's RELs are Canadian (VX2 Canada). GPC's Canadian coverage is not part of this comparison yet." : null
+  const canadaNote = canadian && !adv.size && !cats.size ? "This account's report criteria are Canadian. Insights Studio's Canadian coverage is not part of this comparison yet." : null
   if (adv.size) {
     const codes = [...adv].sort((a, b) => b[1] - a[1]).slice(0, CANDIDATES).map(([c]) => c)
     const ids = await dbxVx2AdvertiserIds(codes)
@@ -274,7 +282,7 @@ async function retry<T>(f: () => Promise<T>): Promise<T> {
 }
 
 async function follow(c: Candidates, progress: Progress, label: string): Promise<FocusEntity[]> {
-  await progress(`${label}: following ${c.items.length} ${c.kind === 'advertiser' ? 'advertisers' : 'categories'} into GPC (Databricks, a minute or two)`)
+  await progress(`${label}: following ${c.items.length} ${c.kind === 'advertiser' ? 'advertisers' : 'categories'} into Insights Studio (a minute or two)`)
   const ids = c.items.map((i) => i.id)
   const flows = await retry(() => (c.kind === 'advertiser' ? dbxFlows(c.taxonomy, ids, new Map()) : dbxCategoryFlows(c.taxonomy, ids)))
   const nameOf = new Map(c.items.map((i) => [i.id, i.name]))
@@ -298,11 +306,11 @@ async function follow(c: Candidates, progress: Progress, label: string): Promise
     for (const f of r.flows) if (f.gpcParentId) byParent.set(f.gpcParentId, (byParent.get(f.gpcParentId) ?? 0) + f.spend)
     const major = [...byParent.values()].filter((v) => v >= r.spend * 0.01).length
     const facts = [
-      `${money(r.spend)} of Aug–Sep 2026 spend followed from ${c.taxonomy}.`,
-      `${Math.round((100 * withAdv) / r.spend)}% lands on a GPC advertiser${major > 1 ? `; ${major} GPC advertisers each take 1% or more` : ''}.`,
-      ...(topCat ? [`Largest GPC category: ${topCat[0]} (${Math.round((100 * topCat[1]) / r.spend)}%).`] : []),
+      `${money(r.spend)} of Aug–Sep 2026 spend followed from the ${TAX_LABEL[c.taxonomy]} Taxonomy.`,
+      `${Math.round((100 * withAdv) / r.spend)}% lands on an Insights Studio advertiser${major > 1 ? `; ${major} Insights Studio advertisers each take 1% or more` : ''}.`,
+      ...(topCat ? [`Largest Insights Studio category: ${topCat[0]} (${Math.round((100 * topCat[1]) / r.spend)}%).`] : []),
     ]
-    return { id: r.id, name, spend: r.spend, sankey: sankeyOf(name, r.flows, c.kind, c.taxonomy), facts }
+    return { id: r.id, name, spend: r.spend, sankey: sankeyOf(name, r.flows, c.kind, TAX_LABEL[c.taxonomy]), facts }
   })
 
   // What the GPC advertisers spend in all, and how much of it the legacy taxonomy cannot see today.
@@ -316,7 +324,7 @@ async function follow(c: Candidates, progress: Progress, label: string): Promise
     }
     const parentIds = [...new Set([...parentOf.values()].map((p) => p.id))]
     if (parentIds.length) {
-      await progress(`${label}: reading what the GPC advertisers spend in all (Databricks)`)
+      await progress(`${label}: reading what the Insights Studio advertisers spend in all`)
       try {
         const totals = await retry(() => dbxGpcTotals(c.taxonomy, [], parentIds))
         for (const e of out) {
@@ -374,7 +382,7 @@ export async function deckData(scope: DeckScope, progress: Progress): Promise<De
         const m = await candidatesMagnifier(ids)
         c = m.c
         section.focus.note = m.note
-      } else section.focus.note = 'Classic has no advertiser or category restrictions and no saved reports, so there is nothing to follow into GPC: media only.'
+      } else section.focus.note = 'Classic has no advertiser or category restrictions and no saved reports, so there is nothing to follow into Insights Studio: media only.'
       if (p === '360' && !c) section.focus.note = 'No advertiser or category restrictions, report selections or reporting profile lists were found.'
       if (c) {
         section.focus = { kind: c.kind, source: c.source, taxonomy: c.taxonomy, entities: await follow(c, progress, label), note: null }
@@ -396,9 +404,9 @@ export async function deckData(scope: DeckScope, progress: Progress): Promise<De
     sections,
     highlights,
     notes: [
-      'Media: each platform’s media mapped by name onto the media GPC carries in Prod ClickHouse (spend since August 2026).',
-      'From → to: Aug–Sep 2026 US spend of the five largest advertisers or categories, followed creative by creative into GPC as Taxonomy Comparison does. 360 is VX1, Magnifier is VX2.',
-      'GPC totals: everything the GPC advertiser spends in Aug–Sep 2026, and the part with no legacy product, which the legacy taxonomy cannot see today.',
+      'Media: each platform’s media mapped by name onto the media Insights Studio carries (spend since August 2026).',
+      'From → to: Aug–Sep 2026 US spend of the five largest advertisers or categories, followed ad by ad from the 360 or Magnifier Taxonomy into the Insights Studio Taxonomy.',
+      'Insights Studio totals: everything the Insights Studio advertiser spends in Aug–Sep 2026, and the part that has no product in the 360 or Magnifier Taxonomy, which those products cannot show today.',
       TROI_NOTE.text,
     ],
   }
@@ -424,14 +432,15 @@ async function summarise(title: string, sections: PlatformSection[]): Promise<st
   })
   try {
     const { text } = await completeJson(
-      `You write the opening slide of a client-facing deck about moving from MediaRadar's legacy products (360, Classic, Magnifier) to Insights Studio, which runs on GPC data.
+      `You write the opening slide of a client-facing deck about moving from MediaRadar's legacy products (360, Classic, Magnifier) to Insights Studio.
+Name things only as 360, Classic, Magnifier and Insights Studio (or the 360 Taxonomy, Magnifier Taxonomy and Insights Studio Taxonomy). Never write VX1, VX2, VX0 or GPC.
 Write 4 to 6 short bullets, each under 25 words, on the major changes this client will experience: media gained and lost, broader coverage, and how their key advertisers or categories map into the new taxonomy.
 Be specific with names and figures from the facts. Be positive but honest about anything that drops. No marketing fluff. Reply with JSON only: {"bullets":["..."]}`,
       `Client: ${title}\nFacts: ${JSON.stringify(facts)}`,
       { maxTokens: 900 },
     )
     const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as { bullets?: unknown }
-    const bullets = Array.isArray(json.bullets) ? json.bullets.map((b) => String(b).trim()).filter(Boolean).slice(0, 6) : []
+    const bullets = Array.isArray(json.bullets) ? json.bullets.map((b) => plainTerms(String(b).trim())).filter(Boolean).slice(0, 6) : []
     if (bullets.length) return bullets
   } catch (err) {
     console.error('[client-eval] deck summary', err)
