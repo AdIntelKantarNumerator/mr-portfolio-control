@@ -116,3 +116,24 @@ test('a field the data does not have is refused before it breaks the report', as
   assert.deepEqual(unknownFields({ set: { columns: 'broadcast_week' } }, known), ['broadcast_week'])
   assert.deepEqual(unknownFields({ set: { rows: ['advertiser', 'month'], columns: null } }, known), [])
 })
+
+test('Azure email: the connection string, the signed request and the message', async () => {
+  const { acsConfig, acsSign, acsBody, mailBlockedReason } = await import('../src/lib/report-builder/v2/mail')
+  const { createHash, createHmac } = await import('node:crypto')
+  const key = Buffer.from('a test key, not a real one').toString('base64')
+  const env = { ACS_CONNECTION_STRING: `endpoint=https://x.unitedstates.communication.azure.com/;accesskey=${key}`, ACS_EMAIL_SENDER: 'DoNotReply@d.azurecomm.net' }
+  assert.deepEqual(acsConfig(env), { endpoint: 'https://x.unitedstates.communication.azure.com', key, sender: 'DoNotReply@d.azurecomm.net' })
+  assert.equal(acsConfig({ ACS_CONNECTION_STRING: env.ACS_CONNECTION_STRING }), null, 'a sender is needed too')
+  assert.equal(mailBlockedReason(env), null)
+  assert.match(mailBlockedReason({}) ?? '', /not set up/)
+
+  const url = 'https://x.unitedstates.communication.azure.com/emails:send?api-version=2023-03-31'
+  const now = new Date('2026-11-20T19:00:00Z')
+  const h = acsSign('POST', url, '{"a":1}', key, now)
+  const hash = createHash('sha256').update('{"a":1}').digest('base64')
+  const sig = createHmac('sha256', Buffer.from(key, 'base64')).update(`POST\n/emails:send?api-version=2023-03-31\nFri, 20 Nov 2026 19:00:00 GMT;x.unitedstates.communication.azure.com;${hash}`).digest('base64')
+  assert.deepEqual(h, { 'x-ms-date': 'Fri, 20 Nov 2026 19:00:00 GMT', 'x-ms-content-sha256': hash, authorization: `HMAC-SHA256 SignedHeaders=x-ms-date;host;x-ms-content-sha256&Signature=${sig}` })
+
+  const b = acsBody({ to: ['a@b.com', 'c@d.com'], subject: 'S', text: 'T', attachments: [{ filename: 'r.xlsx', content: Buffer.from('xl'), contentType: 'application/x' }] }, 'DoNotReply@d.azurecomm.net')
+  assert.deepEqual(b, { senderAddress: 'DoNotReply@d.azurecomm.net', recipients: { to: [{ address: 'a@b.com' }, { address: 'c@d.com' }] }, content: { subject: 'S', plainText: 'T' }, attachments: [{ name: 'r.xlsx', contentType: 'application/x', contentInBase64: Buffer.from('xl').toString('base64') }] })
+})
