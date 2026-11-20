@@ -7,6 +7,7 @@
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '@/components/items/parts'
+import { JobProgress, useJob } from './deck/runner'
 import type { Described } from '@/lib/import360/decode'
 import type { ReadableRel } from '@/lib/client-eval/rel'
 import type { ProfileSummary } from '@/lib/client-eval/profiles'
@@ -30,6 +31,22 @@ async function post(body: Record<string, unknown>) {
 }
 
 const n = (x: number) => x.toLocaleString('en-US')
+
+type DeckScope = { kind: 'client'; clientId: string } | { kind: 'account'; key: string } | { kind: 'person'; clientId: string; person: string }
+
+/** Open the Impact Deck's own window, which builds the deck and downloads it. */
+function openDeck(scope: DeckScope, title: string) {
+  const url = `/client-evaluation/deck?scope=${encodeURIComponent(JSON.stringify(scope))}&title=${encodeURIComponent(title)}`
+  window.open(url, '_blank', 'popup,width=760,height=600')
+}
+
+function DeckButton({ scope, title }: { scope: DeckScope; title: string }) {
+  return (
+    <button type="button" className="btn ce-sm ce-deck-btn" onClick={() => openDeck(scope, title)} title="Build a PowerPoint of what changes for them in Insights Studio">
+      Impact deck
+    </button>
+  )
+}
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—')
 
 function Badge({ p, onClick, title }: { p: Platform; onClick?: () => void; title?: string }) {
@@ -173,6 +190,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
   const [stack, setStack] = useState<Popup[]>([])
   const [tick, setTick] = useState(0)
   const push = (p: Popup) => setStack((s) => [...s, p])
+  const exp = useJob()
   const pop = () => setStack((s) => s.slice(0, -1))
 
   const params = useMemo(() => ({ op: 'clients', q, platform, sort, active: active ? '1' : '0', internal: internal ? '1' : '0' }), [q, platform, sort, active, internal])
@@ -240,7 +258,11 @@ export function ClientEvaluation({ contact }: { contact: string }) {
           <input id="ce-internal" type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Show internal
         </label>
         <span className="ce-count">{busy ? 'Loading…' : `${n(total)} clients`}</span>
+        <button type="button" className="btn ce-sm" disabled={exp.job?.status === 'running'} onClick={() => void exp.start({ kind: 'export' })} title="Every client, every user in each account, and each user's last login, as an Excel workbook">
+          Export clients and users
+        </button>
       </div>
+      <JobProgress job={exp.job} error={exp.error} started={exp.started} what="The export" />
       {error ? <p className="mr-said mr-bad">{error}</p> : null}
 
       <div className="ce-table">
@@ -271,6 +293,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                       {!c.active ? ' · inactive' : ''}
                       {c.internal ? ' · internal' : ''}
                     </div>
+                    <DeckButton scope={{ kind: 'client', clientId: c.id }} title={c.name} />
                   </td>
                   <td>
                     <div className="ce-badges">
@@ -329,6 +352,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                               {m.platform === 'magnifier' && m.reports ? ` · ${n(m.reports)} reports` : ''}
                             </span>
                             <span className="ce-member-acts">
+                              <DeckButton scope={{ kind: 'account', key: m.key }} title={m.name} />
                               <button type="button" className="btn ce-sm" onClick={() => push({ kind: 'account', key: m.key })}>
                                 Entitlements
                               </button>
@@ -472,6 +496,7 @@ function PeoplePopup({
                     <b>{p.name}</b>
                     {!p.active ? <span className="ce-muted"> · inactive</span> : null}
                     <div className="ce-sub">{p.email ?? p.accounts[0]?.login ?? ''}</div>
+                    <DeckButton scope={{ kind: 'person', clientId: client.id, person: p.key }} title={`${p.name} (${client.name})`} />
                   </td>
                   <td>
                     <div className="ce-accts">

@@ -202,3 +202,30 @@ test('a 360 reporting profile reads as its choices, not the options it offered',
   assert.equal(all.markets, null)
   assert.equal(summariseProfile('not json').measures.length, 0)
 })
+
+test('media map: what stays, drops and is added, per platform (Impact Deck)', async () => {
+  const { mediaChange, MEDIA_360, GPC_MEDIA } = await import('../src/lib/client-eval/media-map')
+  const m = mediaChange('360', ['Network TV', 'Cable TV', 'Local Radio', 'Search', 'Browser Display'])
+  assert.deepEqual(m.kept, ['Network TV', 'Cable TV', 'Browser Display'])
+  assert.deepEqual(m.dropped, ['Local Radio', 'Search'])
+  assert.ok(m.added.includes('Native') && m.added.includes('Social') && !m.added.includes('Cable TV'))
+  assert.equal(m.hasDigital, true)
+  const mag = mediaChange('magnifier', ['TV', 'Radio', 'Paid social'])
+  assert.ok(mag.kept.includes('Spot TV') && mag.kept.includes('Social'))
+  assert.deepEqual(mag.dropped, ['Radio'])
+  assert.equal(mag.hasDigital, false)
+  assert.deepEqual(mediaChange('classic', ['Magazine', 'Website', 'Mystery']).unknown, ['Mystery'])
+  // Every 360 media maps to GPC media that exist.
+  for (const to of Object.values(MEDIA_360)) for (const t of to) assert.ok((GPC_MEDIA as readonly string[]).includes(t))
+})
+
+test('a from → to Sankey keeps the big flows and folds slivers into Other', async () => {
+  const { sankeyOf } = await import('../src/lib/client-eval/deck-sankey')
+  const f = (gpc: string, cat: string, spend: number) => ({ month: '2026-08' as const, media: 'Linear TV' as const, gpcId: gpc, gpcName: gpc, gpcParentId: gpc, gpcParentName: gpc, industry: 'I', category: cat, subcategory: null, spend })
+  const s = sankeyOf('Acme', [f('Acme Inc', 'Snacks', 90), f('Acme Inc', 'Drinks', 5), f('Tiny Co', 'Snacks', 1)], 'advertiser', 'VX1')
+  assert.deepEqual(s.columns, ['VX1 advertiser', 'GPC advertiser', 'GPC category'])
+  assert.deepEqual(s.nodes[1]!.map((n) => n.name), ['Acme Inc', 'Other'], 'Tiny Co is under 3%')
+  assert.equal(s.nodes[0]![0]!.spend, 96)
+  const flowed = s.links.filter((l) => l.col === 1).reduce((a, l) => a + l.spend, 0)
+  assert.equal(flowed, 96, 'every dollar reaches a category')
+})

@@ -355,6 +355,91 @@ export async function dbxFlows(
   return out
 }
 
+// --- categories, and Magnifier's advertiser codes (Client Evaluation) ----------
+
+/** A VX2 code as it may appear in SQL: letters and digits only. */
+const isCode = (c: string) => /^[A-Za-z0-9]{1,20}$/.test(c)
+
+/**
+ * Where a legacy category's Aug–Sep dollars land in GPC (Client Evaluation's
+ * Impact Deck, 20 November 2026): the creatives whose legacy product sits in
+ * the category, followed into GPC exactly as dbxFlows follows an advertiser's.
+ * VX1 ids are "C<category id>" at any level of brandcentral's tree (360's
+ * category and subcategory ids are brandcentral's); VX2 ids are "C<category
+ * code>" or "S<subcategory code>" (Magnifier's REL codes).
+ */
+export async function dbxCategoryFlows(from: 'VX1' | 'VX2', ids: string[], onWait?: OnWait): Promise<Map<string, FlowRaw[]>> {
+  let cte: string
+  if (from === 'VX1') {
+    const cats = ids.filter((id) => id.startsWith('C') && isInt(id.slice(1))).map((id) => id.slice(1))
+    if (!cats.length) return new Map()
+    cte = `
+bc_cat AS (SELECT DISTINCT leaf_category_id leaf, cid FROM mrdpp_prod.brandcentral.category_flatten
+  LATERAL VIEW explode(array(industry_category_id, major_category_id, class_category_id, subcategory_category_id, microcategory_category_id, leaf_category_id)) x AS cid
+  WHERE cid IN (${inList(cats)})),
+bc_prod AS (SELECT source_product_id, max(category_id) cat FROM mrdpp_prod.brandcentral.product WHERE record_status_flag = 'ACTIVE' GROUP BY 1),
+from_crtv AS (
+  SELECT DISTINCT concat('C', k.cid) from_id, c.creative_id FROM mrdpp_prod.gold.creative c
+    JOIN bc_prod p ON p.source_product_id = c.vx1_product_id JOIN bc_cat k ON k.leaf = p.cat)`
+  } else {
+    const cats = ids.filter((id) => id.startsWith('C') && isCode(id.slice(1))).map((id) => `'${id.slice(1)}'`)
+    const subs = ids.filter((id) => id.startsWith('S') && isCode(id.slice(1))).map((id) => `'${id.slice(1)}'`)
+    if (!cats.length && !subs.length) return new Map()
+    cte = `
+from_crtv AS (
+  SELECT DISTINCT concat('C', p.PRCATGY) from_id, c.creative_id FROM mrdpp_prod.gold.creative c
+    JOIN mrdpp_prod.vx2_taxonomy.d_product p ON p.PRSEQ = c.vx2_product_id WHERE p.PRCATGY IN (${cats.join(', ') || 'NULL'})
+  UNION
+  SELECT DISTINCT concat('S', p.PRSBCAT) from_id, c.creative_id FROM mrdpp_prod.gold.creative c
+    JOIN mrdpp_prod.vx2_taxonomy.d_product p ON p.PRSEQ = c.vx2_product_id WHERE p.PRSBCAT IN (${subs.join(', ') || 'NULL'}))`
+  }
+  const out = new Map<string, FlowRaw[]>()
+  const rows = await dbxQuery(config(), flowsSql(cte, from), [], { onWait })
+  for (const r of rows) {
+    const month = `${r.month!.slice(0, 4)}-${r.month!.slice(4, 6)}` as Month
+    if (!(MONTHS as readonly string[]).includes(month)) continue
+    const spend = Number(r.spend ?? 0)
+    if (!spend) continue
+    const list = out.get(r.from_id!) ?? []
+    list.push({
+      month,
+      media: r.media as MediaType,
+      gpcId: r.gpc_id,
+      gpcName: r.gpc_name,
+      gpcParentId: r.gpc_parent_id ?? r.gpc_id,
+      gpcParentName: r.gpc_parent_name ?? r.gpc_name,
+      gpcProductId: r.gpc_product_id,
+      gpcProductName: r.gpc_product_name,
+      industry: r.industry,
+      category: r.category,
+      subcategory: r.subcategory || null,
+      srcIndustry: r.src_industry ?? null,
+      srcCategory: r.src_category ?? null,
+      srcSubcategory: r.src_subcategory || null,
+      spend,
+    })
+    out.set(r.from_id!, list)
+  }
+  return out
+}
+
+/** VX2 advertiser codes (Magnifier's REL codes) as the ids dbxFlows takes, with their names. */
+export async function dbxVx2AdvertiserIds(codes: string[]): Promise<Map<string, { id: string; name: string }>> {
+  const list = [...new Set(codes.filter(isCode))]
+  const out = new Map<string, { id: string; name: string }>()
+  for (let i = 0; i < list.length; i += 200) {
+    const part = list.slice(i, i + 200)
+    const params = part.map((c, j) => ({ name: `c${j}`, value: c }))
+    const rows = await dbxQuery(
+      config(),
+      `SELECT CODE k, cast(max(ID) AS string) id, max(NAME) n FROM mrdpp_prod.vx2_taxonomy.d_advertiser WHERE CODE IN (${params.map((p) => `:${p.name}`).join(', ')}) GROUP BY CODE`,
+      params,
+    )
+    for (const r of rows) if (r.k && r.id) out.set(r.k, { id: r.id, name: r.n ?? r.k })
+  }
+  return out
+}
+
 // --- the swap: GPC on the left -------------------------------------------------
 
 /**

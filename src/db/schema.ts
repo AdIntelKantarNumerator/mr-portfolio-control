@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto'
 import { relations } from 'drizzle-orm'
 import {
   boolean,
+  customType,
   doublePrecision,
   index,
   integer,
@@ -2640,4 +2641,31 @@ export const ceJudgments = pgTable('ce_judgments', {
   same: boolean('same').notNull(),
   why: text('why'),
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** Binary file contents (Postgres bytea), as a Buffer. */
+const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
+  dataType: () => 'bytea',
+  fromDriver: (v) => Buffer.from(v),
+})
+
+/** Background jobs for Client Evaluation: the Impact Deck and the export (drizzle/0052). */
+export const ceJobs = pgTable('ce_jobs', {
+  id: text('id').primaryKey(),
+  /** deck | export */
+  kind: text('kind').notNull(),
+  title: text('title').notNull(),
+  params: jsonb('params').notNull(),
+  /** running | done | failed */
+  status: text('status').notNull().default('running'),
+  step: text('step'),
+  done: integer('done').notNull().default(0),
+  total: integer('total').notNull().default(0),
+  error: text('error'),
+  fileName: text('file_name'),
+  fileType: text('file_type'),
+  file: bytea('file'),
+  createdBy: text('created_by'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
 })
