@@ -2667,6 +2667,12 @@ button.ce-badge { cursor: pointer; }
 .ce-of { color: var(--muted); font-weight: 500; }
 .ce-pill { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; font-weight: 650; color: var(--brand); cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ce-pill:hover { border-color: var(--brand); }
+.ce-reps { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.ce-seg { display: inline-flex; align-self: flex-start; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.ce-seg button { border: 0; border-left: 1px solid var(--line); background: var(--surface); padding: 5px 14px; font-size: 13px; font-weight: 650; cursor: pointer; color: var(--ink); }
+.ce-seg button:first-child { border-left: 0; }
+.ce-seg button.ce-on { background: var(--brand); color: #fff; }
+.ce-seg button.ce-on .ce-muted { color: rgba(255,255,255,.8); }
 .ce-names { display: flex; flex-wrap: wrap; gap: 4px; }
 .ce-name-chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); }
 .ce-name-chip.ce-out { color: var(--red); text-decoration: line-through; }

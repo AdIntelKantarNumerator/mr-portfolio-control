@@ -238,7 +238,10 @@ export interface ClientRow {
   platforms: Platform[]
   users: number
   activeUsers: number
+  /** 360 reports used in 2026. */
   reports: number
+  /** Distinct Magnifier reports set up across the client's Magnifier accounts (one report can be on several). */
+  magnifierReports: number
   active: boolean
   internal: boolean
   company: string | null
@@ -254,6 +257,18 @@ export async function listClients(
   const needle = (o.q ?? '').trim().toLowerCase()
   const accts = await d.select({ platform: ceAccounts.platform, accountId: ceAccounts.accountId, name: ceAccounts.name, company: ceAccounts.company, active: ceAccounts.active, users: ceAccounts.users, activeUsers: ceAccounts.activeUsers, reports: ceAccounts.reports, summary: ceAccounts.summary }).from(ceAccounts)
   const acct = new Map(accts.map((a) => [memberKey(a.platform as Platform, a.accountId), a]))
+  const mreports = new Map<string, string[]>()
+  for (const r of await d.select({ accountId: ceReports.accountId, reportId: ceReports.reportId }).from(ceReports).where(eq(ceReports.platform, 'magnifier')))
+    (mreports.get(r.accountId) ?? mreports.set(r.accountId, []).get(r.accountId)!).push(r.reportId)
+  const magnifierOf = (members: string[]) => {
+    const ids = new Set<string>()
+    for (const k of members) {
+      const m = parseMember(k)
+      if (m?.platform === 'magnifier') for (const id of mreports.get(m.accountId) ?? []) ids.add(id)
+    }
+    return ids.size
+  }
+  const mcount = new Map(all.map((c) => [c.clientId, magnifierOf(c.members as string[])]))
   let rows = all.filter((c) => {
     const ps = c.platforms as Platform[]
     if (o.platform === 'multi' ? ps.length < 2 : o.platform && o.platform !== 'all' && !ps.includes(o.platform)) return false
@@ -268,7 +283,7 @@ export async function listClients(
   })
   const sort = o.sort ?? 'reports'
   rows = rows.sort((a, b) =>
-    sort === 'name' ? a.name.localeCompare(b.name) : sort === 'users' ? b.users - a.users || a.name.localeCompare(b.name) : b.reports - a.reports || b.activeUsers - a.activeUsers || a.name.localeCompare(b.name),
+    sort === 'name' ? a.name.localeCompare(b.name) : sort === 'users' ? b.users - a.users || a.name.localeCompare(b.name) : b.reports - a.reports || mcount.get(b.clientId)! - mcount.get(a.clientId)! || b.activeUsers - a.activeUsers || a.name.localeCompare(b.name),
   )
   const total = rows.length
   const page = rows.slice(o.offset ?? 0, (o.offset ?? 0) + (o.limit ?? 100))
@@ -281,6 +296,7 @@ export async function listClients(
       users: c.users,
       activeUsers: c.activeUsers,
       reports: c.reports,
+      magnifierReports: mcount.get(c.clientId) ?? 0,
       active: c.active,
       internal: c.internal,
       company: c.company,
@@ -291,7 +307,7 @@ export async function listClients(
           const m = parseMember(k)!
           return { key: k, platform: m.platform, accountId: m.accountId, name: a?.name ?? k, active: a?.active ?? false, users: a?.users ?? 0, activeUsers: a?.activeUsers ?? 0, reports: a?.reports ?? 0, summary: a?.summary ?? null }
         })
-        .sort((x, y) => PLATFORMS.indexOf(x.platform) - PLATFORMS.indexOf(y.platform) || y.users - x.users),
+        .sort((x, y) => PLATFORMS.indexOf(x.platform) - PLATFORMS.indexOf(y.platform) || y.reports - x.reports || y.activeUsers - x.activeUsers || y.users - x.users),
     })),
   }
 }

@@ -151,7 +151,7 @@ function Sources({ contact, onReady }: { contact: string; onReady: () => void })
 
 type Popup =
   | { kind: 'account'; key: string }
-  | { kind: 'people'; client: ClientRow }
+  | { kind: 'people'; client: ClientRow; platform?: Platform }
   | { kind: 'reports'; usrId: number; who: string }
   | { kind: 'mreports'; accountKey: string; who: string }
   | { kind: 'report'; key: string }
@@ -248,7 +248,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
               <th>Client</th>
               <th>Platforms</th>
               <th className="ce-num" title="Distinct people across the platforms, by email. Active / all.">Users</th>
-              <th className="ce-num" title="360 reports used in 2026">360 reports</th>
+              <th className="ce-num" title="360: reports used in 2026. Magnifier: distinct reports set up across the client's Magnifier accounts.">Reports</th>
               <th>Entitlements</th>
             </tr>
           </thead>
@@ -284,13 +284,19 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                     </button>
                   </td>
                   <td className="ce-num">
-                    {c.reports ? (
-                      <button type="button" className="ce-pill" onClick={() => push({ kind: 'people', client: c })} title="Who saved them: open a person's reports, then a report's spec">
-                        {n(c.reports)} ›
-                      </button>
-                    ) : (
-                      <span className="ce-muted">—</span>
-                    )}
+                    <div className="ce-reps">
+                      {c.reports ? (
+                        <button type="button" className="ce-pill" onClick={() => push({ kind: 'people', client: c, platform: '360' })} title="360 reports used in 2026: open a person's reports, then a report's spec">
+                          <Badge p="360" /> {n(c.reports)} ›
+                        </button>
+                      ) : null}
+                      {c.magnifierReports ? (
+                        <button type="button" className="ce-pill" onClick={() => push({ kind: 'people', client: c, platform: 'magnifier' })} title="Magnifier reports set up for the client's accounts">
+                          <Badge p="magnifier" /> {n(c.magnifierReports)} ›
+                        </button>
+                      ) : null}
+                      {!c.reports && !c.magnifierReports ? <span className="ce-muted">—</span> : null}
+                    </div>
                   </td>
                   <td className="ce-ents">
                     {c.platforms.map((p) => {
@@ -363,7 +369,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
 
       {top?.kind === 'account' ? <AccountPopup k={top.key} onClose={pop} /> : null}
       {top?.kind === 'people' ? (
-        <PeoplePopup client={top.client} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} onMagnifierReports={(accountKey, who) => push({ kind: 'mreports', accountKey, who })} />
+        <PeoplePopup client={top.client} initialPlatform={top.platform} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} onMagnifierReports={(accountKey, who) => push({ kind: 'mreports', accountKey, who })} />
       ) : null}
       {top?.kind === 'mreports' ? <MagnifierReportsPopup k={top.accountKey} who={top.who} onClose={pop} /> : null}
       {top?.kind === 'reports' ? <ReportsPopup usrId={top.usrId} who={top.who} onClose={pop} onReport={(key) => push({ kind: 'report', key })} /> : null}
@@ -385,13 +391,18 @@ export function ClientEvaluation({ contact }: { contact: string }) {
 
 // ------------------------------------------------------------------ people
 
+/** A person's report volume: their 360 reports, and the reports on their Magnifier accounts. */
+const volume = (p: PersonRow) => p.accounts.reduce((t, a) => t + (a.platform === '360' ? a.reports : 0), 0) + Math.max(0, ...p.accounts.map((a) => (a.platform === 'magnifier' ? a.accountReports : 0)))
+
 function PeoplePopup({
   client,
+  initialPlatform,
   onClose,
   onReports,
   onMagnifierReports,
 }: {
   client: ClientRow
+  initialPlatform?: Platform
   onClose: () => void
   onReports: (usrId: number, who: string) => void
   onMagnifierReports: (accountKey: string, who: string) => void
@@ -401,6 +412,7 @@ function PeoplePopup({
   const [q, setQ] = useState('')
   const [sort, setSort] = useState('reports')
   const [activeOnly, setActiveOnly] = useState(false)
+  const [platform, setPlatform] = useState<Platform | 'all'>(initialPlatform ?? 'all')
   useEffect(() => {
     get<{ name: string; people: PersonRow[] }>({ op: 'people', client: client.id }).then(setData, (e) => setError((e as Error).message))
   }, [client.id])
@@ -408,17 +420,27 @@ function PeoplePopup({
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase()
     return (data?.people ?? [])
-      .filter((p) => (!activeOnly || p.active) && (!needle || `${p.name} ${p.email ?? ''} ${p.accounts.map((a) => a.login ?? '').join(' ')}`.toLowerCase().includes(needle)))
-      .sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name) : b.reports - a.reports || Number(b.active) - Number(a.active) || a.name.localeCompare(b.name)))
-  }, [data, q, sort, activeOnly])
+      .map((p) => (platform === 'all' ? p : { ...p, accounts: p.accounts.filter((a) => a.platform === platform) }))
+      .map((p) => (platform === 'all' ? p : { ...p, active: p.accounts.some((a) => a.active), reports: platform === '360' ? p.accounts.reduce((t, a) => t + a.reports, 0) : platform === 'magnifier' ? Math.max(0, ...p.accounts.map((a) => a.accountReports)) : 0 }))
+      .filter((p) => p.accounts.length && (!activeOnly || p.active) && (!needle || `${p.name} ${p.email ?? ''} ${p.accounts.map((a) => a.login ?? '').join(' ')}`.toLowerCase().includes(needle)))
+      .sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name) : volume(b) - volume(a) || Number(b.active) - Number(a.active) || a.name.localeCompare(b.name)))
+  }, [data, q, sort, activeOnly, platform])
 
   return (
     <Modal title={`People at ${client.name}`} onClose={onClose}>
       <div className="ce-pop">
+        <div className="ce-seg" role="tablist" aria-label="Application">
+          {(['all', '360', 'magnifier', 'classic'] as const).map((x) => (
+            <button key={x} type="button" role="tab" aria-selected={platform === x} className={platform === x ? 'ce-on' : undefined} onClick={() => setPlatform(x)}>
+              {x === 'all' ? 'All' : PLATFORM_LABEL[x]}
+              <span className="ce-muted"> {n(x === 'all' ? (data?.people.length ?? 0) : (data?.people.filter((p) => p.accounts.some((a) => a.platform === x)).length ?? 0))}</span>
+            </button>
+          ))}
+        </div>
         <div className="ce-controls">
           <input id="ce-people-q" className="ce-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people" aria-label="Search people" autoFocus />
           <select id="ce-people-sort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort people">
-            <option value="reports">Most 360 reports</option>
+            <option value="reports">Most reports</option>
             <option value="name">A–Z</option>
           </select>
           <label className="ce-tick">
