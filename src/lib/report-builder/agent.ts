@@ -73,7 +73,7 @@ export async function loadUser(email: string): Promise<EngineState | null> {
   return (row?.state as EngineState | undefined) ?? null
 }
 
-async function saveUser(email: string, state: EngineState) {
+export async function saveUser(email: string, state: EngineState) {
   await db.insert(reportBuilderUsers).values({ email, state }).onConflictDoUpdate({ target: reportBuilderUsers.email, set: { state, updatedAt: new Date() } })
 }
 
@@ -102,6 +102,7 @@ async function saveChat(chatId: string, email: string, state: ChatState) {
  * long link is still better than none.
  */
 export async function downloadUrl(base: string, spec: Spec, name: string): Promise<string> {
+  // V2 downloads through V1's export route: the same files, recomputed for whoever opens the link.
   const root = `${base.replace(/\/+$/, '')}/prototypes/report-builder/export`
   const label = `name=${encodeURIComponent(name.slice(0, 80))}`
   const json = JSON.stringify(spec)
@@ -138,7 +139,7 @@ export interface TurnInput {
  * Loads one person's saved reports and one chat's state, runs `work` on them,
  * and saves whichever changed. Every turn and every page action goes through here.
  */
-async function withSession<T>(email: string, chatId: string | null, appUrl: string, work: (ctx: ToolContext) => Promise<T> | T): Promise<T> {
+export async function withSession<T>(email: string, chatId: string | null, appUrl: string, work: (ctx: ToolContext) => Promise<T> | T): Promise<T> {
   const who = email.trim().toLowerCase()
   const chatKey = chatId?.trim() || `default:${who}`
   const before = await loadUser(who)
@@ -159,7 +160,7 @@ async function withSession<T>(email: string, chatId: string | null, appUrl: stri
   return out
 }
 
-async function modelTurn(ctx: ToolContext, input: TurnInput, system: string): Promise<string> {
+export async function modelTurn(ctx: ToolContext, input: TurnInput, system: string): Promise<string> {
   const choice = chooseModel()
   if (!choice) throw new ReportModelError('No model is configured for Report Builder. Set REPORT_BUILDER_MODEL and REPORT_BUILDER_PROVIDERS (OpenRouter), or ANTHROPIC_API_KEY.')
   let last = ''
@@ -205,7 +206,7 @@ export type PageAction =
   | { type: 'demo_month' }
   | { type: 'save_comp_set' }
 
-const ACTION_TOOL: Record<PageAction['type'], string> = {
+export const ACTION_TOOL: Record<PageAction['type'], string> = {
   start: 'new_report',
   choose: 'choose',
   run: 'run_report',
@@ -217,7 +218,7 @@ const ACTION_TOOL: Record<PageAction['type'], string> = {
   save_comp_set: 'competitive_set',
 }
 
-function actionInput(a: PageAction): Record<string, unknown> {
+export function actionInput(a: PageAction): Record<string, unknown> {
   switch (a.type) {
     case 'choose':
       return { choice: a.choice }
@@ -238,7 +239,7 @@ function actionInput(a: PageAction): Record<string, unknown> {
 }
 
 /** What the assistant says after a click: the page shows the rest. */
-function cannedText(view: View | undefined): string {
+export function cannedText(view: View | undefined): string {
   if (!view) return 'Done.'
   switch (view.kind) {
     case 'question':
@@ -284,7 +285,7 @@ export interface PageReply {
   brandSet: CompSetView | null
 }
 
-async function reply(ctx: ToolContext, text: string): Promise<PageReply> {
+export async function reply(ctx: ToolContext, text: string): Promise<PageReply> {
   return {
     text,
     compSet: compView(ctx.comp?.get() ?? null),

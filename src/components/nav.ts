@@ -172,6 +172,13 @@ export const NAV: NavSection[] = [
         hint: 'Set up custom reports and data extracts by conversation',
       },
       {
+        // 20 November 2026: the conversation beside an editable builder, with save, run, export and schedule.
+        href: '/prototypes/report-builder-v2',
+        label: 'Report Builder V2',
+        icon: IconReportBuilder,
+        hint: 'Set up reports by conversation and edit them as selections; run, export and schedule without the chat',
+      },
+      {
         href: '/prototypes/magnifier-offline-reports',
         label: 'Magnifier Offline Reports',
         icon: IconTimeline,

@@ -35,12 +35,24 @@ export async function register() {
   // `register` also runs in the edge runtime, where none of this exists.
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
 
+  // Report Builder V2's scheduled reports: a check for due runs once a minute
+  // (lib/report-builder/v2/schedule.ts). Started after the migration below
+  // when there is one, so it never reads a table that is not there yet.
+  const startSchedules = async () => {
+    try {
+      const { startScheduleTicker } = await import('./lib/report-builder/v2/schedule')
+      startScheduleTicker()
+    } catch (err) {
+      console.error('[report schedules] could not start', err)
+    }
+  }
+
   const url = process.env.DATABASE_URL?.trim()
 
   // Local development runs on embedded PGlite and migrates through
   // `npm run db:migrate -- --local`. Nothing to do, and no reason to slow the
   // dev server's boot.
-  if (!url || !/^postgres(ql)?:\/\//.test(url)) return
+  if (!url || !/^postgres(ql)?:\/\//.test(url)) return startSchedules()
 
   const { Pool } = await import('pg')
   const { drizzle } = await import('drizzle-orm/node-postgres')
@@ -75,4 +87,5 @@ export async function register() {
   } finally {
     await pool.end()
   }
+  await startSchedules()
 }

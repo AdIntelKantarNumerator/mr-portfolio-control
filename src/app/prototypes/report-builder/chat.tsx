@@ -68,7 +68,7 @@ const ICON_PATHS: Record<string, string[]> = {
   competitor_placements: ['M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z', 'M12 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z'],
   detail_extract: ['M3 5h18v14H3z', 'M3 10h18', 'M3 14.5h18', 'M9 5v14'],
 }
-function ReportIcon({ id }: { id: string }) {
+export function ReportIcon({ id }: { id: string }) {
   const paths = ICON_PATHS[id]
   if (!paths) return null
   return (
@@ -195,7 +195,7 @@ function StackLegend({ measures }: { measures: string[] }) {
 }
 
 /** A trend line when the columns are periods; bars of each row's total otherwise. */
-function Chart({ table }: { table: ViewTable }) {
+export function Chart({ table }: { table: ViewTable }) {
   const text = table.columns.filter((c) => c.type === 'text').length
   const label = (r: unknown[]) =>
     r
@@ -295,7 +295,7 @@ function Chart({ table }: { table: ViewTable }) {
   )
 }
 
-function Table({ table, max }: { table: ViewTable; max: number }) {
+export function Table({ table, max }: { table: ViewTable; max: number }) {
   const rows = table.rows.slice(0, max)
   const dcols = displayCols(table.columns)
   return (
@@ -411,7 +411,7 @@ function CompAdd({ side, set, onAdd }: { side: 'mine' | 'versus'; set: SetKind; 
  * The person's competitive set, edited here. Publisher Intel: their properties
  * and the competing ones. Competitive Intel: their brands and competitors.
  */
-function CompPanel({ comp, setComp, set }: { comp: CompSetView | null; setComp: (c: CompSetView | null) => void; set: SetKind }) {
+export function CompPanel({ comp, setComp, set }: { comp: CompSetView | null; setComp: (c: CompSetView | null) => void; set: SetKind }) {
   const [err, setErr] = useState<string | null>(null)
   const brands = set === 'brands'
   async function change(edit: Record<string, unknown>) {
@@ -464,7 +464,7 @@ type Branch = { state: 'loading' } | { state: 'error'; message: string } | { sta
  * a tree: the top level first, with each row's next level fetched when it is
  * opened. Every level uses the same columns as the top, so they line up.
  */
-function TreeTable({ tree, max }: { tree: ViewTree; max: number }) {
+export function TreeTable({ tree, max }: { tree: ViewTree; max: number }) {
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [branches, setBranches] = useState<Map<string, Branch>>(new Map())
   const top = tree.top
@@ -610,7 +610,7 @@ function TreeTable({ tree, max }: { tree: ViewTree; max: number }) {
  * What the text box suggests, from where the conversation is: the buttons
  * cover the usual answers, so the hint shows what else can be typed.
  */
-function hintFor(view: View | null | undefined, editing: boolean): string {
+export function hintFor(view: View | null | undefined, editing: boolean): string {
   if (!view) return 'Describe a report, for example "media mix for Toyota, last 3 months"'
   if (view.kind === 'question') {
     const q = (view.question ?? '').toLowerCase()
@@ -997,7 +997,7 @@ export function ReportBuilderChat({
   )
 }
 
-function MessageView({
+export function MessageView({
   m,
   live,
   panel,

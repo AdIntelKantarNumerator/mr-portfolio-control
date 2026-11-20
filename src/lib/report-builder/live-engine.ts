@@ -15,6 +15,7 @@
  */
 import type { EngineState, Option, Patch, Result, SavedSummary, Spec, Understanding, Validation } from './engine'
 import { EntitlementError } from './data/entitlements'
+import { V2_TEMPLATES } from './v2/templates'
 import { DIMENSIONS, MEASURE_INFO, all, any, normName, type AggregateQuery, type Cond, type DataAdapter, type DimGroup, type DimKey, type MeasureKey, type MeasureSpec } from './data/types'
 
 const INLINE_ROW_LIMIT = 2000
@@ -57,6 +58,8 @@ const TEMPLATES = [
   { id: 'competitive_trend', label: 'Competitive trend', description: 'Week by week: you against your competitors', spec: { template: 'competitive_trend', rows: ['advertiser'], columns: 'broadcast_week', measures: ['spend'], compare: NO_COMPARE, time: QUARTER_OF_WEEKS } },
   { id: 'competitor_placements', label: 'Where competitors run', description: 'Spend by property, for you and your competitors', spec: { template: 'competitor_placements', rows: ['advertiser', 'property'], measures: ['spend'], compare: NO_COMPARE, time: RECENT } },
   { id: 'detail_extract', label: 'Detailed extract', description: 'Product-level rows by property and month, for a spreadsheet', spec: { template: 'detail_extract', rows: ['top_parent', 'advertiser', 'product', 'subcategory', 'media_type', 'property', 'month'], measures: ['spend', 'occurrences', 'impressions'], time: { mode: 'rolling', unit: 'month', count: 1 }, output: 'csv' } },
+  // Report Builder V2 (20 November 2026): the templates in the PRD's priority sheet. V1 does not offer them (tools.ts MODE_TEMPLATES).
+  ...V2_TEMPLATES(RECENT, WEEKS, NO_COMPARE, NO_ZERO),
 ]
 
 /** Everyday words for the taxonomy's own names: "fast food" is QSRs-Quick Serve Restaurants. */

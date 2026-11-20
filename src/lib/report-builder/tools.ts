@@ -23,6 +23,8 @@ export interface ChatState {
   editing: { id: string; name: string } | null
   /** Publisher Intel (a media owner) or Competitive Intel (a brand or buyer); unset in chat hosts, which offer the classic set. */
   mode?: IntelMode
+  /** Report Builder V2's page: offers the V2 templates (MODE_TEMPLATES_V2). */
+  v2?: boolean
 }
 
 export type IntelMode = 'publisher' | 'buyer'
@@ -33,7 +35,14 @@ export const MODE_TEMPLATES: Record<IntelMode | 'all', string[]> = {
   buyer: ['competitive_mix', 'share_of_voice', 'competitive_trend', 'competitor_placements', 'category_share', 'detail_extract'],
   all: ['advertiser_trend', 'media_mix', 'category_share', 'zero_share', 'detail_extract'],
 }
-const ALL_TEMPLATES = Array.from(new Set(Object.values(MODE_TEMPLATES).flat()))
+/** Report Builder V2: the templates in the PRD's priority sheet first, then the V1 ones that still fit. */
+export const MODE_TEMPLATES_V2: Record<IntelMode, string[]> = {
+  publisher: ['zero_share', 'local_market_prospecting', 'category_prospecting', 'advertisers_on_my_properties', 'advertiser_drilldown', 'tv_schedule', 'share_of_wallet', 'advertiser_trend', 'media_mix', 'detail_extract'],
+  buyer: ['competitive_media_mix', 'local_market_footprint', 'category_competitive_view', 'tv_schedule', 'share_of_voice', 'competitive_trend', 'competitor_placements', 'detail_extract'],
+}
+/** The templates a chat offers, in order. */
+export const templatesFor = (chat: Pick<ChatState, 'mode' | 'v2'>): string[] => (chat.v2 ? MODE_TEMPLATES_V2[chat.mode ?? 'buyer'] : MODE_TEMPLATES[chat.mode ?? 'all'])
+const ALL_TEMPLATES = Array.from(new Set([...Object.values(MODE_TEMPLATES).flat(), ...Object.values(MODE_TEMPLATES_V2).flat()]))
 export const MODE_LABEL: Record<IntelMode, string> = { publisher: 'Publisher Intel', buyer: 'Competitive Intel' }
 
 export const emptyChat = (): ChatState => ({ report: null, offered: [], editing: null })
@@ -216,7 +225,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'new_report',
     description:
-      'Start a new report in this chat, replacing any report in progress. Publisher Intel (a media owner): zero_share (who buys competitors but not you), share_of_wallet, my_advertisers (who buys your properties), competitor_categories, advertiser_trend, detail_extract. Competitive Intel (a brand or buyer): competitive_mix (media mix, you vs competitors), share_of_voice, competitive_trend (weekly), competitor_placements (where competitors run), category_share, detail_extract. Also media_mix (one advertiser). Omit template to ask the user. Returns a question, a problem or a ready preview.',
+      'Start a new report in this chat, replacing any report in progress. Publisher Intel (a media owner): zero_share (who buys competitors but not you), share_of_wallet, my_advertisers (who buys your properties), competitor_categories, advertiser_trend, detail_extract. Competitive Intel (a brand or buyer): competitive_mix (media mix, you vs competitors), share_of_voice, competitive_trend (weekly), competitor_placements (where competitors run), category_share, detail_extract. Also media_mix (one advertiser). On Report Builder V2, report_options lists its own templates (competitive_media_mix, local_market_footprint, category_competitive_view, tv_schedule, local_market_prospecting, category_prospecting, advertisers_on_my_properties, advertiser_drilldown and others); use those ids. Omit template to ask the user. Returns a question, a problem or a ready preview.',
     parameters: obj({ template: { type: 'string', enum: ALL_TEMPLATES.concat(['media_mix']).filter((t, i, a) => a.indexOf(t) === i) } }),
   },
   {
@@ -306,7 +315,7 @@ export const TOOLS: ToolDef[] = [
 ]
 
 /** What a tool returns when the report changed: one of question, problem or ready. */
-async function status(ctx: ToolContext, v: Validation) {
+export async function status(ctx: ToolContext, v: Validation) {
   const { chat, engine } = ctx
   chat.report = v.spec
   const templateOf = (o: Option) => {
@@ -327,7 +336,7 @@ async function status(ctx: ToolContext, v: Validation) {
     let q = v.questions[0]!
     // The kinds of report this mode offers, in its order.
     if (q.id === 'template') {
-      const ids = MODE_TEMPLATES[chat.mode ?? 'all']
+      const ids = templatesFor(chat)
       q = { ...q, options: ids.map((id) => q.options.find((o) => templateOf(o) === id)).filter((o): o is Option => Boolean(o)) }
     }
     // With a stored set, confirm it instead of asking from scratch.
@@ -463,7 +472,7 @@ export async function runTool(ctx: ToolContext, name: string, input: Record<stri
     case 'report_options': {
       const c = await engine.catalog()
       if (!chat.mode) return c
-      const ids = MODE_TEMPLATES[chat.mode]
+      const ids = templatesFor(chat)
       return { ...c, intel: MODE_LABEL[chat.mode], templates: ids.map((id) => c.templates.find((t) => t.id === id)).filter(Boolean) }
     }
 

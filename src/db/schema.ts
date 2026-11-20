@@ -2523,6 +2523,49 @@ export const reportBuilderExports = pgTable('report_builder_exports', {
   createdAt: createdAt(),
 })
 
+/**
+ * Report Builder V2: a saved report run on a cadence and emailed with the
+ * file attached (drizzle/0054). The report is read by id at each run, so a
+ * rolling period and later edits apply to the next delivery.
+ * lib/report-builder/v2/schedule.ts runs them.
+ */
+export const reportBuilderSchedules = pgTable(
+  'report_builder_schedules',
+  {
+    id: id(),
+    /** The owner: whose saved report, and who hears about failures. */
+    email: text('email').notNull(),
+    reportId: text('report_id').notNull(),
+    reportName: text('report_name').notNull(),
+    /** once | daily | weekly | monthly */
+    cadence: text('cadence').notNull(),
+    /** The first run (and the only one, for once). */
+    startAt: timestamp('start_at', { withTimezone: true }).notNull(),
+    /** "HH:MM" in timezone. */
+    timeOfDay: text('time_of_day').notNull(),
+    timezone: text('timezone').notNull(),
+    /** weekly: 0 Sunday .. 6 Saturday. */
+    dayOfWeek: integer('day_of_week'),
+    /** monthly: 1..28, or -1 for the last day. */
+    dayOfMonth: integer('day_of_month'),
+    /** A period for every run instead of the report's own (always rolling). */
+    period: jsonb('period'),
+    /** xlsx | csv */
+    format: text('format').notNull(),
+    recipients: jsonb('recipients').$type<string[]>().notNull(),
+    active: boolean('active').notNull().default(true),
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }),
+    lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+    /** ok | failed | running */
+    lastStatus: text('last_status'),
+    lastError: text('last_error'),
+    runs: integer('runs').notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('report_builder_schedules_due').on(t.active, t.nextRunAt), index('report_builder_schedules_email').on(t.email)],
+)
+
 // ---------------------------------------------------------------------------
 // Client Evaluation (drizzle/0050_client_evaluation.sql). Snapshots of each
 // client platform, the consolidated client list built from them, and the
