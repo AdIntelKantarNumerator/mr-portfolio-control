@@ -22,6 +22,8 @@ export function useJob() {
   const [job, setJob] = useState<JobState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [started, setStarted] = useState<number | null>(null)
+  /** Checks are failing for now (the server is busy); still trying. */
+  const [waiting, setWaiting] = useState(false)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => () => {
@@ -41,33 +43,48 @@ export function useJob() {
     const id = String(out.id)
     setJob({ id, status: 'running', step: 'Starting', done: 0, total: 0, error: null, fileName: null })
     if (timer.current) clearInterval(timer.current)
+    // A check can fail while the server is busy (another export writing, a
+    // restart): keep checking, and give up only after three minutes of failures.
+    let failingSince: number | null = null
+    let checking = false
     timer.current = setInterval(async () => {
-      const r = await fetch(`/client-evaluation/jobs?id=${id}`, { cache: 'no-store' })
-      const j = (await r.json().catch(() => ({}))) as JobState & { error?: string }
-      if (!r.ok) {
-        setError(j.error ?? 'Lost track of the job.')
-        if (timer.current) clearInterval(timer.current)
-        return
-      }
-      setJob({ ...j, id })
-      if (j.status !== 'running') {
-        if (timer.current) clearInterval(timer.current)
-        if (j.status === 'done') {
-          // A file, not a page: a link the browser downloads.
-          const a = document.createElement('a')
-          a.href = `/client-evaluation/jobs?id=${id}&file=1`
-          a.download = j.fileName ?? ''
-          document.body.appendChild(a)
-          a.click()
-          a.remove()
+      if (checking) return
+      checking = true
+      try {
+        const r = await fetch(`/client-evaluation/jobs?id=${id}`, { cache: 'no-store', signal: AbortSignal.timeout(20_000) })
+        const j = (await r.json().catch(() => ({}))) as JobState & { error?: string }
+        if (!r.ok) throw new Error(j.error ?? `The server answered ${r.status}.`)
+        failingSince = null
+        setWaiting(false)
+        setJob({ ...j, id })
+        if (j.status !== 'running') {
+          if (timer.current) clearInterval(timer.current)
+          if (j.status === 'done') {
+            // A file, not a page: a link the browser downloads.
+            const a = document.createElement('a')
+            a.href = `/client-evaluation/jobs?id=${id}&file=1`
+            a.download = j.fileName ?? ''
+            document.body.appendChild(a)
+            a.click()
+            a.remove()
+          }
         }
+      } catch (err) {
+        failingSince ??= Date.now()
+        setWaiting(true)
+        if (Date.now() - failingSince > 180_000) {
+          setError(`Lost touch with the server for three minutes (${(err as Error).message}). The job may still finish: try again in a few minutes.`)
+          if (timer.current) clearInterval(timer.current)
+        }
+      } finally {
+        checking = false
       }
     }, 2000)
   }
-  return { job, error, started, start }
+  return { job, error, started, start, waiting }
 }
 
-export function JobProgress({ job, error, started, what }: { job: JobState | null; error: string | null; started: number | null; what: string }) {
+export function JobProgress({ job, error, started, what, waiting = false }: { job: JobState | null; error: string | null; started: number | null; what: string; waiting?: boolean }) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (job?.status !== 'running') return
@@ -91,7 +108,7 @@ export function JobProgress({ job, error, started, what }: { job: JobState | nul
       ) : (
         <>
           <div className="ce-progress-step">
-            {job.step ?? 'Working'}… <span className="ce-muted">{elapsed}</span>
+            {job.step ?? 'Working'}… <span className="ce-muted">{elapsed}{waiting ? ' · the server is busy, still checking' : ''}</span>
           </div>
           <div className="ce-track">
             <div className={`ce-bar${pct === null ? ' ce-indet' : ''}`} style={pct === null ? undefined : { width: `${Math.max(4, pct)}%` }} />
@@ -103,7 +120,7 @@ export function JobProgress({ job, error, started, what }: { job: JobState | nul
 }
 
 export function DeckRunner({ scope, title }: { scope: string; title: string }) {
-  const { job, error, started, start } = useJob()
+  const { job, error, started, start, waiting } = useJob()
   const once = useRef(false)
   useEffect(() => {
     if (once.current) return
@@ -127,7 +144,7 @@ export function DeckRunner({ scope, title }: { scope: string; title: string }) {
           Building a PowerPoint of what changes in media coverage and taxonomy on the move to Insights Studio. It reads each platform&apos;s data, so it takes a few minutes. Keep this window open.
         </p>
       </div>
-      <JobProgress job={job} error={error} started={started} what="The deck" />
+      <JobProgress job={job} error={error} started={started} what="The deck" waiting={waiting} />
       {job?.status === 'done' ? (
         <button type="button" className="btn" onClick={() => window.close()}>
           Close this window

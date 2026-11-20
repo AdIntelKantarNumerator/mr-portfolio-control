@@ -99,7 +99,9 @@ export function Shell({
 
   // The sign-in page gets no navigation: showing a signed-out visitor the full
   // menu invites them to click things that will only bounce them back here.
-  if (pathname === '/signin') {
+  // Nor does the Impact Deck's own small window (Client Evaluation): it is a
+  // progress panel, not a page to navigate from (Scott, 20 November 2026).
+  if (pathname === '/signin' || pathname === '/client-evaluation/deck') {
     return <div className="mx-auto w-full max-w-[1400px] px-4 py-10 sm:px-6">{children}</div>
   }
 

@@ -16,7 +16,7 @@ import { currentAccess } from '@/lib/auth/access'
 import { buildDeck } from '@/lib/client-eval/deck-pptx'
 import { deckData, type DeckScope } from '@/lib/client-eval/deck-data'
 import { buildExport } from '@/lib/client-eval/export'
-import { readJob, readJobFile, startJob } from '@/lib/client-eval/jobs'
+import { readJob, readJobFile, runningJob, startJob } from '@/lib/client-eval/jobs'
 import { parseMember } from '@/lib/client-eval/types'
 
 export const runtime = 'nodejs'
@@ -46,19 +46,22 @@ export async function POST(req: Request) {
       const scope = readScope(body.scope)
       if (!scope) return bad('Unknown client, account or person.')
       const title = String(body.title ?? 'Client').slice(0, 200)
-      const id = await startJob('deck', `Impact Deck: ${title}`, { scope }, by, async (progress) => {
+      const id = await startJob('deck', `Impact Deck: ${title}`, { scope }, by, async (progress, out) => {
         const data = await deckData(scope, progress)
         await progress('Building the PowerPoint')
-        return { file: await buildDeck(data), fileName: `${fileSafe(data.title)} - Insights Studio impact ${day}.pptx`, fileType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }
+        out.write(await buildDeck(data))
+        return { fileName: `${fileSafe(data.title)} - Insights Studio impact ${day}.pptx`, fileType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }
       })
       return NextResponse.json({ id })
     }
     if (body.kind === 'export') {
-      const id = await startJob('export', 'Clients and users export', {}, by, async (progress) => ({
-        file: await buildExport(db, progress),
-        fileName: `Client Evaluation - clients and users ${day}.xlsx`,
-        fileType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      }))
+      // One export at a time: it is the same file for everyone, and two at once slow the server for every other request.
+      const already = await runningJob('export')
+      if (already) return NextResponse.json({ id: already })
+      const id = await startJob('export', 'Clients and users export', {}, by, async (progress, out) => {
+        await buildExport(db, progress, out)
+        return { fileName: `Client Evaluation - clients and users ${day}.xlsx`, fileType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
+      })
       return NextResponse.json({ id })
     }
     return bad('Unknown request.')
@@ -78,7 +81,7 @@ export async function GET(req: Request) {
     const f = await readJobFile(id)
     if (!f) return new Response('That file is not ready, or is no longer here.', { status: 404 })
     const ascii = f.fileName.replace(/[^ -~]/g, '_').replace(/"/g, '')
-    return new Response(new Uint8Array(f.file), {
+    return new Response(f.stream, {
       headers: {
         'content-type': f.fileType,
         'content-disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(f.fileName)}`,

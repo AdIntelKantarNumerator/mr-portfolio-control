@@ -2669,3 +2669,14 @@ export const ceJobs = pgTable('ce_jobs', {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 })
+
+/** A job's file in 2 MB pieces (drizzle/0053), so a 60 MB export is never held whole. */
+export const ceJobChunks = pgTable(
+  'ce_job_chunks',
+  {
+    jobId: text('job_id').notNull(),
+    seq: integer('seq').notNull(),
+    data: bytea('data').notNull(),
+  },
+  (t) => [primaryKey({ name: 'ce_job_chunks_pk', columns: [t.jobId, t.seq] })],
+)

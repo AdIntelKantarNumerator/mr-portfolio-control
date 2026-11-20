@@ -262,7 +262,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
           Export clients and users
         </button>
       </div>
-      <JobProgress job={exp.job} error={exp.error} started={exp.started} what="The export" />
+      <JobProgress job={exp.job} error={exp.error} started={exp.started} what="The export" waiting={exp.waiting} />
       {error ? <p className="mr-said mr-bad">{error}</p> : null}
 
       <div className="ce-table">

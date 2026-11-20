@@ -11,45 +11,81 @@
  *
  * Last login: 360's latest login session since 2025, Classic's latest login.
  * Magnifier records none we can read.
+ *
+ * IT MUST NOT HOLD THE SERVER. The app is one B1 instance (one core, 1.75 GB),
+ * and the first version - every user read at once, sorted, the whole file in
+ * memory - made it unresponsive while it ran (Scott, 20 November 2026). So:
+ * clients are taken in batches and only their users are read; the work pauses
+ * between batches for as long as it worked, so other requests get at least
+ * half the core; and the file goes out in pieces as it is written (jobs.ts).
  */
 import { PassThrough } from 'node:stream'
+import { and, eq, inArray } from 'drizzle-orm'
 import ExcelJS from 'exceljs'
 import type { Database } from '@/db/client'
 import { ceAccounts, ceClients, ceUsers } from '@/db/schema'
-import { PLATFORM_LABEL, parseMember, type Platform } from './types'
+import type { JobOutput } from './jobs'
+import { PLATFORM_LABEL, parseMember, PLATFORMS, type Platform } from './types'
 
 type Progress = (step: string, done?: number, total?: number) => Promise<void>
 
 const ACCOUNT_ID_LABEL: Record<Platform, string> = { '360': '360 user set', classic: 'Classic account', magnifier: 'Magnifier account code' }
+const BATCH = 100
 
-export async function buildExport(d: Database, progress: Progress): Promise<Buffer> {
+/** Give the core back: pause for as long as the last stretch of work took (at least 15 ms). */
+async function yieldTo(since: number): Promise<number> {
+  const worked = Date.now() - since
+  await new Promise((resolve) => setTimeout(resolve, Math.max(15, worked)))
+  return Date.now()
+}
+
+type UserRow = Pick<typeof ceUsers.$inferSelect, 'platform' | 'accountId' | 'userId' | 'name' | 'login' | 'email' | 'active' | 'lastSeen' | 'reports' | 'profiles'>
+
+/** The users of these clients' accounts, read per platform. */
+async function usersOf(d: Database, clients: Array<{ members: unknown }>): Promise<Map<string, UserRow[]>> {
+  const byPlatform = new Map<Platform, string[]>()
+  for (const c of clients)
+    for (const k of c.members as string[]) {
+      const m = parseMember(k)
+      if (m) (byPlatform.get(m.platform) ?? byPlatform.set(m.platform, []).get(m.platform)!).push(m.accountId)
+    }
+  const out = new Map<string, UserRow[]>()
+  for (const p of PLATFORMS) {
+    const ids = byPlatform.get(p)
+    if (!ids?.length) continue
+    for (let i = 0; i < ids.length; i += 500) {
+      const rows = await d
+        .select({ platform: ceUsers.platform, accountId: ceUsers.accountId, userId: ceUsers.userId, name: ceUsers.name, login: ceUsers.login, email: ceUsers.email, active: ceUsers.active, lastSeen: ceUsers.lastSeen, reports: ceUsers.reports, profiles: ceUsers.profiles })
+        .from(ceUsers)
+        .where(and(eq(ceUsers.platform, p), inArray(ceUsers.accountId, ids.slice(i, i + 500))))
+      for (const u of rows) {
+        const k = `${u.platform}:${u.accountId}`
+        ;(out.get(k) ?? out.set(k, []).get(k)!).push(u)
+      }
+    }
+  }
+  return out
+}
+
+export async function buildExport(d: Database, progress: Progress, sink: JobOutput): Promise<void> {
   await progress('Reading clients and accounts')
   const clients = await d.select().from(ceClients)
-  const accounts = await d.select({ platform: ceAccounts.platform, accountId: ceAccounts.accountId, name: ceAccounts.name, company: ceAccounts.company, active: ceAccounts.active, reports: ceAccounts.reports }).from(ceAccounts)
+  const accounts = await d.select({ platform: ceAccounts.platform, accountId: ceAccounts.accountId, name: ceAccounts.name, active: ceAccounts.active }).from(ceAccounts)
   const acct = new Map(accounts.map((a) => [`${a.platform}:${a.accountId}`, a]))
-  await progress('Reading users')
-  const users = await d.select().from(ceUsers)
-  const usersOf = new Map<string, typeof users>()
-  for (const u of users) {
-    const k = `${u.platform}:${u.accountId}`
-    ;(usersOf.get(k) ?? usersOf.set(k, []).get(k)!).push(u)
-  }
-  const clientOf = new Map<string, (typeof clients)[number]>()
-  for (const c of clients) for (const k of c.members as string[]) clientOf.set(k, c)
+  const sorted = clients.map((c) => ({ c, k: c.name.toLowerCase() })).sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0)).map((x) => x.c)
 
   const out = new PassThrough()
-  const chunks: Buffer[] = []
-  out.on('data', (c: Buffer) => chunks.push(c))
-  const done = new Promise<void>((resolve, reject) => {
+  out.on('data', (c: Buffer) => sink.write(c))
+  const ended = new Promise<void>((resolve, reject) => {
     out.on('end', resolve)
     out.on('error', reject)
   })
-  const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: out, useStyles: true })
+  const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: out, useStyles: true, useSharedStrings: false })
   const head = (ws: ExcelJS.Worksheet) => {
     ws.getRow(1).font = { bold: true }
     ws.getRow(1).commit()
   }
-  const sorted = [...clients].sort((a, b) => a.name.localeCompare(b.name))
+  let t = Date.now()
 
   // Clients
   await progress('Writing clients', 0, sorted.length)
@@ -75,7 +111,7 @@ export async function buildExport(d: Database, progress: Progress): Promise<Buff
       .filter((m): m is NonNullable<typeof m> => m?.platform === p)
       .map((m) => `${acct.get(`${p}:${m.accountId}`)?.name ?? ''} (${m.accountId.trim()})`)
       .join('; ')
-  for (const c of sorted)
+  for (const [i, c] of sorted.entries()) {
     wc.addRow({
       client: c.name,
       platforms: (c.platforms as Platform[]).map((p) => PLATFORM_LABEL[p]).join(', '),
@@ -90,10 +126,14 @@ export async function buildExport(d: Database, progress: Progress): Promise<Buff
       mag: list(c, 'magnifier'),
       classic: list(c, 'classic'),
     }).commit()
+    if (i % 1000 === 999) {
+      await sink.drain()
+      t = await yieldTo(t)
+    }
+  }
   await wc.commit()
 
   // People: one per person per client, by email.
-  await progress('Writing people', 0, sorted.length)
   const wp = wb.addWorksheet('People', { views: [{ state: 'frozen', ySplit: 1 }] })
   wp.columns = [
     { header: 'Client', key: 'client', width: 36 },
@@ -112,58 +152,61 @@ export async function buildExport(d: Database, progress: Progress): Promise<Buff
     { header: '360 reporting profiles', key: 'profiles', width: 20 },
   ]
   head(wp)
-  let i = 0
-  for (const c of sorted) {
-    if (++i % 500 === 0) await progress('Writing people', i, sorted.length)
-    const people = new Map<string, { name: string; email: string | null; active: boolean; platforms: Set<Platform>; last: string; last360: string; lastClassic: string; sets: Set<string>; logins: Set<string>; mag: Set<string>; classic: Set<string>; reports: number; profiles: number }>()
-    for (const k of c.members as string[]) {
-      for (const u of usersOf.get(k) ?? []) {
-        const p = u.platform as Platform
-        const key = u.email || `${p}:${u.userId}`
-        const x =
-          people.get(key) ??
-          people
-            .set(key, { name: u.name, email: u.email, active: false, platforms: new Set(), last: '', last360: '', lastClassic: '', sets: new Set(), logins: new Set(), mag: new Set(), classic: new Set(), reports: 0, profiles: 0 })
-            .get(key)!
-        x.active ||= u.active
-        x.platforms.add(p)
-        const seen = u.lastSeen ?? ''
-        if (seen > x.last) x.last = seen
-        if (p === '360') {
-          if (seen > x.last360) x.last360 = seen
-          x.sets.add(`${acct.get(k)?.name ?? ''} (${u.accountId})`)
-          if (u.login) x.logins.add(u.login)
-          x.reports += u.reports
-          x.profiles += u.profiles
-        } else if (p === 'magnifier') x.mag.add(u.accountId.trim())
-        else {
-          if (seen > x.lastClassic) x.lastClassic = seen
-          x.classic.add(u.accountId)
+  for (let b = 0; b < sorted.length; b += BATCH) {
+    await progress('Writing people', b, sorted.length)
+    const part = sorted.slice(b, b + BATCH)
+    const users = await usersOf(d, part)
+    for (const c of part) {
+      const people = new Map<string, { name: string; email: string | null; active: boolean; platforms: Set<Platform>; last: string; last360: string; lastClassic: string; sets: Set<string>; logins: Set<string>; mag: Set<string>; classic: Set<string>; reports: number; profiles: number }>()
+      for (const k of c.members as string[])
+        for (const u of users.get(k) ?? []) {
+          const p = u.platform as Platform
+          const key = u.email || `${p}:${u.userId}`
+          const x =
+            people.get(key) ??
+            people
+              .set(key, { name: u.name, email: u.email, active: false, platforms: new Set(), last: '', last360: '', lastClassic: '', sets: new Set(), logins: new Set(), mag: new Set(), classic: new Set(), reports: 0, profiles: 0 })
+              .get(key)!
+          x.active ||= u.active
+          x.platforms.add(p)
+          const seen = u.lastSeen ?? ''
+          if (seen > x.last) x.last = seen
+          if (p === '360') {
+            if (seen > x.last360) x.last360 = seen
+            x.sets.add(`${acct.get(k)?.name ?? ''} (${u.accountId})`)
+            if (u.login) x.logins.add(u.login)
+            x.reports += u.reports
+            x.profiles += u.profiles
+          } else if (p === 'magnifier') x.mag.add(u.accountId.trim())
+          else {
+            if (seen > x.lastClassic) x.lastClassic = seen
+            x.classic.add(u.accountId)
+          }
         }
-      }
+      for (const x of [...people.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)))
+        wp.addRow({
+          client: c.name,
+          name: x.name,
+          email: x.email ?? '',
+          active: x.active ? 'Yes' : 'No',
+          platforms: [...x.platforms].map((p) => PLATFORM_LABEL[p]).join(', '),
+          last: x.last,
+          last360: x.last360,
+          lastClassic: x.lastClassic,
+          sets: [...x.sets].join('; '),
+          logins: [...x.logins].join('; '),
+          mag: [...x.mag].join('; '),
+          classic: [...x.classic].join('; '),
+          reports: x.reports || '',
+          profiles: x.profiles || '',
+        }).commit()
     }
-    for (const x of [...people.values()].sort((a, b) => a.name.localeCompare(b.name)))
-      wp.addRow({
-        client: c.name,
-        name: x.name,
-        email: x.email ?? '',
-        active: x.active ? 'Yes' : 'No',
-        platforms: [...x.platforms].map((p) => PLATFORM_LABEL[p]).join(', '),
-        last: x.last,
-        last360: x.last360,
-        lastClassic: x.lastClassic,
-        sets: [...x.sets].join('; '),
-        logins: [...x.logins].join('; '),
-        mag: [...x.mag].join('; '),
-        classic: [...x.classic].join('; '),
-        reports: x.reports || '',
-        profiles: x.profiles || '',
-      }).commit()
+    await sink.drain()
+    t = await yieldTo(t)
   }
   await wp.commit()
 
   // Users by account
-  await progress('Writing users by account', 0, users.length)
   const wu = wb.addWorksheet('Users by account', { views: [{ state: 'frozen', ySplit: 1 }] })
   wu.columns = [
     { header: 'Client', key: 'client', width: 36 },
@@ -182,46 +225,52 @@ export async function buildExport(d: Database, progress: Progress): Promise<Buff
     { header: '360 reporting profiles', key: 'profiles', width: 20 },
   ]
   head(wu)
-  let n = 0
-  const order = [...users].sort((a, b) => (clientOf.get(`${a.platform}:${a.accountId}`)?.name ?? '').localeCompare(clientOf.get(`${b.platform}:${b.accountId}`)?.name ?? '') || a.platform.localeCompare(b.platform) || a.name.localeCompare(b.name))
-  for (const u of order) {
-    if (++n % 20000 === 0) await progress('Writing users by account', n, users.length)
-    const k = `${u.platform}:${u.accountId}`
-    const a = acct.get(k)
-    const p = u.platform as Platform
-    wu.addRow({
-      client: clientOf.get(k)?.name ?? '',
-      platform: PLATFORM_LABEL[p],
-      accountId: u.accountId.trim(),
-      idKind: ACCOUNT_ID_LABEL[p],
-      account: a?.name ?? '',
-      accountActive: a?.active ? 'Yes' : 'No',
-      userId: u.userId.trim(),
-      login: u.login ?? '',
-      name: u.name,
-      email: u.email ?? '',
-      active: u.active ? 'Yes' : 'No',
-      last: u.lastSeen ?? (p === 'magnifier' ? 'not recorded' : ''),
-      reports: p === '360' ? u.reports : '',
-      profiles: p === '360' ? u.profiles : '',
-    }).commit()
+  for (let b = 0; b < sorted.length; b += BATCH) {
+    await progress('Writing users by account', b, sorted.length)
+    const part = sorted.slice(b, b + BATCH)
+    const users = await usersOf(d, part)
+    for (const c of part)
+      for (const k of c.members as string[]) {
+        const a = acct.get(k)
+        const list = (users.get(k) ?? []).sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0))
+        for (const u of list) {
+          const p = u.platform as Platform
+          wu.addRow({
+            client: c.name,
+            platform: PLATFORM_LABEL[p],
+            accountId: u.accountId.trim(),
+            idKind: ACCOUNT_ID_LABEL[p],
+            account: a?.name ?? '',
+            accountActive: a?.active ? 'Yes' : 'No',
+            userId: u.userId.trim(),
+            login: u.login ?? '',
+            name: u.name,
+            email: u.email ?? '',
+            active: u.active ? 'Yes' : 'No',
+            last: u.lastSeen ?? (p === 'magnifier' ? 'not recorded' : ''),
+            reports: p === '360' ? u.reports : '',
+            profiles: p === '360' ? u.profiles : '',
+          }).commit()
+        }
+      }
+    await sink.drain()
+    t = await yieldTo(t)
   }
   await wu.commit()
 
-  // Notes
   const wn = wb.addWorksheet('Notes')
   wn.columns = [{ header: 'About this export', key: 't', width: 120 }]
-  for (const t of [
+  for (const text of [
     `Exported ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC from the Client Evaluation snapshots.`,
     'Last login: 360 is the latest login session since January 2025; Classic is the latest entry in its login history; Magnifier does not record logins in the tables we can read.',
     'People: one row per person per client, matched by email across the apps; a user with no email is their own row.',
     'Account ids: 360 user set id, Magnifier account code, Classic customer account id.',
   ])
-    wn.addRow({ t }).commit()
+    wn.addRow({ t: text }).commit()
   await wn.commit()
 
-  await progress('Finishing the workbook')
+  await progress('Finishing the workbook', sorted.length, sorted.length)
   await wb.commit()
-  await done
-  return Buffer.concat(chunks)
+  await ended
+  await sink.drain()
 }

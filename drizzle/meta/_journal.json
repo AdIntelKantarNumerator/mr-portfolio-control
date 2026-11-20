@@ -372,6 +372,13 @@
       "when": 1795200000000,
       "tag": "0052_client_eval_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1795300000000,
+      "tag": "0053_client_eval_job_chunks",
+      "breakpoints": true
     }
   ]
 }

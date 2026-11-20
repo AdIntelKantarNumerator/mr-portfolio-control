@@ -219,13 +219,15 @@ async function candidatesMagnifier(accountIds: string[]): Promise<{ c: Candidate
   const conn = await connectMagnifier(cfg)
   let rels: string[] = []
   try {
-    const [rows] = await conn.query(
-      `SELECT c.RULE_RAW FROM (SELECT DISTINCT USER_ACCOUNT_CODE, REPORT_ID FROM USER_ACCOUNT_REPORTING) r
+    // A time limit: a deck once waited on this query for good (20 November 2026).
+    const [rows] = await conn.query({
+      sql: `SELECT c.RULE_RAW FROM (SELECT DISTINCT USER_ACCOUNT_CODE, REPORT_ID FROM USER_ACCOUNT_REPORTING) r
        JOIN REPORT_CONFIGURATION rc ON rc.REPORT_ID = r.REPORT_ID AND rc.IS_ENABLED = 1
        JOIN CRITERIA c ON c.ID = rc.CRITERIA_ID
        WHERE r.USER_ACCOUNT_CODE IN (?)`,
-      [accountIds],
-    )
+      values: [accountIds],
+      timeout: 60_000,
+    })
     rels = (rows as Array<{ RULE_RAW: string | null }>).map((r) => String(r.RULE_RAW ?? ''))
   } finally {
     await conn.end().catch(() => {})
@@ -269,6 +271,16 @@ async function candidatesMagnifier(accountIds: string[]): Promise<{ c: Candidate
 }
 
 // ------------------------------------------------------------------ from → to
+
+/** The work, or an error after this long: no step of a deck may hang it. */
+async function within<T>(ms: number, what: string, f: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([f(), new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`${what} took more than ${Math.round(ms / 60_000)} minutes.`)), ms)))])
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /** Once more after a pause when Databricks drops the connection: a reset is usually momentary. */
 async function retry<T>(f: () => Promise<T>): Promise<T> {
@@ -377,15 +389,15 @@ export async function deckData(scope: DeckScope, progress: Progress): Promise<De
     }
     try {
       let c: Candidates | null = null
-      if (p === '360') c = await candidates360(ints(ids), t.usrIds)
+      if (p === '360') c = await within(4 * 60_000, 'Reading 360 selections', () => candidates360(ints(ids), t.usrIds))
       else if (p === 'magnifier') {
-        const m = await candidatesMagnifier(ids)
+        const m = await within(3 * 60_000, "Reading Magnifier's report criteria", () => candidatesMagnifier(ids))
         c = m.c
         section.focus.note = m.note
       } else section.focus.note = 'Classic has no advertiser or category restrictions and no saved reports, so there is nothing to follow into Insights Studio: media only.'
       if (p === '360' && !c) section.focus.note = 'No advertiser or category restrictions, report selections or reporting profile lists were found.'
       if (c) {
-        section.focus = { kind: c.kind, source: c.source, taxonomy: c.taxonomy, entities: await follow(c, progress, label), note: null }
+        section.focus = { kind: c.kind, source: c.source, taxonomy: c.taxonomy, entities: await within(12 * 60_000, 'Following them into Insights Studio', () => follow(c!, progress, label)), note: null }
         if (!section.focus.entities.length) section.focus.note = `None of these ${c.kind === 'advertiser' ? 'advertisers' : 'categories'} had US spend in Aug–Sep 2026.`
       }
     } catch (err) {
