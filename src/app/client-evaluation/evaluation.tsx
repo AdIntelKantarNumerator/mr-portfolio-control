@@ -11,9 +11,10 @@ import type { Described } from '@/lib/import360/decode'
 import type { ReadableRel } from '@/lib/client-eval/rel'
 import type { ProfileSummary } from '@/lib/client-eval/profiles'
 import type { UsageClient } from '@/lib/client-eval/ratings-usage'
+import type { InactiveAccount } from '@/lib/client-eval/inactive'
 import { csvField } from '@/lib/client-eval/csv'
 import type { ClientRow, PersonRow, SourceInfo } from '@/lib/client-eval/store'
-import { PLATFORM_LABEL, SNAPSHOT_ONLY, type Ent360, type EntClassic, type EntMagnifier, type Entitlements, type Platform } from '@/lib/client-eval/types'
+import { memberKey, PLATFORM_LABEL, PLATFORMS, SNAPSHOT_ONLY, type Ent360, type EntClassic, type EntMagnifier, type Entitlements, type Platform } from '@/lib/client-eval/types'
 
 type Source = SourceInfo & { refreshable: boolean }
 const API = '/client-evaluation/api'
@@ -231,6 +232,7 @@ type Popup =
   | { kind: 'report'; key: string }
   | { kind: 'merge'; client: ClientRow }
   | { kind: 'ratings' }
+  | { kind: 'inactive' }
 
 export function ClientEvaluation({ contact }: { contact: string }) {
   const [q, setQ] = useState('')
@@ -324,6 +326,9 @@ export function ClientEvaluation({ contact }: { contact: string }) {
         </label>
         <button type="button" className="btn ce-sm" onClick={() => push({ kind: 'ratings' })} title="360 reports run with VideoAmp ratings, by client and user, for the months you pick">
           Ratings Usage
+        </button>
+        <button type="button" className="btn ce-sm" onClick={() => push({ kind: 'inactive' })} title="Active accounts where nobody has logged in since the date you pick">
+          No Recent Logins
         </button>
         <span className="ce-count">{busy ? 'Loading…' : `${n(total)} clients`}</span>
         {q.trim() && total > 0 ? (
@@ -492,6 +497,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
 
       {top?.kind === 'account' ? <AccountPopup k={top.key} onClose={pop} /> : null}
       {top?.kind === 'ratings' ? <RatingsUsagePopup onClose={pop} /> : null}
+      {top?.kind === 'inactive' ? <InactivePopup onClose={pop} onAccount={(key) => push({ kind: 'account', key })} /> : null}
       {top?.kind === 'people' ? (
         <PeoplePopup client={top.client} initialPlatform={top.platform} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} onMagnifierReports={(accountKey, who) => push({ kind: 'mreports', accountKey, who })} onSearches={(user, account, who) => push({ kind: 'searches', user, account, who })} onProfiles={(usrId, who) => push({ kind: 'profiles', usrId, who })} />
       ) : null}
@@ -829,6 +835,171 @@ function RatingsUsagePopup({ onClose }: { onClose: () => void }) {
                 <tr>
                   <td colSpan={3} className="ce-muted">
                     No VideoAmp reports in these months.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ------------------------------------------------------------------ No Recent Logins
+
+interface InactiveData {
+  since: string
+  loginFrom: Record<Platform, string | null>
+  accounts: InactiveAccount[]
+}
+
+const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10)
+const QUIET = [
+  { label: '30 days', days: 30 },
+  { label: '90 days', days: 90 },
+  { label: '6 months', days: 182 },
+  { label: '1 year', days: 365 },
+  { label: '2 years', days: 730 },
+]
+const dayLabel = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+/** Kept while an account popup is open over this one, so coming back keeps the choices. */
+const inactiveChoice = { since: '', platform: 'all', internal: false }
+const SHOW_MAX = 500
+
+/** Active accounts with no login since a day (Scott, 23 November 2026). From the snapshot. */
+function InactivePopup({ onClose, onAccount }: { onClose: () => void; onAccount: (key: string) => void }) {
+  const [since, setSince] = useState(inactiveChoice.since || daysAgo(182))
+  const [platform, setPlatform] = useState(inactiveChoice.platform)
+  const [internal, setInternal] = useState(inactiveChoice.internal)
+  const [data, setData] = useState<InactiveData | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(true)
+  Object.assign(inactiveChoice, { since, platform, internal })
+  const choose = (d: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d === since) return
+    setBusy(true)
+    setError(null)
+    setSince(d)
+  }
+  useEffect(() => {
+    let live = true
+    get<InactiveData>({ op: 'inactive', since }).then(
+      (r) => {
+        if (!live) return
+        setData(r)
+        setBusy(false)
+      },
+      (e) => {
+        if (!live) return
+        setError((e as Error).message)
+        setBusy(false)
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [since])
+  const shown = (data?.accounts ?? []).filter((a) => (internal || !a.internal) && (platform === 'all' || a.platform === platform))
+  const users = shown.reduce((s, a) => s + a.activeUsers, 0)
+  const never = shown.filter((a) => !a.lastLogin).length
+  // Platforms whose login record starts after the chosen day: "none on record" there is not "never".
+  const short = PLATFORMS.filter((p) => (platform === 'all' || p === platform) && data?.loginFrom[p] && data.loginFrom[p]! > since)
+  function exportCsv() {
+    const head = ['Platform', 'Account', 'Account code', 'Client', 'Active users', 'Users', 'Reports', 'Last login', 'Created']
+    const lines = [head.join(',')]
+    for (const a of shown) lines.push([PLATFORM_LABEL[a.platform], a.name, a.accountId, a.client, String(a.activeUsers), String(a.users), String(a.reports), a.lastLogin ?? 'None on record', a.created].map(csvField).join(','))
+    const blob = new Blob(['﻿' + lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `No logins since ${since}${platform === 'all' ? '' : ` - ${PLATFORM_LABEL[platform as Platform]}`}.csv`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+  }
+  const preset = QUIET.find((x) => daysAgo(x.days) === since)
+  return (
+    <Modal title="No Recent Logins" onClose={onClose}>
+      <div className="ce-pop">
+        <div className="ce-controls">
+          <label className="ce-tick">
+            No login in
+            <select id="ce-in-preset" value={preset ? String(preset.days) : ''} onChange={(e) => e.target.value && choose(daysAgo(Number(e.target.value)))}>
+              {QUIET.map((x) => (
+                <option key={x.days} value={x.days}>
+                  the last {x.label}
+                </option>
+              ))}
+              {!preset ? <option value="">since {dayLabel(since)}</option> : null}
+            </select>
+          </label>
+          <label className="ce-tick">
+            or since
+            <input id="ce-in-since" type="date" value={since} max={daysAgo(0)} onChange={(e) => choose(e.target.value)} />
+          </label>
+          <select id="ce-in-platform" value={platform} onChange={(e) => setPlatform(e.target.value)} aria-label="Platform">
+            <option value="all">All platforms</option>
+            {PLATFORMS.map((p) => (
+              <option key={p} value={p}>
+                {PLATFORM_LABEL[p]}
+              </option>
+            ))}
+          </select>
+          <label className="ce-tick">
+            <input id="ce-in-internal" type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Show internal
+          </label>
+          <span className="ce-count">{busy ? 'Loading…' : `${n(shown.length)} accounts · ${n(users)} active users · ${n(never)} with no login on record`}</span>
+          <button type="button" className="btn btn-primary ce-sm" disabled={busy || !shown.length} onClick={exportCsv}>
+            Export
+          </button>
+        </div>
+        <p className="ce-muted ce-sm">
+          Active accounts where nobody has logged in since {dayLabel(since)}, from the last refresh.
+          {short.map((p) => ` ${PLATFORM_LABEL[p]} logins are on record from ${dayLabel(data!.loginFrom[p]!)} only.`).join('')}
+        </p>
+        {error ? <p className="mr-said mr-bad">{error}</p> : null}
+        <div className="ce-table ce-scroll">
+          <table className="dtable">
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Platform</th>
+                <th>Active users</th>
+                <th>Reports</th>
+                <th>Last login</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.slice(0, SHOW_MAX).map((a) => (
+                <tr key={`${a.platform}:${a.accountId}`}>
+                  <td>
+                    <button type="button" className="ce-name" onClick={() => onAccount(memberKey(a.platform, a.accountId))}>
+                      <b>{a.name}</b>
+                    </button>
+                    <div className="ce-sub">
+                      {a.accountId}
+                      {a.client && a.client !== a.name ? ` · ${a.client}` : ''}
+                      {a.internal ? ' · internal' : ''}
+                    </div>
+                  </td>
+                  <td>{PLATFORM_LABEL[a.platform]}</td>
+                  <td>{n(a.activeUsers)}</td>
+                  <td>{n(a.reports)}</td>
+                  <td className="ce-date">{a.lastLogin ?? <span className="ce-muted">None on record</span>}</td>
+                  <td className="ce-date">{a.created ?? ''}</td>
+                </tr>
+              ))}
+              {shown.length > SHOW_MAX ? (
+                <tr>
+                  <td colSpan={6} className="ce-muted">
+                    Showing {n(SHOW_MAX)} of {n(shown.length)}. Export has them all.
+                  </td>
+                </tr>
+              ) : null}
+              {!busy && !shown.length && !error ? (
+                <tr>
+                  <td colSpan={6} className="ce-muted">
+                    Every active account has a login since then.
                   </td>
                 </tr>
               ) : null}

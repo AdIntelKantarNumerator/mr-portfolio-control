@@ -285,3 +285,12 @@ test('Ratings Usage: months run from October 2026, and a span ends at the next m
   assert.throws(() => monthSpan('2026-11', '2026-10'))
   assert.throws(() => monthSpan("2026-10'; --", '2026-11'))
 })
+
+test('No Recent Logins: the day must be a real YYYY-MM-DD', async () => {
+  const { validSince } = await import('../src/lib/client-eval/inactive')
+  assert.equal(validSince('2026-05-23'), '2026-05-23')
+  assert.throws(() => validSince(null))
+  assert.throws(() => validSince('2026-5-23'))
+  assert.throws(() => validSince("2026-05-23'; --"))
+  assert.throws(() => validSince('2026-13-40'))
+})

@@ -6,6 +6,7 @@
  *   GET  ?op=account&key=<platform:account>   one account's entitlements (the popup)
  *   GET  ?op=people&client=<id>               a client's people across platforms
  *   GET  ?op=ratings&from=YYYY-MM&to=YYYY-MM  360 reports run with VideoAmp ratings, by client and user, live
+ *   GET  ?op=inactive&since=YYYY-MM-DD        active accounts with no login on or after that day
  *   GET  ?op=reports&user=<360 usr id>        a 360 user's reports used in 2026, live
  *   GET  ?op=report&key=<mnemonic:id>         one 360 report's spec, live, described
  *   GET  ?op=profiles&user=<360 usr id>       a 360 user's reporting profiles, live
@@ -25,6 +26,7 @@ import { currentAccess } from '@/lib/auth/access'
 import { describe } from '@/lib/import360/decode'
 import { live360Configured, liveLookup, liveReport, liveReports } from '@/lib/import360/source'
 import { buildExport, EXPORT_MAX } from '@/lib/client-eval/export'
+import { inactiveAccounts, LOGIN_FROM, validSince } from '@/lib/client-eval/inactive'
 import { liveProfiles } from '@/lib/client-eval/profiles'
 import { USAGE_FROM, usageMonths, videoAmpUsage } from '@/lib/client-eval/ratings-usage'
 import { liveSearches, mongoUrl } from '@/lib/client-eval/saved-searches'
@@ -86,6 +88,15 @@ export async function GET(req: Request) {
       const from = u.get('from') ?? USAGE_FROM
       const to = u.get('to') ?? months[months.length - 1]!
       return NextResponse.json({ months, ...(await videoAmpUsage(db, from, to)) })
+    }
+    if (op === 'inactive') {
+      let since: string
+      try {
+        since = validSince(u.get('since'))
+      } catch (e) {
+        return bad((e as Error).message)
+      }
+      return NextResponse.json({ since, loginFrom: LOGIN_FROM, accounts: await inactiveAccounts(db, since) })
     }
     if (op === 'reports') {
       const usr = Number(u.get('user'))
