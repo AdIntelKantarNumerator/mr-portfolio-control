@@ -2632,6 +2632,8 @@ export const ceUsers = pgTable(
     profiles: integer('profiles').notNull().default(0),
     /** Logins in the 30 days before the snapshot (drizzle/0055): 360 sessions, Classic login history. */
     logins30: integer('logins30').notNull().default(0),
+    /** When the user was created, YYYY-MM-DD, from the application's own records (drizzle/0058). Classic records none: its first login. */
+    created: text('created'),
   },
   (t) => [primaryKey({ name: 'ce_users_pk', columns: [t.platform, t.accountId, t.userId] }), index('ce_users_email_idx').on(t.email)],
 )
@@ -2730,3 +2732,15 @@ export const ceJobChunks = pgTable(
   },
   (t) => [primaryKey({ name: 'ce_job_chunks_pk', columns: [t.jobId, t.seq] })],
 )
+
+/** Sign-ins from the SSO user pool, by email (drizzle/0057): Magnifier's last logins. lib/client-eval/cognito-signins.ts. */
+export const ceSignins = pgTable('ce_signins', {
+  email: text('email').primaryKey(),
+  username: text('username').notNull(),
+  /** CONFIRMED | EXTERNAL_PROVIDER */
+  status: text('status').notNull(),
+  lastSignin: timestamp('last_signin', { withTimezone: true }),
+  logins30: integer('logins30').notNull().default(0),
+  /** When the history was last read; read again after a day. */
+  checkedAt: timestamp('checked_at', { withTimezone: true }),
+})

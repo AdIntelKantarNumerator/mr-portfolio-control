@@ -48,10 +48,10 @@ export async function loadClassic(q: Query, progress: Progress): Promise<Snapsho
     WHERE ${ACCOUNTS}`)
 
   await progress('Reading Classic users', 1, 6)
-  const users = await q(`SELECT u.userId, u.accountId, u.firstName, u.lastName, u.fullName, u.email, h.last, h.n30
+  const users = await q(`SELECT u.userId, u.accountId, u.firstName, u.lastName, u.fullName, u.email, h.last, h.n30, h.first
     FROM magradar_public.users u
     JOIN magradar_public.customer_accounts a ON a.accountId = u.accountId
-    LEFT JOIN (SELECT userId, MAX(loginTime) AS last, SUM(CASE WHEN loginTime >= DATEADD(day, -30, GETDATE()) THEN 1 ELSE 0 END) AS n30
+    LEFT JOIN (SELECT userId, MAX(loginTime) AS last, MIN(loginTime) AS first, SUM(CASE WHEN loginTime >= DATEADD(day, -30, GETDATE()) THEN 1 ELSE 0 END) AS n30
       FROM magradar_public.loginHistory GROUP BY userId) h ON h.userId = u.userId
     WHERE ${ACCOUNTS}`)
 
@@ -148,6 +148,8 @@ export async function loadClassic(q: Query, progress: Progress): Promise<Snapsho
       lastSeen: day(u.last),
       reports: 0,
       logins30: Number(u.n30 ?? 0),
+      // Classic keeps no creation date: the first login stands in.
+      created: day(u.first),
     }
   })
   await progress('Classic read', 6, 6)

@@ -400,6 +400,20 @@
       "when": 1795600000000,
       "tag": "0056_client_eval_saved_searches",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1795700000000,
+      "tag": "0057_client_eval_signins",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795700100000,
+      "tag": "0058_client_eval_user_created",
+      "breakpoints": true
     }
   ]
 }

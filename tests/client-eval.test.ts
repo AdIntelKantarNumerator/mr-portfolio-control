@@ -249,3 +249,22 @@ test('a Magnifier saved search reads like a REL: its codes as fields, media roll
   assert.deepEqual([...want.get('advertiser')!], ['ZYZXPM'])
   assert.deepEqual([...want.get('subcategory')!], ['734614', '1'])
 })
+
+test('SSO sign-ins: the last successful sign-in, and how many in 30 days', async () => {
+  const { summariseEvents } = await import('../src/lib/client-eval/cognito-signins')
+  const now = Date.parse('2026-11-23T12:00:00Z')
+  const day = (n: number) => new Date(now - n * 86_400_000)
+  const s = summariseEvents(
+    [
+      { EventType: 'SignIn', EventResponse: 'Fail', CreationDate: day(0) },
+      { EventType: 'SignIn', EventResponse: 'Pass', CreationDate: day(1) },
+      { EventType: 'ForgotPassword', EventResponse: 'Pass', CreationDate: day(2) },
+      { EventType: 'SignIn', EventResponse: 'Pass', CreationDate: day(10) },
+      { EventType: 'SignIn', EventResponse: 'Pass', CreationDate: day(40) },
+    ],
+    now,
+  )
+  assert.equal(s.last?.toISOString(), day(1).toISOString())
+  assert.equal(s.logins30, 2)
+  assert.deepEqual(summariseEvents([], now), { last: null, logins30: 0 })
+})

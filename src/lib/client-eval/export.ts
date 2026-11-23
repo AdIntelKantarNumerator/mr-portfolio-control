@@ -37,7 +37,7 @@ async function yieldTo(since: number): Promise<number> {
   return Date.now()
 }
 
-type UserRow = Pick<typeof ceUsers.$inferSelect, 'platform' | 'accountId' | 'userId' | 'name' | 'login' | 'email' | 'active' | 'lastSeen' | 'reports' | 'profiles' | 'logins30'>
+type UserRow = Pick<typeof ceUsers.$inferSelect, 'platform' | 'accountId' | 'userId' | 'name' | 'login' | 'email' | 'active' | 'lastSeen' | 'reports' | 'profiles' | 'logins30' | 'created'>
 
 /** The users of these clients' accounts, read per platform. */
 async function usersOf(d: Database, clients: Array<{ members: unknown }>): Promise<Map<string, UserRow[]>> {
@@ -53,7 +53,7 @@ async function usersOf(d: Database, clients: Array<{ members: unknown }>): Promi
     if (!ids?.length) continue
     for (let i = 0; i < ids.length; i += 500) {
       const rows = await d
-        .select({ platform: ceUsers.platform, accountId: ceUsers.accountId, userId: ceUsers.userId, name: ceUsers.name, login: ceUsers.login, email: ceUsers.email, active: ceUsers.active, lastSeen: ceUsers.lastSeen, reports: ceUsers.reports, profiles: ceUsers.profiles, logins30: ceUsers.logins30 })
+        .select({ platform: ceUsers.platform, accountId: ceUsers.accountId, userId: ceUsers.userId, name: ceUsers.name, login: ceUsers.login, email: ceUsers.email, active: ceUsers.active, lastSeen: ceUsers.lastSeen, reports: ceUsers.reports, profiles: ceUsers.profiles, logins30: ceUsers.logins30, created: ceUsers.created })
         .from(ceUsers)
         .where(and(eq(ceUsers.platform, p), inArray(ceUsers.accountId, ids.slice(i, i + 500))))
       for (const u of rows) {
@@ -239,6 +239,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
     { header: 'Name', key: 'name', width: 28 },
     { header: 'Email', key: 'email', width: 34 },
     { header: 'User active', key: 'active', width: 11 },
+    { header: 'Created', key: 'created', width: 12 },
     { header: 'Last login', key: 'last', width: 12 },
     { header: 'Logins, last 30 days', key: 'logins30', width: 18 },
     { header: '360 reports / Magnifier saved searches (2026)', key: 'reports', width: 26 },
@@ -267,8 +268,9 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
             name: u.name,
             email: u.email ?? '',
             active: u.active ? 'Yes' : 'No',
-            last: u.lastSeen ?? (p === 'magnifier' ? 'not recorded' : ''),
-            logins30: p === 'magnifier' ? '' : u.logins30,
+            created: u.created ?? '',
+            last: u.lastSeen ?? '',
+            logins30: u.logins30,
             reports: p === 'classic' ? '' : u.reports,
             profiles: p === '360' ? u.profiles : '',
           }).commit()
@@ -282,7 +284,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
   wn.columns = [{ header: 'About this export', key: 't', width: 120 }]
   for (const text of [
     `Exported ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC from the Client Evaluation snapshots: ${sorted.length} selected client${sorted.length === 1 ? '' : 's'}.`,
-    'Last login: 360 is the latest login session since January 2025; Classic is the latest entry in its login history; Magnifier does not record logins in the tables we can read. Logins, last 30 days: as of the snapshot.',
+    'Last login: 360 is the latest login session since January 2025; Classic is the latest entry in its login history; Magnifier is the latest sign-in through the SSO user pool, which all MediaRadar applications share. Logins, last 30 days: as of the snapshot.',
     'People: one row per person per client, matched by email across the apps; a user with no email is their own row.',
     'Account ids: 360 user set id, Magnifier account code, Classic customer account id.',
   ])

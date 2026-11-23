@@ -82,7 +82,7 @@ export async function loadMagnifier(conn: Connection, progress: Progress): Promi
 
   // USER_ACCOUNT's REPORTS_<media> columns are legacy and mean nothing now (Scott, 20 November 2026): not read.
   await progress('Reading Magnifier users', 1, 5)
-  const users = await select(conn, `SELECT ua.ACCOUNT_CODE, u.USER_CODE, u.FIRST_NAME, u.LAST_NAME, u.EMAIL_ADDRESS,
+  const users = await select(conn, `SELECT ua.ACCOUNT_CODE, u.USER_CODE, u.FIRST_NAME, u.LAST_NAME, u.EMAIL_ADDRESS, u.CREATION_DATE,
       (ua.STATUS = 'A' AND u.STATUS = 'A' AND CURDATE() BETWEEN u.VALID_FROM AND u.VALID_UNTIL) AS active
     FROM USER_ACCOUNT ua
     JOIN \`USER\` u ON u.USER_CODE = ua.USER_CODE
@@ -149,6 +149,7 @@ export async function loadMagnifier(conn: Connection, progress: Progress): Promi
       active: Number(u.active) === 1,
       lastSeen: null,
       reports: 0,
+      created: u.CREATION_DATE instanceof Date ? u.CREATION_DATE.toISOString().slice(0, 10) : str(u.CREATION_DATE).slice(0, 10) || null,
     })
   }
   // Saved searches saved or updated in 2026, from Magnifier's MongoDB (saved-searches.ts): each user's count, kept as their reports.

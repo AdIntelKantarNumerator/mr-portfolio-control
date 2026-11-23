@@ -348,8 +348,10 @@ export interface PersonRow {
   /** Logins in the last 30 days, 360 and Classic together. */
   logins30: number
   lastSeen: string | null
+  /** The earliest creation date across their applications (Classic: first login). */
+  created: string | null
   /** reports: 360 reports this person used in 2026. accountReports: the reports set up for the account (Magnifier). */
-  accounts: Array<{ platform: Platform; accountId: string; accountName: string; userId: string; login: string | null; active: boolean; reports: number; accountReports: number; profiles: number; logins30: number; lastSeen: string | null }>
+  accounts: Array<{ platform: Platform; accountId: string; accountName: string; userId: string; login: string | null; active: boolean; reports: number; accountReports: number; profiles: number; logins30: number; lastSeen: string | null; created: string | null }>
 }
 
 /** A client's people across its platforms, one row per person (by email). */
@@ -367,12 +369,13 @@ export async function clientPeople(d: Database, clientId: string): Promise<{ nam
     for (const part of chunk(ids, 500))
       for (const u of await d.select().from(ceUsers).where(and(eq(ceUsers.platform, p), inArray(ceUsers.accountId, part)))) {
         const key = u.email || `${p}:${u.userId}`
-        const row = people.get(key) ?? people.set(key, { key, name: u.name, email: u.email, active: false, reports: 0, logins30: 0, lastSeen: null, accounts: [] }).get(key)!
+        const row = people.get(key) ?? people.set(key, { key, name: u.name, email: u.email, active: false, reports: 0, logins30: 0, lastSeen: null, created: null, accounts: [] }).get(key)!
         row.active ||= u.active
         row.reports += u.reports
         if (u.lastSeen && (!row.lastSeen || u.lastSeen > row.lastSeen)) row.lastSeen = u.lastSeen
+        if (u.created && (!row.created || u.created < row.created)) row.created = u.created
         if (row.name === row.email && u.name !== u.email) row.name = u.name
-        row.accounts.push({ platform: p, accountId: u.accountId, accountName: names.get(u.accountId) ?? u.accountId, userId: u.userId, login: u.login, active: u.active, reports: u.reports, accountReports: acctReports.get(u.accountId) ?? 0, profiles: u.profiles, logins30: u.logins30, lastSeen: u.lastSeen })
+        row.accounts.push({ platform: p, accountId: u.accountId, accountName: names.get(u.accountId) ?? u.accountId, userId: u.userId, login: u.login, active: u.active, reports: u.reports, accountReports: acctReports.get(u.accountId) ?? 0, profiles: u.profiles, logins30: u.logins30, lastSeen: u.lastSeen, created: u.created })
       }
   }
   // A person's recent logins: per platform, their busiest login (one login can sit on several user sets), added up.

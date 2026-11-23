@@ -97,6 +97,8 @@ export interface UserSnap {
   profiles?: number
   /** Logins in the 30 days before the snapshot. */
   logins30?: number
+  /** When the user was created (YYYY-MM-DD), from the application's own records; Classic: first login. */
+  created?: string | null
 }
 
 export interface ReportSnap {

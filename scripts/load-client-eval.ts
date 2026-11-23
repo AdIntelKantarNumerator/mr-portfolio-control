@@ -41,6 +41,15 @@ async function main() {
     Object.assign(process.env, { MAGNIFIER_MYSQL_HOST: m.MYSQL_HOST, MAGNIFIER_MYSQL_PORT: m.MYSQL_PORT, MAGNIFIER_MYSQL_USER: m.MYSQL_USER, MAGNIFIER_MYSQL_PASSWORD: m.MYSQL_PASSWORD, MAGNIFIER_MYSQL_DATABASE: m.MYSQL_DATABASE || 'competitrack_user_db' })
   }
 
+  // Magnifier's last logins come from the SSO pool (lib/client-eval/cognito-signins.ts).
+  if (platforms.includes('magnifier') && !process.env.COGNITO_ACCESS_KEY_ID) {
+    try {
+      const c = readEnvFile(join(parent, '.magnifier-cognito.env'))
+      Object.assign(process.env, { COGNITO_REGION: c.AWS_REGION, COGNITO_USER_POOL_ID: c.COGNITO_USER_POOL_ID, COGNITO_ACCESS_KEY_ID: c.AWS_ACCESS_KEY_ID, COGNITO_SECRET_ACCESS_KEY: c.AWS_SECRET_ACCESS_KEY, COGNITO_ROLE_ARN: c.AWS_ROLE_ARN })
+    } catch {
+      console.warn('  No ../.magnifier-cognito.env: Magnifier last logins are not read.')
+    }
+  }
   // Magnifier's saved searches come from its MongoDB (lib/client-eval/saved-searches.ts).
   if (platforms.includes('magnifier') && !process.env.MAGNIFIER_MONGO_URL) {
     try {
@@ -102,6 +111,8 @@ async function main() {
           const conn = await m.connectMagnifier(m.magnifierConfig()!)
           try {
             snap = await m.loadMagnifier(conn, progress)
+            const { applySignins } = await import('../src/lib/client-eval/cognito-signins')
+            await applySignins(db, snap.users, progress).catch((err) => console.error('\n  SSO sign-ins failed:', (err as Error).message))
           } finally {
             await conn.end()
           }

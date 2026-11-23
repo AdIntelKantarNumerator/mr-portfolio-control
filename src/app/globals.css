@@ -2660,6 +2660,7 @@ button.ce-badge { cursor: pointer; }
 .ce-name { display: inline-flex; gap: 6px; align-items: baseline; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; font-size: 15px; color: var(--ink); }
 .ce-caret { color: var(--muted); font-size: 11px; width: 10px; }
 .ce-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.ce-date { white-space: nowrap; }
 .ce-muted { color: var(--muted); }
 .ce-bad { color: var(--red); }
 .ce-link { background: none; border: 0; padding: 0; cursor: pointer; color: var(--brand); font-weight: 650; text-align: left; }

@@ -389,7 +389,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                       {n(c.activeUsers)}
                       <span className="ce-of"> / {n(c.users)}</span> ›
                     </button>
-                    {c.logins30 ? <div className="ce-sub" title="Logins in the last 30 days, 360 and Classic (Magnifier records none)">{n(c.logins30)} logins · 30 days</div> : null}
+                    {c.logins30 ? <div className="ce-sub" title="Logins in the last 30 days: 360 sessions, Classic logins, Magnifier SSO sign-ins">{n(c.logins30)} logins · 30 days</div> : null}
                   </td>
                   <td className="ce-num">
                     <div className="ce-reps">
@@ -582,7 +582,8 @@ function PeoplePopup({
               <tr>
                 <th>Person</th>
                 <th>Platforms</th>
-                <th>Last seen</th>
+                <th title="From each application's own records: 360 and Magnifier user creation dates. Classic records none, so its first login. The earliest across a person's applications.">Created</th>
+                <th title="360: latest login session. Classic: latest login. Magnifier: latest sign-in through the SSO pool, which all MediaRadar apps share.">Last seen</th>
                 <th title="360: reports this person used in 2026. Magnifier: the reports set up for their account.">Reports</th>
                 {platform !== 'magnifier' && platform !== 'classic' ? <th title="360 reporting profiles: the measures, media, markets and demographics a person reports with">Reporting profiles</th> : null}
               </tr>
@@ -606,9 +607,12 @@ function PeoplePopup({
                       ))}
                     </div>
                   </td>
-                  <td>
+                  <td title={p.accounts.filter((a) => a.created).map((a) => `${a.platform === 'classic' ? 'Classic (first login)' : a.platform === '360' ? '360' : 'Magnifier'}: ${a.created}`).join('\n')} className="ce-date">
+                    {p.created ?? <span className="ce-muted">—</span>}
+                  </td>
+                  <td className="ce-date">
                     {p.lastSeen ?? <span className="ce-muted">—</span>}
-                    {p.logins30 ? <div className="ce-sub" title="Logins in the last 30 days, 360 and Classic">{n(p.logins30)} logins · 30 days</div> : null}
+                    {p.logins30 ? <div className="ce-sub" title="Logins in the last 30 days: 360 sessions, Classic logins, Magnifier SSO sign-ins">{n(p.logins30)} logins · 30 days</div> : null}
                   </td>
                   <td>
                     <div className="ce-accts">

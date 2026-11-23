@@ -37,7 +37,7 @@ export async function load360(progress: Progress): Promise<Snapshot> {
     LEFT JOIN iddb_ar.dbo.APPLICATION a ON a.application_id = s.application_id`)
 
   await progress('Reading 360 users', 1, 6)
-  const users = await q360<Row>(`SELECT u.Usr_id, u.usrset_id, u.Usr_n, u.active_f, u.admin_f, m.first_n, m.last_n, m.login_n, m.email_s, m.active_f AS m_active
+  const users = await q360<Row>(`SELECT u.Usr_id, u.usrset_id, u.Usr_n, u.active_f, u.admin_f, m.first_n, m.last_n, m.login_n, m.email_s, m.active_f AS m_active, m.create_d
     FROM iddb_ar.dbo.USR u
     OUTER APPLY (SELECT TOP 1 x.masteruser_id FROM iddb_ar.dbo.MASTERUSER_XREF x WHERE x.usr_id = u.Usr_id ORDER BY x.active_f DESC) x
     LEFT JOIN iddb_ar.dbo.MASTERUSER m ON m.masteruser_id = x.masteruser_id`)
@@ -132,6 +132,7 @@ export async function load360(progress: Progress): Promise<Snapshot> {
       reports: reportsByUser.get(Number(u.Usr_id)) ?? 0,
       profiles: profiles.get(Number(u.Usr_id)) ?? 0,
       logins30: recent.get(login.toLowerCase()) ?? 0,
+      created: day(u.create_d),
     })
     const t = tally.get(set) ?? tally.set(set, { users: 0, active: 0, reports: 0 }).get(set)!
     t.users++
