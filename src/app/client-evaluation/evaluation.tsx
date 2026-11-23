@@ -10,6 +10,8 @@ import { Modal } from '@/components/items/parts'
 import type { Described } from '@/lib/import360/decode'
 import type { ReadableRel } from '@/lib/client-eval/rel'
 import type { ProfileSummary } from '@/lib/client-eval/profiles'
+import type { UsageClient } from '@/lib/client-eval/ratings-usage'
+import { csvField } from '@/lib/client-eval/csv'
 import type { ClientRow, PersonRow, SourceInfo } from '@/lib/client-eval/store'
 import { PLATFORM_LABEL, SNAPSHOT_ONLY, type Ent360, type EntClassic, type EntMagnifier, type Entitlements, type Platform } from '@/lib/client-eval/types'
 
@@ -228,6 +230,7 @@ type Popup =
   | { kind: 'profiles'; usrId: number; who: string }
   | { kind: 'report'; key: string }
   | { kind: 'merge'; client: ClientRow }
+  | { kind: 'ratings' }
 
 export function ClientEvaluation({ contact }: { contact: string }) {
   const [q, setQ] = useState('')
@@ -319,6 +322,9 @@ export function ClientEvaluation({ contact }: { contact: string }) {
         <label className="ce-tick">
           <input id="ce-internal" type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Show internal
         </label>
+        <button type="button" className="btn ce-sm" onClick={() => push({ kind: 'ratings' })} title="360 reports run with VideoAmp ratings, by client and user, for the months you pick">
+          Ratings Usage
+        </button>
         <span className="ce-count">{busy ? 'Loading…' : `${n(total)} clients`}</span>
         {q.trim() && total > 0 ? (
           <button
@@ -485,6 +491,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
       ) : null}
 
       {top?.kind === 'account' ? <AccountPopup k={top.key} onClose={pop} /> : null}
+      {top?.kind === 'ratings' ? <RatingsUsagePopup onClose={pop} /> : null}
       {top?.kind === 'people' ? (
         <PeoplePopup client={top.client} initialPlatform={top.platform} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} onMagnifierReports={(accountKey, who) => push({ kind: 'mreports', accountKey, who })} onSearches={(user, account, who) => push({ kind: 'searches', user, account, who })} onProfiles={(usrId, who) => push({ kind: 'profiles', usrId, who })} />
       ) : null}
@@ -662,6 +669,171 @@ function PeoplePopup({
             </tbody>
           </table>
           {shown.length > 500 ? <p className="ce-muted">Showing the first 500. Search to narrow.</p> : null}
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ------------------------------------------------------------------ Ratings Usage
+
+interface UsageData {
+  months: string[]
+  reports: number
+  users: number
+  clients: UsageClient[]
+}
+
+const monthLabel = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+
+/** 360 reports run with VideoAmp ratings in a span of months, by client, then user (Scott, 23 November 2026). Read live. */
+function RatingsUsagePopup({ onClose }: { onClose: () => void }) {
+  const [months, setMonths] = useState<string[]>([])
+  const [from, setFrom] = useState<string | null>(null)
+  const [to, setTo] = useState<string | null>(null)
+  const [data, setData] = useState<UsageData | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(true)
+  const [internal, setInternal] = useState(false)
+  const [open, setOpen] = useState<Set<string>>(new Set())
+  const pick = (set: (m: string) => void, m: string) => {
+    setBusy(true)
+    setError(null)
+    set(m)
+  }
+  useEffect(() => {
+    get<UsageData>({ op: 'ratings', ...(from ? { from } : {}), ...(to ? { to } : {}) }).then(
+      (r) => {
+        setData(r)
+        setMonths(r.months)
+        if (!from) setFrom(r.months[0] ?? null)
+        if (!to) setTo(r.months[r.months.length - 1] ?? null)
+        setBusy(false)
+      },
+      (e) => {
+        setError((e as Error).message)
+        setBusy(false)
+      },
+    )
+    // from and to start empty: the first read fills them in, and then is not repeated for that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from && to ? `${from}|${to}` : ''])
+  const shown = (data?.clients ?? []).filter((c) => internal || !c.internal)
+  const total = shown.reduce((s, c) => s + c.reports, 0)
+  const people = new Set(shown.flatMap((c) => c.users.map((u) => u.usrId))).size
+  const key = (c: UsageClient) => c.id ?? c.name
+  function exportCsv() {
+    const head = ['Client', 'Account', 'Application', 'User', 'Email', 'Username', 'VideoAmp reports', 'Last run']
+    const lines = [head.join(',')]
+    for (const c of shown) for (const u of c.users) lines.push([c.name, u.account, u.app, u.name, u.email, u.login, String(u.reports), u.last].map(csvField).join(','))
+    const blob = new Blob(['﻿' + lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `VideoAmp ratings usage ${from}${to !== from ? ` to ${to}` : ''}.csv`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+  }
+  return (
+    <Modal title="Ratings Usage: VideoAmp" onClose={onClose}>
+      <div className="ce-pop">
+        <div className="ce-controls">
+          <label className="ce-tick">
+            From
+            <select id="ce-ru-from" value={from ?? ''} onChange={(e) => pick(setFrom, e.target.value)} disabled={!months.length}>
+              {months.map((m) => (
+                <option key={m} value={m} disabled={!!to && m > to}>
+                  {monthLabel(m)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="ce-tick">
+            To
+            <select id="ce-ru-to" value={to ?? ''} onChange={(e) => pick(setTo, e.target.value)} disabled={!months.length}>
+              {months.map((m) => (
+                <option key={m} value={m} disabled={!!from && m < from}>
+                  {monthLabel(m)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="ce-tick">
+            <input id="ce-ru-internal" type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Show internal
+          </label>
+          <span className="ce-count">{busy ? 'Reading 360…' : `${n(total)} reports · ${n(shown.length)} clients · ${n(people)} users`}</span>
+          <button type="button" className="btn btn-primary ce-sm" disabled={busy || !shown.length} onClick={exportCsv}>
+            Export
+          </button>
+        </div>
+        <p className="ce-muted ce-sm">360 reports run with VideoAmp ratings. 360 records the ratings provider from October 2026.</p>
+        {error ? <p className="mr-said mr-bad">{error}</p> : null}
+        <div className="ce-table ce-scroll">
+          <table className="dtable">
+            <thead>
+              <tr>
+                <th>Client</th>
+                <th>Users</th>
+                <th>VideoAmp reports</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((c) => {
+                const isOpen = open.has(key(c))
+                return (
+                  <Fragment key={key(c)}>
+                    <tr className={isOpen ? 'ce-open' : undefined}>
+                      <td>
+                        <button
+                          type="button"
+                          className="ce-name"
+                          aria-expanded={isOpen}
+                          onClick={() =>
+                            setOpen((s) => {
+                              const next = new Set(s)
+                              if (next.has(key(c))) next.delete(key(c))
+                              else next.add(key(c))
+                              return next
+                            })
+                          }
+                        >
+                          <span className="ce-caret">{isOpen ? '▾' : '▸'}</span>
+                          <b>{c.name}</b>
+                        </button>
+                        {c.internal ? <span className="ce-muted"> · internal</span> : null}
+                      </td>
+                      <td>{n(c.users.length)}</td>
+                      <td>
+                        <b>{n(c.reports)}</b>
+                      </td>
+                    </tr>
+                    {isOpen
+                      ? c.users.map((u) => (
+                          <tr key={`${u.app}:${u.usrId}`} className="ce-subrow">
+                            <td>
+                              <div className="ce-indent">
+                                {u.name}
+                                <div className="ce-sub">
+                                  {u.email ?? u.login ?? ''} · {u.account} · {u.app}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="ce-date">Last {u.last}</td>
+                            <td>{n(u.reports)}</td>
+                          </tr>
+                        ))
+                      : null}
+                  </Fragment>
+                )
+              })}
+              {!busy && !shown.length && !error ? (
+                <tr>
+                  <td colSpan={3} className="ce-muted">
+                    No VideoAmp reports in these months.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </div>
     </Modal>

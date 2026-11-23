@@ -277,3 +277,11 @@ test('users CSV: fields are quoted when they need it, and formulas are defused',
   assert.equal(csvField('=HYPERLINK(1)'), "'=HYPERLINK(1)")
   assert.equal(csvField(null), '')
 })
+
+test('Ratings Usage: months run from October 2026, and a span ends at the next month', async () => {
+  const { usageMonths, monthSpan } = await import('../src/lib/client-eval/ratings-usage')
+  assert.deepEqual(usageMonths(new Date('2027-01-15T00:00:00Z')), ['2026-10', '2026-11', '2026-12', '2027-01'])
+  assert.deepEqual(monthSpan('2026-10', '2026-12'), { start: '2026-10-01', end: '2027-01-01' })
+  assert.throws(() => monthSpan('2026-11', '2026-10'))
+  assert.throws(() => monthSpan("2026-10'; --", '2026-11'))
+})
