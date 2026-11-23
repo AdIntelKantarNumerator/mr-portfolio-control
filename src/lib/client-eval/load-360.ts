@@ -3,6 +3,7 @@
  * the 360 SQL Server (lib/import360/source.ts q360), which the app reaches.
  *
  *   client       iddb_ar USRSET (a user set), under a LICENSEGRP (the company),
+ *                active when both are (isSetActive),
  *                in an APPLICATION (Ad Insights Media Buyer, Media Owner,
  *                Insights Studio).
  *   users        USR, with the person from MASTERUSER through MASTERUSER_XREF.
@@ -29,9 +30,17 @@ const HIDDEN = [63, 700]
 /** 360's own names for the restricted entity types are internal ("adtable", "time"); these read better. */
 const TYPE_LABEL: Record<number, string> = { 63: 'Data tables', 300: 'Submedia', 500: 'Markets', 700: 'Time', 102: 'Parents', 103: 'Categories', 135: 'Subcategories', 118: 'Advertisers', 139: 'Brands', 373: 'Properties' }
 
+/**
+ * A user set is active when its own flag is on and so is its license group's
+ * (Scott, 23 November 2026). A set with no license group goes by its own flag.
+ */
+export function isSetActive(s: { active_f?: unknown; grp_active?: unknown }): boolean {
+  return Number(s.active_f) === 1 && (s.grp_active == null || Number(s.grp_active) === 1)
+}
+
 export async function load360(progress: Progress): Promise<Snapshot> {
   await progress('Reading 360 clients', 0, 6)
-  const sets = await q360<Row>(`SELECT s.usrset_id, s.usrset_n, s.mnemonic_a, s.active_f, s.availableyears, s.application_id, a.application_n, l.LicenseGrp_n
+  const sets = await q360<Row>(`SELECT s.usrset_id, s.usrset_n, s.mnemonic_a, s.active_f, s.availableyears, s.application_id, a.application_n, l.LicenseGrp_n, l.active_f AS grp_active
     FROM iddb_ar.dbo.USRSET s
     LEFT JOIN iddb_ar.dbo.LICENSEGRP l ON l.LicenseGrp_id = s.licensegrp_id
     LEFT JOIN iddb_ar.dbo.APPLICATION a ON a.application_id = s.application_id`)
@@ -113,7 +122,7 @@ export async function load360(progress: Progress): Promise<Snapshot> {
 
   const out: UserSnap[] = []
   const tally = new Map<number, { users: number; active: number; reports: number }>()
-  const setActive = new Map(sets.map((s) => [Number(s.usrset_id), Number(s.active_f) === 1]))
+  const setActive = new Map(sets.map((s) => [Number(s.usrset_id), isSetActive(s)]))
   for (const u of users) {
     const set = Number(u.usrset_id)
     if (!setActive.has(set)) continue
@@ -155,7 +164,7 @@ export async function load360(progress: Progress): Promise<Snapshot> {
       accountId: String(id),
       name: str(s.usrset_n) || `User set ${id}`,
       company: str(s.LicenseGrp_n) || null,
-      active: Number(s.active_f) === 1,
+      active: isSetActive(s),
       reports,
       summary: summary360(ent),
       entitlements: ent,

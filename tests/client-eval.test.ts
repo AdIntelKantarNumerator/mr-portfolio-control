@@ -294,3 +294,11 @@ test('No Recent Logins: the day must be a real YYYY-MM-DD', async () => {
   assert.throws(() => validSince("2026-05-23'; --"))
   assert.throws(() => validSince('2026-13-40'))
 })
+
+test('360: a user set is active only when its license group is too', async () => {
+  const { isSetActive } = await import('../src/lib/client-eval/load-360')
+  assert.equal(isSetActive({ active_f: 1, grp_active: 1 }), true)
+  assert.equal(isSetActive({ active_f: 1, grp_active: 0 }), false)
+  assert.equal(isSetActive({ active_f: 0, grp_active: 1 }), false)
+  assert.equal(isSetActive({ active_f: 1, grp_active: null }), true)
+})
