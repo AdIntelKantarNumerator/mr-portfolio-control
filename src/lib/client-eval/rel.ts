@@ -186,7 +186,7 @@ export function readable(rel: RelSummary, name: (kind: NameKind, code: string) =
   }
   for (const f of rel.fields) {
     if (MEDIA_FIELDS.has(f.field)) continue
-    const label = fieldLabel(f.field)
+    const label = f.label || fieldLabel(f.field)
     let row = byLabel.get(label)
     if (!row) {
       row = { label, items: [], excluded: [], total: 0 }

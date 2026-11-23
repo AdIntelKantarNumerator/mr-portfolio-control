@@ -30,6 +30,7 @@ import { connectMagnifier, magnifierConfig } from './load-magnifier'
 import { currentMedia, mediaChange, TROI_NOTE, type MediaChange } from './media-map'
 import { parseRel } from './rel'
 import { relNames } from './rel-names'
+import { searchFocus } from './saved-searches'
 import { catLabel, sankeyOf, UNKNOWN, type SankeyData } from './deck-sankey'
 import { clientPeople } from './store'
 import { PLATFORM_LABEL, parseMember, PLATFORMS, type Ent360, type EntClassic, type EntMagnifier, type Platform } from './types'
@@ -61,7 +62,7 @@ export interface PlatformSection {
   media: MediaChange
   focus: {
     kind: 'advertiser' | 'category' | null
-    source: 'entitlement' | 'reports' | 'profiles' | null
+    source: 'entitlement' | 'reports' | 'profiles' | 'searches' | null
     taxonomy: 'VX1' | 'VX2' | null
     entities: FocusEntity[]
     note: string | null
@@ -123,7 +124,7 @@ async function resolve(scope: DeckScope): Promise<Target> {
 
 interface Candidates {
   kind: 'advertiser' | 'category'
-  source: 'entitlement' | 'reports' | 'profiles'
+  source: 'entitlement' | 'reports' | 'profiles' | 'searches'
   taxonomy: 'VX1' | 'VX2'
   items: Array<{ id: string; name: string }>
 }
@@ -232,7 +233,6 @@ async function candidatesMagnifier(accountIds: string[]): Promise<{ c: Candidate
   } finally {
     await conn.end().catch(() => {})
   }
-  if (!rels.length) return { c: null, note: 'No Magnifier reports are set up, so there are no advertiser or category restrictions to follow.' }
   const adv = new Map<string, number>()
   const cats = new Map<string, number>()
   let canadian = 0
@@ -248,12 +248,25 @@ async function candidatesMagnifier(accountIds: string[]): Promise<{ c: Candidate
         else if (f.field === 'subcategory_code' || f.field === 'category_t2_code') cats.set(`S${code}`, (cats.get(`S${code}`) ?? 0) + 1)
       }
     }
+  // Without any in the RELs: the advertisers and categories in their 2026 saved searches (saved-searches.ts).
+  let source: Candidates['source'] = 'entitlement'
+  if (!adv.size && !cats.size) {
+    try {
+      const f = await searchFocus(accountIds, null)
+      for (const [k, v] of f.adv) adv.set(k, v)
+      for (const [k, v] of f.cats) cats.set(k, v)
+      if (adv.size || cats.size) source = 'searches'
+    } catch (err) {
+      console.error('[client-eval] deck saved searches', err)
+    }
+  }
+  if (!rels.length && !adv.size && !cats.size) return { c: null, note: 'No Magnifier reports are set up and no searches were saved in 2026, so there are no advertisers or categories to follow.' }
   const canadaNote = canadian && !adv.size && !cats.size ? "This account's report criteria are Canadian. Insights Studio's Canadian coverage is not part of this comparison yet." : null
   if (adv.size) {
     const codes = [...adv].sort((a, b) => b[1] - a[1]).slice(0, CANDIDATES).map(([c]) => c)
     const ids = await dbxVx2AdvertiserIds(codes)
     const items = codes.map((c) => ids.get(c)).filter((x): x is { id: string; name: string } => !!x)
-    if (items.length) return { c: { kind: 'advertiser', source: 'entitlement', taxonomy: 'VX2', items }, note: null }
+    if (items.length) return { c: { kind: 'advertiser', source, taxonomy: 'VX2', items }, note: null }
   }
   if (cats.size) {
     const keys = [...cats].sort((a, b) => b[1] - a[1]).slice(0, CANDIDATES).map(([k]) => k)
@@ -263,7 +276,7 @@ async function candidatesMagnifier(accountIds: string[]): Promise<{ c: Candidate
     ])
     const { lookup } = await relNames(want)
     return {
-      c: { kind: 'category', source: 'entitlement', taxonomy: 'VX2', items: keys.map((k) => ({ id: k, name: lookup(k.startsWith('C') ? 'category' : 'subcategory', k.slice(1)) ?? k.slice(1) })) },
+      c: { kind: 'category', source, taxonomy: 'VX2', items: keys.map((k) => ({ id: k, name: lookup(k.startsWith('C') ? 'category' : 'subcategory', k.slice(1)) ?? k.slice(1) })) },
       note: null,
     }
   }

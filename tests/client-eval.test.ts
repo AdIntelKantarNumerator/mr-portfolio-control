@@ -229,3 +229,23 @@ test('a from → to Sankey keeps the big flows and folds slivers into Other', as
   const flowed = s.links.filter((l) => l.col === 1).reduce((a, l) => a + l.spend, 0)
   assert.equal(flowed, 96, 'every dollar reaches a category')
 })
+
+test('a Magnifier saved search reads like a REL: its codes as fields, media rolled up (23 November 2026)', async () => {
+  const { searchAsRel, codesToName } = await import('../src/lib/client-eval/saved-searches')
+  const rel = searchAsRel({
+    fields: [
+      { name: 'brand-c.occurrence/advertiserName', include: ['ZYZXPM'], exclude: [] },
+      { name: 'brand-c.occurrence/mediaTier1Name', include: ['T', 'O'], exclude: [] },
+      { name: 'brand-c.occurrence/culturalNames', include: ['general_media'], exclude: [] },
+      { name: 'brand-c.occurrence/productName', include: [], exclude: [] },
+    ],
+    summaryTags: [{ name: 'brand-n.occurrence/categoryTier2Name', include: ['734614'], exclude: ['1'] }],
+  })
+  assert.deepEqual(rel.media, ['Digital', 'TV'])
+  assert.deepEqual(rel.fields.find((f) => f.field === 'advertiser_code')!.codes, ['ZYZXPM'])
+  assert.equal(rel.fields.find((f) => f.field === 'culturalNames')!.label, 'Cultural')
+  assert.ok(!rel.fields.some((f) => f.field === 'product_code'), 'an empty filter is no filter')
+  const want = codesToName([rel])
+  assert.deepEqual([...want.get('advertiser')!], ['ZYZXPM'])
+  assert.deepEqual([...want.get('subcategory')!], ['734614', '1'])
+})

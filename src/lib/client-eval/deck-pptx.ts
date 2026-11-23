@@ -155,7 +155,7 @@ function sankeySlide(pptx: PptxGenJS, d: DeckData, s: PlatformSection, e: FocusE
   const sl = pptx.addSlide()
   const name = PLATFORM_LABEL[s.platform]
   const what = s.focus.kind === 'advertiser' ? 'advertiser' : 'category'
-  const why = s.focus.source === 'entitlement' ? 'from their entitlements' : s.focus.source === 'reports' ? 'picked in their 2026 reports' : 'from their 360 reporting profiles'
+  const why = s.focus.source === 'entitlement' ? 'from their entitlements' : s.focus.source === 'reports' ? 'picked in their 2026 reports' : s.focus.source === 'searches' ? 'picked in their 2026 saved searches' : 'from their 360 reporting profiles'
   header(sl, `${e.name}: ${name} Taxonomy → Insights Studio Taxonomy`, `${name} · one of their five largest ${what === 'advertiser' ? 'advertisers' : 'categories'}, ${why}`)
   drawSankey(sl, e.sankey, { x: 0.5, y: 1.75, w: 8.6, h: 5.0 })
 

@@ -393,6 +393,13 @@
       "when": 1795500000000,
       "tag": "0055_client_eval_recent_logins",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795600000000,
+      "tag": "0056_client_eval_saved_searches",
+      "breakpoints": true
     }
   ]
 }

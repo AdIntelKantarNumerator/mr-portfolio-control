@@ -169,6 +169,7 @@ export async function buildClients(d: Database, opts: { useModel?: boolean; prog
     const company = [...companies].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
     const everyone = new Map<string, boolean>()
     let reports = 0
+    let magSearches = 0
     // Recent logins: one login on two 360 user sets is one person's sessions, counted once.
     const logins = new Map<string, number>()
     for (const k of c.members)
@@ -176,6 +177,7 @@ export async function buildClients(d: Database, opts: { useModel?: boolean; prog
         const who = u.email || `${u.platform}:${u.userId}`
         everyone.set(who, everyone.get(who) === true || u.active)
         if (u.platform === '360') reports += u.reports
+        else if (u.platform === 'magnifier') magSearches += u.reports
         if (u.logins30) {
           const key = `${u.platform}:${(u.login ?? u.userId).toLowerCase()}`
           logins.set(key, Math.max(logins.get(key) ?? 0, u.logins30))
@@ -194,6 +196,7 @@ export async function buildClients(d: Database, opts: { useModel?: boolean; prog
       activeUsers: [...everyone.values()].filter(Boolean).length,
       reports,
       logins30: [...logins.values()].reduce((a, b) => a + b, 0),
+      magSearches,
       active: members.some((m) => m.active),
       how: c.how as Link[],
     }
@@ -251,6 +254,8 @@ export interface ClientRow {
   logins30: number
   /** Distinct Magnifier reports set up across the client's Magnifier accounts (one report can be on several). */
   magnifierReports: number
+  /** Magnifier saved searches saved or updated in 2026. */
+  magnifierSearches: number
   active: boolean
   internal: boolean
   company: string | null
@@ -292,7 +297,7 @@ export async function listClients(
   })
   const sort = o.sort ?? 'reports'
   rows = rows.sort((a, b) =>
-    sort === 'name' ? a.name.localeCompare(b.name) : sort === 'logins' ? b.logins30 - a.logins30 || b.activeUsers - a.activeUsers || a.name.localeCompare(b.name) : sort === 'users' ? b.users - a.users || a.name.localeCompare(b.name) : b.reports - a.reports || mcount.get(b.clientId)! - mcount.get(a.clientId)! || b.activeUsers - a.activeUsers || a.name.localeCompare(b.name),
+    sort === 'name' ? a.name.localeCompare(b.name) : sort === 'logins' ? b.logins30 - a.logins30 || b.activeUsers - a.activeUsers || a.name.localeCompare(b.name) : sort === 'users' ? b.users - a.users || a.name.localeCompare(b.name) : b.reports - a.reports || b.magSearches - a.magSearches || mcount.get(b.clientId)! - mcount.get(a.clientId)! || b.activeUsers - a.activeUsers || a.name.localeCompare(b.name),
   )
   const total = rows.length
   const page = rows.slice(o.offset ?? 0, (o.offset ?? 0) + (o.limit ?? 100))
@@ -307,6 +312,7 @@ export async function listClients(
       reports: c.reports,
       logins30: c.logins30,
       magnifierReports: mcount.get(c.clientId) ?? 0,
+      magnifierSearches: c.magSearches,
       active: c.active,
       internal: c.internal,
       company: c.company,

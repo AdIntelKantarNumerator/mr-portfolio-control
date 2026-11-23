@@ -221,6 +221,7 @@ type Popup =
   | { kind: 'people'; client: ClientRow; platform?: Platform }
   | { kind: 'reports'; usrId: number; who: string }
   | { kind: 'mreports'; accountKey: string; who: string }
+  | { kind: 'searches'; user: string; account: string; who: string }
   | { kind: 'profiles'; usrId: number; who: string }
   | { kind: 'report'; key: string }
   | { kind: 'merge'; client: ClientRow }
@@ -397,12 +398,17 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                           <Badge p="360" /> {n(c.reports)} ›
                         </button>
                       ) : null}
-                      {c.magnifierReports ? (
-                        <button type="button" className="ce-pill" onClick={() => push({ kind: 'people', client: c, platform: 'magnifier' })} title="Magnifier reports set up for the client's accounts">
-                          <Badge p="magnifier" /> {n(c.magnifierReports)} ›
+                      {c.magnifierSearches ? (
+                        <button type="button" className="ce-pill" onClick={() => push({ kind: 'people', client: c, platform: 'magnifier' })} title="Magnifier searches saved or updated in 2026: open a person's searches">
+                          <Badge p="magnifier" /> {n(c.magnifierSearches)} searches ›
                         </button>
                       ) : null}
-                      {!c.reports && !c.magnifierReports ? <span className="ce-muted">—</span> : null}
+                      {c.magnifierReports ? (
+                        <button type="button" className="ce-pill" onClick={() => push({ kind: 'people', client: c, platform: 'magnifier' })} title="Magnifier reports set up for the client's accounts">
+                          <Badge p="magnifier" /> {n(c.magnifierReports)} reports ›
+                        </button>
+                      ) : null}
+                      {!c.reports && !c.magnifierReports && !c.magnifierSearches ? <span className="ce-muted">—</span> : null}
                     </div>
                   </td>
                   <td className="ce-ents">
@@ -477,9 +483,10 @@ export function ClientEvaluation({ contact }: { contact: string }) {
 
       {top?.kind === 'account' ? <AccountPopup k={top.key} onClose={pop} /> : null}
       {top?.kind === 'people' ? (
-        <PeoplePopup client={top.client} initialPlatform={top.platform} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} onMagnifierReports={(accountKey, who) => push({ kind: 'mreports', accountKey, who })} onProfiles={(usrId, who) => push({ kind: 'profiles', usrId, who })} />
+        <PeoplePopup client={top.client} initialPlatform={top.platform} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} onMagnifierReports={(accountKey, who) => push({ kind: 'mreports', accountKey, who })} onSearches={(user, account, who) => push({ kind: 'searches', user, account, who })} onProfiles={(usrId, who) => push({ kind: 'profiles', usrId, who })} />
       ) : null}
       {top?.kind === 'profiles' ? <ProfilesPopup usrId={top.usrId} who={top.who} onClose={pop} /> : null}
+      {top?.kind === 'searches' ? <SearchesPopup user={top.user} account={top.account} who={top.who} onClose={pop} /> : null}
       {top?.kind === 'mreports' ? <MagnifierReportsPopup k={top.accountKey} who={top.who} onClose={pop} /> : null}
       {top?.kind === 'reports' ? <ReportsPopup usrId={top.usrId} who={top.who} onClose={pop} onReport={(key) => push({ kind: 'report', key })} /> : null}
       {top?.kind === 'report' ? <ReportPopup k={top.key} onClose={pop} /> : null}
@@ -501,7 +508,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
 // ------------------------------------------------------------------ people
 
 /** A person's report volume: their 360 reports, and the reports on their Magnifier accounts. */
-const volume = (p: PersonRow) => p.accounts.reduce((t, a) => t + (a.platform === '360' ? a.reports : 0), 0) + Math.max(0, ...p.accounts.map((a) => (a.platform === 'magnifier' ? a.accountReports : 0)))
+const volume = (p: PersonRow) => p.accounts.reduce((t, a) => t + (a.platform !== 'classic' ? a.reports : 0), 0) + Math.max(0, ...p.accounts.map((a) => (a.platform === 'magnifier' ? a.accountReports : 0)))
 
 function PeoplePopup({
   client,
@@ -509,6 +516,7 @@ function PeoplePopup({
   onClose,
   onReports,
   onMagnifierReports,
+  onSearches,
   onProfiles,
 }: {
   client: ClientRow
@@ -516,6 +524,7 @@ function PeoplePopup({
   onClose: () => void
   onReports: (usrId: number, who: string) => void
   onMagnifierReports: (accountKey: string, who: string) => void
+  onSearches: (user: string, account: string, who: string) => void
   onProfiles: (usrId: number, who: string) => void
 }) {
   const [data, setData] = useState<{ name: string; people: PersonRow[] } | null>(null)
@@ -617,7 +626,14 @@ function PeoplePopup({
                             <Badge p="magnifier" /> {n(a.accountReports)} report{a.accountReports === 1 ? '' : 's'} ›
                           </button>
                         ))}
-                      {!p.accounts.some((a) => (a.platform === '360' && a.reports > 0) || (a.platform === 'magnifier' && a.accountReports > 0)) ? <span className="ce-muted">—</span> : null}
+                      {p.accounts
+                        .filter((a) => a.platform === 'magnifier' && a.reports > 0)
+                        .map((a) => (
+                          <button key={`ms:${a.accountId}:${a.userId}`} type="button" className="ce-pill" onClick={() => onSearches(a.userId, a.accountId, p.name)} title={`Searches ${p.name} saved or updated in 2026 on ${a.accountName}`}>
+                            <Badge p="magnifier" /> {n(a.reports)} saved search{a.reports === 1 ? '' : 'es'} ›
+                          </button>
+                        ))}
+                      {!p.accounts.some((a) => (a.platform !== 'classic' && a.reports > 0) || (a.platform === 'magnifier' && a.accountReports > 0)) ? <span className="ce-muted">—</span> : null}
                     </div>
                   </td>
                   {platform !== 'magnifier' && platform !== 'classic' ? (
@@ -1144,6 +1160,92 @@ function MagnifierReportsPopup({ k, who, onClose }: { k: string; who: string; on
         <p className="ce-muted">Magnifier sets reports up for the account, so everyone on it shares these.</p>
         {error ? <p className="mr-said mr-bad">{error}</p> : null}
         {a ? <MagnifierReportList reports={a.magnifierReports} /> : !error ? <p className="ce-muted">Loading…</p> : null}
+      </div>
+    </Modal>
+  )
+}
+
+// ------------------------------------------------------------------ Magnifier saved searches
+
+interface SearchView {
+  id: string
+  title: string
+  report: string | null
+  country: string | null
+  period: string | null
+  keyword: string | null
+  shared: boolean
+  saved: string | null
+  updated: string | null
+  rel: ReadableRel
+}
+
+function SearchesPopup({ user, account, who, onClose }: { user: string; account: string; who: string; onClose: () => void }) {
+  const [data, setData] = useState<{ searches: SearchView[]; namesNote: string | null } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState<string | null>(null)
+  useEffect(() => {
+    get<{ searches: SearchView[]; namesNote: string | null }>({ op: 'searches', user: user.trim(), accounts: account.trim() }).then(
+      (r) => {
+        setData(r)
+        if (r.searches.length === 1) setOpen(r.searches[0]!.id)
+      },
+      (e) => setError((e as Error).message),
+    )
+  }, [user, account])
+  return (
+    <Modal title={`${who}'s Magnifier saved searches`} onClose={onClose}>
+      <div className="ce-pop">
+        <span className="ce-count">{data ? `${n(data.searches.length)} saved or updated in 2026, read live from Magnifier` : 'Reading Magnifier…'}</span>
+        {error ? <p className="mr-said mr-bad">{error}</p> : null}
+        {data?.namesNote ? <p className="ce-muted">{data.namesNote}</p> : null}
+        <div className="ce-filters">
+          {(data?.searches ?? []).map((s) => (
+            <div key={s.id} className="ce-report">
+              <div>
+                <button type="button" className="ce-link" onClick={() => setOpen(open === s.id ? null : s.id)}>
+                  {open === s.id ? '▾' : '▸'} {s.title}
+                </button>{' '}
+                {s.shared ? <span className="ce-name-chip">Shared</span> : null}{' '}
+                <span className="ce-muted">
+                  {[s.country, s.period, `updated ${s.updated ?? s.saved ?? '—'}`].filter(Boolean).join(' · ')}
+                  {s.rel.media.length ? ` · ${s.rel.media.join(', ')}` : ''}
+                </span>
+              </div>
+              {open === s.id ? (
+                <dl className="ce-dl">
+                  {s.keyword ? (
+                    <>
+                      <dt>Keywords</dt>
+                      <dd>{s.keyword}</dd>
+                    </>
+                  ) : null}
+                  <dt>Media</dt>
+                  <dd>{s.rel.media.length ? <MediaChips media={s.rel.media} /> : 'Not restricted by media'}</dd>
+                  {s.rel.rows.map((row) => (
+                    <Fragment key={row.label}>
+                      <dt>{row.label}</dt>
+                      <dd>
+                        {row.items.length ? <Names items={row.items} total={row.total - row.excluded.length} /> : null}
+                        {row.excluded.length ? (
+                          <>
+                            <span className="ce-muted">Not:</span> <Names items={row.excluded} out />
+                          </>
+                        ) : null}
+                      </dd>
+                    </Fragment>
+                  ))}
+                  <dt>Period</dt>
+                  <dd>{s.period ?? '—'}</dd>
+                  <dt>Report</dt>
+                  <dd className="ce-muted">
+                    {s.report ?? '—'} · saved {s.saved ?? '—'}
+                  </dd>
+                </dl>
+              ) : null}
+            </div>
+          ))}
+        </div>
       </div>
     </Modal>
   )

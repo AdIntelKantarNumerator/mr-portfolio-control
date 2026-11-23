@@ -24,6 +24,7 @@
 import type { Connection, RowDataPacket } from 'mysql2/promise'
 import { FIELDS, parseRel, readable, schemaCountry, wildcardIndustry, type NameKind, type ReadableRel } from './rel'
 import { relNames } from './rel-names'
+import { mongoUrl, searchCounts } from './saved-searches'
 import type { AccountSnap, EntMagnifier, Progress, ReportSnap, Snapshot, UserSnap } from './types'
 
 type Row = Record<string, unknown>
@@ -149,6 +150,16 @@ export async function loadMagnifier(conn: Connection, progress: Progress): Promi
       lastSeen: null,
       reports: 0,
     })
+  }
+  // Saved searches saved or updated in 2026, from Magnifier's MongoDB (saved-searches.ts): each user's count, kept as their reports.
+  if (mongoUrl()) {
+    await progress('Counting Magnifier saved searches (2026)', 4, 5)
+    try {
+      const counts = await searchCounts()
+      for (const u of outUsers) u.reports = counts.get(`${u.accountId.trim()}|${u.userId.trim()}`.toLowerCase()) ?? 0
+    } catch (err) {
+      console.error('[client-eval] Magnifier saved searches', err)
+    }
   }
   const withUsers = new Set(outUsers.map((u) => u.accountId))
   const activeBy = new Set(outUsers.filter((u) => u.active).map((u) => u.accountId))

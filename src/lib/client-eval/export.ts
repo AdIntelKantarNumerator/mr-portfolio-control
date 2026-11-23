@@ -159,6 +159,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
     { header: 'Classic account ids', key: 'classic', width: 20 },
     { header: '360 reports (2026)', key: 'reports', width: 17 },
     { header: '360 reporting profiles', key: 'profiles', width: 20 },
+    { header: 'Magnifier saved searches (2026)', key: 'searches', width: 22 },
   ]
   head(wp)
   for (let b = 0; b < sorted.length; b += BATCH) {
@@ -166,7 +167,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
     const part = sorted.slice(b, b + BATCH)
     const users = await usersOf(d, part)
     for (const c of part) {
-      const people = new Map<string, { name: string; email: string | null; active: boolean; platforms: Set<Platform>; last: string; last360: string; lastClassic: string; sets: Set<string>; logins: Set<string>; mag: Set<string>; classic: Set<string>; reports: number; profiles: number; recent: Map<string, number> }>()
+      const people = new Map<string, { name: string; email: string | null; active: boolean; platforms: Set<Platform>; last: string; last360: string; lastClassic: string; sets: Set<string>; logins: Set<string>; mag: Set<string>; classic: Set<string>; reports: number; profiles: number; searches: number; recent: Map<string, number> }>()
       for (const k of c.members as string[])
         for (const u of users.get(k) ?? []) {
           const p = u.platform as Platform
@@ -174,7 +175,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
           const x =
             people.get(key) ??
             people
-              .set(key, { name: u.name, email: u.email, active: false, platforms: new Set(), last: '', last360: '', lastClassic: '', sets: new Set(), logins: new Set(), mag: new Set(), classic: new Set(), reports: 0, profiles: 0, recent: new Map() })
+              .set(key, { name: u.name, email: u.email, active: false, platforms: new Set(), last: '', last360: '', lastClassic: '', sets: new Set(), logins: new Set(), mag: new Set(), classic: new Set(), reports: 0, profiles: 0, searches: 0, recent: new Map() })
               .get(key)!
           x.active ||= u.active
           // One login on several 360 user sets is one set of sessions: the busiest counts.
@@ -191,7 +192,10 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
             if (u.login) x.logins.add(u.login)
             x.reports += u.reports
             x.profiles += u.profiles
-          } else if (p === 'magnifier') x.mag.add(u.accountId.trim())
+          } else if (p === 'magnifier') {
+            x.mag.add(u.accountId.trim())
+            x.searches += u.reports
+          }
           else {
             if (seen > x.lastClassic) x.lastClassic = seen
             x.classic.add(u.accountId)
@@ -214,6 +218,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
           classic: [...x.classic].join('; '),
           reports: x.reports || '',
           profiles: x.profiles || '',
+          searches: x.searches || '',
         }).commit()
     }
     t = await yieldTo(t)
@@ -236,7 +241,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
     { header: 'User active', key: 'active', width: 11 },
     { header: 'Last login', key: 'last', width: 12 },
     { header: 'Logins, last 30 days', key: 'logins30', width: 18 },
-    { header: '360 reports (2026)', key: 'reports', width: 17 },
+    { header: '360 reports / Magnifier saved searches (2026)', key: 'reports', width: 26 },
     { header: '360 reporting profiles', key: 'profiles', width: 20 },
   ]
   head(wu)
@@ -264,7 +269,7 @@ export async function buildExport(d: Database, clientIds: string[], progress: Pr
             active: u.active ? 'Yes' : 'No',
             last: u.lastSeen ?? (p === 'magnifier' ? 'not recorded' : ''),
             logins30: p === 'magnifier' ? '' : u.logins30,
-            reports: p === '360' ? u.reports : '',
+            reports: p === 'classic' ? '' : u.reports,
             profiles: p === '360' ? u.profiles : '',
           }).commit()
         }

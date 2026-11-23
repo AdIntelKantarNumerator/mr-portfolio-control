@@ -41,6 +41,14 @@ async function main() {
     Object.assign(process.env, { MAGNIFIER_MYSQL_HOST: m.MYSQL_HOST, MAGNIFIER_MYSQL_PORT: m.MYSQL_PORT, MAGNIFIER_MYSQL_USER: m.MYSQL_USER, MAGNIFIER_MYSQL_PASSWORD: m.MYSQL_PASSWORD, MAGNIFIER_MYSQL_DATABASE: m.MYSQL_DATABASE || 'competitrack_user_db' })
   }
 
+  // Magnifier's saved searches come from its MongoDB (lib/client-eval/saved-searches.ts).
+  if (platforms.includes('magnifier') && !process.env.MAGNIFIER_MONGO_URL) {
+    try {
+      Object.assign(process.env, readEnvFile(join(parent, '.magnifier-mongo.env')))
+    } catch {
+      console.warn('  No ../.magnifier-mongo.env: Magnifier saved searches are not counted.')
+    }
+  }
   // Magnifier's REL codes are named from Databricks (lib/client-eval/rel-names.ts).
   if (platforms.includes('magnifier') && !process.env.DATABRICKS_HOST) {
     try {

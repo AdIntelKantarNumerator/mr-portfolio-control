@@ -8,6 +8,7 @@
  *   GET  ?op=reports&user=<360 usr id>        a 360 user's reports used in 2026, live
  *   GET  ?op=report&key=<mnemonic:id>         one 360 report's spec, live, described
  *   GET  ?op=profiles&user=<360 usr id>       a 360 user's reporting profiles, live
+ *   GET  ?op=searches&user=<code>&accounts=<codes>  a Magnifier user's 2026 saved searches, live
  *   POST { op: 'refresh', platform }          start a refresh (360, Magnifier)
  *   POST { op: 'merge', member, withMember }  put an account with another's client
  *   POST { op: 'split', member }              make an account its own client
@@ -24,6 +25,7 @@ import { describe } from '@/lib/import360/decode'
 import { live360Configured, liveLookup, liveReport, liveReports } from '@/lib/import360/source'
 import { buildExport, EXPORT_MAX } from '@/lib/client-eval/export'
 import { liveProfiles } from '@/lib/client-eval/profiles'
+import { liveSearches, mongoUrl } from '@/lib/client-eval/saved-searches'
 import { canRefreshHere, startRefresh } from '@/lib/client-eval/refresh'
 import { accountDetail, addOverride, clientPeople, listClients, sources } from '@/lib/client-eval/store'
 import { isPlatform, parseMember } from '@/lib/client-eval/types'
@@ -81,6 +83,13 @@ export async function GET(req: Request) {
       if (!Number.isInteger(usr) || usr <= 0) return bad('Unknown 360 user.')
       if (!live360Configured()) return bad('360 is not reachable from this server.')
       return NextResponse.json({ reports: await liveReports(usr) })
+    }
+    if (op === 'searches') {
+      const user = (u.get('user') ?? '').trim()
+      const accounts = (u.get('accounts') ?? '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20)
+      if (!user || user.length > 100) return bad('Unknown Magnifier user.')
+      if (!mongoUrl()) return bad("Magnifier's saved searches are not configured on this server.")
+      return NextResponse.json(await liveSearches(user, accounts))
     }
     if (op === 'profiles') {
       const usr = Number(u.get('user'))

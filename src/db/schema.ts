@@ -2626,6 +2626,7 @@ export const ceUsers = pgTable(
     active: boolean('active').notNull(),
     /** Last sign-in or use, YYYY-MM-DD, where the platform records it. */
     lastSeen: text('last_seen'),
+    /** 360: reports used in 2026. Magnifier: saved searches saved or updated in 2026 (drizzle/0056). */
     reports: integer('reports').notNull().default(0),
     /** 360 reporting profiles (drizzle/0051). */
     profiles: integer('profiles').notNull().default(0),
@@ -2662,6 +2663,8 @@ export const ceClients = pgTable('ce_clients', {
   reports: integer('reports').notNull().default(0),
   /** Logins in the last 30 days across its people (drizzle/0055). */
   logins30: integer('logins30').notNull().default(0),
+  /** Magnifier saved searches saved or updated in 2026 (drizzle/0056). */
+  magSearches: integer('mag_searches').notNull().default(0),
   active: boolean('active').notNull(),
   /** Every account is ours: staff, demo, development (lib/client-eval/match.ts isInternal). Hidden unless asked for. */
   internal: boolean('internal').notNull().default(false),

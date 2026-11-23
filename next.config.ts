@@ -16,7 +16,9 @@ const nextConfig: NextConfig = {
    */
   // mssql (and its driver, tedious) reads the 360 SQL Server for the Report Builder import; kept
   // external like PGlite so the driver loads from node_modules rather than being bundled.
-  serverExternalPackages: ["@electric-sql/pglite", "mssql", "tedious"],
+  // mongodb@3 (Magnifier's saved searches, Client Evaluation) has optional add-ons it requires only if present;
+  // bundling it makes those missing requires fail the build, so it stays external too.
+  serverExternalPackages: ["@electric-sql/pglite", "mssql", "tedious", "mongodb"],
   /*
    * Process Documentation uploads go through a server action, and a Claude
    * artifact with embedded images can run to megabytes; the default limit is
