@@ -139,6 +139,9 @@ function Sources({ contact, onReady }: { contact: string; onReady: () => void })
                   ) : null}
                   <span>As of {when(s.loadedAt)}</span>
                   {s.status === 'failed' ? <span className="ce-bad">Last refresh failed: {s.error}</span> : null}
+                  <a className="ce-dl" href={`/client-evaluation/users?platform=${s.platform}`} download title={`Every active ${PLATFORM_LABEL[s.platform]} user: name, email, account, username, created, last login (CSV)`}>
+                    Active users ↓ CSV
+                  </a>
                 </div>
               )}
               {SNAPSHOT_ONLY[s.platform] ? <div className="ce-source-note">Ping {contact} to refresh.</div> : null}

@@ -268,3 +268,12 @@ test('SSO sign-ins: the last successful sign-in, and how many in 30 days', async
   assert.equal(s.logins30, 2)
   assert.deepEqual(summariseEvents([], now), { last: null, logins30: 0 })
 })
+
+test('users CSV: fields are quoted when they need it, and formulas are defused', async () => {
+  const { csvField } = await import('../src/lib/client-eval/csv')
+  assert.equal(csvField('Jane Doe'), 'Jane Doe')
+  assert.equal(csvField('Doe, Jane'), '"Doe, Jane"')
+  assert.equal(csvField('Say "hi"'), '"Say ""hi"""')
+  assert.equal(csvField('=HYPERLINK(1)'), "'=HYPERLINK(1)")
+  assert.equal(csvField(null), '')
+})
