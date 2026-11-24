@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { cluster, displayName, domainFitsName, isInternal, links, mainDomains, nameKey, type MatchAccount } from '../src/lib/client-eval/match'
+import { clientName, cluster, displayName, domainFitsName, isInternal, links, mainDomains, nameKey, type MatchAccount } from '../src/lib/client-eval/match'
 import { mediaOf, parseRel, readable, schemaCountry } from '../src/lib/client-eval/rel'
 import { tidy } from '../src/lib/client-eval/rel-names'
 import { memberKey, parseMember } from '../src/lib/client-eval/types'
@@ -349,4 +349,16 @@ test('Migration Plan: the Word document builds from a plan', async () => {
 test('Migration Plan: one cache row per key, the last answer kept', () => {
   const list: Array<[string, number | null]> = [['san benedetto', 1], ['ford', 2], ['san benedetto', 3]]
   assert.deepEqual([...new Map(list)], [['san benedetto', 3], ['ford', 2]])
+})
+
+test('Client name: the shared name when no account holds half the users', () => {
+  const m = (name: string, users: number) => ({ name, users })
+  const dmn = m('Dallas Morning News-Dallas DH', 198)
+  const hearst = [dmn, m('Hearst TV - Sacramento CA MO', 116), m('Hearst TV - Baltimore MD MO', 82), m('Hearst News - San Antonio Express News', 96), m('Hearst Newspapers - Northeast', 79)]
+  assert.equal(clientName(dmn, hearst), 'Hearst')
+  // One account with most of the users keeps its own name.
+  assert.equal(clientName(m('Horizon Media - New York NY AI', 500), [m('Horizon Media - New York NY AI', 500), m('Other', 10), m('Another', 10)]), 'Horizon Media')
+  // Words that begin the other name are no change; hyphens and ampersands inside a word stay.
+  assert.equal(clientName(m('The New York Times', 7), [m('The New York Times', 7), m('New York Times Digital', 400), m('New York Times Ads', 500)]), 'The New York Times')
+  assert.equal(clientName(m('U.S Bank - MN', 13), [m('U.S Bank - MN', 13), m('M&T Bank Corp', 60), m('M&T Bank - NY', 59)]), 'M&T Bank')
 })

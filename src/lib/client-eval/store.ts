@@ -7,7 +7,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm'
 import type { Database } from '@/db/client'
 import { ceAccounts, ceClients, ceJudgments, ceOverrides, ceReports, ceSources, ceUsers } from '@/db/schema'
 import { completeJson } from '@/lib/llm'
-import { clientIdOf, cluster, displayName, isInternal, links, type Ask, type Link, type MatchAccount, type Override } from './match'
+import { clientIdOf, clientName, cluster, isInternal, links, type Ask, type Link, type MatchAccount, type Override } from './match'
 import { memberKey, parseMember, PLATFORMS, type Platform, type Snapshot } from './types'
 
 const BATCH = 800
@@ -187,7 +187,7 @@ export async function buildClients(d: Database, opts: { useModel?: boolean; prog
       clientId: clientIdOf(c.members),
       // The biggest account's name, tags off. 360's license-group names are often a holding company's
       // or an old one ("MPG" for Havas), so they are shown beside it rather than used.
-      name: displayName(named.name),
+      name: clientName(named, members),
       company,
       internal: c.members.every((k) => internal.has(k)),
       members: c.members,

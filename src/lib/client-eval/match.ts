@@ -290,5 +290,49 @@ export function displayName(name: string): string {
   return s || name
 }
 
+const NAME_SKIP = new Set(['the', 'a', 'an'])
+
+/**
+ * A client's name. Usually its biggest account's (`named`). But when no account holds half the users and most
+ * accounts start with the same word, that word: 53 of the 54 accounts under "Dallas Morning News-Dallas" were
+ * Hearst's, and the Dallas paper's own was only the biggest of them (Scott, 24 November 2026).
+ */
+export function clientName(named: { name: string; users: number }, members: { name: string; users: number }[]): string {
+  const own = displayName(named.name)
+  const total = members.reduce((n, m) => n + m.users, 0)
+  if (members.length < 3 || named.users * 2 >= total) return own
+  const words = (name: string) => {
+    // Words split at spaces and spaced separators only: "T-Mobile" and "M&T" stay whole.
+    const w = displayName(name).replace(/\([^)]*\)/g, ' ').split(/\s+[-–/:|]\s+|,\s*|\s+/).filter((x) => x && !/^[-–/:|]+$/.test(x))
+    while (w.length && NAME_SKIP.has(w[0]!.toLowerCase())) w.shift()
+    return w
+  }
+  const lists = members.map((m) => words(m.name))
+  // The longest run of leading words more than half the accounts share: "Weight Watchers", not "Weight". A word is
+  // added only while nearly all who share the shorter name share it too: Hearst's papers are not "Hearst TV".
+  let best: string[] | null = null
+  let shared = 0
+  for (let k = 1; k <= 4; k++) {
+    const count = new Map<string, { n: number; spell: Map<string, number> }>()
+    for (const w of lists) {
+      if (w.length < k) continue
+      const spelt = w.slice(0, k).join(' ')
+      const c = count.get(spelt.toLowerCase()) ?? count.set(spelt.toLowerCase(), { n: 0, spell: new Map() }).get(spelt.toLowerCase())!
+      c.n++
+      c.spell.set(spelt, (c.spell.get(spelt) ?? 0) + 1)
+    }
+    const top = [...count.values()].sort((a, b) => b.n - a.n)[0]
+    if (!top || top.n * 2 <= members.length || (shared && top.n < shared * 0.8)) break
+    best = [...top.spell].sort((a, b) => b[1] - a[1])[0]![0].split(' ')
+    shared = top.n
+  }
+  const flat = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (!best || flat(best.join('')).length < 3) return own
+  // No change worth making when one name begins the other ("Lamar", "Lamar Advertising"; "Yahoo", "Yahoo!").
+  const mine = flat(words(named.name).join(''))
+  if (mine.startsWith(flat(best.join(''))) || flat(best.join('')).startsWith(mine)) return own
+  return best.join(' ')
+}
+
 /** A stable id for a client: its first member, which changes only if that account leaves it. */
 export const clientIdOf = (members: string[]) => [...members].sort()[0]!
