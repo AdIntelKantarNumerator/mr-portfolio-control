@@ -13,6 +13,7 @@ import type { ProfileSummary } from '@/lib/client-eval/profiles'
 import type { UsageClient } from '@/lib/client-eval/ratings-usage'
 import type { InactiveAccount } from '@/lib/client-eval/inactive'
 import { ACCOUNT_TYPE_LABEL, ENTITY_TYPE, rollupMedia, rollupNames, SET_LABEL } from '@/lib/client-eval/migration/catalog'
+import { accountPlanId } from '@/lib/client-eval/migration/mode'
 import type { MigrationPlan } from '@/lib/client-eval/migration/types'
 import { csvField } from '@/lib/client-eval/csv'
 import type { ClientRow, PersonRow, SourceInfo } from '@/lib/client-eval/store'
@@ -233,7 +234,7 @@ type Popup =
   | { kind: 'merge'; client: ClientRow }
   | { kind: 'ratings' }
   | { kind: 'inactive' }
-  | { kind: 'plan'; client: ClientRow }
+  | { kind: 'plan'; subject: PlanSubject }
 
 export function ClientEvaluation({ contact }: { contact: string }) {
   const [q, setQ] = useState('')
@@ -395,9 +396,15 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                       {!c.active ? ' · inactive' : ''}
                       {c.internal ? ' · internal' : ''}
                     </div>
-                    <button type="button" className="btn ce-sm ce-deck-btn" onClick={() => push({ kind: 'plan', client: c })} title="What this client becomes in Insights Studio: accounts, entitlements, users, workspaces and impact">
-                      Migration Plan
-                    </button>
+                    {c.holding ? (
+                      <span className="ce-muted ce-sm" title="A holding company: each account has its own Migration Plan, under the client's accounts">
+                        Plans per account
+                      </span>
+                    ) : (
+                      <button type="button" className="btn ce-sm ce-deck-btn" onClick={() => push({ kind: 'plan', subject: { id: c.id, name: c.name, account: null } })} title="What this client becomes in Insights Studio: accounts, entitlements, users, workspaces and impact">
+                        Migration Plan
+                      </button>
+                    )}
                   </td>
                   <td>
                     <div className="ce-badges">
@@ -462,6 +469,11 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                               {m.platform === 'magnifier' && m.reports ? ` · ${n(m.reports)} reports` : ''}
                             </span>
                             <span className="ce-member-acts">
+                              {c.holding && m.active ? (
+                                <button type="button" className="btn btn-primary ce-sm" onClick={() => push({ kind: 'plan', subject: { id: accountPlanId(m.key), name: m.name, account: m.key } })} title="What this account becomes in Insights Studio, on its own, keeping what it may see today">
+                                  Migration Plan
+                                </button>
+                              ) : null}
                               <button type="button" className="btn ce-sm" onClick={() => openDeck({ kind: 'account', key: m.key }, m.name)} title="Build a PowerPoint of what changes for this account in Insights Studio">
                                 Impact deck
                               </button>
@@ -507,7 +519,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
 
       {top?.kind === 'account' ? <AccountPopup k={top.key} onClose={pop} /> : null}
       {top?.kind === 'ratings' ? <RatingsUsagePopup onClose={pop} /> : null}
-      {top?.kind === 'plan' ? <MigrationPlanPopup client={top.client} onClose={pop} /> : null}
+      {top?.kind === 'plan' ? <MigrationPlanPopup subject={top.subject} onClose={pop} /> : null}
       {top?.kind === 'inactive' ? <InactivePopup onClose={pop} onAccount={(key) => push({ kind: 'account', key })} /> : null}
       {top?.kind === 'people' ? (
         <PeoplePopup client={top.client} initialPlatform={top.platform} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} onMagnifierReports={(accountKey, who) => push({ kind: 'mreports', accountKey, who })} onSearches={(user, account, who) => push({ kind: 'searches', user, account, who })} onProfiles={(usrId, who) => push({ kind: 'profiles', usrId, who })} />
@@ -1055,7 +1067,6 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
                       </span>
                     ))}
                   </div>
-                  <MediaKey withheld={a.coverage.withheld.length > 0} premium={media.some((m) => m.status === 'premium')} />
                 </div>
                 <div className="ce-tile">
                   <h5>
@@ -1167,7 +1178,7 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
 
   if (tab === 'Workspaces')
     return plan.workspaces.length ? (
-      <>
+      <div className="ce-ws-grid">
         {plan.workspaces.map((w) => (
           <div key={w.key} className="ce-acct">
             <div className="ce-acct-head" title={w.why}>
@@ -1205,7 +1216,7 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
             </div>
           </div>
         ))}
-      </>
+      </div>
     ) : (
       <p className="ce-muted">No workspaces: none of the users have lists or restrictions to keep.</p>
     )
@@ -1271,34 +1282,59 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
     )
 
   if (tab === 'Impact') {
-    const gains = plan.impact.gains.filter((g) => !/new to them:/.test(g))
+    // Gains for the whole plan, not per account (Scott, 24 November 2026): media grouped as on Accounts, each
+    // package added once, then anything else gained. Drawn from the plan's data, so older plans read the same way.
+    const packages = new Map<string, string>()
+    for (const a of plan.accounts) for (const p of a.packages) if (!(p.starting ?? p.key === 'competitive') && !packages.has(p.name)) packages.set(p.name, p.why)
+    const accountNames = plan.accounts.map((a) => `${a.name}: `)
+    const other = plan.impact.gains.filter((g) => !/new to them:|^Packages? added:/.test(g) && !accountNames.some((x) => g.startsWith(x)))
     return (
       <>
         <div className="ce-tiles">
-          {addedMedia.length ? (
+          {addedMedia.length || packages.size || other.length ? (
             <div className="ce-tile ce-tile-green">
-              <h5>
-                <TileIcon kind="media" /> New media <span className="ce-muted">{n(addedMedia.length)}</span>
-              </h5>
-              <ul className="ce-tile-list">
-                {addedMedia.map((m) => (
-                  <li key={m.name} title={m.members.join(', ')}>
-                    {m.name}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {gains.length ? (
-            <div className="ce-tile ce-tile-green">
-              <h5>
-                <TileIcon kind="package" /> Gains
-              </h5>
-              <ul className="ce-tile-list">
-                {gains.map((s, i) => (
-                  <li key={i}>{s}</li>
-                ))}
-              </ul>
+              <h5>▲ Gains</h5>
+              <dl className="ce-kv">
+                {addedMedia.length ? (
+                  <>
+                    <dt>
+                      <TileIcon kind="media" /> Media
+                    </dt>
+                    <dd>
+                      <ul className="ce-tile-list">
+                        {addedMedia.map((m) => (
+                          <li key={m.name} title={m.members.join(', ')}>
+                            {m.name}
+                          </li>
+                        ))}
+                      </ul>
+                    </dd>
+                  </>
+                ) : null}
+                {packages.size ? (
+                  <>
+                    <dt>
+                      <TileIcon kind="package" /> Packages
+                    </dt>
+                    <dd>
+                      <ul className="ce-tile-list">
+                        {[...packages].map(([name, why]) => (
+                          <li key={name} title={why}>
+                            {name}
+                          </li>
+                        ))}
+                      </ul>
+                    </dd>
+                  </>
+                ) : null}
+              </dl>
+              {other.length ? (
+                <ul className="ce-tile-list">
+                  {other.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
           {plan.impact.losses.length ? (
@@ -1393,7 +1429,14 @@ function MediaKey({ premium, withheld, lost }: { premium?: boolean; withheld?: b
   )
 }
 
-function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: () => void }) {
+/** What a Migration Plan covers: a client, or one account of a holding company. */
+interface PlanSubject {
+  id: string
+  name: string
+  account: string | null
+}
+
+function MigrationPlanPopup({ subject: client, onClose }: { subject: PlanSubject; onClose: () => void }) {
   const [view, setView] = useState<PlanResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<PlanTab>('Summary')
@@ -1468,7 +1511,7 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
                   : ''}
           </span>
           <span className="ce-count" />
-          <button type="button" className="btn ce-sm" disabled={!plan} onClick={() => openDeck({ kind: 'client', clientId: client.id }, client.name)} title="The Impact Deck, leading with the advertisers this plan found">
+          <button type="button" className="btn ce-sm" disabled={!plan} onClick={() => openDeck(client.account ? { kind: 'account', key: client.account } : { kind: 'client', clientId: client.id }, client.name)} title="The Impact Deck, leading with the advertisers this plan found">
             Impact Deck ↓
           </button>
           <a className={`btn btn-primary ce-sm${plan ? '' : ' ce-disabled'}`} href={plan ? `/client-evaluation/api?op=plan-doc&client=${encodeURIComponent(client.id)}` : undefined} download aria-disabled={!plan} title="The plan as a Word document">

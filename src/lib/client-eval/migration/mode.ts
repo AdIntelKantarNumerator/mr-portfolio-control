@@ -22,3 +22,15 @@ export function planMode(client: string, company: string | null, pool: Array<{ t
     return { mode: 'markets', why: `${marketed.length} of its ${pool.length} accounts are each limited to a market: one account with every market, and a workspace per market for that market's users.` }
   return { mode: 'standard', why: '' }
 }
+
+/**
+ * A holding company's client, known from the list alone (name or 360 license group, three or more accounts): its
+ * Migration Plans are made account by account, each from its own account's row, not one for the client (Scott,
+ * 24 November 2026).
+ */
+export const isHoldingClient = (name: string, company: string | null, accounts: number) => accounts >= 3 && (HOLDING.test(name) || HOLDING.test(company ?? ''))
+
+/** A plan for one legacy account, not a client: "acct|360:12345". */
+export const ACCOUNT_PLAN = 'acct|'
+export const accountPlanId = (member: string) => `${ACCOUNT_PLAN}${member}`
+export const accountOfPlan = (id: string) => (id.startsWith(ACCOUNT_PLAN) ? id.slice(ACCOUNT_PLAN.length) : null)

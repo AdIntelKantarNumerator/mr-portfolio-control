@@ -8,6 +8,7 @@ import type { Database } from '@/db/client'
 import { ceAccounts, ceClients, ceJudgments, ceOverrides, ceReports, ceSources, ceUsers } from '@/db/schema'
 import { completeJson } from '@/lib/llm'
 import { clientIdOf, clientName, cluster, isCanadian, isInternal, links, type Ask, type Link, type MatchAccount, type Override } from './match'
+import { isHoldingClient } from './migration/mode'
 import { memberKey, parseMember, PLATFORMS, type Entitlements, type Platform, type Snapshot } from './types'
 
 const BATCH = 800
@@ -263,6 +264,8 @@ export interface ClientRow {
   active: boolean
   internal: boolean
   canada: boolean
+  /** A holding company: Migration Plans are made per account (migration/mode.ts). */
+  holding: boolean
   company: string | null
   members: Array<{ key: string; platform: Platform; accountId: string; name: string; active: boolean; users: number; activeUsers: number; reports: number; summary: string | null }>
   how: Link[]
@@ -322,6 +325,7 @@ export async function listClients(
       active: c.active,
       internal: c.internal,
       canada: c.canada,
+      holding: isHoldingClient(c.name, c.company, (c.members as string[]).length),
       company: c.company,
       how: c.how as Link[],
       members: (c.members as string[])

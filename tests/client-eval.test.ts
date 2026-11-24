@@ -409,3 +409,15 @@ test('Migration Plan: TV, magazines and newspapers are shown as one each', async
   assert.deepEqual(r.map((x) => [x.name, x.status]), [['Linear TV', 'kept'], ['Magazines', 'added'], ['Newspapers', 'added'], ['Social', 'premium']])
   assert.deepEqual(rollupNames(['Spot TV', 'Syndication', 'Browser Display']), ['Linear TV', 'Browser Display'])
 })
+
+test('Migration Plan: holding companies are planned per account', async () => {
+  const { accountOfPlan, accountPlanId, isHoldingClient } = await import('../src/lib/client-eval/migration/mode')
+  assert.equal(isHoldingClient('Publicis Zenith Media', null, 46), true)
+  assert.equal(isHoldingClient('GroupM Mindshare', null, 292), true)
+  assert.equal(isHoldingClient('Horizon Media', 'Horizon Media', 8), true)
+  assert.equal(isHoldingClient('Publicis Digitas', null, 2), false, 'fewer than three accounts')
+  assert.equal(isHoldingClient('Hearst', null, 54), false)
+  assert.equal(accountPlanId('360:41314'), 'acct|360:41314')
+  assert.equal(accountOfPlan('acct|360:41314'), '360:41314')
+  assert.equal(accountOfPlan('360:32730'), null)
+})

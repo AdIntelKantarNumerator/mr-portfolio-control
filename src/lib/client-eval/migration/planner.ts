@@ -21,8 +21,9 @@
  */
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { ceClients, ceJobs, cePlans, ceSources } from '@/db/schema'
-import { buildPlan, inputsHash } from './build'
+import { ceAccounts, ceClients, ceJobs, cePlans, ceSources } from '@/db/schema'
+import { buildPlan, inputsHash, planSubject } from './build'
+import { accountPlanId, isHoldingClient } from './mode'
 import type { MigrationPlan } from './types'
 
 const PAUSE_MS = 5_000
@@ -81,7 +82,8 @@ async function loop() {
     .update(cePlans)
     .set({ status: 'failed', step: null, priority: 0, error: 'The server stopped while this plan was being built (it may have run out of memory). Ask for it again to retry.' })
     .where(eq(cePlans.status, 'building'))
-  await dropCanadian()
+  // Once at start: Canadian plans dropped, holding companies switched to account plans (seed does both).
+  await seed()
   let seeded = false
   while (!g.__cePlanner?.stop) {
     try {
@@ -166,16 +168,28 @@ async function seed() {
   await dropCanadian()
   const have = new Set((await db.select({ id: cePlans.clientId }).from(cePlans)).map((r) => r.id))
   const rows = await db
-    .select({ id: ceClients.clientId, platforms: ceClients.platforms, activeUsers: ceClients.activeUsers, logins30: ceClients.logins30 })
+    .select({ id: ceClients.clientId, name: ceClients.name, company: ceClients.company, members: ceClients.members, platforms: ceClients.platforms, activeUsers: ceClients.activeUsers, logins30: ceClients.logins30 })
     .from(ceClients)
     .where(and(eq(ceClients.active, true), eq(ceClients.internal, false), eq(ceClients.canada, false)))
+  // Holding companies are planned account by account (Scott, 24 November 2026): a full plan for each of their
+  // active accounts with users, none for the client; a client plan left from before is dropped.
+  const holding = rows.filter((c) => isHoldingClient(c.name, c.company, (c.members as string[]).length))
+  const holdingIds = holding.map((c) => c.id)
+  for (let i = 0; i < holdingIds.length; i += 500) await db.delete(cePlans).where(inArray(cePlans.clientId, holdingIds.slice(i, i + 500)))
+  const live = new Map((await db.select({ platform: ceAccounts.platform, id: ceAccounts.accountId, activeUsers: ceAccounts.activeUsers }).from(ceAccounts).where(eq(ceAccounts.active, true))).map((a) => [`${a.platform}:${a.id}`, a.activeUsers]))
   const add = rows
-    .filter((c) => !have.has(c.id))
+    .filter((c) => !holdingIds.includes(c.id) && !have.has(c.id))
     .map((c) => {
       const multi = (c.platforms as string[]).length > 1
       const full = multi || c.activeUsers >= 5 || c.logins30 > 0
       return { clientId: c.id, status: 'queued', depth: full ? 'full' : 'light', priority: (multi ? 1000 : 0) + (c.logins30 > 0 ? 500 : 0) + Math.min(c.activeUsers, 400) }
     })
+  for (const c of holding)
+    for (const m of c.members as string[]) {
+      const users = live.get(m)
+      const id = accountPlanId(m)
+      if (users && !have.has(id)) add.push({ clientId: id, status: 'queued', depth: 'full', priority: 1500 + Math.min(users, 400) })
+    }
   for (let i = 0; i < add.length; i += 500) await db.insert(cePlans).values(add.slice(i, i + 500)).onConflictDoNothing()
 }
 
@@ -230,8 +244,7 @@ async function runOne(clientId: string, depth: 'full' | 'light') {
 
 /** Ask for a client's plan now: it jumps the queue, in full. Without the planner running here, it is built straight away. */
 export async function requestPlan(clientId: string, by: string | null): Promise<void> {
-  const [c] = await db.select({ id: ceClients.clientId }).from(ceClients).where(eq(ceClients.clientId, clientId)).limit(1)
-  if (!c) throw new Error('That client is not in the list. It may have changed with a refresh.')
+  if (!(await planSubject(db, clientId))) throw new Error('That client or account is not in the list. It may have changed with a refresh.')
   const [have] = await db.select({ status: cePlans.status, startedAt: cePlans.startedAt }).from(cePlans).where(eq(cePlans.clientId, clientId)).limit(1)
   // Building: leave it, unless it started so long ago that it must have stopped (a restart, a hang).
   if (have?.status === 'building' && have.startedAt && Date.now() - have.startedAt.getTime() < STUCK_MS) return

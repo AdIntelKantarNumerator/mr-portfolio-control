@@ -19,7 +19,7 @@
  * built, one account per type, and says the review did not run.
  */
 import { createHash } from 'node:crypto'
-import { and, eq, gte, inArray } from 'drizzle-orm'
+import { and, eq, gte, inArray, sql } from 'drizzle-orm'
 import type { Database } from '@/db/client'
 import { ceAccounts, ceClients, ceOfflineReports, ceUsers } from '@/db/schema'
 import { chunks, q360, reportsForUsers } from '@/lib/import360/source'
@@ -29,7 +29,7 @@ import type { Candidate } from '@/lib/taxonomy-rules'
 import { ADV_360, candidatesMagnifier, names360, plainTerms, type Candidates } from '../deck-data'
 import { accountSearches, mongoUrl } from '../saved-searches'
 import { premiumNote } from './premium'
-import { planMode, type PlanMode } from './mode'
+import { accountOfPlan, planMode, type PlanMode } from './mode'
 import { currentMedia, mediaChange, type MediaChange } from '../media-map'
 import { ratingsRunsBySet } from '../ratings-usage'
 import { clientPeople, type PersonRow } from '../store'
@@ -110,8 +110,26 @@ async function legacyAccounts(d: Database, members: string[]): Promise<Legacy[]>
 }
 
 /** What the plan is built from, as a hash: a refresh that changes any of it marks the plan out of date. */
+/**
+ * What a plan id covers: a client (its id), or one legacy account of a holding company ("acct|360:12345", mode.ts),
+ * planned on its own under its client (Scott, 24 November 2026). Null when it is gone.
+ */
+export async function planSubject(d: Database, id: string): Promise<{ name: string; company: string | null; members: string[]; clientId: string; clientName: string; account: string | null } | null> {
+  const member = accountOfPlan(id)
+  if (!member) {
+    const [c] = await d.select({ name: ceClients.name, company: ceClients.company, members: ceClients.members }).from(ceClients).where(eq(ceClients.clientId, id)).limit(1)
+    return c ? { name: c.name, company: c.company, members: c.members as string[], clientId: id, clientName: c.name, account: null } : null
+  }
+  const m = parseMember(member)
+  if (!m) return null
+  const [c] = await d.select({ id: ceClients.clientId, name: ceClients.name, company: ceClients.company }).from(ceClients).where(sql`${ceClients.members} ? ${member}`).limit(1)
+  const [a] = await d.select({ name: ceAccounts.name, company: ceAccounts.company }).from(ceAccounts).where(and(eq(ceAccounts.platform, m.platform), eq(ceAccounts.accountId, m.accountId))).limit(1)
+  if (!c || !a) return null
+  return { name: a.name, company: a.company ?? c.company, members: [member], clientId: c.id, clientName: c.name, account: member }
+}
+
 export async function inputsHash(d: Database, clientId: string): Promise<string | null> {
-  const [c] = await d.select({ members: ceClients.members, name: ceClients.name }).from(ceClients).where(eq(ceClients.clientId, clientId)).limit(1)
+  const c = await planSubject(d, clientId)
   if (!c) return null
   const members = [...(c.members as string[])].sort()
   const h = createHash('sha1').update(`v${PLAN_VERSION}|${c.name}|${members.join(',')}`)
@@ -243,7 +261,7 @@ Reply with JSON only: {"organization":"name","organizationWhy":"one sentence","a
  * starts in September 2026, so a Magnifier account counts as used while it has active users. If nothing is left,
  * everything active is kept, so the plan still says something.
  */
-export function migratable(legacy: Legacy[], people: PersonRow[], now: Date): { pool: Legacy[]; notMigrated: NonNullable<MigrationPlan['notMigrated']> } {
+export function migratable(legacy: Legacy[], people: PersonRow[], now: Date): { pool: Legacy[]; notMigrated: NonNullable<MigrationPlan['notMigrated']>; allDormant: boolean } {
   const cutoff = monthsAgo(RECENT_MONTHS, now)
   const lastLogin = new Map<string, string>()
   for (const p of people)
@@ -268,8 +286,8 @@ export function migratable(legacy: Legacy[], people: PersonRow[], now: Date): { 
         why: a.platform === 'magnifier' ? 'No active users and no saved searches in 2026.' : `Dormant: ${last ? `no login since ${last}` : 'no login on record'} and no reports in 2026, though still flagged active.`,
       })
   }
-  if (!pool.length) return { pool: legacy.filter((a) => a.active).length ? legacy.filter((a) => a.active) : legacy, notMigrated: [] }
-  return { pool, notMigrated }
+  if (!pool.length) return { pool: legacy.filter((a) => a.active).length ? legacy.filter((a) => a.active) : legacy, notMigrated: [], allDormant: legacy.some((a) => a.active) }
+  return { pool, notMigrated, allDormant: false }
 }
 
 // ------------------------------------------------------------------ an account's entitlements
@@ -832,18 +850,27 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   const now = opts.now ?? new Date()
   const notes: string[] = []
   await progress('Reading the client')
-  const [c] = await d.select().from(ceClients).where(eq(ceClients.clientId, clientId)).limit(1)
-  if (!c) throw new Error('That client is not in the list. It may have changed with a refresh.')
-  const legacy = await legacyAccounts(d, c.members as string[])
+  const c = await planSubject(d, clientId)
+  if (!c) throw new Error('That client or account is not in the list. It may have changed with a refresh.')
+  const legacy = await legacyAccounts(d, c.members)
   if (!legacy.length) throw new Error('The client has no accounts in the snapshot.')
 
   await progress('Reading the people')
-  const people = (await clientPeople(d, clientId))?.people ?? []
+  // An account's plan: its client's people, as far as they use this account.
+  const people = ((await clientPeople(d, c.clientId))?.people ?? [])
+    .map((p) => (c.account ? { ...p, accounts: p.accounts.filter((a) => `${a.platform}:${a.accountId}` === c.account) } : p))
+    .filter((p) => p.accounts.length)
   // Accounts not migrated: inactive ones, and dormant ones (Scott, 24 November 2026: Amazon Project Kuiper was lost
   // as a client yet is still flagged active in 360, which keeps no end date).
-  const { pool, notMigrated } = migratable(legacy, people, now)
-  const { mode, why: modeWhy } = planMode(c.name, c.company, pool)
-  const { groups, org, model: splitModel } = await groupAccounts(c.name, pool, mode, useModel, progress)
+  const { pool, notMigrated, allDormant } = migratable(legacy, people, now)
+  if (allDormant) notes.push('Every account here looks dormant (no login in 12 months, nothing run in 2026); the plan is drawn anyway. Confirm before migrating.')
+  // A holding company's account is planned on its own and keeps what it may see today.
+  const { mode, why: modeWhy } = c.account
+    ? { mode: 'holding' as const, why: `One of ${c.clientName}'s accounts, planned on its own: it becomes its own Insights Studio account and keeps the advertisers and categories it may see today.` }
+    : planMode(c.name, c.company, pool)
+  const grouped = await groupAccounts(c.name, pool, mode, useModel, progress)
+  const { groups, model: splitModel } = grouped
+  const org = c.account ? { name: c.clientName, why: `The organization is ${c.clientName}; this plan covers one of its accounts.` } : grouped.org
 
   // Ratings evidence (360 report runs with Nielsen or VideoAmp).
   const sets360 = groups.flatMap((g) => g.members).filter((a) => a.platform === '360').map((a) => Number(a.id))
@@ -1083,7 +1110,9 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
     .filter((m) => m.status === 'added')
     .map((m) => m.name)
   if (added.length) gains.push(`${added.length} ${added.length === 1 ? 'medium' : 'media'} new to them: ${added.join(', ')}.`)
-  for (const a of accounts) for (const pk of a.packages.filter((x) => !x.starting)) gains.push(`${a.name}: ${pk.name} (${pk.why.replace(/\.$/, '')}).`)
+  // Packages added, once for the whole plan, not per account (Scott, 24 November 2026).
+  const addedPackages = [...new Set(accounts.flatMap((a) => a.packages.filter((x) => !x.starting).map((x) => x.name)))]
+  if (addedPackages.length) gains.push(`${addedPackages.length === 1 ? 'Package' : 'Packages'} added: ${addedPackages.join(', ')}.`)
   if (accounts.some((a) => a.coverage.widened.length)) gains.push('Restrictions on advertisers and categories are lifted: the whole account sees all brands and categories, with workspaces keeping each user’s focus.')
   // Lost: legacy media with nowhere to go, unless Insights Studio's catalogue has it under the same name (Search).
   const offered = new Set(MEDIA.filter((x) => x.active).map((x) => x.name.toLowerCase()))
