@@ -882,8 +882,8 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
       async (r) => {
         if (!live) return
         setView(r)
-        // No plan yet, or a light one: ask for it in full, once.
-        if (!asked.current && (r.status === 'none' || r.status === 'failed' || (r.status === 'ready' && r.depth === 'light'))) {
+        // No plan yet, or a light one: ask for it in full, once. A failed one only on request: it may have stopped the server.
+        if (!asked.current && (r.status === 'none' || (r.status === 'ready' && r.depth === 'light'))) {
           asked.current = true
           try {
             await post({ op: 'plan', client: client.id })
@@ -952,9 +952,9 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
           <a className={`btn btn-primary ce-sm${plan ? '' : ' ce-disabled'}`} href={plan ? `/client-evaluation/api?op=plan-doc&client=${encodeURIComponent(client.id)}` : undefined} download aria-disabled={!plan} title="The plan as a Word document">
             Migration Plan ↓
           </a>
-          {view?.admin ? (
-            <button type="button" className="btn ce-sm" disabled={working} onClick={() => void rebuild()} title="Admins: rebuild this client's plan now">
-              Rebuild
+          {view?.admin || view?.status === 'failed' ? (
+            <button type="button" className="btn ce-sm" disabled={working} onClick={() => void rebuild()} title={view?.status === 'failed' ? 'Build this plan again' : "Admins: rebuild this client's plan now"}>
+              {view?.status === 'failed' ? 'Try again' : 'Rebuild'}
             </button>
           ) : null}
         </div>

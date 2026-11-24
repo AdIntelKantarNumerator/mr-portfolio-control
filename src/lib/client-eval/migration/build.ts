@@ -39,9 +39,14 @@ export type PlanProgress = (step: string) => Promise<void> | void
 const RECENT_MONTHS = 12
 const MAX_ITEMS = 200
 const MAP_ADVERTISERS = 2000
-const MAP_CATEGORIES = 300
+const MAP_CATEGORIES = 100
 /** dbxFlows takes this many at a time: one statement stays a reasonable size. */
-const FOLLOW_BATCH = 250
+const FOLLOW_BATCH = 100
+/**
+ * Categories a statement: a category's flows are every product in it, far more rows than an advertiser's,
+ * and 300 at once ran the server (1.75 GB) out of memory (24 November 2026).
+ */
+const CATEGORY_BATCH = 10
 const MODEL_ACCOUNTS = 80
 
 const monthsAgo = (n: number, now = new Date()) => {
@@ -466,19 +471,23 @@ async function buildMatcher(advIds: string[], catIds: string[], magnifierAccount
   if (catIds.length) {
     await progress(`Following ${catIds.length} categories into Insights Studio`)
     try {
-      const flows = new Map<string, FlowRaw[]>()
-      for (let i = 0; i < catIds.length; i += FOLLOW_BATCH) for (const [k, v] of await within(6 * 60_000, 'Following categories', () => dbxCategoryFlows('VX1', catIds.slice(i, i + FOLLOW_BATCH)))) flows.set(k, v)
       const tree = await within(4 * 60_000, 'Reading the taxonomy', () => dbxTaxonomyTree())
       const byName = new Map<string, { id: string; e: number }>()
       for (const n of tree) {
         const e = LEVEL_E.find(([re]) => re.test(n.level))?.[1]
         if (e && !byName.has(`${e}|${n.name.toLowerCase()}`)) byName.set(`${e}|${n.name.toLowerCase()}`, { id: n.id, e })
       }
-      for (const [id, fl] of flows) {
-        const sub = topBy(fl, (f) => f.subcategory, (f) => f.spend)
-        const cat = topBy(fl, (f) => f.category, (f) => f.spend)
-        const hit = (sub && byName.get(`135|${sub.toLowerCase()}`)) || (cat && byName.get(`103|${cat.toLowerCase()}`))
-        if (hit) m.cat.set(id, { id: hit.id, name: (hit.e === 135 ? sub : cat)!, e: hit.e })
+      // A few at a time, each batch reduced to its answer before the next is read: the rows are many.
+      for (let i = 0; i < catIds.length; i += CATEGORY_BATCH) {
+        if (i) await progress(`Following categories into Insights Studio (${i} of ${catIds.length})`)
+        const flows = await within(6 * 60_000, 'Following categories', () => dbxCategoryFlows('VX1', catIds.slice(i, i + CATEGORY_BATCH)))
+        for (const [id, fl] of flows) {
+          const sub = topBy(fl, (f) => f.subcategory, (f) => f.spend)
+          const cat = topBy(fl, (f) => f.category, (f) => f.spend)
+          const hit = (sub && byName.get(`135|${sub.toLowerCase()}`)) || (cat && byName.get(`103|${cat.toLowerCase()}`))
+          if (hit) m.cat.set(id, { id: hit.id, name: (hit.e === 135 ? sub : cat)!, e: hit.e })
+        }
+        flows.clear()
       }
     } catch (err) {
       notes.push(`360 categories could not be followed into Insights Studio: ${(err as Error).message}`.slice(0, 200))

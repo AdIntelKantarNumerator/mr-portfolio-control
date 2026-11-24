@@ -73,8 +73,13 @@ export function ensurePlanner(): void {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 async function loop() {
-  // A plan left "building" by a restart is queued again.
-  await db.update(cePlans).set({ status: 'queued', step: null }).where(eq(cePlans.status, 'building'))
+  // A plan left "building" when the server started was being built when it stopped. Retrying it can stop the server
+  // again (24 November 2026: one plan ran it out of memory every ten minutes all night), so it is marked failed and
+  // the queue moves on. Opening its popup asks for it again, once, which is how anyone finds out.
+  await db
+    .update(cePlans)
+    .set({ status: 'failed', step: null, priority: 0, error: 'The server stopped while this plan was being built (it may have run out of memory). Ask for it again to retry.' })
+    .where(eq(cePlans.status, 'building'))
   let seeded = false
   while (!g.__cePlanner?.stop) {
     try {
