@@ -989,15 +989,17 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
           </div>
         ) : null}
         {plan.notMigrated?.length ? (
-          <div className="ce-box ce-box-grey">
-            <span className="ce-big">⊘ {n(plan.notMigrated.length)} not migrated</span>
-            <div className="ce-names">
+          <div className="ce-tile">
+            <h5>
+              <TileIcon kind="account" /> Not migrated <span className="ce-muted">{n(plan.notMigrated.length)}</span>
+            </h5>
+            <ul className="ce-tile-list">
               {plan.notMigrated.map((x) => (
-                <span key={`${x.platform}:${x.name}`} className="ce-name-chip" title={`${PLATFORM_LABEL[x.platform]}: ${x.why}`}>
-                  {x.name}
-                </span>
+                <li key={`${x.platform}:${x.name}`} title={x.why}>
+                  <span className={`ce-badge ce-${x.platform}`}>{PLATFORM_LABEL[x.platform]}</span> {x.name} <span className="ce-muted ce-sm">{/^Inactive/.test(x.why) ? 'inactive' : 'dormant'}</span>
+                </li>
               ))}
-            </div>
+            </ul>
           </div>
         ) : null}
         <p className="ce-muted ce-sm" title={plan.organization.why}>
@@ -1268,81 +1270,93 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
       <p className="ce-muted">{plan.reports ? 'No 360 reports used in 2026 by the users created.' : 'Rebuild the plan to see 360 reports.'}</p>
     )
 
-  if (tab === 'Impact')
+  if (tab === 'Impact') {
+    const gains = plan.impact.gains.filter((g) => !/new to them:/.test(g))
     return (
       <>
-        {addedMedia.length ? (
-          <div className="ce-box ce-box-green">
-            <span className="ce-big">▲ {n(addedMedia.length)} new media</span>
-            <div className="ce-names">
-              {addedMedia.map((m) => (
-                <span key={m.name} className="ce-name-chip ce-m-added" title={m.members.join(', ')}>
-                  {m.name}
-                </span>
-              ))}
+        <div className="ce-tiles">
+          {addedMedia.length ? (
+            <div className="ce-tile ce-tile-green">
+              <h5>
+                <TileIcon kind="media" /> New media <span className="ce-muted">{n(addedMedia.length)}</span>
+              </h5>
+              <ul className="ce-tile-list">
+                {addedMedia.map((m) => (
+                  <li key={m.name} title={m.members.join(', ')}>
+                    {m.name}
+                  </li>
+                ))}
+              </ul>
             </div>
-          </div>
-        ) : null}
-        {plan.impact.gains.filter((g) => !/new to them:/.test(g)).length ? (
-          <div className="ce-box ce-box-green">
-            <span className="ce-big">▲ Gains</span>
-            <ul className="ce-plan-list">
-              {plan.impact.gains
-                .filter((g) => !/new to them:/.test(g))
-                .map((s, i) => (
+          ) : null}
+          {gains.length ? (
+            <div className="ce-tile ce-tile-green">
+              <h5>
+                <TileIcon kind="package" /> Gains
+              </h5>
+              <ul className="ce-tile-list">
+                {gains.map((s, i) => (
                   <li key={i}>{s}</li>
                 ))}
-            </ul>
-          </div>
-        ) : null}
-        {plan.impact.losses.length ? (
-          <div className="ce-box ce-box-red">
-            <span className="ce-big">▼ Losses</span>
-            <ul className="ce-plan-list">
-              {plan.impact.losses.map((s, i) => (
-                <li key={i}>{s}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        {plan.impact.notInV1.length ? (
-          <div className="ce-box ce-box-grey">
-            <span className="ce-big">ⓘ Not in Insights Studio V1</span>
-            <ul className="ce-plan-list">
-              {plan.impact.notInV1.map((s, i) => (
-                <li key={i}>{s}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        <h4>Media by platform</h4>
-        <MediaKey lost={plan.impact.media.some((m) => m.change.dropped.length > 0)} />
-        {plan.impact.media.map((m) => (
-          <div key={m.platform} className="ce-row">
-            <span className={`ce-badge ce-${m.platform}`}>{PLATFORM_LABEL[m.platform]}</span>
-            <div className="ce-names">
-              {rollupNames(m.change.kept).map((x) => (
-                <span key={x} className="ce-name-chip ce-m-kept">
-                  {x}
-                </span>
-              ))}
-              {m.change.dropped.map((x) => (
-                <span key={x} className="ce-name-chip ce-out" title="Not in Insights Studio yet">
-                  {x}
-                </span>
-              ))}
-              {rollupNames(m.change.added)
-                .filter((x) => !rollupNames(m.change.kept).includes(x))
-                .map((x) => (
-                  <span key={x} className="ce-name-chip ce-m-added" title="New to them">
-                    {x}
-                  </span>
-                ))}
+              </ul>
             </div>
-          </div>
-        ))}
+          ) : null}
+          {plan.impact.losses.length ? (
+            <div className="ce-tile ce-tile-red">
+              <h5>▼ Losses</h5>
+              <ul className="ce-tile-list">
+                {plan.impact.losses.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {plan.impact.notInV1.length ? (
+            <div className="ce-tile">
+              <h5>ⓘ Not in Insights Studio V1</h5>
+              <ul className="ce-tile-list">
+                {plan.impact.notInV1.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+        <h4>Media by platform</h4>
+        <div className="ce-tiles">
+          {plan.impact.media.map((m) => {
+            const kept = rollupNames(m.change.kept)
+            const added = rollupNames(m.change.added).filter((x) => !kept.includes(x))
+            return (
+              <div key={m.platform} className="ce-tile">
+                <h5>
+                  <span className={`ce-badge ce-${m.platform}`}>{PLATFORM_LABEL[m.platform]}</span>
+                </h5>
+                <dl className="ce-kv">
+                  <dt>Keeps</dt>
+                  <dd>{kept.join(', ') || '—'}</dd>
+                  {added.length ? (
+                    <>
+                      <dt>Adds</dt>
+                      <dd className="ce-good">{added.join(', ')}</dd>
+                    </>
+                  ) : null}
+                  {m.change.dropped.length ? (
+                    <>
+                      <dt>Loses</dt>
+                      <dd className="ce-bad" title="Not in Insights Studio yet">
+                        {m.change.dropped.join(', ')}
+                      </dd>
+                    </>
+                  ) : null}
+                </dl>
+              </div>
+            )
+          })}
+        </div>
       </>
     )
+  }
 
   // Checklist
   return (
