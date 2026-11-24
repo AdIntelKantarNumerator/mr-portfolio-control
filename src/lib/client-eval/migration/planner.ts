@@ -3,7 +3,7 @@
  * client's plan in the background, over hours or days, one at a time.
  *
  * The app runs on one small server (B1: one core), so the planner builds one
- * full plan at a time (two light ones, which read no Databricks), pauses between them, and waits while an Impact Deck or an
+ * full plan at a time, with light ones (which read no Databricks) two at a time beside it, pauses between them, and waits while an Impact Deck or an
  * export is being built. Its queue is ce_plans, so a restart picks up where it
  * stopped.
  *
@@ -88,13 +88,22 @@ async function loop() {
         await sleep(BUSY_MS)
         continue
       }
-      const next = await nextQueued()
-      if (next) {
-        if (next.depth === 'light') {
-          // Light plans read no Databricks and little memory: two side by side (Scott, 24 November 2026).
-          const pair = await nextLight(LIGHT_AT_ONCE)
-          await Promise.all(pair.map((p) => runOne(p.clientId, 'light')))
-        } else await runOne(next.clientId, next.depth as 'full' | 'light')
+      // Two lanes (Scott, 24 November 2026): one full plan at a time, and beside it light plans, two at a time, which
+      // read no Databricks and little memory. Light plans no longer wait days behind every full one.
+      const full = await nextFull()
+      let fullDone = !full
+      const fullRun = full ? runOne(full.clientId, 'full').finally(() => (fullDone = true)) : Promise.resolve()
+      let light = 0
+      do {
+        if (await jobRunning()) break
+        const pair = await nextLight(LIGHT_AT_ONCE)
+        if (!pair.length) break
+        await Promise.all(pair.map((p) => runOne(p.clientId, 'light')))
+        light += pair.length
+        if (!fullDone) await sleep(PAUSE_MS)
+      } while (!fullDone && !g.__cePlanner?.stop)
+      await fullRun
+      if (full || light) {
         await sleep(PAUSE_MS)
         continue
       }
@@ -122,7 +131,7 @@ async function jobRunning(): Promise<boolean> {
   return (r?.n ?? 0) > 0
 }
 
-/** The next light plans in queue order. Called when the next plan of all is light, so none jumps a full one. */
+/** The next light plans in queue order. */
 async function nextLight(n: number) {
   return db
     .select({ clientId: cePlans.clientId })
@@ -132,8 +141,13 @@ async function nextLight(n: number) {
     .limit(n)
 }
 
-async function nextQueued() {
-  const [r] = await db.select({ clientId: cePlans.clientId, depth: cePlans.depth }).from(cePlans).where(eq(cePlans.status, 'queued')).orderBy(desc(cePlans.priority), asc(cePlans.requestedAt)).limit(1)
+async function nextFull() {
+  const [r] = await db
+    .select({ clientId: cePlans.clientId })
+    .from(cePlans)
+    .where(and(eq(cePlans.status, 'queued'), eq(cePlans.depth, 'full')))
+    .orderBy(desc(cePlans.priority), asc(cePlans.requestedAt))
+    .limit(1)
   return r ?? null
 }
 

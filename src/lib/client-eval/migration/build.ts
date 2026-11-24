@@ -12,7 +12,7 @@
  *     only clients who have them today keep; no country beyond the US unless they have it today;
  *   - users: active, with a login in the last 12 months (Magnifier's logins start in September 2026,
  *     so its active users count as recent);
- *   - legacy ids become Insights Studio ids the way Taxonomy Comparison follows them (dbxFlows).
+ *   - legacy ids become Insights Studio ids the way Taxonomy Comparison follows them (dbxFlows, summed: dbxAdvertiserSummary, dbxCategorySummary).
  *
  * The facts come from the snapshot (ce_*) and live 360 reads. The model only
  * groups accounts and reviews the finished plan; without it the plan is still
@@ -24,7 +24,7 @@ import type { Database } from '@/db/client'
 import { ceAccounts, ceClients, ceUsers } from '@/db/schema'
 import { chunks, q360 } from '@/lib/import360/source'
 import { completeJson } from '@/lib/llm'
-import { dbxCategoryFlows, dbxFlows, dbxGpcNameMatches, dbxTaxonomyTree, type FlowRaw } from '@/lib/taxonomy-dbx'
+import { dbxAdvertiserSummary, dbxCategorySummary, dbxGpcNameMatches, dbxTaxonomyTree } from '@/lib/taxonomy-dbx'
 import type { Candidate } from '@/lib/taxonomy-rules'
 import { ADV_360, candidatesMagnifier, names360, plainTerms, type Candidates } from '../deck-data'
 import { currentMedia, mediaChange, type MediaChange } from '../media-map'
@@ -41,13 +41,20 @@ const RECENT_MONTHS = 12
 const MAX_ITEMS = 200
 const MAP_ADVERTISERS = 2000
 const MAP_CATEGORIES = 100
-/** dbxFlows takes this many at a time: one statement stays a reasonable size. */
-const FOLLOW_BATCH = 250
+/** Advertisers a statement. Each reads 30-50 GB of occurrences however few it holds; the summary keeps 1,000 at about 45 s and 20 MB (24 November 2026). */
+const FOLLOW_BATCH = 1000
 /**
- * Categories a statement: a category's flows are every product in it, far more rows than an advertiser's,
- * and 300 at once ran the server (1.75 GB) out of memory (24 November 2026).
+ * How long one Databricks step may take, waiting included. The warehouse is shared: on 24 November 2026 other
+ * people's queries kept ours queued for up to 6 minutes, and Dallas Morning News lost its advertisers, categories
+ * and names to the old 4-6 minute limits while waiting, not running.
  */
-const CATEGORY_BATCH = 10
+const FOLLOW_LIMIT = 12 * 60_000
+/**
+ * Categories a statement. Full flow rows for 300 categories ran the server (1.75 GB) out of memory (24 November
+ * 2026); the summary dbxCategorySummary returns is one row per category and GPC category/subcategory, so 100
+ * used 15 MB in testing.
+ */
+const CATEGORY_BATCH = 100
 const MODEL_ACCOUNTS = 80
 
 const monthsAgo = (n: number, now = new Date()) => {
@@ -450,7 +457,7 @@ function topBy<T>(rows: T[], key: (r: T) => string | null, spend: (r: T) => numb
 async function buildMatcher(d: Database, advIds: string[], catIds: string[], magnifierAccounts: string[], progress: PlanProgress): Promise<{ m: Matcher; magnifierFocus: Candidates | null; notes: string[] }> {
   const m: Matcher = { adv: new Map(), cat: new Map(), magnifier: new Map() }
   const notes: string[] = []
-  const fromFlows = (flows: Map<string, FlowRaw[]>, into: Map<string, { id: string; name: string; parent: boolean }>) => {
+  const fromFlows = (flows: Awaited<ReturnType<typeof dbxAdvertiserSummary>>, into: Map<string, { id: string; name: string; parent: boolean }>) => {
     for (const [id, fl] of flows) {
       const top = topBy(fl, (f) => f.gpcId, (f) => f.spend)
       if (!top) continue
@@ -468,7 +475,7 @@ async function buildMatcher(d: Database, advIds: string[], catIds: string[], mag
       for (let i = 0; i < followAdv.length; i += FOLLOW_BATCH) {
         if (i) await progress(`Following advertisers into Insights Studio (${i} of ${followAdv.length})`)
         const part = followAdv.slice(i, i + FOLLOW_BATCH)
-        fromFlows(await within(6 * 60_000, 'Following advertisers', () => dbxFlows('VX1', part, new Map(), undefined, { large: true })), m.adv)
+        fromFlows(await within(FOLLOW_LIMIT, 'Following advertisers', () => dbxAdvertiserSummary('VX1', part)), m.adv)
         await saveMatches(d, 'adv', part.map((id) => [id, m.adv.get(id) ?? null]))
       }
     } catch (err) {
@@ -487,11 +494,12 @@ async function buildMatcher(d: Database, advIds: string[], catIds: string[], mag
         const e = LEVEL_E.find(([re]) => re.test(n.level))?.[1]
         if (e && !byName.has(`${e}|${n.name.toLowerCase()}`)) byName.set(`${e}|${n.name.toLowerCase()}`, { id: n.id, e })
       }
-      // A few at a time, each batch reduced to its answer before the next is read: the rows are many.
+      // Summed in Databricks to one row per category and GPC category/subcategory, so 100 fit in one query
+      // (24 November 2026: about 35 seconds for 100, where batches of 10 full rows took 20 seconds each).
       for (let i = 0; i < catIds.length; i += CATEGORY_BATCH) {
         if (i) await progress(`Following categories into Insights Studio (${i} of ${catIds.length})`)
         const part = catIds.slice(i, i + CATEGORY_BATCH)
-        const flows = await within(6 * 60_000, 'Following categories', () => dbxCategoryFlows('VX1', part))
+        const flows = await within(FOLLOW_LIMIT, 'Following categories', () => dbxCategorySummary(part))
         for (const [id, fl] of flows) {
           const sub = topBy(fl, (f) => f.subcategory, (f) => f.spend)
           const cat = topBy(fl, (f) => f.category, (f) => f.spend)
@@ -518,7 +526,7 @@ async function buildMatcher(d: Database, advIds: string[], catIds: string[], mag
         for (const [id, g] of known) if (g) into.set(id, g)
         const follow = ids.filter((id) => !known.has(id))
         if (follow.length) {
-          fromFlows(await within(6 * 60_000, 'Following Magnifier advertisers', () => dbxFlows('VX2', follow, new Map(), undefined, { large: true })), into)
+          fromFlows(await within(FOLLOW_LIMIT, 'Following Magnifier advertisers', () => dbxAdvertiserSummary('VX2', follow)), into)
           await saveMatches(d, 'mag', follow.map((id) => [id, into.get(id) ?? null]))
         }
         for (const i of c.c.items) {
@@ -616,7 +624,7 @@ async function nameMatch(d: Database, workspaces: PlanWorkspace[], progress: Pla
   if (!names.length) return { guessed }
   await progress(`Finding ${names.length} advertisers by name in Insights Studio`)
   const cands = new Map<string, Candidate[]>()
-  for (let i = 0; i < names.length; i += 400) for (const [k, v] of await within(4 * 60_000, 'Finding advertisers by name', () => dbxGpcNameMatches(names.slice(i, i + 400)))) cands.set(k, v)
+  for (let i = 0; i < names.length; i += 400) for (const [k, v] of await within(FOLLOW_LIMIT, 'Finding advertisers by name', () => dbxGpcNameMatches(names.slice(i, i + 400)))) cands.set(k, v)
   // Names with nothing similar in Insights Studio: kept as no match.
   await saveMatches<NameGuess>(d, 'name', names.filter((n) => !cands.get(n)?.length).map((n) => [keyOf(n), null]))
   const batches: string[][] = []

@@ -431,6 +431,61 @@ from_crtv AS (
   return out
 }
 
+/** The flows query kept whole as a CTE, then summed by `by`: the same answer as reducing its rows in JavaScript, in far fewer rows. */
+function summarised(full: string, by: string): string {
+  const at = full.lastIndexOf('\nSELECT f.from_id')
+  return `${full.slice(0, at)},\nflows AS (${full.slice(at + 1)})\nSELECT ${by}, sum(spend) spend FROM flows WHERE spend <> 0 GROUP BY ALL`
+}
+
+/**
+ * Where each legacy advertiser's dollars land, summed by GPC entity: one row per advertiser and entity, where
+ * dbxFlows returns one per month, medium, product and category too. The Migration Plan needs only the top entity,
+ * and with the small answer 1,000 advertisers fit in one query (24 November 2026: each query reads 30-50 GB of
+ * occurrences however few advertisers it holds, so fewer queries is what makes plans faster).
+ */
+export async function dbxAdvertiserSummary(from: 'VX1' | 'VX2', ids: string[]): Promise<Map<string, Array<{ gpcId: string; gpcName: string | null; gpcParentId: string; spend: number }>>> {
+  const out = new Map<string, Array<{ gpcId: string; gpcName: string | null; gpcParentId: string; spend: number }>>()
+  if (!ids.length) return out
+  const sql = summarised(flowsSql(fromCreativesSql(from, ids, new Map()), from), 'from_id, gpc_id, gpc_name, coalesce(gpc_parent_id, gpc_id) gpc_parent_id')
+  for (const r of await dbxQuery(config(), sql, [], { large: true })) {
+    const spend = Number(r.spend ?? 0)
+    if (!spend || !r.gpc_id) continue
+    const list = out.get(r.from_id!) ?? []
+    list.push({ gpcId: r.gpc_id, gpcName: r.gpc_name ?? null, gpcParentId: r.gpc_parent_id ?? r.gpc_id, spend })
+    out.set(r.from_id!, list)
+  }
+  return out
+}
+
+/**
+ * Where each legacy category's dollars land, summed by GPC category and subcategory only: one small row per pair,
+ * not one per month, medium and entity as dbxCategoryFlows returns. The Migration Plan needs only the top category
+ * and subcategory, and the full rows made it read 10 categories at a time (24 November 2026: memory), each query
+ * costing about 20 seconds however few it held. VX1 category ids, "C<id>".
+ */
+export async function dbxCategorySummary(ids: string[]): Promise<Map<string, Array<{ category: string | null; subcategory: string | null; spend: number }>>> {
+  const out = new Map<string, Array<{ category: string | null; subcategory: string | null; spend: number }>>()
+  const cats = ids.filter((id) => id.startsWith('C') && isInt(id.slice(1))).map((id) => id.slice(1))
+  if (!cats.length) return out
+  const cte = `
+bc_cat AS (SELECT DISTINCT leaf_category_id leaf, cid FROM mrdpp_prod.brandcentral.category_flatten
+  LATERAL VIEW explode(array(industry_category_id, major_category_id, class_category_id, subcategory_category_id, microcategory_category_id, leaf_category_id)) x AS cid
+  WHERE cid IN (${inList(cats)})),
+bc_prod AS (SELECT source_product_id, max(category_id) cat FROM mrdpp_prod.brandcentral.product WHERE record_status_flag = 'ACTIVE' GROUP BY 1),
+from_crtv AS (
+  SELECT DISTINCT concat('C', k.cid) from_id, c.creative_id FROM mrdpp_prod.gold.creative c
+    JOIN bc_prod p ON p.source_product_id = c.vx1_product_id JOIN bc_cat k ON k.leaf = p.cat)`
+  const sql = summarised(flowsSql(cte, 'VX1'), 'from_id, category, subcategory')
+  for (const r of await dbxQuery(config(), sql, [], {})) {
+    const spend = Number(r.spend ?? 0)
+    if (!spend) continue
+    const list = out.get(r.from_id!) ?? []
+    list.push({ category: r.category ?? null, subcategory: r.subcategory || null, spend })
+    out.set(r.from_id!, list)
+  }
+  return out
+}
+
 /** VX2 advertiser codes (Magnifier's REL codes) as the ids dbxFlows takes, with their names. */
 export async function dbxVx2AdvertiserIds(codes: string[]): Promise<Map<string, { id: string; name: string }>> {
   const list = [...new Set(codes.filter(isCode))]
