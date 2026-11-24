@@ -879,6 +879,61 @@ const VERDICT: Record<MigrationPlan['review']['verdict'], { label: string; cls: 
 }
 
 /** A client's Migration Plan to Insights Studio (Scott, 23 November 2026). */
+/** Small line icons for the plan's tiles, in the text colour. */
+function TileIcon({ kind }: { kind: 'account' | 'media' | 'package' | 'advertiser' | 'category' | 'market' | 'property' }) {
+  const paths: Record<typeof kind, React.ReactNode> = {
+    account: (
+      <>
+        <rect x="3" y="7" width="18" height="13" rx="2" />
+        <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18" />
+      </>
+    ),
+    media: (
+      <>
+        <rect x="2" y="5" width="20" height="13" rx="2" />
+        <path d="M8 21h8M12 18v3M10 9l5 2.5-5 2.5z" />
+      </>
+    ),
+    package: (
+      <>
+        <path d="M21 8 12 3 3 8v8l9 5 9-5z" />
+        <path d="M3 8l9 5 9-5M12 13v8" />
+      </>
+    ),
+    advertiser: (
+      <>
+        <path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z" />
+        <path d="M15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12" />
+      </>
+    ),
+    category: (
+      <>
+        <rect x="3" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="3" width="7" height="7" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" />
+        <rect x="14" y="14" width="7" height="7" rx="1" />
+      </>
+    ),
+    market: (
+      <>
+        <path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z" />
+        <circle cx="12" cy="10" r="2.5" />
+      </>
+    ),
+    property: (
+      <>
+        <rect x="4" y="3" width="16" height="18" rx="2" />
+        <path d="M8 7h8M8 11h8M8 15h5" />
+      </>
+    ),
+  }
+  return (
+    <svg className="ce-tile-ico" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {paths[kind]}
+    </svg>
+  )
+}
+
 // ------------------------------------------------------------------ Migration Plan: the tabs
 
 /** A plan's tabs, drawn to be read at a glance: boxes, pills and icons, the reasons on hover (Scott, 24 November 2026). */
@@ -956,6 +1011,8 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
       <>
         {plan.accounts.map((a) => {
           const media = rollupMedia(a.coverage.media)
+          const starting = a.packages.filter((p) => p.starting || p.kind !== 'add_on')
+          const addOns = a.packages.filter((p) => p.kind === 'add_on')
           return (
             <div key={a.key} className="ce-acct">
               <div className="ce-acct-head" title={a.why}>
@@ -967,69 +1024,99 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
                   👤 {n(a.seats)}
                 </span>
               </div>
-              <div className="ce-row ce-sm">
-                <span className="ce-muted">Replaces</span>
-                {a.from.map((f) => (
-                  <span key={f.key} className="ce-pill" title={`${f.activeUsers} active users`}>
-                    <span className={`ce-badge ce-${f.platform}`}>{PLATFORM_LABEL[f.platform]}</span> {f.name}
-                  </span>
-                ))}
+              <div className="ce-tiles">
+                <div className="ce-tile">
+                  <h5>
+                    <TileIcon kind="account" /> Replaces
+                  </h5>
+                  <ul className="ce-tile-list">
+                    {a.from.map((f) => (
+                      <li key={f.key} title={`${n(f.activeUsers)} active users`}>
+                        <span className={`ce-badge ce-${f.platform}`}>{PLATFORM_LABEL[f.platform]}</span> {f.name}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="ce-tile">
+                  <h5>
+                    <TileIcon kind="media" /> Media
+                  </h5>
+                  <div className="ce-names">
+                    {media.map((m) => (
+                      <span key={m.name} className={`ce-name-chip ce-m-${m.status}`} title={`${m.status === 'added' ? 'Added: new to them' : m.status === 'premium' ? 'Premium, kept: they have it today' : 'Has today, keeps'}${m.members.length > 1 ? ` (${m.members.join(', ')})` : ''}`}>
+                        {m.name}
+                      </span>
+                    ))}
+                    {a.coverage.withheld.map((w) => (
+                      <span key={w.name} className="ce-name-chip ce-withheld" title={w.why}>
+                        {w.name}
+                      </span>
+                    ))}
+                  </div>
+                  <MediaKey withheld={a.coverage.withheld.length > 0} premium={media.some((m) => m.status === 'premium')} />
+                </div>
+                <div className="ce-tile">
+                  <h5>
+                    <TileIcon kind="package" /> Package
+                  </h5>
+                  <dl className="ce-kv">
+                    <dt>Package</dt>
+                    <dd>
+                      {starting.map((p, i) => (
+                        <span key={p.key} title={p.why}>
+                          {i ? ', ' : ''}
+                          {p.name}
+                        </span>
+                      ))}
+                    </dd>
+                    {addOns.length ? (
+                      <>
+                        <dt>Add-ons</dt>
+                        <dd>
+                          {addOns.map((p, i) => (
+                            <span key={p.key} title={p.why}>
+                              {i ? ', ' : ''}
+                              {p.name}
+                            </span>
+                          ))}
+                        </dd>
+                      </>
+                    ) : null}
+                    <dt>History</dt>
+                    <dd title={a.contract.lookbackYears.why}>{a.contract.lookbackYears.value} years</dd>
+                    <dt>Preliminary</dt>
+                    <dd title={a.contract.includePreliminary.why}>{a.contract.includePreliminary.value ? 'Yes' : 'No'}</dd>
+                    <dt>Countries</dt>
+                    <dd>
+                      {a.coverage.countries.map((c, i) => (
+                        <span key={c.code} title={c.why}>
+                          {i ? ', ' : ''}
+                          {c.name}
+                        </span>
+                      ))}
+                    </dd>
+                    {a.coverage.limits?.length ? (
+                      <>
+                        <dt>Access</dt>
+                        <dd title={a.coverage.limits.map((l) => `${l.label}: ${l.items.join(', ')}${l.total > l.items.length ? ` and ${l.total - l.items.length} more` : ''}`).join('\n')}>
+                          🔒 Limited to {a.coverage.limits.map((l) => `${n(l.total)} ${l.label.toLowerCase()}`).join(', ')}
+                        </dd>
+                      </>
+                    ) : null}
+                  </dl>
+                </div>
               </div>
-              <div className="ce-row">
-                {a.packages.map((p) => (
-                  <span key={p.key} className={`ce-pill ${p.starting ? 'ce-pill-blue' : 'ce-pill-green'}`} title={p.why}>
-                    {p.starting ? '■' : '＋'} {p.name}
-                    {p.kind === 'add_on' ? ' (add-on)' : ''}
-                  </span>
-                ))}
-                <span className="ce-pill" title={a.contract.lookbackYears.why}>
-                  🕘 {a.contract.lookbackYears.value} yrs
-                </span>
-                <span className={`ce-pill ${a.contract.includePreliminary.value ? 'ce-pill-green' : ''}`} title={a.contract.includePreliminary.why}>
-                  {a.contract.includePreliminary.value ? '✓' : '✕'} Preliminary
-                </span>
-                {a.coverage.countries.map((c) => (
-                  <span key={c.code} className="ce-pill" title={c.why}>
-                    {c.code === 'US' ? '🇺🇸' : '🇨🇦'} {c.name}
-                  </span>
-                ))}
-              </div>
-              <MediaKey withheld={a.coverage.withheld.length > 0} premium={media.some((m) => m.status === 'premium')} />
-              <div className="ce-names">
-                {media.map((m) => (
-                  <span key={m.name} className={`ce-name-chip ce-m-${m.status}`} title={`${m.status === 'added' ? 'New to them' : m.status === 'premium' ? 'Premium, kept: they have it today' : 'They have it today'}${m.members.length > 1 ? `: ${m.members.join(', ')}` : ''}`}>
-                    {m.name}
-                  </span>
-                ))}
-                {a.coverage.withheld.map((w) => (
-                  <span key={w.name} className="ce-name-chip ce-withheld" title={w.why}>
-                    {w.name}
-                  </span>
-                ))}
-              </div>
-              {a.coverage.limits?.length ? (
-                <details className="ce-box ce-box-blue">
-                  <summary className="ce-big" title="Kept on the account: its users see only these, Creative Intel included">
-                    🔒 Access limited to {a.coverage.limits.map((l) => `${n(l.total)} ${l.label.toLowerCase()}`).join(', ')}
-                  </summary>
-                  {a.coverage.limits.map((l) => (
-                    <div key={l.label} className="ce-sm">
-                      <b>{l.label}</b> <span className="ce-muted">{l.items.join(', ')}{l.total > l.items.length ? ` and ${n(l.total - l.items.length)} more` : ''}</span>
-                    </div>
-                  ))}
-                </details>
-              ) : null}
               {a.coverage.widened.length ? (
                 <details className="ce-box ce-box-amber">
                   <summary className="ce-big" title={a.coverage.widened.join('\n')}>
-                    ↗ {restrictionLabel(a.coverage.widened)}
+                    {restrictionLabel(a.coverage.widened)}
                   </summary>
                   <div className="ce-sm ce-muted">The account sees everything; workspaces keep each user's focus. What they had:</div>
-                  {a.coverage.widened.map((w, i) => (
-                    <div key={i} className="ce-sm">
-                      {w}
-                    </div>
-                  ))}
+                  <ul className="ce-tile-list">
+                    {a.coverage.widened.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
                 </details>
               ) : null}
             </div>
@@ -1082,31 +1169,38 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
         {plan.workspaces.map((w) => (
           <div key={w.key} className="ce-acct">
             <div className="ce-acct-head" title={w.why}>
-              <b>{w.name}</b>
+              <b className="ce-big">{w.name}</b>
               <span className="ce-pill ce-sm" title={w.source}>
-                {/^market/i.test(w.source) ? '📍' : /profile/i.test(w.source) ? '★' : /magnifier/i.test(w.source) ? '◆' : '■'} {w.source.replace(/^360 reporting profile .*/, '360 profile').replace(/:.*/, '')}
+                {w.source.replace(/^360 reporting profile .*/, '360 profile').replace(/:.*/, '')}
               </span>
-              <span className="ce-pill ce-sm" title={w.users.map((k) => userName.get(k) ?? k).join(', ')}>
+              <span className="ce-pill" title={w.users.map((k) => userName.get(k) ?? k).join(', ')}>
                 👤 {n(w.users.length)}
               </span>
               <span className="ce-muted ce-sm">{accountName.get(w.account)}</span>
             </div>
-            {w.sets.map((s) => (
-              <div key={s.set} className="ce-row">
-                <span className="ce-pill ce-pill-violet" title={`${n(s.items.filter((i) => i.gpc).length)} matched to Insights Studio${s.items.some((i) => i.gpc?.guess) ? `, ${n(s.items.filter((i) => i.gpc?.guess).length)} as a best guess` : ''}`}>
-                  {SET_LABEL[s.set]} {n(s.items.length + s.more)}
-                </span>
-                <div className="ce-names">
-                  {s.items.slice(0, 12).map((i) => (
-                    <span key={`${i.entityType}:${i.legacy.id}`} className={`ce-name-chip${i.gpc ? (i.gpc.guess ? ' ce-guess' : '') : ' ce-unmatched'}`} title={`${ENTITY_TYPE[i.entityType] ?? i.entityType} · from ${PLATFORM_LABEL[i.legacy.platform]} ${i.legacy.list}${i.gpc ? ` · Insights Studio: ${i.gpc.name} #${i.gpc.id} · ${i.gpc.how}` : ' · not matched yet'}`}>
-                      {i.gpc?.name ?? i.name}
-                      {i.gpc?.guess ? ' ?' : ''}
-                    </span>
-                  ))}
-                  {s.items.length + s.more > 12 ? <span className="ce-muted ce-sm">+{n(s.items.length + s.more - 12)}</span> : null}
-                </div>
-              </div>
-            ))}
+            <div className="ce-tiles">
+              {w.sets.map((s) => {
+                const shown = s.items.slice(0, 15)
+                const rest = s.items.length + s.more - shown.length
+                const matched = s.items.filter((i) => i.gpc).length
+                return (
+                  <div key={s.set} className="ce-tile">
+                    <h5 title={`${n(matched)} of ${n(s.items.length)} matched to Insights Studio${s.items.some((i) => i.gpc?.guess) ? `; ${n(s.items.filter((i) => i.gpc?.guess).length)} as a best guess (?)` : ''}`}>
+                      <TileIcon kind={s.set === 'categories' ? 'category' : s.set === 'markets' ? 'market' : s.set === 'advertisers' ? 'advertiser' : 'property'} /> {SET_LABEL[s.set]} <span className="ce-muted">{n(s.items.length + s.more)}</span>
+                    </h5>
+                    <ul className="ce-tile-list">
+                      {shown.map((i) => (
+                        <li key={`${i.entityType}:${i.legacy.id}`} className={i.gpc ? undefined : 'ce-muted'} title={`${ENTITY_TYPE[i.entityType] ?? i.entityType} · from ${PLATFORM_LABEL[i.legacy.platform]} ${i.legacy.list}${i.gpc ? ` · Insights Studio: ${i.gpc.name} #${i.gpc.id} · ${i.gpc.how}` : ' · not matched to Insights Studio yet'}`}>
+                          {i.gpc?.name ?? i.name}
+                          {i.gpc?.guess ? ' ?' : ''}
+                        </li>
+                      ))}
+                    </ul>
+                    {rest > 0 ? <div className="ce-muted ce-sm">and {n(rest)} more</div> : null}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         ))}
       </>

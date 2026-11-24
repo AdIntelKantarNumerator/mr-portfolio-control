@@ -2871,3 +2871,17 @@ button.ce-badge { cursor: pointer; }
 .ce-check li { padding-left: 24px; position: relative; }
 .ce-check li::before { content: '☐'; position: absolute; left: 2px; color: var(--muted); }
 @media (max-width: 640px) { .ce-plan-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Migration Plan tiles: an account's Replaces / Media / Package, a workspace's lists (24 November 2026). */
+.ce-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; align-items: start; }
+.ce-tile { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface-2, var(--surface)); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ce-tile h5 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.ce-tile-ico { color: var(--brand); flex: none; }
+.ce-tile-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.ce-tile-list .ce-badge { font-size: 10.5px; }
+.ce-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+.ce-kv dt { color: var(--muted); }
+.ce-kv dd { margin: 0; }
+.ce-kv [title], .ce-tile-list [title] { cursor: help; }
+.ce-acct-head { justify-content: flex-start; }
+.ce-tile .ce-key { margin: 0; font-size: 11px; }
