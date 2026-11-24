@@ -103,8 +103,12 @@ async function loop() {
   }
 }
 
+/** A deck or export in progress. One with no progress for 10 minutes was cut off by a restart and does not count. */
 async function jobRunning(): Promise<boolean> {
-  const [r] = await db.select({ n: sql<number>`count(*)::int` }).from(ceJobs).where(eq(ceJobs.status, 'running'))
+  const [r] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(ceJobs)
+    .where(and(eq(ceJobs.status, 'running'), sql`${ceJobs.updatedAt} > now() - interval '10 minutes'`))
   return (r?.n ?? 0) > 0
 }
 
