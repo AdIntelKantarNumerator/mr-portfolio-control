@@ -274,6 +274,44 @@ export async function liveReports(usrId: number): Promise<Array<{ key: string; n
 }
 
 /**
+ * Every user's report use, read live from every client's report table: the reports used on or after `since`
+ * (names, newest first) and the last time any of their reports was used. For Client Evaluation's "Recent Login
+ * Usage" workbook (Scott, 24 November 2026).
+ */
+export async function reportUsage(since: string): Promise<Map<number, { recent: string[]; last: string | null }>> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) throw new Error('since must be YYYY-MM-DD')
+  const prefixes = (await q360<{ p: string }>(`SELECT LEFT(name, LEN(name) - LEN('_reportset')) AS p FROM sys.tables WHERE name LIKE '%[_]reportset'`))
+    .map((r) => r.p)
+    .filter((p) => /^[A-Za-z0-9_]+$/.test(p))
+  const out = new Map<number, { recent: string[]; last: string | null }>()
+  const day = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : null)
+  const of = (u: number) => out.get(u) ?? out.set(u, { recent: [], last: null }).get(u)!
+  for (const part of chunks(prefixes, 150)) {
+    for (const r of await q360<{ usr_id: number; last: Date | null }>(part.map((p) => `SELECT usr_id, MAX(lastused_d) AS last FROM [${p}_reportset] GROUP BY usr_id`).join(' UNION ALL '))) {
+      const e = of(Number(r.usr_id))
+      const d = day(r.last)
+      if (d && (!e.last || d > e.last)) e.last = d
+    }
+    for (const r of await q360<{ usr_id: number; n: string | null; used: Date }>(
+      part.map((p) => `SELECT usr_id, reportset_n AS n, lastused_d AS used FROM [${p}_reportset] WHERE lastused_d >= '${since}'`).join(' UNION ALL ') + ' ORDER BY used DESC',
+    ))
+      of(Number(r.usr_id)).recent.push(String(r.n ?? '').trim() || 'Untitled report')
+  }
+  return out
+}
+
+/** Each user's reporting profiles used on or after `since`, by name, newest first. */
+export async function profileUsage(since: string): Promise<Map<number, string[]>> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) throw new Error('since must be YYYY-MM-DD')
+  const out = new Map<number, string[]>()
+  for (const r of await q360<{ usr_id: number; n: string | null }>(
+    `SELECT usr_id, reporting_profile_n AS n FROM iddb_appl.dbo.reporting_profile WHERE lastused_d >= '${since}' ORDER BY lastused_d DESC`,
+  ))
+    (out.get(Number(r.usr_id)) ?? out.set(Number(r.usr_id), []).get(Number(r.usr_id))!).push(String(r.n ?? '').trim() || 'Untitled profile')
+  return out
+}
+
+/**
  * Several users' reports used since SINCE, by user, newest first: liveReports for a whole client at once (a
  * Migration Plan's Reports tab), one statement per client table rather than one per user.
  */

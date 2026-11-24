@@ -140,6 +140,11 @@ function Sources({ contact, onReady }: { contact: string; onReady: () => void })
                   <a className="ce-csv" href={`/client-evaluation/users?platform=${s.platform}`} download title={`Every active ${PLATFORM_LABEL[s.platform]} user: name, email, account, username, created, last login (CSV)`}>
                     Active users ↓ CSV
                   </a>
+                  {s.platform === '360' ? (
+                    <a className="ce-csv" href="/client-evaluation/recent-logins" download title="360 users who logged in within 90 days, with the reporting profiles and reports they used in that time and their last report (Excel). Takes a minute.">
+                      Recent Login Usage ↓
+                    </a>
+                  ) : null}
                 </div>
               )}
               {SNAPSHOT_ONLY[s.platform] ? <div className="ce-source-note">Ping {contact} to refresh.</div> : null}
