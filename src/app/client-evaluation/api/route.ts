@@ -70,6 +70,8 @@ export async function GET(req: Request) {
         sort: sort === 'name' || sort === 'users' || sort === 'logins' ? sort : 'reports',
         active: u.get('active') === '1',
         internal: u.get('internal') === '1',
+        // Canada is left out unless asked for (Scott, 24 November 2026: "Exclude Canada", on by default).
+        canada: u.get('canada') === '1',
       } as const
       // Select all: every client the search matches, ids and names only. Only for a search (Scott, 20 November 2026).
       if (u.get('ids') === '1') {

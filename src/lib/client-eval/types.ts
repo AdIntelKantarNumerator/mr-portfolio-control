@@ -62,6 +62,8 @@ export interface EntMagnifier {
   /** Product switches on the account. */
   flags: string[]
   countries: string[]
+  /** Countries of the data its saved searches since 2025 run on: the account's country when it has no reports. */
+  searchCountries?: string[]
   /** Media its RELs let in, rolled up (TV, Print, Digital...). */
   media: string[]
   /** What the account's RELs let in, together across its reports: names per restriction (capped), and how many. */

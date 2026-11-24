@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { clientName, cluster, displayName, domainFitsName, isInternal, links, mainDomains, nameKey, type MatchAccount } from '../src/lib/client-eval/match'
+import { clientName, cluster, displayName, domainFitsName, isCanadian, isInternal, links, mainDomains, nameKey, type MatchAccount } from '../src/lib/client-eval/match'
 import { mediaOf, parseRel, readable, schemaCountry } from '../src/lib/client-eval/rel'
 import { tidy } from '../src/lib/client-eval/rel-names'
 import { memberKey, parseMember } from '../src/lib/client-eval/types'
@@ -303,10 +303,10 @@ test('360: a user set is active only when its license group is too', async () =>
   assert.equal(isSetActive({ active_f: 1, grp_active: null }), true)
 })
 
-test('Migration Plan: Live Streaming Sports is the only premium medium (National Newspapers is not)', async () => {
+test('Migration Plan: Social, AVOD and Live Streaming Sports are premium (National Newspapers is not)', async () => {
   const { MEDIA, PREMIUM_MEDIA, packageByKey } = await import('../src/lib/client-eval/migration/catalog')
   const premium = MEDIA.filter((m) => PREMIUM_MEDIA.has(m.id)).map((m) => m.name)
-  assert.deepEqual(premium, ['Live Streaming Sports'])
+  assert.deepEqual(premium, ['Social', 'AVOD', 'Live Streaming Sports'])
   assert.equal(packageByKey.get('competitive')?.id, 2)
   assert.equal(packageByKey.get('ratings_us_linear_tv')?.kind, 'add_on')
 })
@@ -361,4 +361,25 @@ test('Client name: the shared name when no account holds half the users', () => 
   // Words that begin the other name are no change; hyphens and ampersands inside a word stay.
   assert.equal(clientName(m('The New York Times', 7), [m('The New York Times', 7), m('New York Times Digital', 400), m('New York Times Ads', 500)]), 'The New York Times')
   assert.equal(clientName(m('U.S Bank - MN', 13), [m('U.S Bank - MN', 13), m('M&T Bank Corp', 60), m('M&T Bank - NY', 59)]), 'M&T Bank')
+})
+
+test('Canada: an account is Canadian only when all its data is', () => {
+  const mag = (countries: string[], searchCountries?: string[]) => ({ kind: 'magnifier' as const, contract: { start: null, end: null }, flags: [], countries, searchCountries, media: [], access: [], namesNote: null, reports: 0 })
+  assert.equal(isCanadian(mag(['Canada'])), true)
+  assert.equal(isCanadian(mag(['Canada', 'US'])), false)
+  assert.equal(isCanadian(mag([], ['Canada'])), true, 'no reports: its saved searches decide')
+  assert.equal(isCanadian(mag(['US'], ['Canada'])), false, 'its reports decide when it has some')
+  assert.equal(isCanadian(mag([])), false, 'nothing known: not Canadian')
+  const s360 = (include: string[]) => ({ kind: '360' as const, application: 'Ad Insights', years: 3, media: { include, exclude: [] }, features: [], filters: [] })
+  assert.equal(isCanadian(s360(['Canadian TV', 'Canadian Newspapers'])), true)
+  assert.equal(isCanadian(s360(['Canadian TV', 'Network TV'])), false)
+  assert.equal(isCanadian(s360([])), false)
+})
+
+test('Migration Plan: the premium note says what they keep and what is not included', async () => {
+  const { premiumNote } = await import('../src/lib/client-eval/migration/premium')
+  const acct = (premium: string[]) => ({ coverage: { media: premium.map((name, i) => ({ id: i, name, type: 'x', status: 'premium' as const })) } }) as never
+  assert.match(premiumNote([acct(['Social'])])!, /They keep Social; AVOD and Live Streaming Sports are not included\./)
+  assert.match(premiumNote([acct([])])!, /None is included/)
+  assert.match(premiumNote([acct(['Social', 'AVOD', 'Live Streaming Sports'])])!, /keep all three/)
 })

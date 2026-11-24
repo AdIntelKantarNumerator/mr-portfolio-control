@@ -60,6 +60,33 @@ export async function searchCounts(): Promise<Map<string, number>> {
   }
 }
 
+/**
+ * The countries each account's saved searches since 2025 run on ("brand-c" US, "brand-n" / "brand-monthly" Canada),
+ * by account code in lower case: how an account with no reports of its own is known to be Canadian (Scott, 24 November 2026).
+ */
+export async function searchCountriesBy(): Promise<Map<string, string[]>> {
+  const c = await connect()
+  try {
+    const rows = await c
+      .db('criteriaService')
+      .collection('savedSearches')
+      .aggregate<{ _id: { a: string; s: string } }>(
+        [{ $match: { $or: [{ updatedAt: { $gte: new Date('2025-01-01T00:00:00Z') } }, { createdAt: { $gte: new Date('2025-01-01T00:00:00Z') } }] } }, { $group: { _id: { a: '$accountCode', s: '$schemaNamespace' } } }],
+        { allowDiskUse: true },
+      )
+      .toArray()
+    const out = new Map<string, Set<string>>()
+    for (const r of rows) {
+      const country = schemaCountry(r._id.s)
+      const a = String(r._id.a ?? '').trim().toLowerCase()
+      if (country && a) (out.get(a) ?? out.set(a, new Set()).get(a)!).add(country)
+    }
+    return new Map([...out].map(([a, cs]) => [a, [...cs].sort()]))
+  } finally {
+    await c.close()
+  }
+}
+
 /** A saved search's filter fields, as the REL fields they match; the rest by their own label. */
 const AS_REL: Record<string, string> = {
   advertiserName: 'advertiser_code',
@@ -206,6 +233,46 @@ export async function liveSearches(userCode: string, accountCodes: string[]): Pr
     namesNote: error,
     searches: rows.map((s, i) => ({
       id: String(s._id),
+      title: s.title?.trim() || 'Untitled search',
+      report: s.reportId ?? null,
+      country: schemaCountry(s.schemaNamespace ?? ''),
+      period: period(s),
+      keyword: Array.isArray(s.search?.values) && s.search!.values.length ? s.search!.values.map(String).join(', ') : null,
+      shared: s.shared === true,
+      saved: DAY(s.createdAt),
+      updated: DAY(s.updatedAt),
+      rel: readable(rels[i]!, lookup),
+    })),
+  }
+}
+
+/**
+ * Every search saved or updated in 2026 on these accounts, with whose it is ("<account>|<user>", lower case),
+ * filters by name: what a Migration Plan carries over as Insights Studio saved views. One query for the client.
+ * Magnifier keeps no "last run" date, so saved or updated in 2026 is the test of use.
+ */
+export async function accountSearches(accountCodes: string[], limit = 3000): Promise<{ searches: Array<SavedSearchView & { owner: string }>; namesNote: string | null }> {
+  if (!accountCodes.length) return { searches: [], namesNote: null }
+  const c = await connect()
+  let rows: RawSearch[]
+  try {
+    rows = await c
+      .db('criteriaService')
+      .collection<RawSearch>('savedSearches')
+      .find({ accountCode: { $in: accountCodes }, ...since })
+      .sort({ updatedAt: -1 })
+      .limit(limit)
+      .toArray()
+  } finally {
+    await c.close()
+  }
+  const rels = rows.map(searchAsRel)
+  const { lookup, error } = await relNames(codesToName(rels))
+  return {
+    namesNote: error,
+    searches: rows.map((s, i) => ({
+      id: String(s._id),
+      owner: `${String(s.accountCode ?? '').trim()}|${String(s.userCode ?? '').trim()}`.toLowerCase(),
       title: s.title?.trim() || 'Untitled search',
       report: s.reportId ?? null,
       country: schemaCountry(s.schemaNamespace ?? ''),

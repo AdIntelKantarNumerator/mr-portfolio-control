@@ -24,7 +24,7 @@
 import type { Connection, RowDataPacket } from 'mysql2/promise'
 import { FIELDS, parseRel, readable, schemaCountry, wildcardIndustry, type NameKind, type ReadableRel } from './rel'
 import { relNames } from './rel-names'
-import { mongoUrl, searchCounts } from './saved-searches'
+import { mongoUrl, searchCounts, searchCountriesBy } from './saved-searches'
 import type { AccountSnap, EntMagnifier, Progress, ReportSnap, Snapshot, UserSnap } from './types'
 
 type Row = Record<string, unknown>
@@ -153,11 +153,13 @@ export async function loadMagnifier(conn: Connection, progress: Progress): Promi
     })
   }
   // Saved searches saved or updated in 2026, from Magnifier's MongoDB (saved-searches.ts): each user's count, kept as their reports.
+  let searchCountries = new Map<string, string[]>()
   if (mongoUrl()) {
     await progress('Counting Magnifier saved searches (2026)', 4, 5)
     try {
       const counts = await searchCounts()
       for (const u of outUsers) u.reports = counts.get(`${u.accountId.trim()}|${u.userId.trim()}`.toLowerCase()) ?? 0
+      searchCountries = await searchCountriesBy()
     } catch (err) {
       console.error('[client-eval] Magnifier saved searches', err)
     }
@@ -184,6 +186,7 @@ export async function loadMagnifier(conn: Connection, progress: Progress): Promi
         contract: { start: day(a.CONTRACT_START_DATE), end: day(a.CONTRACT_END_DATE) },
         flags: FLAGS.filter(([c]) => Number(a[c]) === 1).map(([, label]) => label),
         countries: [...new Set(mine.map((r) => (r.detail as { country: string | null }).country).filter((c): c is string => !!c))].sort(),
+        searchCountries: searchCountries.get(id.trim().toLowerCase()) ?? [],
         media: [...new Set(rels.flatMap((r) => r.media))].sort(),
         access: [...access].map(([label, x]) => ({ label, items: [...x.items].sort((p, q) => p.localeCompare(q)), total: x.total })),
         reports: mine.length,

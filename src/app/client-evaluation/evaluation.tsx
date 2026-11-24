@@ -236,6 +236,8 @@ export function ClientEvaluation({ contact }: { contact: string }) {
   const [sort, setSort] = useState('reports')
   const [active, setActive] = useState(true)
   const [internal, setInternal] = useState(false)
+  // Canada is left out of the analysis unless asked for (Scott, 24 November 2026).
+  const [noCanada, setNoCanada] = useState(true)
   const [rows, setRows] = useState<ClientRow[]>([])
   const [total, setTotal] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -255,7 +257,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
   const push = (p: Popup) => setStack((s) => [...s, p])
   const pop = () => setStack((s) => s.slice(0, -1))
 
-  const params = useMemo(() => ({ op: 'clients', q, platform, sort, active: active ? '1' : '0', internal: internal ? '1' : '0' }), [q, platform, sort, active, internal])
+  const params = useMemo(() => ({ op: 'clients', q, platform, sort, active: active ? '1' : '0', internal: internal ? '1' : '0', canada: noCanada ? '0' : '1' }), [q, platform, sort, active, internal, noCanada])
   useEffect(() => {
     let live = true
     const t = setTimeout(async () => {
@@ -316,6 +318,9 @@ export function ClientEvaluation({ contact }: { contact: string }) {
         </select>
         <label className="ce-tick">
           <input id="ce-active" type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Active only
+        </label>
+        <label className="ce-tick" title="Leave out clients whose accounts are all Canadian (Magnifier's Canadian data, 360 limited to Canadian media)">
+          <input id="ce-no-canada" type="checkbox" checked={noCanada} onChange={(e) => setNoCanada(e.target.checked)} /> Exclude Canada
         </label>
         <label className="ce-tick">
           <input id="ce-internal" type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Show internal
@@ -860,7 +865,7 @@ interface PlanResponse {
   planner: { running: boolean; total: number; ready: number; full: number; queued: number; building: string | null; failed: number } | null
 }
 
-const PLAN_TABS = ['Summary', 'Accounts', 'Users', 'Workspaces', 'Impact', 'Checklist'] as const
+const PLAN_TABS = ['Summary', 'Accounts', 'Users', 'Workspaces', 'Saved views', 'Impact', 'Checklist'] as const
 type PlanTab = (typeof PLAN_TABS)[number]
 const VERDICT: Record<MigrationPlan['review']['verdict'], { label: string; cls: string }> = {
   ok: { label: 'Looks right', cls: 'ce-ok' },
@@ -869,6 +874,19 @@ const VERDICT: Record<MigrationPlan['review']['verdict'], { label: string; cls: 
 }
 
 /** A client's Migration Plan to Insights Studio (Scott, 23 November 2026). */
+/** What the media chips' colours mean. Each kind shows only where the list has it. */
+function MediaKey({ premium, withheld, lost }: { premium?: boolean; withheld?: boolean; lost?: boolean }) {
+  return (
+    <div className="ce-key ce-sm ce-muted" aria-label="Key">
+      <span className="ce-name-chip">Has today, keeps</span>
+      {premium ? <span className="ce-name-chip ce-m-premium">Premium, has today, keeps</span> : null}
+      <span className="ce-name-chip ce-m-added">Added</span>
+      {lost ? <span className="ce-name-chip ce-out">Loses</span> : null}
+      {withheld ? <span className="ce-name-chip ce-withheld">Premium, not included</span> : null}
+    </div>
+  )
+}
+
 function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: () => void }) {
   const [view, setView] = useState<PlanResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -971,7 +989,7 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
         {error ? <p className="mr-said mr-bad">{error}</p> : null}
         {view?.status === 'failed' && view.error ? <p className="mr-said mr-bad">{view.error}</p> : null}
         {!plan ? (
-          <p className="ce-muted">{working ? 'Building the plan: a minute or two. You can close this and come back.' : 'No plan yet.'}</p>
+          <p className="ce-muted">{!view && !error ? 'Loading the plan…' : working ? 'Building the plan: a minute or two. You can close this and come back.' : 'No plan yet.'}</p>
         ) : (
           <>
             <div className="ce-seg" role="tablist" aria-label="Plan">
@@ -980,6 +998,7 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
                   {t}
                   {t === 'Users' ? <span className="ce-muted"> {n(created.length)}</span> : null}
                   {t === 'Workspaces' ? <span className="ce-muted"> {n(plan.workspaces.length)}</span> : null}
+                  {t === 'Saved views' ? <span className="ce-muted"> {n(plan.savedViews?.length ?? 0)}</span> : null}
                   {t === 'Accounts' ? <span className="ce-muted"> {n(plan.accounts.length)}</span> : null}
                 </button>
               ))}
@@ -1057,6 +1076,7 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
                         <dd>{a.coverage.countries.map((c) => c.name).join(', ')}</dd>
                         <dt>Media</dt>
                         <dd>
+                          <MediaKey withheld={a.coverage.withheld.length > 0} premium={a.coverage.media.some((m) => m.status === 'premium')} />
                           <div className="ce-names">
                             {a.coverage.media.map((m) => (
                               <span key={m.id} className={`ce-name-chip ce-m-${m.status}`} title={m.status === 'added' ? 'New to them' : m.status === 'premium' ? 'Premium, kept: they have it today' : 'They have it today'}>
@@ -1064,7 +1084,7 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
                               </span>
                             ))}
                             {a.coverage.withheld.map((w) => (
-                              <span key={w.name} className="ce-name-chip ce-out" title={w.why}>
+                              <span key={w.name} className="ce-name-chip ce-withheld" title={w.why}>
                                 {w.name}
                               </span>
                             ))}
@@ -1151,6 +1171,30 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
                 )
               ) : null}
 
+              {tab === 'Saved views' ? (
+                plan.savedViews?.length ? (
+                  <>
+                    <p className="ce-muted ce-sm">Magnifier saved searches saved or updated in 2026, to recreate as Insights Studio saved views.</p>
+                    {plan.savedViews.slice(0, 300).map((v) => (
+                      <div key={v.key} className="ce-report">
+                        <div>
+                          <b>{v.title}</b> <span className="ce-muted ce-sm">· {userName.get(v.user) ?? v.user}{v.updated ? ` · updated ${v.updated}` : ''}{v.shared ? ' · shared' : ''}</span>
+                        </div>
+                        <div className="ce-muted ce-sm">{[v.period, v.keyword ? `keyword "${v.keyword}"` : null, v.media.length ? v.media.join(', ') : null].filter(Boolean).join(' · ') || 'No filters'}</div>
+                        {v.filters.map((f) => (
+                          <div key={f.label} className="ce-sm">
+                            <b>{f.label}</b> <span className="ce-muted">{f.items.slice(0, 8).join(', ')}{f.total > 8 ? ` +${n(f.total - 8)}` : ''}{f.excluded.length ? ` · not ${f.excluded.slice(0, 4).join(', ')}` : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    {plan.savedViews.length > 300 ? <p className="ce-muted ce-sm">Showing 300 of {n(plan.savedViews.length)}. The Word document has them all.</p> : null}
+                  </>
+                ) : (
+                  <p className="ce-muted">{plan.savedViews ? 'No Magnifier saved searches from 2026 for the users created.' : 'Rebuild the plan to see saved searches.'}</p>
+                )
+              ) : null}
+
               {tab === 'Impact' ? (
                 <>
                   {plan.impact.gains.length ? (
@@ -1184,6 +1228,7 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
                     </>
                   ) : null}
                   <h4>Media by platform</h4>
+                  <MediaKey lost={plan.impact.media.some((m) => m.change.dropped.length > 0)} />
                   {plan.impact.media.map((m) => (
                     <div key={m.platform} className="ce-report">
                       <b>{PLATFORM_LABEL[m.platform]}</b>
@@ -1247,7 +1292,7 @@ const QUIET = [
 ]
 const dayLabel = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 /** Kept while an account popup is open over this one, so coming back keeps the choices. */
-const inactiveChoice = { since: '', platform: 'all', internal: false }
+const inactiveChoice = { since: '', platform: 'all', internal: false, noCanada: true }
 const SHOW_MAX = 500
 
 /** Active accounts with no login since a day (Scott, 23 November 2026). From the snapshot. */
@@ -1255,10 +1300,11 @@ function InactivePopup({ onClose, onAccount }: { onClose: () => void; onAccount:
   const [since, setSince] = useState(inactiveChoice.since || daysAgo(182))
   const [platform, setPlatform] = useState(inactiveChoice.platform)
   const [internal, setInternal] = useState(inactiveChoice.internal)
+  const [noCanada, setNoCanada] = useState(inactiveChoice.noCanada)
   const [data, setData] = useState<InactiveData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(true)
-  Object.assign(inactiveChoice, { since, platform, internal })
+  Object.assign(inactiveChoice, { since, platform, internal, noCanada })
   const choose = (d: string) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d === since) return
     setBusy(true)
@@ -1283,7 +1329,7 @@ function InactivePopup({ onClose, onAccount }: { onClose: () => void; onAccount:
       live = false
     }
   }, [since])
-  const shown = (data?.accounts ?? []).filter((a) => (internal || !a.internal) && (platform === 'all' || a.platform === platform))
+  const shown = (data?.accounts ?? []).filter((a) => (internal || !a.internal) && (!noCanada || !a.canada) && (platform === 'all' || a.platform === platform))
   const users = shown.reduce((s, a) => s + a.activeUsers, 0)
   const never = shown.filter((a) => !a.lastLogin).length
   // Platforms whose login record starts after the chosen day: "none on record" there is not "never".
@@ -1329,6 +1375,9 @@ function InactivePopup({ onClose, onAccount }: { onClose: () => void; onAccount:
           </select>
           <label className="ce-tick">
             <input id="ce-in-internal" type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Show internal
+          </label>
+          <label className="ce-tick">
+            <input id="ce-in-no-canada" type="checkbox" checked={noCanada} onChange={(e) => setNoCanada(e.target.checked)} /> Exclude Canada
           </label>
           <span className="ce-count">{busy ? 'Loading…' : `${n(shown.length)} accounts · ${n(users)} active users · ${n(never)} with no login on record`}</span>
           <button type="button" className="btn btn-primary ce-sm" disabled={busy || !shown.length} onClick={exportCsv}>

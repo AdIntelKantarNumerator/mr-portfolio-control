@@ -79,11 +79,12 @@ export const MEDIA: IsMedia[] = [
 ]
 
 /**
- * Premium media (Scott, 23 November 2026): packaging gives every medium except
- * these, which only clients who have them today keep: Live Streaming Sports.
- * National Newspapers is not premium (Scott).
+ * Premium media: packaging gives every medium except these, which only clients
+ * who have them today keep. Live Streaming Sports (Scott, 23 November 2026);
+ * Social and AVOD too (Scott, 24 November 2026). National Newspapers is not
+ * premium. Any medium a client has today it keeps.
  */
-export const PREMIUM_MEDIA = new Set([502])
+export const PREMIUM_MEDIA = new Set([407, 501, 502])
 
 /** Countries a plan can name. Non-US only when the client has it today (Scott, 23 November 2026). */
 export const COUNTRIES = { US: 'United States', CA: 'Canada' } as const

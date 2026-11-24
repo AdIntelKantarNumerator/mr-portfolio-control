@@ -120,6 +120,23 @@ export async function planDocx(plan: MigrationPlan): Promise<Buffer> {
     }
   }
 
+  const views = plan.savedViews ?? []
+  if (views.length) {
+    out.push(h(`Saved views (${views.length})`, HeadingLevel.HEADING_1))
+    out.push(p('Magnifier saved searches saved or updated in 2026, to recreate as Insights Studio saved views.'))
+    out.push(
+      table(
+        ['Saved search', 'Person', 'Updated', 'Filters'],
+        views.map((v) => [
+          `${v.title}${v.shared ? ' (shared)' : ''}`,
+          userName.get(v.user) ?? v.user,
+          v.updated ?? '',
+          [v.period, v.keyword ? `keyword "${v.keyword}"` : null, ...v.filters.map((f) => `${f.label}: ${f.items.slice(0, 6).join(', ')}${f.total > 6 ? ` +${f.total - 6}` : ''}`)].filter(Boolean).join('; ') || 'None',
+        ]),
+      ),
+    )
+  }
+
   out.push(h('Checklist', HeadingLevel.HEADING_1))
   for (const c of plan.checklist) out.push(bullet(c))
   if (plan.notes.length) {

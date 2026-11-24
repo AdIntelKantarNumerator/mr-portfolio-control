@@ -2670,6 +2670,8 @@ export const ceClients = pgTable('ce_clients', {
   active: boolean('active').notNull(),
   /** Every account is ours: staff, demo, development (lib/client-eval/match.ts isInternal). Hidden unless asked for. */
   internal: boolean('internal').notNull().default(false),
+  /** Every account is Canadian (lib/client-eval/match.ts isCanadian): left out of the analysis unless asked for (drizzle/0061). */
+  canada: boolean('canada').notNull().default(false),
   /** 360's license group, when the client has one. */
   company: text('company'),
   /** Why the accounts were put together: lib/client-eval/match.ts Link[]. */

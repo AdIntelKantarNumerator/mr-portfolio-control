@@ -27,13 +27,15 @@ import { completeJson } from '@/lib/llm'
 import { dbxAdvertiserSummary, dbxCategorySummary, dbxGpcNameMatches, dbxMergedEntities, dbxTaxonomyTree } from '@/lib/taxonomy-dbx'
 import type { Candidate } from '@/lib/taxonomy-rules'
 import { ADV_360, candidatesMagnifier, names360, plainTerms, type Candidates } from '../deck-data'
+import { accountSearches, mongoUrl } from '../saved-searches'
+import { premiumNote } from './premium'
 import { currentMedia, mediaChange, type MediaChange } from '../media-map'
 import { ratingsRunsBySet } from '../ratings-usage'
 import { clientPeople, type PersonRow } from '../store'
 import { parseMember, PLATFORM_LABEL, PLATFORMS, type Ent360, type EntClassic, type EntMagnifier, type Entitlements, type Platform } from '../types'
 import { readMatches, saveMatches } from './matches'
 import { ACCOUNT_TYPE_LABEL, COUNTRIES, ENTITY_TYPE, MEDIA, packageByKey, PREMIUM_MEDIA, SET_LABEL, type AccountType, type CountryCode, type SetKey } from './catalog'
-import { PLAN_VERSION, type MigrationPlan, type PlanAccount, type PlanUser, type PlanWorkspace, type PlanWorkspaceItem } from './types'
+import { PLAN_VERSION, type MigrationPlan, type PlanAccount, type PlanSavedView, type PlanUser, type PlanWorkspace, type PlanWorkspaceItem } from './types'
 
 export type PlanProgress = (step: string) => Promise<void> | void
 
@@ -246,11 +248,15 @@ function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number
   const feats = features(g.members)
   const has = (re: RegExp) => feats.find((f) => re.test(f))
   const packages: PlanAccount['packages'] = []
-  const add = (key: string, why: string) => {
+  const add = (key: string, why: string, starting?: boolean) => {
     const p = packageByKey.get(key)!
-    if (!packages.some((x) => x.key === key)) packages.push({ key, name: p.name, kind: p.kind, why })
+    if (!packages.some((x) => x.key === key)) packages.push({ key, name: p.name, kind: p.kind, why, ...(starting ? { starting: true } : {}) })
   }
-  add('competitive', 'The base package: spend, units, impressions and creative for every account.')
+  // The package each application stands for (Scott, 24 November 2026): 360 and Classic are competitive
+  // (spend), Magnifier is creative, so its users start from Creative, not Competitive.
+  const from = new Set(g.members.map((a) => a.platform))
+  if (from.has('360') || from.has('classic')) add('competitive', `The base package for ${[from.has('360') ? '360' : '', from.has('classic') ? 'Classic' : ''].filter(Boolean).join(' and ')} users: spend, units, impressions and creative.`, true)
+  if (from.has('magnifier')) add('creative', 'Magnifier is a creative application: its users have creative access today.', true)
   const contactFeat = has(/contact|sales opportunit|agency module/i)
   if (g.type === 'publisher') add('commercial', 'Publisher account: sales opportunities, contacts and agency data are what sellers use.')
   else if (contactFeat) add('commercial', `Uses ${contactFeat} today.`)
@@ -284,18 +290,13 @@ function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number
   // Coverage: every medium except premium ones they lack; no country beyond the US unless they have it.
   const legacy = legacyMedia(g.members)
   const keptNames = new Set<string>()
-  let lss = false
-  for (const [p, m] of legacy) {
-    const ch = mediaChange(p, [...m.media], m.restricted)
-    for (const k of ch.kept) keptNames.add(k)
-    if (ch.kept.includes('Live Streaming Sports')) lss = true
-  }
-  const premiumHeld = new Set<number>(lss ? [502] : [])
+  for (const [p, m] of legacy) for (const k of mediaChange(p, [...m.media], m.restricted).kept) keptNames.add(k)
+  const premiumHeld = new Set(MEDIA.filter((m) => PREMIUM_MEDIA.has(m.id) && keptNames.has(m.name)).map((m) => m.id))
   const media: PlanAccount['coverage']['media'] = []
   const withheld: PlanAccount['coverage']['withheld'] = []
   for (const m of MEDIA.filter((x) => x.active)) {
     if (PREMIUM_MEDIA.has(m.id) && !premiumHeld.has(m.id)) {
-      withheld.push({ name: m.name, why: 'Premium: only clients who have it today keep it.' })
+      withheld.push({ name: m.name, why: 'Premium: included only for clients who have it today, and they do not.' })
       continue
     }
     media.push({ id: m.id, name: m.name, type: m.type, status: PREMIUM_MEDIA.has(m.id) ? 'premium' : keptNames.has(m.name) ? 'kept' : 'added' })
@@ -391,22 +392,47 @@ interface RawItem {
   list: string
 }
 
-/** Each 360 user's default reporting profile lists. */
-async function profileItems(usrIds: number[]): Promise<Map<number, RawItem[]>> {
-  const out = new Map<number, RawItem[]>()
+/** 360 reporting profiles last used on or after this day become workspaces (Scott, 24 November 2026: "only those used in 2026"). */
+export const PROFILES_SINCE = '2026-01-01'
+
+interface Profile {
+  id: number
+  name: string
+  lastUsed: string
+  isDefault: boolean
+  items: RawItem[]
+}
+
+/**
+ * Each 360 user's reporting profiles used since PROFILES_SINCE (reporting_profile.lastused_d), with their lists.
+ * Every one of them, not just the default: a user who switches between profiles has a workspace for each.
+ */
+async function profileItems(usrIds: number[]): Promise<Map<number, Profile[]>> {
+  const out = new Map<number, Profile[]>()
   for (const part of chunks(usrIds, 500)) {
     if (!part.length) continue
-    for (const r of await q360<{ usr_id: number; t: number; e: number; id: number }>(
-      `SELECT d.usr_id, s.entity_set_type_id AS t, i.entity_type_id AS e, i.entity_id AS id
-       FROM iddb_appl.dbo.user_default_reporting_profile d
-       JOIN iddb_appl.dbo.entity_set s ON s.reporting_profile_id = d.reporting_profile_id AND s.active_f = 1
+    const byId = new Map<number, Profile>()
+    for (const r of await q360<{ usr_id: number; p: number; n: string | null; used: Date | string; dflt: number; t: number; e: number; id: number }>(
+      `SELECT rp.usr_id, rp.reporting_profile_id AS p, rp.reporting_profile_n AS n, rp.lastused_d AS used,
+         CASE WHEN d.reporting_profile_id IS NULL THEN 0 ELSE 1 END AS dflt, s.entity_set_type_id AS t, i.entity_type_id AS e, i.entity_id AS id
+       FROM iddb_appl.dbo.reporting_profile rp
+       LEFT JOIN iddb_appl.dbo.user_default_reporting_profile d ON d.usr_id = rp.usr_id AND d.reporting_profile_id = rp.reporting_profile_id
+       JOIN iddb_appl.dbo.entity_set s ON s.reporting_profile_id = rp.reporting_profile_id AND s.active_f = 1
        JOIN iddb_appl.dbo.entity_item i ON i.entity_set_id = s.entity_set_id
-       WHERE d.usr_id IN (${part.join(',')}) AND i.entity_id > 0 AND s.entity_set_type_id IN (1,2,3,4,5,6,7,8)
-       ORDER BY d.usr_id, s.entity_set_type_id, i.order_id`,
+       WHERE rp.usr_id IN (${part.join(',')}) AND rp.lastused_d >= '${PROFILES_SINCE}' AND i.entity_id > 0 AND s.entity_set_type_id IN (1,2,3,4,5,6,7,8)
+       ORDER BY rp.usr_id, rp.lastused_d DESC, s.entity_set_type_id, i.order_id`,
     )) {
       const s = PROFILE_SET[Number(r.t)]
       if (!s || !ALLOWED[s.set].includes(Number(r.e))) continue
-      ;(out.get(Number(r.usr_id)) ?? out.set(Number(r.usr_id), []).get(Number(r.usr_id))!).push({ set: s.set, e: Number(r.e), id: Number(r.id), list: s.list })
+      const pid = Number(r.p)
+      let prof = byId.get(pid)
+      if (!prof) {
+        const used = r.used instanceof Date ? r.used.toISOString() : String(r.used)
+        prof = { id: pid, name: String(r.n ?? '').trim() || `Profile ${pid}`, lastUsed: used.slice(0, 10), isDefault: Number(r.dflt) === 1, items: [] }
+        byId.set(pid, prof)
+        ;(out.get(Number(r.usr_id)) ?? out.set(Number(r.usr_id), []).get(Number(r.usr_id))!).push(prof)
+      }
+      prof.items.push({ set: s.set, e: Number(r.e), id: Number(r.id), list: s.list })
     }
   }
   return out
@@ -725,7 +751,7 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   const created = users.filter((u) => u.create.value)
   const usrOf = new Map<number, PlanUser>()
   for (const u of created) for (const l of people.find((p) => p.key === u.key)?.accounts ?? []) if (l.platform === '360' && l.active) usrOf.set(Number(l.userId), u)
-  let profiles = new Map<number, RawItem[]>()
+  let profiles = new Map<number, Profile[]>()
   let filters = new Map<number, RawItem[]>()
   try {
     if (usrOf.size) profiles = await profileItems([...usrOf.keys()])
@@ -735,7 +761,8 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   }
   // Name every 360 item once.
   const want = new Map<number, Set<number>>()
-  for (const list of [...profiles.values(), ...filters.values()]) for (const r of list.slice(0, MAX_ITEMS * 4)) (want.get(r.e) ?? want.set(r.e, new Set()).get(r.e)!).add(r.id)
+  const profileLists = [...profiles.values()].flatMap((ps) => ps.map((x) => x.items))
+  for (const list of [...profileLists, ...filters.values()]) for (const r of list.slice(0, MAX_ITEMS * 4)) (want.get(r.e) ?? want.set(r.e, new Set()).get(r.e)!).add(r.id)
   let names = new Map<string, string>()
   try {
     names = await names360(want)
@@ -746,7 +773,7 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   // Follow advertisers and categories into Insights Studio (full plans only).
   const freq = new Map<string, number>()
   const catFreq = new Map<string, number>()
-  for (const list of [...profiles.values(), ...filters.values()])
+  for (const list of [...profileLists, ...filters.values()])
     for (const r of list) {
       const a = ADV_ID(r.e, r.id)
       if (a) freq.set(a, (freq.get(a) ?? 0) + 1)
@@ -770,7 +797,7 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   for (const a of accounts) for (const f of a.from) accountOfLegacy.set(f.key, a.key)
   const workspaces: PlanWorkspace[] = []
   const bySig = new Map<string, PlanWorkspace>()
-  const addWs = (account: string, sets: PlanWorkspace['sets'], user: PlanUser, source: string, why: string, fallbackName: string) => {
+  const addWs = (account: string, sets: PlanWorkspace['sets'], user: PlanUser, source: string, why: string, fallbackName: string, keepName = false) => {
     if (!sets.length) return
     const sig = `${account}|${signature(sets)}`
     const have = bySig.get(sig)
@@ -778,22 +805,24 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
       if (!have.users.includes(user.key)) have.users.push(user.key)
       return
     }
-    const ws: PlanWorkspace = { key: `W${workspaces.length + 1}`, account, name: wsName(sets, fallbackName), source, users: [user.key], sets, why }
+    const ws: PlanWorkspace = { key: `W${workspaces.length + 1}`, account, name: keepName ? fallbackName.slice(0, 80) : wsName(sets, fallbackName), source, users: [user.key], sets, why }
     bySig.set(sig, ws)
     workspaces.push(ws)
   }
   for (const [usr, u] of usrOf) {
     if (!u.account) continue
-    const own = profiles.get(usr) ?? []
-    if (own.length)
+    for (const prof of profiles.get(usr) ?? []) {
+      const own = prof.items
       addWs(
         u.account,
         setsOf(own.map((r) => item360(r, names, matcher, r.list)), (i) => (own.find((r) => String(r.id) === i.legacy.id && r.list === i.legacy.list)?.set ?? setFor(i.entityType) ?? 'advertisers')),
         u,
-        '360 default reporting profile',
-        'The lists in their default 360 reporting profile, which is what they look at day to day.',
-        `${u.name}'s focus`,
+        `360 reporting profile "${prof.name}"${prof.isDefault ? ' (their default)' : ''}`,
+        `The lists in their 360 reporting profile "${prof.name}", last used ${prof.lastUsed}. Profiles not used since ${PROFILES_SINCE} are not carried over.`,
+        prof.name,
+        true,
       )
+    }
   }
   // A user set's restrictions: everyone created from it shares one workspace, as their access today.
   for (const [set, items] of filters) {
@@ -825,6 +854,34 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
     for (const u of created) {
       const p = people.find((x) => x.key === u.key)
       if (p?.accounts.some((l) => l.platform === 'magnifier' && l.accountId === a.id && l.active)) addWs(account, sets, u, `Magnifier access today: ${a.name}`, "The account's Magnifier reports are limited to these today; the workspace keeps that focus while the account gets more.", a.name)
+    }
+  }
+
+  // Magnifier saved searches saved or updated in 2026 become Insights Studio saved views, for the users created.
+  const savedViews: PlanSavedView[] = []
+  const magCodes = [...new Set(groups.flatMap((g) => g.members).filter((a) => a.platform === 'magnifier').map((a) => a.id))]
+  if (magCodes.length && mongoUrl()) {
+    await progress('Reading Magnifier saved searches (2026)')
+    try {
+      const owner = new Map<string, PlanUser>()
+      for (const u of created)
+        for (const l of people.find((p) => p.key === u.key)?.accounts ?? []) if (l.platform === 'magnifier') owner.set(`${l.accountId.trim()}|${String(l.userId).trim()}`.toLowerCase(), u)
+      const { searches, namesNote } = await within(FOLLOW_LIMIT, 'Reading Magnifier saved searches', () => accountSearches(magCodes))
+      let canadian = 0
+      for (const s of searches) {
+        const u = owner.get(s.owner)
+        if (!u) continue
+        // Canada is left out of the analysis (Scott, 24 November 2026).
+        if (s.country === 'Canada') {
+          canadian++
+          continue
+        }
+        savedViews.push({ key: `V${savedViews.length + 1}`, user: u.key, account: u.account, title: s.title, report: s.report, country: s.country, period: s.period, keyword: s.keyword, shared: s.shared, updated: s.updated ?? s.saved, filters: s.rel.rows, media: s.rel.media })
+      }
+      if (canadian) notes.push(`${canadian} Magnifier saved ${canadian === 1 ? 'search is' : 'searches are'} on Canadian data and not carried over.`)
+      if (namesNote) notes.push(`Some saved-search filters could not be named: ${namesNote}`.slice(0, 200))
+    } catch (err) {
+      notes.push(`Magnifier saved searches could not be read: ${(err as Error).message}`.slice(0, 200))
     }
   }
 
@@ -882,10 +939,11 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   const gains: string[] = []
   const losses: string[] = []
   const notInV1: string[] = []
-  const anyAccount = accounts[0]!
-  const added = anyAccount.coverage.media.filter((x) => x.status === 'added').map((x) => x.name)
-  if (added.length) gains.push(`${added.length} media new to them, including ${added.slice(0, 4).join(', ')}.`)
-  for (const a of accounts) for (const pk of a.packages.filter((x) => x.key !== 'competitive')) gains.push(`${a.name}: ${pk.name} (${pk.why.replace(/\.$/, '')}).`)
+  // Every medium new to them, in the catalogue's order (Scott, 24 November 2026: list them all).
+  const addedSet = new Set(accounts.flatMap((a) => a.coverage.media.filter((x) => x.status === 'added').map((x) => x.name)))
+  const added = MEDIA.filter((m) => addedSet.has(m.name)).map((m) => m.name)
+  if (added.length) gains.push(`${added.length} ${added.length === 1 ? 'medium' : 'media'} new to them: ${added.join(', ')}.`)
+  for (const a of accounts) for (const pk of a.packages.filter((x) => !x.starting)) gains.push(`${a.name}: ${pk.name} (${pk.why.replace(/\.$/, '')}).`)
   if (accounts.some((a) => a.coverage.widened.length)) gains.push('Restrictions on advertisers and categories are lifted: the whole account sees all brands and categories, with workspaces keeping each user’s focus.')
   // Lost: legacy media with nowhere to go, unless Insights Studio's catalogue has it under the same name (Search).
   const offered = new Set(MEDIA.filter((x) => x.active).map((x) => x.name.toLowerCase()))
@@ -894,7 +952,7 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
     x.change.dropped = gone
     if (gone.length) losses.push(`${PLATFORM_LABEL[x.platform]}: ${gone.join(', ')} not in Insights Studio yet.`)
   }
-  for (const a of accounts) for (const w of a.coverage.withheld) notInV1.push(`${a.name}: ${w.name} is premium and not included (they do not have it today).`)
+  // Premium media they lack are neither gained nor lost, so they are not impact; the plan notes the rule instead.
   if (accounts.some((a) => a.packages.some((p) => p.key === 'ratings_us_linear_tv'))) notInV1.push('Ratings access by book and market is not carried by Insights Studio V1: ratings scope is set up separately.')
   if (workspaces.some((w) => w.sets.some((s) => s.set === 'markets'))) notInV1.push('Market lists are kept in workspaces, but Insights Studio does not apply workspace markets yet.')
 
@@ -909,6 +967,7 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   if (guesses) checklist.push(`${guesses} workspace items were matched by name as a best guess (marked); check them.`)
   if (legacy.some((a) => a.platform === 'classic')) checklist.push("Classic users' own lists (properties, competitive sets, categories) are not read yet, so their workspaces are not proposed.")
   if (accounts.some((a) => a.packages.some((p) => p.key === 'ratings_us_linear_tv'))) checklist.push('Set up ratings scope (books and markets) outside Insights Studio V1.')
+  if (savedViews.length) checklist.push(`Recreate ${savedViews.length} Magnifier saved ${savedViews.length === 1 ? 'search' : 'searches'} from 2026 as Insights Studio saved views; their filters need Insights Studio ids.`)
   const inactive = legacy.filter((a) => !a.active)
   if (inactive.length) checklist.push(`${inactive.length} inactive legacy ${inactive.length === 1 ? 'account is' : 'accounts are'} not migrated.`)
 
@@ -934,6 +993,7 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
     accounts,
     users,
     workspaces,
+    savedViews,
     impact: { media, gains, losses, notInV1 },
     checklist,
     review: { verdict: 'check', issues: [], model: splitModel },
@@ -943,8 +1003,11 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   if (useModel) await review(plan, progress)
   else plan.review.issues.push('The model review did not run.')
   if (!plan.summary.length) plan.summary = computedSummary(plan)
+  const premium = premiumNote(accounts)
+  if (premium) plan.summary.push(premium)
   return plan
 }
+
 
 function computedSummary(p: MigrationPlan): string[] {
   const out = [`${p.accounts.length} Insights Studio ${p.accounts.length === 1 ? 'account' : 'accounts'} under ${p.organization.name}.`]

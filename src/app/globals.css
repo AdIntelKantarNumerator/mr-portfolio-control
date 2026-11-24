@@ -2839,6 +2839,8 @@ button.ce-badge { cursor: pointer; }
 .ce-name-chip.ce-m-added { background: var(--green-bg); color: var(--green); border-color: transparent; }
 .ce-name-chip.ce-m-premium { background: var(--amber-bg); color: var(--amber); border-color: transparent; }
 .ce-name-chip.ce-unmatched { border-style: dashed; color: var(--muted); }
+.ce-name-chip.ce-withheld { border-style: dashed; color: var(--muted); background: transparent; }
+.ce-key { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 2px 0 6px; }
 .ce-name-chip.ce-guess { border-style: dotted; border-color: var(--amber); }
 .ce-disabled { pointer-events: none; opacity: .5; }
 @media (max-width: 700px) { .ce-plan-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

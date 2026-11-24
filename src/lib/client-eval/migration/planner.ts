@@ -81,6 +81,7 @@ async function loop() {
     .update(cePlans)
     .set({ status: 'failed', step: null, priority: 0, error: 'The server stopped while this plan was being built (it may have run out of memory). Ask for it again to retry.' })
     .where(eq(cePlans.status, 'building'))
+  await dropCanadian()
   let seeded = false
   while (!g.__cePlanner?.stop) {
     try {
@@ -151,13 +152,23 @@ async function nextFull() {
   return r ?? null
 }
 
-/** Every active client without a plan row gets one, queued by how much it matters. */
+/** Canadian clients' plans still waiting in the queue are dropped: no plan is built for them. */
+async function dropCanadian() {
+  const canadian = (await db.select({ id: ceClients.clientId }).from(ceClients).where(eq(ceClients.canada, true))).map((r) => r.id)
+  for (let i = 0; i < canadian.length; i += 500) await db.delete(cePlans).where(and(eq(cePlans.status, 'queued'), inArray(cePlans.clientId, canadian.slice(i, i + 500))))
+}
+
+/**
+ * Every active client without a plan row gets one, queued by how much it matters. Canadian clients get none
+ * (Scott, 24 November 2026: Canada is left out of the analysis); one still queued from before is dropped.
+ */
 async function seed() {
+  await dropCanadian()
   const have = new Set((await db.select({ id: cePlans.clientId }).from(cePlans)).map((r) => r.id))
   const rows = await db
     .select({ id: ceClients.clientId, platforms: ceClients.platforms, activeUsers: ceClients.activeUsers, logins30: ceClients.logins30 })
     .from(ceClients)
-    .where(and(eq(ceClients.active, true), eq(ceClients.internal, false)))
+    .where(and(eq(ceClients.active, true), eq(ceClients.internal, false), eq(ceClients.canada, false)))
   const add = rows
     .filter((c) => !have.has(c.id))
     .map((c) => {

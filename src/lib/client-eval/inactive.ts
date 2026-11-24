@@ -29,6 +29,8 @@ export interface InactiveAccount {
   name: string
   client: string | null
   internal: boolean
+  /** In a Canadian client (match.ts isCanadian): hidden while Canada is excluded. */
+  canada: boolean
   users: number
   activeUsers: number
   reports: number
@@ -57,9 +59,9 @@ export async function inactiveAccounts(d: Database, since: string): Promise<Inac
     .groupBy(ceUsers.platform, ceUsers.accountId)
   const by = new Map(seen.map((s) => [memberKey(s.platform as Platform, s.accountId), s]))
 
-  const clientOf = new Map<string, { name: string; internal: boolean }>()
-  for (const c of await d.select({ name: ceClients.name, internal: ceClients.internal, members: ceClients.members }).from(ceClients))
-    for (const m of c.members as string[]) clientOf.set(m, { name: c.name, internal: c.internal })
+  const clientOf = new Map<string, { name: string; internal: boolean; canada: boolean }>()
+  for (const c of await d.select({ name: ceClients.name, internal: ceClients.internal, canada: ceClients.canada, members: ceClients.members }).from(ceClients))
+    for (const m of c.members as string[]) clientOf.set(m, { name: c.name, internal: c.internal, canada: c.canada })
 
   const out: InactiveAccount[] = []
   for (const a of await d.select().from(ceAccounts).where(eq(ceAccounts.active, true))) {
@@ -74,6 +76,7 @@ export async function inactiveAccounts(d: Database, since: string): Promise<Inac
       name: a.name,
       client: c?.name ?? null,
       internal: c?.internal ?? false,
+      canada: c?.canada ?? false,
       users: a.users,
       activeUsers: a.activeUsers,
       reports: a.reports,

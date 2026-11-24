@@ -7,8 +7,8 @@ import { and, eq, inArray, sql } from 'drizzle-orm'
 import type { Database } from '@/db/client'
 import { ceAccounts, ceClients, ceJudgments, ceOverrides, ceReports, ceSources, ceUsers } from '@/db/schema'
 import { completeJson } from '@/lib/llm'
-import { clientIdOf, clientName, cluster, isInternal, links, type Ask, type Link, type MatchAccount, type Override } from './match'
-import { memberKey, parseMember, PLATFORMS, type Platform, type Snapshot } from './types'
+import { clientIdOf, clientName, cluster, isCanadian, isInternal, links, type Ask, type Link, type MatchAccount, type Override } from './match'
+import { memberKey, parseMember, PLATFORMS, type Entitlements, type Platform, type Snapshot } from './types'
 
 const BATCH = 800
 
@@ -134,7 +134,7 @@ async function judge(d: Database, asks: Ask[], byKey: Map<string, MatchAccount>,
 /** Rebuild ce_clients from the snapshots, the model's verdicts and people's merges and splits. */
 export async function buildClients(d: Database, opts: { useModel?: boolean; progress?: (step: string, done?: number, total?: number) => Promise<void> | void } = {}) {
   const accts = await d
-    .select({ platform: ceAccounts.platform, accountId: ceAccounts.accountId, name: ceAccounts.name, company: ceAccounts.company, domains: ceAccounts.domains, users: ceAccounts.users, active: ceAccounts.active, reports: ceAccounts.reports })
+    .select({ platform: ceAccounts.platform, accountId: ceAccounts.accountId, name: ceAccounts.name, company: ceAccounts.company, domains: ceAccounts.domains, users: ceAccounts.users, active: ceAccounts.active, reports: ceAccounts.reports, entitlements: ceAccounts.entitlements })
     .from(ceAccounts)
   const match: MatchAccount[] = accts.map((a) => ({ key: memberKey(a.platform as Platform, a.accountId), platform: a.platform as Platform, name: a.name, company: a.company, domains: (a.domains ?? {}) as Record<string, number>, users: a.users }))
   const byKey = new Map(match.map((m) => [m.key, m]))
@@ -143,7 +143,10 @@ export async function buildClients(d: Database, opts: { useModel?: boolean; prog
   // Our own accounts (staff, demo, development) join only each other: a demo account under a client's
   // license group would otherwise make the client look internal, or the internal group look like a client.
   const internal = new Set(match.filter(isInternal).map((m) => m.key))
-  const apart = (l: { a: string; b: string }) => internal.has(l.a) !== internal.has(l.b)
+  // Canadian accounts join only each other too (Scott, 24 November 2026): a client is Canadian or not, so leaving
+  // Canada out of the analysis leaves no Canadian account inside another client's counts or plan.
+  const canadian = new Set(accts.filter((a) => isCanadian(a.entitlements as Entitlements | null)).map((a) => memberKey(a.platform as Platform, a.accountId)))
+  const apart = (l: { a: string; b: string }) => internal.has(l.a) !== internal.has(l.b) || canadian.has(l.a) !== canadian.has(l.b)
   found.links = found.links.filter((l) => !apart(l))
   found.ask = found.ask.filter((l) => !apart(l))
   if (opts.useModel !== false && found.ask.length) await judge(d, found.ask, byKey, (done, total) => opts.progress?.('Asking the model about close calls', done, total))
@@ -190,6 +193,7 @@ export async function buildClients(d: Database, opts: { useModel?: boolean; prog
       name: clientName(named, members),
       company,
       internal: c.members.every((k) => internal.has(k)),
+      canada: c.members.every((k) => canadian.has(k)),
       members: c.members,
       platforms: [...new Set(members.map((m) => m.platform))].sort((a, b) => PREF[a]! - PREF[b]!),
       users: everyone.size,
@@ -258,6 +262,7 @@ export interface ClientRow {
   magnifierSearches: number
   active: boolean
   internal: boolean
+  canada: boolean
   company: string | null
   members: Array<{ key: string; platform: Platform; accountId: string; name: string; active: boolean; users: number; activeUsers: number; reports: number; summary: string | null }>
   how: Link[]
@@ -265,7 +270,7 @@ export interface ClientRow {
 
 export async function listClients(
   d: Database,
-  o: { q?: string; platform?: Platform | 'all' | 'multi'; sort?: 'reports' | 'name' | 'users' | 'logins'; active?: boolean; internal?: boolean; limit?: number; offset?: number },
+  o: { q?: string; platform?: Platform | 'all' | 'multi'; sort?: 'reports' | 'name' | 'users' | 'logins'; active?: boolean; internal?: boolean; canada?: boolean; limit?: number; offset?: number },
 ): Promise<{ rows: ClientRow[]; total: number }> {
   const all = await d.select().from(ceClients)
   const needle = (o.q ?? '').trim().toLowerCase()
@@ -288,6 +293,7 @@ export async function listClients(
     if (o.platform === 'multi' ? ps.length < 2 : o.platform && o.platform !== 'all' && !ps.includes(o.platform)) return false
     if (o.active && !c.active) return false
     if (!o.internal && c.internal) return false
+    if (!o.canada && c.canada) return false
     if (!needle) return true
     if (c.name.toLowerCase().includes(needle) || (c.company ?? '').toLowerCase().includes(needle)) return true
     return (c.members as string[]).some((k) => {
@@ -315,6 +321,7 @@ export async function listClients(
       magnifierSearches: c.magSearches,
       active: c.active,
       internal: c.internal,
+      canada: c.canada,
       company: c.company,
       how: c.how as Link[],
       members: (c.members as string[])

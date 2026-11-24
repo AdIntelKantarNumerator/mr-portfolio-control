@@ -32,7 +32,8 @@ export interface PlanAccount {
   from: Array<{ key: string; platform: Platform; name: string; activeUsers: number }>
   why: string
   contract: { lookbackYears: Reasoned<number>; includePreliminary: Reasoned<boolean> }
-  packages: Array<{ key: string; name: string; kind: 'base' | 'add_on'; why: string }>
+  /** starting: the package the account's applications stand for (Competitive for 360/Classic, Creative for Magnifier), not a gain. */
+  packages: Array<{ key: string; name: string; kind: 'base' | 'add_on'; why: string; starting?: boolean }>
   coverage: {
     media: PlanMedia[]
     /** Media in Insights Studio's catalogue but left out: premium they lack today. */
@@ -74,6 +75,26 @@ export interface PlanWorkspace {
   why: string
 }
 
+/**
+ * A Magnifier saved search saved or updated in 2026, to recreate as an Insights Studio saved view (Creative
+ * Intel keeps saved views as isappdata.dashboard rows of type 4; Insights Studio has no "saved searches").
+ */
+export interface PlanSavedView {
+  key: string
+  /** The plan user it belongs to. */
+  user: string
+  account: string | null
+  title: string
+  report: string | null
+  country: string | null
+  period: string | null
+  keyword: string | null
+  shared: boolean
+  updated: string | null
+  filters: Array<{ label: string; items: string[]; excluded: string[]; total: number }>
+  media: string[]
+}
+
 export interface PlanImpact {
   media: Array<{ platform: Platform; change: MediaChange }>
   gains: string[]
@@ -99,6 +120,8 @@ export interface MigrationPlan {
   accounts: PlanAccount[]
   users: PlanUser[]
   workspaces: PlanWorkspace[]
+  /** Absent on plans built before 24 November 2026. */
+  savedViews?: PlanSavedView[]
   impact: PlanImpact
   checklist: string[]
   review: PlanReview

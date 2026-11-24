@@ -26,7 +26,7 @@
  * link to it. Overrides are keyed by "platform:account_id", which a refresh
  * does not change, so they outlive it.
  */
-import type { Platform } from './types'
+import type { Entitlements, Platform } from './types'
 
 export interface MatchAccount {
   key: string
@@ -288,6 +288,21 @@ export function displayName(name: string): string {
       .replace(/\s+(New York NY|NY|Chicago IL|Los Angeles CA)$/, '')
       .trim()
   return s || name
+}
+
+/**
+ * A Canadian account (Scott, 24 November 2026: Canada is left out of the analysis by default): Magnifier's
+ * reports, or when it has none its saved searches, run on Canadian data only; a 360 user set limited to Canadian
+ * media. An account with US data too is not Canadian. Classic has no Canadian data restriction.
+ */
+export function isCanadian(e: Entitlements | null | undefined): boolean {
+  if (!e) return false
+  if (e.kind === 'magnifier') {
+    const cs = e.countries.length ? e.countries : (e.searchCountries ?? [])
+    return cs.length > 0 && cs.every((c) => /canad/i.test(c))
+  }
+  if (e.kind === '360') return !!e.media && e.media.include.length > 0 && e.media.include.every((m) => /canad/i.test(m))
+  return false
 }
 
 const NAME_SKIP = new Set(['the', 'a', 'an'])
