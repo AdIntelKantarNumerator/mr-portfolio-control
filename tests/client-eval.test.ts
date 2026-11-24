@@ -423,3 +423,15 @@ test('Migration Plan: holding companies are planned per account', async () => {
   assert.equal(accountOfPlan('acct|360:41314'), '360:41314')
   assert.equal(accountOfPlan('360:32730'), null)
 })
+
+test('Migration Plan: the bundle follows the commercial team’s platform rule', async () => {
+  const { bundleFor } = await import('../src/lib/client-eval/migration/bundle')
+  const keys = (...p: Array<'360' | 'classic' | 'magnifier'>) => bundleFor(p).map((b) => b.key).sort().join(' + ')
+  assert.equal(keys('360'), 'competitive')
+  assert.equal(keys('classic'), 'commercial')
+  assert.equal(keys('magnifier'), 'creative')
+  assert.equal(keys('360', 'classic'), 'commercial + competitive')
+  assert.equal(keys('360', 'magnifier'), 'competitive + creative')
+  assert.equal(keys('classic', 'magnifier'), 'creative', 'Classic with Magnifier: Creative only')
+  assert.equal(keys('360', 'classic', 'magnifier'), 'commercial + competitive + creative')
+})

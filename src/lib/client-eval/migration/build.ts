@@ -29,6 +29,7 @@ import type { Candidate } from '@/lib/taxonomy-rules'
 import { ADV_360, candidatesMagnifier, names360, plainTerms, type Candidates } from '../deck-data'
 import { accountSearches, mongoUrl } from '../saved-searches'
 import { premiumNote } from './premium'
+import { bundleFor } from './bundle'
 import { accountOfPlan, planMode, type PlanMode } from './mode'
 import { currentMedia, mediaChange, type MediaChange } from '../media-map'
 import { ratingsRunsBySet } from '../ratings-usage'
@@ -363,23 +364,16 @@ function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number
     const p = packageByKey.get(key)!
     if (!packages.some((x) => x.key === key)) packages.push({ key, name: p.name, kind: p.kind, why, ...(starting ? { starting: true } : {}) })
   }
-  // The package each application stands for (Scott, 24 November 2026): 360 and Classic are competitive
-  // (spend), Magnifier is creative, so its users start from Creative, not Competitive.
+  // The bundle: the commercial team's rule, platform by platform (bundle.ts). It replaces the earlier guesses from
+  // account type and features (a publisher getting Commercial; Classic getting Competitive).
   const from = new Set(g.members.map((a) => a.platform))
-  if (from.has('360') || from.has('classic')) add('competitive', `The base package for ${[from.has('360') ? '360' : '', from.has('classic') ? 'Classic' : ''].filter(Boolean).join(' and ')} users: spend, units, impressions and creative.`, true)
-  if (from.has('magnifier')) add('creative', 'Magnifier is a creative application: its users have creative access today.', true)
+  for (const b of bundleFor(from)) add(b.key, b.why, true)
   // Offline reports are spend reports: a client that receives them gets Competitive too (Scott, 24 November 2026).
   if (offline)
     add(
       'competitive',
       `Receives Magnifier offline reports: ${offline.people} ${offline.people === 1 ? 'person' : 'people'} downloaded one in 2026${offline.example ? ` ("${offline.example}")` : ''}, last on ${offline.last}.`,
-      from.has('360') || from.has('classic'),
     )
-  const contactFeat = has(/contact|sales opportunit|agency module/i)
-  if (g.type === 'publisher') add('commercial', 'Publisher account: sales opportunities, contacts and agency data are what sellers use.')
-  else if (contactFeat) add('commercial', `Uses ${contactFeat} today.`)
-  const creativeFeat = has(/creative analytics|creative attribute|creative id reporting|creative light/i)
-  if (creativeFeat) add('creative', `Uses ${creativeFeat} today.`)
   const sports = has(/sports module/i)
   if (sports) add('sports', `Uses the ${sports} today.`)
   const sponsor = has(/sponsorship/i)
