@@ -41,6 +41,11 @@ export interface PlanAccount {
     countries: Array<{ code: CountryCode; name: string; why: string }>
     /** Restrictions today that the plan does not carry into the entitlement (they become workspaces). */
     widened: string[]
+    /**
+     * Restrictions kept on the entitlement (agency holding companies): the account sees only these advertisers
+     * and categories in Insights Studio, Creative Intel included.
+     */
+    limits?: Array<{ label: string; items: string[]; total: number }>
   }
   seats: number
 }
@@ -133,6 +138,10 @@ export interface MigrationPlan {
   accounts: PlanAccount[]
   users: PlanUser[]
   workspaces: PlanWorkspace[]
+  /** How the accounts were planned (holding company, market accounts, or the model's split), and why. */
+  mode?: { kind: 'holding' | 'markets' | 'standard'; why: string }
+  /** Legacy accounts left out: inactive, or dormant (no login in 12 months and nothing run in 2026). */
+  notMigrated?: Array<{ name: string; platform: Platform; why: string }>
   /** Absent on plans built before 24 November 2026. */
   savedViews?: PlanSavedView[]
   /** 360 reports used in 2026; absent on plans built before 24 November 2026. */

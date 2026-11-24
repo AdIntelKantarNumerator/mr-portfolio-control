@@ -4,7 +4,7 @@
  */
 import { Document, HeadingLevel, Packer, Paragraph, ShadingType, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { PLATFORM_LABEL } from '../types'
-import { ACCOUNT_TYPE_LABEL, ENTITY_TYPE, SET_LABEL } from './catalog'
+import { ACCOUNT_TYPE_LABEL, ENTITY_TYPE, rollupMedia, SET_LABEL } from './catalog'
 import type { MigrationPlan } from './types'
 
 const h = (text: string, level: (typeof HeadingLevel)[keyof typeof HeadingLevel]) => new Paragraph({ text, heading: level })
@@ -34,6 +34,11 @@ export async function planDocx(plan: MigrationPlan): Promise<Buffer> {
 
   out.push(h('Summary', HeadingLevel.HEADING_1))
   for (const s of plan.summary) out.push(bullet(s))
+  if (plan.mode?.why) out.push(bullet(plan.mode.why))
+  if (plan.notMigrated?.length) {
+    out.push(p(`Not migrated (${plan.notMigrated.length})`, { bold: true }))
+    for (const x of plan.notMigrated) out.push(bullet(`${x.name} (${PLATFORM_LABEL[x.platform]}): ${x.why}`))
+  }
   out.push(p(`Review: ${plan.review.verdict === 'ok' ? 'no issues found' : plan.review.verdict === 'problem' ? 'problems to resolve' : 'points to check'}.`, { bold: true }))
   for (const i of plan.review.issues) out.push(bullet(i))
 
@@ -52,16 +57,21 @@ export async function planDocx(plan: MigrationPlan): Promise<Buffer> {
     out.push(bullet(`Preliminary data: ${a.contract.includePreliminary.value ? 'yes' : 'no'}. ${a.contract.includePreliminary.why}`))
     out.push(p('Coverage', { bold: true }))
     out.push(bullet(`Countries: ${a.coverage.countries.map((c) => `${c.name} (${c.why})`).join('; ')}`))
-    const kept = a.coverage.media.filter((m) => m.status === 'kept').map((m) => m.name)
-    const added = a.coverage.media.filter((m) => m.status === 'added').map((m) => m.name)
+    const rolled = rollupMedia(a.coverage.media)
+    const kept = rolled.filter((m) => m.status === 'kept').map((m) => m.name)
+    const added = rolled.filter((m) => m.status === 'added').map((m) => m.name)
     const premium = a.coverage.media.filter((m) => m.status === 'premium').map((m) => m.name)
     if (kept.length) out.push(bullet(`Media they keep: ${kept.join(', ')}`))
     if (added.length) out.push(bullet(`Media added: ${added.join(', ')}`))
     if (premium.length) out.push(bullet(`Premium media kept: ${premium.join(', ')}`))
     for (const w of a.coverage.withheld) out.push(bullet(`Not included: ${w.name}. ${w.why}`))
     if (a.coverage.widened.length) {
-      out.push(p('Restrictions lifted (kept as workspaces)', { bold: true }))
+      out.push(p('Restrictions removed (kept as workspaces)', { bold: true }))
       for (const w of a.coverage.widened) out.push(bullet(w))
+    }
+    if (a.coverage.limits?.length) {
+      out.push(p('Access limited to (kept on the account)', { bold: true }))
+      for (const l of a.coverage.limits) out.push(bullet(`${l.label}: ${l.items.slice(0, 30).join(', ')}${l.total > 30 ? ` and ${l.total - 30} more` : ''}`))
     }
   }
 

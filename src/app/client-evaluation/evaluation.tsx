@@ -12,7 +12,7 @@ import type { ReadableRel } from '@/lib/client-eval/rel'
 import type { ProfileSummary } from '@/lib/client-eval/profiles'
 import type { UsageClient } from '@/lib/client-eval/ratings-usage'
 import type { InactiveAccount } from '@/lib/client-eval/inactive'
-import { ACCOUNT_TYPE_LABEL, ENTITY_TYPE, SET_LABEL } from '@/lib/client-eval/migration/catalog'
+import { ACCOUNT_TYPE_LABEL, ENTITY_TYPE, rollupMedia, rollupNames, SET_LABEL } from '@/lib/client-eval/migration/catalog'
 import type { MigrationPlan } from '@/lib/client-eval/migration/types'
 import { csvField } from '@/lib/client-eval/csv'
 import type { ClientRow, PersonRow, SourceInfo } from '@/lib/client-eval/store'
@@ -874,6 +874,399 @@ const VERDICT: Record<MigrationPlan['review']['verdict'], { label: string; cls: 
 }
 
 /** A client's Migration Plan to Insights Studio (Scott, 23 November 2026). */
+// ------------------------------------------------------------------ Migration Plan: the tabs
+
+/** A plan's tabs, drawn to be read at a glance: boxes, pills and icons, the reasons on hover (Scott, 24 November 2026). */
+function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
+  const accountName = new Map(plan.accounts.map((a) => [a.key, a.name]))
+  const userName = new Map(plan.users.map((u) => [u.key, u.name]))
+  const created = plan.users.filter((u) => u.create.value)
+  const addedMedia = rollupMedia(plan.accounts.flatMap((a) => a.coverage.media)).filter((m) => m.status === 'added')
+  const restrictionLabel = (lines: string[]) => {
+    const kinds = new Set(lines.map((l) => (/categor|industr|subcat/i.test(l) ? 'Category' : /market/i.test(l) ? 'Market' : /advertiser|brand|product|parent/i.test(l) ? 'Advertiser' : /propert|publisher|media owner/i.test(l) ? 'Property' : 'Other')))
+    return kinds.size === 1 && !kinds.has('Other') ? `${[...kinds][0]} restrictions removed` : 'Restrictions removed'
+  }
+
+  if (tab === 'Summary')
+    return (
+      <>
+        <div className="ce-plan-stats">
+          <div className="ce-tile-blue" title="Insights Studio client accounts under one organization">
+            <b>{n(plan.accounts.length)}</b>
+            <span>{plan.accounts.length === 1 ? 'account' : 'accounts'}</span>
+          </div>
+          <div className="ce-tile-green" title="Active, and logged in within 12 months">
+            <b>{n(created.length)}</b>
+            <span>users to create</span>
+          </div>
+          <div className="ce-tile-violet" title="Each keeps a user's focus: their 360 profiles and today's restrictions">
+            <b>{n(plan.workspaces.length)}</b>
+            <span>workspaces</span>
+          </div>
+          <div className="ce-tile-green" title={addedMedia.map((m) => m.name).join(', ') || 'None'}>
+            <b>{n(addedMedia.length)}</b>
+            <span>media added</span>
+          </div>
+        </div>
+        {plan.mode && plan.mode.kind !== 'standard' ? (
+          <div className="ce-box ce-box-blue" title={plan.mode.why}>
+            <span className="ce-big">{plan.mode.kind === 'holding' ? '🏢 Agency holding company: an account per agency, access kept' : '📍 One account, a workspace per market'}</span>
+          </div>
+        ) : null}
+        <ul className="ce-plan-list">
+          {plan.summary.map((s, i) => (
+            <li key={i}>{s}</li>
+          ))}
+        </ul>
+        {plan.review.issues.length ? (
+          <div className="ce-box ce-box-amber">
+            <span className="ce-big">⚠ Review</span>
+            <ul className="ce-plan-list">
+              {plan.review.issues.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {plan.notMigrated?.length ? (
+          <div className="ce-box ce-box-grey">
+            <span className="ce-big">⊘ {n(plan.notMigrated.length)} not migrated</span>
+            <div className="ce-names">
+              {plan.notMigrated.map((x) => (
+                <span key={`${x.platform}:${x.name}`} className="ce-name-chip" title={`${PLATFORM_LABEL[x.platform]}: ${x.why}`}>
+                  {x.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <p className="ce-muted ce-sm" title={plan.organization.why}>
+          Organization: <b>{plan.organization.name}</b>
+        </p>
+      </>
+    )
+
+  if (tab === 'Accounts')
+    return (
+      <>
+        {plan.accounts.map((a) => {
+          const media = rollupMedia(a.coverage.media)
+          return (
+            <div key={a.key} className="ce-acct">
+              <div className="ce-acct-head" title={a.why}>
+                <b className="ce-big">{a.name}</b>
+                <span className="ce-badge ce-360" title={a.type.why}>
+                  {ACCOUNT_TYPE_LABEL[a.type.value]}
+                </span>
+                <span className="ce-pill" title="Users created on this account">
+                  👤 {n(a.seats)}
+                </span>
+              </div>
+              <div className="ce-row ce-sm">
+                <span className="ce-muted">Replaces</span>
+                {a.from.map((f) => (
+                  <span key={f.key} className="ce-pill" title={`${f.activeUsers} active users`}>
+                    <span className={`ce-badge ce-${f.platform}`}>{PLATFORM_LABEL[f.platform]}</span> {f.name}
+                  </span>
+                ))}
+              </div>
+              <div className="ce-row">
+                {a.packages.map((p) => (
+                  <span key={p.key} className={`ce-pill ${p.starting ? 'ce-pill-blue' : 'ce-pill-green'}`} title={p.why}>
+                    {p.starting ? '■' : '＋'} {p.name}
+                    {p.kind === 'add_on' ? ' (add-on)' : ''}
+                  </span>
+                ))}
+                <span className="ce-pill" title={a.contract.lookbackYears.why}>
+                  🕘 {a.contract.lookbackYears.value} yrs
+                </span>
+                <span className={`ce-pill ${a.contract.includePreliminary.value ? 'ce-pill-green' : ''}`} title={a.contract.includePreliminary.why}>
+                  {a.contract.includePreliminary.value ? '✓' : '✕'} Preliminary
+                </span>
+                {a.coverage.countries.map((c) => (
+                  <span key={c.code} className="ce-pill" title={c.why}>
+                    {c.code === 'US' ? '🇺🇸' : '🇨🇦'} {c.name}
+                  </span>
+                ))}
+              </div>
+              <MediaKey withheld={a.coverage.withheld.length > 0} premium={media.some((m) => m.status === 'premium')} />
+              <div className="ce-names">
+                {media.map((m) => (
+                  <span key={m.name} className={`ce-name-chip ce-m-${m.status}`} title={`${m.status === 'added' ? 'New to them' : m.status === 'premium' ? 'Premium, kept: they have it today' : 'They have it today'}${m.members.length > 1 ? `: ${m.members.join(', ')}` : ''}`}>
+                    {m.name}
+                  </span>
+                ))}
+                {a.coverage.withheld.map((w) => (
+                  <span key={w.name} className="ce-name-chip ce-withheld" title={w.why}>
+                    {w.name}
+                  </span>
+                ))}
+              </div>
+              {a.coverage.limits?.length ? (
+                <details className="ce-box ce-box-blue">
+                  <summary className="ce-big" title="Kept on the account: its users see only these, Creative Intel included">
+                    🔒 Access limited to {a.coverage.limits.map((l) => `${n(l.total)} ${l.label.toLowerCase()}`).join(', ')}
+                  </summary>
+                  {a.coverage.limits.map((l) => (
+                    <div key={l.label} className="ce-sm">
+                      <b>{l.label}</b> <span className="ce-muted">{l.items.join(', ')}{l.total > l.items.length ? ` and ${n(l.total - l.items.length)} more` : ''}</span>
+                    </div>
+                  ))}
+                </details>
+              ) : null}
+              {a.coverage.widened.length ? (
+                <details className="ce-box ce-box-amber">
+                  <summary className="ce-big" title={a.coverage.widened.join('\n')}>
+                    ↗ {restrictionLabel(a.coverage.widened)}
+                  </summary>
+                  <div className="ce-sm ce-muted">The account sees everything; workspaces keep each user's focus. What they had:</div>
+                  {a.coverage.widened.map((w, i) => (
+                    <div key={i} className="ce-sm">
+                      {w}
+                    </div>
+                  ))}
+                </details>
+              ) : null}
+            </div>
+          )
+        })}
+      </>
+    )
+
+  if (tab === 'Users')
+    return (
+      <div className="ce-table">
+        <table className="dtable">
+          <thead>
+            <tr>
+              <th>Person</th>
+              <th>Account</th>
+              <th>Last login</th>
+              <th>Create</th>
+            </tr>
+          </thead>
+          <tbody>
+            {plan.users.slice(0, 500).map((u) => (
+              <tr key={u.key} className={u.create.value ? undefined : 'ce-inactive'}>
+                <td title={u.email ?? ''}>
+                  <b>{u.name}</b>{' '}
+                  {[...new Set(u.logins.map((l) => l.platform))].map((p) => (
+                    <span key={p} className={`ce-badge ce-${p}`}>
+                      {PLATFORM_LABEL[p]}
+                    </span>
+                  ))}
+                </td>
+                <td>{accountName.get(u.account ?? '') ?? '—'}</td>
+                <td className="ce-date">{u.lastSeen ?? <span className="ce-muted">None</span>}</td>
+                <td>
+                  <span className={`ce-pill ${u.create.value ? 'ce-pill-green' : ''}`} title={u.create.why}>
+                    {u.create.value ? '✓ Create' : '✕ Not now'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {plan.users.length > 500 ? <p className="ce-muted ce-sm">Showing 500 of {n(plan.users.length)}. The Word document has them all.</p> : null}
+      </div>
+    )
+
+  if (tab === 'Workspaces')
+    return plan.workspaces.length ? (
+      <>
+        {plan.workspaces.map((w) => (
+          <div key={w.key} className="ce-acct">
+            <div className="ce-acct-head" title={w.why}>
+              <b>{w.name}</b>
+              <span className="ce-pill ce-sm" title={w.source}>
+                {/^market/i.test(w.source) ? '📍' : /profile/i.test(w.source) ? '★' : /magnifier/i.test(w.source) ? '◆' : '■'} {w.source.replace(/^360 reporting profile .*/, '360 profile').replace(/:.*/, '')}
+              </span>
+              <span className="ce-pill ce-sm" title={w.users.map((k) => userName.get(k) ?? k).join(', ')}>
+                👤 {n(w.users.length)}
+              </span>
+              <span className="ce-muted ce-sm">{accountName.get(w.account)}</span>
+            </div>
+            {w.sets.map((s) => (
+              <div key={s.set} className="ce-row">
+                <span className="ce-pill ce-pill-violet" title={`${n(s.items.filter((i) => i.gpc).length)} matched to Insights Studio${s.items.some((i) => i.gpc?.guess) ? `, ${n(s.items.filter((i) => i.gpc?.guess).length)} as a best guess` : ''}`}>
+                  {SET_LABEL[s.set]} {n(s.items.length + s.more)}
+                </span>
+                <div className="ce-names">
+                  {s.items.slice(0, 12).map((i) => (
+                    <span key={`${i.entityType}:${i.legacy.id}`} className={`ce-name-chip${i.gpc ? (i.gpc.guess ? ' ce-guess' : '') : ' ce-unmatched'}`} title={`${ENTITY_TYPE[i.entityType] ?? i.entityType} · from ${PLATFORM_LABEL[i.legacy.platform]} ${i.legacy.list}${i.gpc ? ` · Insights Studio: ${i.gpc.name} #${i.gpc.id} · ${i.gpc.how}` : ' · not matched yet'}`}>
+                      {i.gpc?.name ?? i.name}
+                      {i.gpc?.guess ? ' ?' : ''}
+                    </span>
+                  ))}
+                  {s.items.length + s.more > 12 ? <span className="ce-muted ce-sm">+{n(s.items.length + s.more - 12)}</span> : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </>
+    ) : (
+      <p className="ce-muted">No workspaces: none of the users have lists or restrictions to keep.</p>
+    )
+
+  if (tab === 'Saved views')
+    return plan.savedViews?.length ? (
+      <div className="ce-table">
+        <p className="ce-muted ce-sm">Magnifier saved searches from 2026, recreated as Insights Studio saved views. Hover for their filters.</p>
+        <table className="dtable">
+          <thead>
+            <tr>
+              <th>Saved search</th>
+              <th>Person</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {plan.savedViews.slice(0, 500).map((v) => (
+              <tr key={v.key}>
+                <td title={[v.period, v.keyword ? `keyword "${v.keyword}"` : null, v.media.length ? v.media.join(', ') : null, ...v.filters.map((f) => `${f.label}: ${f.items.slice(0, 8).join(', ')}${f.total > 8 ? ` +${f.total - 8}` : ''}`)].filter(Boolean).join('\n') || 'No filters'}>
+                  ◆ {v.title} {v.shared ? <span className="ce-pill ce-sm">shared</span> : null}
+                </td>
+                <td>{userName.get(v.user) ?? v.user}</td>
+                <td className="ce-date">{v.updated ?? ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {plan.savedViews.length > 500 ? <p className="ce-muted ce-sm">Showing 500 of {n(plan.savedViews.length)}. The Word document has them all.</p> : null}
+      </div>
+    ) : (
+      <p className="ce-muted">{plan.savedViews ? 'No Magnifier saved searches from 2026 for the users created.' : 'Rebuild the plan to see saved searches.'}</p>
+    )
+
+  if (tab === 'Reports')
+    return plan.reports?.length ? (
+      <div className="ce-table">
+        <div className="ce-box ce-box-grey ce-sm">⏳ 360 reports used in 2026. They move once Insights Studio has its report builder, which does not exist yet.</div>
+        <table className="dtable">
+          <thead>
+            <tr>
+              <th>Report</th>
+              <th>Type</th>
+              <th>Person</th>
+              <th>Last used</th>
+            </tr>
+          </thead>
+          <tbody>
+            {plan.reports.slice(0, 500).map((r) => (
+              <tr key={r.key}>
+                <td>{r.name}</td>
+                <td className="ce-muted">{r.type}</td>
+                <td>{userName.get(r.user) ?? r.user}</td>
+                <td className="ce-date">{r.lastUsed ?? ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {plan.reports.length > 500 ? <p className="ce-muted ce-sm">Showing 500 of {n(plan.reports.length)}. The Word document has them all.</p> : null}
+      </div>
+    ) : (
+      <p className="ce-muted">{plan.reports ? 'No 360 reports used in 2026 by the users created.' : 'Rebuild the plan to see 360 reports.'}</p>
+    )
+
+  if (tab === 'Impact')
+    return (
+      <>
+        {addedMedia.length ? (
+          <div className="ce-box ce-box-green">
+            <span className="ce-big">▲ {n(addedMedia.length)} new media</span>
+            <div className="ce-names">
+              {addedMedia.map((m) => (
+                <span key={m.name} className="ce-name-chip ce-m-added" title={m.members.join(', ')}>
+                  {m.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {plan.impact.gains.filter((g) => !/new to them:/.test(g)).length ? (
+          <div className="ce-box ce-box-green">
+            <span className="ce-big">▲ Gains</span>
+            <ul className="ce-plan-list">
+              {plan.impact.gains
+                .filter((g) => !/new to them:/.test(g))
+                .map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+            </ul>
+          </div>
+        ) : null}
+        {plan.impact.losses.length ? (
+          <div className="ce-box ce-box-red">
+            <span className="ce-big">▼ Losses</span>
+            <ul className="ce-plan-list">
+              {plan.impact.losses.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {plan.impact.notInV1.length ? (
+          <div className="ce-box ce-box-grey">
+            <span className="ce-big">ⓘ Not in Insights Studio V1</span>
+            <ul className="ce-plan-list">
+              {plan.impact.notInV1.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        <h4>Media by platform</h4>
+        <MediaKey lost={plan.impact.media.some((m) => m.change.dropped.length > 0)} />
+        {plan.impact.media.map((m) => (
+          <div key={m.platform} className="ce-row">
+            <span className={`ce-badge ce-${m.platform}`}>{PLATFORM_LABEL[m.platform]}</span>
+            <div className="ce-names">
+              {rollupNames(m.change.kept).map((x) => (
+                <span key={x} className="ce-name-chip ce-m-kept">
+                  {x}
+                </span>
+              ))}
+              {m.change.dropped.map((x) => (
+                <span key={x} className="ce-name-chip ce-out" title="Not in Insights Studio yet">
+                  {x}
+                </span>
+              ))}
+              {rollupNames(m.change.added)
+                .filter((x) => !rollupNames(m.change.kept).includes(x))
+                .map((x) => (
+                  <span key={x} className="ce-name-chip ce-m-added" title="New to them">
+                    {x}
+                  </span>
+                ))}
+            </div>
+          </div>
+        ))}
+      </>
+    )
+
+  // Checklist
+  return (
+    <>
+      <ul className="ce-check">
+        {plan.checklist.map((s, i) => (
+          <li key={i}>{s}</li>
+        ))}
+      </ul>
+      {plan.notes.length ? (
+        <details className="ce-sm ce-muted">
+          <summary>Build notes ({n(plan.notes.length)})</summary>
+          <ul className="ce-plan-list">
+            {plan.notes.map((s, i) => (
+              <li key={i}>{s}</li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </>
+  )
+}
+
 /** What the media chips' colours mean. Each kind shows only where the list has it. */
 function MediaKey({ premium, withheld, lost }: { premium?: boolean; withheld?: boolean; lost?: boolean }) {
   return (
@@ -941,8 +1334,6 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
 
   const plan = view?.plan ?? null
   const working = view?.status === 'queued' || view?.status === 'building' || view?.status === 'none'
-  const accountName = new Map((plan?.accounts ?? []).map((a) => [a.key, a.name]))
-  const userName = new Map((plan?.users ?? []).map((u) => [u.key, u.name]))
   const created = (plan?.users ?? []).filter((u) => u.create.value)
 
   return (
@@ -1005,301 +1396,7 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
               ))}
             </div>
             <div className="ce-scroll ce-plan-body">
-              {tab === 'Summary' ? (
-                <>
-                  <div className="ce-plan-stats">
-                    <div>
-                      <b>{n(plan.accounts.length)}</b>
-                      <span>Insights Studio {plan.accounts.length === 1 ? 'account' : 'accounts'}</span>
-                    </div>
-                    <div>
-                      <b>{n(created.length)}</b>
-                      <span>users to create</span>
-                    </div>
-                    <div>
-                      <b>{n(plan.workspaces.length)}</b>
-                      <span>workspaces</span>
-                    </div>
-                    <div>
-                      <b>{n(plan.accounts[0]?.coverage.media.filter((m) => m.status === 'added').length ?? 0)}</b>
-                      <span>media added</span>
-                    </div>
-                  </div>
-                  <ul className="ce-plan-list">
-                    {plan.summary.map((s, i) => (
-                      <li key={i}>{s}</li>
-                    ))}
-                  </ul>
-                  {plan.review.issues.length ? (
-                    <>
-                      <h4>Review</h4>
-                      <ul className="ce-plan-list">
-                        {plan.review.issues.map((s, i) => (
-                          <li key={i}>{s}</li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : null}
-                  <p className="ce-muted ce-sm">
-                    Organization: <b>{plan.organization.name}</b>. {plan.organization.why}
-                  </p>
-                </>
-              ) : null}
-
-              {tab === 'Accounts'
-                ? plan.accounts.map((a) => (
-                    <div key={a.key} className="ce-report">
-                      <div>
-                        <b>{a.name}</b> <span className="ce-badge ce-360">{ACCOUNT_TYPE_LABEL[a.type.value]}</span> <span className="ce-muted ce-sm">{n(a.seats)} users</span>
-                      </div>
-                      <div className="ce-muted ce-sm">{a.why}</div>
-                      <dl className="ce-dl">
-                        <dt>Replaces</dt>
-                        <dd>{a.from.map((f) => `${PLATFORM_LABEL[f.platform]}: ${f.name}`).join(' · ')}</dd>
-                        <dt>Packages</dt>
-                        <dd>
-                          {a.packages.map((p) => (
-                            <div key={p.key}>
-                              <b>{p.name}</b>
-                              {p.kind === 'add_on' ? <span className="ce-muted"> (add-on)</span> : null} <span className="ce-muted ce-sm">{p.why}</span>
-                            </div>
-                          ))}
-                        </dd>
-                        <dt>History</dt>
-                        <dd>
-                          {a.contract.lookbackYears.value} years <span className="ce-muted ce-sm">{a.contract.lookbackYears.why}</span>
-                        </dd>
-                        <dt>Preliminary</dt>
-                        <dd>
-                          {a.contract.includePreliminary.value ? 'Yes' : 'No'} <span className="ce-muted ce-sm">{a.contract.includePreliminary.why}</span>
-                        </dd>
-                        <dt>Countries</dt>
-                        <dd>{a.coverage.countries.map((c) => c.name).join(', ')}</dd>
-                        <dt>Media</dt>
-                        <dd>
-                          <MediaKey withheld={a.coverage.withheld.length > 0} premium={a.coverage.media.some((m) => m.status === 'premium')} />
-                          <div className="ce-names">
-                            {a.coverage.media.map((m) => (
-                              <span key={m.id} className={`ce-name-chip ce-m-${m.status}`} title={m.status === 'added' ? 'New to them' : m.status === 'premium' ? 'Premium, kept: they have it today' : 'They have it today'}>
-                                {m.name}
-                              </span>
-                            ))}
-                            {a.coverage.withheld.map((w) => (
-                              <span key={w.name} className="ce-name-chip ce-withheld" title={w.why}>
-                                {w.name}
-                              </span>
-                            ))}
-                          </div>
-                        </dd>
-                        {a.coverage.widened.length ? (
-                          <>
-                            <dt>Lifted</dt>
-                            <dd className="ce-sm">
-                              {a.coverage.widened.slice(0, 8).map((w, i) => (
-                                <div key={i}>{w}</div>
-                              ))}
-                              {a.coverage.widened.length > 8 ? <div className="ce-muted">and {a.coverage.widened.length - 8} more</div> : null}
-                            </dd>
-                          </>
-                        ) : null}
-                      </dl>
-                    </div>
-                  ))
-                : null}
-
-              {tab === 'Users' ? (
-                <div className="ce-table">
-                  <table className="dtable">
-                    <thead>
-                      <tr>
-                        <th>Person</th>
-                        <th>Account</th>
-                        <th>Last login</th>
-                        <th>Create</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {plan.users.slice(0, 500).map((u) => (
-                        <tr key={u.key} className={u.create.value ? undefined : 'ce-inactive'}>
-                          <td>
-                            <b>{u.name}</b>
-                            <div className="ce-sub">
-                              {u.email ?? ''} · {[...new Set(u.logins.map((l) => PLATFORM_LABEL[l.platform]))].join(', ')}
-                            </div>
-                          </td>
-                          <td>{accountName.get(u.account ?? '') ?? '—'}</td>
-                          <td className="ce-date">{u.lastSeen ?? <span className="ce-muted">None on record</span>}</td>
-                          <td title={u.create.why}>{u.create.value ? <b>Yes</b> : <span className="ce-muted">No: {u.create.why}</span>}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {plan.users.length > 500 ? <p className="ce-muted ce-sm">Showing 500 of {n(plan.users.length)}. The Word document has them all.</p> : null}
-                </div>
-              ) : null}
-
-              {tab === 'Workspaces' ? (
-                plan.workspaces.length ? (
-                  plan.workspaces.map((w) => (
-                    <div key={w.key} className="ce-report">
-                      <div>
-                        <b>{w.name}</b> <span className="ce-muted ce-sm">· {accountName.get(w.account)} · {w.source}</span>
-                      </div>
-                      <div className="ce-muted ce-sm">
-                        For {w.users.slice(0, 6).map((k) => userName.get(k) ?? k).join(', ')}
-                        {w.users.length > 6 ? ` and ${w.users.length - 6} more` : ''}
-                      </div>
-                      {w.sets.map((s) => (
-                        <div key={s.set}>
-                          <span className="ce-sm">
-                            <b>{SET_LABEL[s.set]}</b> <span className="ce-muted">{n(s.items.length + s.more)} · {n(s.items.filter((i) => i.gpc).length)} matched{s.items.some((i) => i.gpc?.guess) ? ` (${n(s.items.filter((i) => i.gpc?.guess).length)} best guess)` : ''}</span>
-                          </span>
-                          <div className="ce-names">
-                            {s.items.slice(0, 24).map((i) => (
-                              <span key={`${i.entityType}:${i.legacy.id}`} className={`ce-name-chip${i.gpc ? (i.gpc.guess ? ' ce-guess' : '') : ' ce-unmatched'}`} title={`${ENTITY_TYPE[i.entityType] ?? i.entityType} · from ${PLATFORM_LABEL[i.legacy.platform]} ${i.legacy.list}${i.gpc ? ` · Insights Studio: ${i.gpc.name} #${i.gpc.id} · ${i.gpc.how}` : ' · not matched yet'}`}>
-                                {i.gpc?.name ?? i.name}
-                                {i.gpc?.guess ? ' ?' : ''}
-                              </span>
-                            ))}
-                            {s.items.length + s.more > 24 ? <span className="ce-muted ce-sm">+{n(s.items.length + s.more - 24)}</span> : null}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ))
-                ) : (
-                  <p className="ce-muted">No workspaces: none of the users have lists or restrictions to keep.</p>
-                )
-              ) : null}
-
-              {tab === 'Saved views' ? (
-                plan.savedViews?.length ? (
-                  <>
-                    <p className="ce-muted ce-sm">Magnifier saved searches saved or updated in 2026, to recreate as Insights Studio saved views.</p>
-                    {plan.savedViews.slice(0, 300).map((v) => (
-                      <div key={v.key} className="ce-report">
-                        <div>
-                          <b>{v.title}</b> <span className="ce-muted ce-sm">· {userName.get(v.user) ?? v.user}{v.updated ? ` · updated ${v.updated}` : ''}{v.shared ? ' · shared' : ''}</span>
-                        </div>
-                        <div className="ce-muted ce-sm">{[v.period, v.keyword ? `keyword "${v.keyword}"` : null, v.media.length ? v.media.join(', ') : null].filter(Boolean).join(' · ') || 'No filters'}</div>
-                        {v.filters.map((f) => (
-                          <div key={f.label} className="ce-sm">
-                            <b>{f.label}</b> <span className="ce-muted">{f.items.slice(0, 8).join(', ')}{f.total > 8 ? ` +${n(f.total - 8)}` : ''}{f.excluded.length ? ` · not ${f.excluded.slice(0, 4).join(', ')}` : ''}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                    {plan.savedViews.length > 300 ? <p className="ce-muted ce-sm">Showing 300 of {n(plan.savedViews.length)}. The Word document has them all.</p> : null}
-                  </>
-                ) : (
-                  <p className="ce-muted">{plan.savedViews ? 'No Magnifier saved searches from 2026 for the users created.' : 'Rebuild the plan to see saved searches.'}</p>
-                )
-              ) : null}
-
-              {tab === 'Reports' ? (
-                plan.reports?.length ? (
-                  <>
-                    <p className="ce-muted ce-sm">360 reports used in 2026. They migrate once Insights Studio has its report builder, which does not exist yet.</p>
-                    <div className="ce-table">
-                      <table className="dtable">
-                        <thead>
-                          <tr>
-                            <th>Report</th>
-                            <th>Type</th>
-                            <th>Person</th>
-                            <th>Last used</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {plan.reports.slice(0, 500).map((r) => (
-                            <tr key={r.key}>
-                              <td>{r.name}</td>
-                              <td className="ce-muted">{r.type}</td>
-                              <td>{userName.get(r.user) ?? r.user}</td>
-                              <td className="ce-date">{r.lastUsed ?? ''}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {plan.reports.length > 500 ? <p className="ce-muted ce-sm">Showing 500 of {n(plan.reports.length)}. The Word document has them all.</p> : null}
-                  </>
-                ) : (
-                  <p className="ce-muted">{plan.reports ? 'No 360 reports used in 2026 by the users created.' : 'Rebuild the plan to see 360 reports.'}</p>
-                )
-              ) : null}
-
-              {tab === 'Impact' ? (
-                <>
-                  {plan.impact.gains.length ? (
-                    <>
-                      <h4>Gains</h4>
-                      <ul className="ce-plan-list">
-                        {plan.impact.gains.map((s, i) => (
-                          <li key={i}>{s}</li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : null}
-                  {plan.impact.losses.length ? (
-                    <>
-                      <h4>Losses</h4>
-                      <ul className="ce-plan-list">
-                        {plan.impact.losses.map((s, i) => (
-                          <li key={i}>{s}</li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : null}
-                  {plan.impact.notInV1.length ? (
-                    <>
-                      <h4>Not in Insights Studio V1</h4>
-                      <ul className="ce-plan-list">
-                        {plan.impact.notInV1.map((s, i) => (
-                          <li key={i}>{s}</li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : null}
-                  <h4>Media by platform</h4>
-                  <MediaKey lost={plan.impact.media.some((m) => m.change.dropped.length > 0)} />
-                  {plan.impact.media.map((m) => (
-                    <div key={m.platform} className="ce-report">
-                      <b>{PLATFORM_LABEL[m.platform]}</b>
-                      <div className="ce-names">
-                        {m.change.kept.map((x) => (
-                          <span key={x} className="ce-name-chip ce-m-kept">
-                            {x}
-                          </span>
-                        ))}
-                        {m.change.dropped.map((x) => (
-                          <span key={x} className="ce-name-chip ce-out" title="Not in Insights Studio yet">
-                            {x}
-                          </span>
-                        ))}
-                        {m.change.added.map((x) => (
-                          <span key={x} className="ce-name-chip ce-m-added" title="New to them">
-                            {x}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </>
-              ) : null}
-
-              {tab === 'Checklist' ? (
-                <ul className="ce-plan-list">
-                  {plan.checklist.map((s, i) => (
-                    <li key={i}>{s}</li>
-                  ))}
-                  {plan.notes.map((s, i) => (
-                    <li key={`n${i}`} className="ce-muted">
-                      {s}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              <PlanBody plan={plan} tab={tab} />
             </div>
           </>
         )}

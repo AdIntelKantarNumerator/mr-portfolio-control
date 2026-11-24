@@ -86,6 +86,35 @@ export const MEDIA: IsMedia[] = [
  */
 export const PREMIUM_MEDIA = new Set([407, 501, 502])
 
+/**
+ * Media shown as one (Scott, 24 November 2026): every TV medium is "Linear TV", every magazine one (Medical Journals
+ * too) "Magazines", every newspaper one "Newspapers". A client with any medium in a group has the group. The
+ * entitlement still names each medium; this is how a plan reads.
+ */
+const MEDIA_GROUP: Record<string, string> = { Television: 'Linear TV', Magazine: 'Magazines', Newspaper: 'Newspapers' }
+const groupByName = new Map(MEDIA.map((m) => [m.name.toLowerCase(), MEDIA_GROUP[m.type] ?? m.name]))
+
+/** The name a medium is shown under: its group's, or its own. */
+export const mediaGroupOf = (name: string) => groupByName.get(name.toLowerCase()) ?? name
+
+/** Names rolled up into their groups, each once, in the order first seen. */
+export const rollupNames = (names: string[]) => [...new Set(names.map(mediaGroupOf))]
+
+/** A plan's media rolled up: a group is kept when any of its media is, otherwise it takes its members' status. */
+export function rollupMedia<T extends { name: string; status: 'kept' | 'added' | 'premium' }>(media: T[]): Array<{ name: string; status: T['status']; members: string[] }> {
+  const out = new Map<string, { name: string; status: T['status']; members: string[] }>()
+  for (const m of media) {
+    const name = mediaGroupOf(m.name)
+    const g = out.get(name)
+    if (!g) out.set(name, { name, status: m.status, members: [m.name] })
+    else {
+      g.members.push(m.name)
+      if (m.status === 'kept' || (m.status === 'premium' && g.status === 'added')) g.status = m.status
+    }
+  }
+  return [...out.values()]
+}
+
 /** Countries a plan can name. Non-US only when the client has it today (Scott, 23 November 2026). */
 export const COUNTRIES = { US: 'United States', CA: 'Canada' } as const
 export type CountryCode = keyof typeof COUNTRIES

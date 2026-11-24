@@ -389,3 +389,23 @@ test('Migration Plan: the premium note says what they keep and what is not inclu
   assert.match(premiumNote([acct([])])!, /None is included/)
   assert.match(premiumNote([acct(['Social', 'AVOD', 'Live Streaming Sports'])])!, /keep all three/)
 })
+
+test('Migration Plan: holding companies go account by account; market-split clients get one account', async () => {
+  const { planMode } = await import('../src/lib/client-eval/migration/mode')
+  const s360 = (filters: Array<{ type: string; include: string[] }>) => ({ type: 'brand_agency' as const, ent: { kind: '360' as const, application: 'Media Buyer', years: 3, media: null, features: [], filters: filters.map((f) => ({ ...f, exclude: [], count: f.include.length })) } })
+  const three = [s360([]), s360([]), s360([])]
+  assert.equal(planMode('Publicis Zenith Media', null, three).mode, 'holding')
+  assert.equal(planMode('Zenith Solar', 'Publicis Groupe', three).mode, 'holding', 'by its license group')
+  assert.equal(planMode('Publicis Zenith Media', null, three.slice(0, 2)).mode, 'standard', 'two accounts are not a holding company')
+  const pub = (m: string) => ({ ...s360([{ type: 'Markets', include: [m, '* TOTAL US'] }]), type: 'publisher' as const })
+  assert.equal(planMode('Sinclair Broadcasting Corporate', null, [pub('MACON,GA'), pub('TULSA,OK'), pub('ALBANY,GA')]).mode, 'markets')
+  assert.equal(planMode('Acme', null, [s360([]), s360([]), s360([])]).mode, 'standard')
+})
+
+test('Migration Plan: TV, magazines and newspapers are shown as one each', async () => {
+  const { rollupMedia, rollupNames } = await import('../src/lib/client-eval/migration/catalog')
+  const m = (name: string, status: 'kept' | 'added' | 'premium') => ({ name, status })
+  const r = rollupMedia([m('Network TV', 'added'), m('Cable TV', 'kept'), m('Medical Journals', 'added'), m('Sunday Magazines', 'added'), m('National Newspapers', 'added'), m('Social', 'premium')])
+  assert.deepEqual(r.map((x) => [x.name, x.status]), [['Linear TV', 'kept'], ['Magazines', 'added'], ['Newspapers', 'added'], ['Social', 'premium']])
+  assert.deepEqual(rollupNames(['Spot TV', 'Syndication', 'Browser Display']), ['Linear TV', 'Browser Display'])
+})
