@@ -30,6 +30,7 @@ const IDLE_MS = 60_000
 const BUSY_MS = 30_000
 const ASKED = 100_000
 const CHECK_BATCH = 50
+const STUCK_MS = 30 * 60_000
 
 export interface PlanView {
   status: 'none' | 'queued' | 'building' | 'ready' | 'failed'
@@ -182,8 +183,9 @@ async function runOne(clientId: string, depth: 'full' | 'light') {
 export async function requestPlan(clientId: string, by: string | null): Promise<void> {
   const [c] = await db.select({ id: ceClients.clientId }).from(ceClients).where(eq(ceClients.clientId, clientId)).limit(1)
   if (!c) throw new Error('That client is not in the list. It may have changed with a refresh.')
-  const [have] = await db.select({ status: cePlans.status }).from(cePlans).where(eq(cePlans.clientId, clientId)).limit(1)
-  if (have?.status === 'building') return
+  const [have] = await db.select({ status: cePlans.status, startedAt: cePlans.startedAt }).from(cePlans).where(eq(cePlans.clientId, clientId)).limit(1)
+  // Building: leave it, unless it started so long ago that it must have stopped (a restart, a hang).
+  if (have?.status === 'building' && have.startedAt && Date.now() - have.startedAt.getTime() < STUCK_MS) return
   await db
     .insert(cePlans)
     .values({ clientId, status: 'queued', depth: 'full', priority: ASKED, requestedAt: new Date(), requestedBy: by })

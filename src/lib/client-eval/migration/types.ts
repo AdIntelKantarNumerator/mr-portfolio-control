@@ -7,7 +7,7 @@ import type { MediaChange } from '../media-map'
 import type { Platform } from '../types'
 import type { AccountType, CountryCode, Role, SetKey } from './catalog'
 
-export const PLAN_VERSION = 1
+export const PLAN_VERSION = 2
 
 /** A choice and why it was made. */
 export interface Reasoned<T> {
@@ -61,7 +61,7 @@ export interface PlanWorkspaceItem {
   /** Where it came from: platform, the legacy list and id. */
   legacy: { platform: Platform; list: string; id: string }
   /** The Insights Studio (GPC) id, when it could be matched; null otherwise. */
-  gpc: { id: string; name: string; how: string } | null
+  gpc: { id: string; name: string; how: string; guess?: boolean } | null
 }
 
 export interface PlanWorkspace {

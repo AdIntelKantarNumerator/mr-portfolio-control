@@ -303,10 +303,10 @@ test('360: a user set is active only when its license group is too', async () =>
   assert.equal(isSetActive({ active_f: 1, grp_active: null }), true)
 })
 
-test('Migration Plan: premium media are Live Streaming Sports and National Newspapers, both in the catalogue', async () => {
+test('Migration Plan: Live Streaming Sports is the only premium medium (National Newspapers is not)', async () => {
   const { MEDIA, PREMIUM_MEDIA, packageByKey } = await import('../src/lib/client-eval/migration/catalog')
   const premium = MEDIA.filter((m) => PREMIUM_MEDIA.has(m.id)).map((m) => m.name)
-  assert.deepEqual(premium.sort(), ['Live Streaming Sports', 'National Newspapers'])
+  assert.deepEqual(premium, ['Live Streaming Sports'])
   assert.equal(packageByKey.get('competitive')?.id, 2)
   assert.equal(packageByKey.get('ratings_us_linear_tv')?.kind, 'add_on')
 })

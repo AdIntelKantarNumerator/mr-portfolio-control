@@ -80,11 +80,10 @@ export const MEDIA: IsMedia[] = [
 
 /**
  * Premium media (Scott, 23 November 2026): packaging gives every medium except
- * these, which only clients who have them today keep. Live Streaming Sports is
- * Scott's example; National Newspapers (WSJ, NYT, USA Today) is left out of the
- * standard "US All Media" coverage template, so it is treated the same way.
+ * these, which only clients who have them today keep: Live Streaming Sports.
+ * National Newspapers is not premium (Scott).
  */
-export const PREMIUM_MEDIA = new Set([502, 902])
+export const PREMIUM_MEDIA = new Set([502])
 
 /** Countries a plan can name. Non-US only when the client has it today (Scott, 23 November 2026). */
 export const COUNTRIES = { US: 'United States', CA: 'Canada' } as const

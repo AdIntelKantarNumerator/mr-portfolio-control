@@ -24,7 +24,8 @@ import type { Database } from '@/db/client'
 import { ceAccounts, ceClients, ceUsers } from '@/db/schema'
 import { chunks, q360 } from '@/lib/import360/source'
 import { completeJson } from '@/lib/llm'
-import { dbxCategoryFlows, dbxFlows, dbxTaxonomyTree, type FlowRaw } from '@/lib/taxonomy-dbx'
+import { dbxCategoryFlows, dbxFlows, dbxGpcNameMatches, dbxTaxonomyTree, type FlowRaw } from '@/lib/taxonomy-dbx'
+import type { Candidate } from '@/lib/taxonomy-rules'
 import { ADV_360, candidatesMagnifier, names360, plainTerms, type Candidates } from '../deck-data'
 import { currentMedia, mediaChange, type MediaChange } from '../media-map'
 import { ratingsRunsBySet } from '../ratings-usage'
@@ -205,7 +206,6 @@ Reply with JSON only: {"organization":"name","organizationWhy":"one sentence","a
 // ------------------------------------------------------------------ an account's entitlements
 
 const PRELIM = /preliminary/i
-const NATIONAL_PAPERS = new Set(['Wall Street Journal', 'USA Today', 'New York Times', 'Natl Newspapers'])
 
 function legacyMedia(members: Legacy[]): Map<Platform, { media: Set<string>; restricted: boolean }> {
   const out = new Map<Platform, { media: Set<string>; restricted: boolean }>()
@@ -270,14 +270,12 @@ function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number
   const legacy = legacyMedia(g.members)
   const keptNames = new Set<string>()
   let lss = false
-  let papers = false
   for (const [p, m] of legacy) {
     const ch = mediaChange(p, [...m.media], m.restricted)
     for (const k of ch.kept) keptNames.add(k)
     if (ch.kept.includes('Live Streaming Sports')) lss = true
-    if (p === '360' && [...m.media].some((x) => NATIONAL_PAPERS.has(x))) papers = true
   }
-  const premiumHeld = new Set<number>([...(lss ? [502] : []), ...(papers ? [902] : [])])
+  const premiumHeld = new Set<number>(lss ? [502] : [])
   const media: PlanAccount['coverage']['media'] = []
   const withheld: PlanAccount['coverage']['withheld'] = []
   for (const m of MEDIA.filter((x) => x.active)) {
@@ -459,7 +457,7 @@ async function buildMatcher(advIds: string[], catIds: string[], magnifierAccount
     try {
       for (let i = 0; i < advIds.length; i += FOLLOW_BATCH) {
         if (i) await progress(`Following advertisers into Insights Studio (${i} of ${advIds.length})`)
-        fromFlows(await dbxFlows('VX1', advIds.slice(i, i + FOLLOW_BATCH), new Map(), undefined, { large: true }), m.adv)
+        fromFlows(await within(6 * 60_000, 'Following advertisers', () => dbxFlows('VX1', advIds.slice(i, i + FOLLOW_BATCH), new Map(), undefined, { large: true })), m.adv)
       }
     } catch (err) {
       notes.push(`360 advertisers could not be followed into Insights Studio: ${(err as Error).message}`.slice(0, 200))
@@ -469,8 +467,8 @@ async function buildMatcher(advIds: string[], catIds: string[], magnifierAccount
     await progress(`Following ${catIds.length} categories into Insights Studio`)
     try {
       const flows = new Map<string, FlowRaw[]>()
-      for (let i = 0; i < catIds.length; i += FOLLOW_BATCH) for (const [k, v] of await dbxCategoryFlows('VX1', catIds.slice(i, i + FOLLOW_BATCH))) flows.set(k, v)
-      const tree = await dbxTaxonomyTree()
+      for (let i = 0; i < catIds.length; i += FOLLOW_BATCH) for (const [k, v] of await within(6 * 60_000, 'Following categories', () => dbxCategoryFlows('VX1', catIds.slice(i, i + FOLLOW_BATCH)))) flows.set(k, v)
+      const tree = await within(4 * 60_000, 'Reading the taxonomy', () => dbxTaxonomyTree())
       const byName = new Map<string, { id: string; e: number }>()
       for (const n of tree) {
         const e = LEVEL_E.find(([re]) => re.test(n.level))?.[1]
@@ -490,10 +488,10 @@ async function buildMatcher(advIds: string[], catIds: string[], magnifierAccount
   if (magnifierAccounts.length) {
     await progress("Following Magnifier's advertisers into Insights Studio")
     try {
-      const c = await candidatesMagnifier(magnifierAccounts)
+      const c = await within(3 * 60_000, "Reading Magnifier's report criteria", () => candidatesMagnifier(magnifierAccounts))
       if (c.c?.kind === 'advertiser' && c.c.items.length) {
         magnifierFocus = c.c
-        const flows = await dbxFlows('VX2', c.c.items.map((i) => i.id), new Map(), undefined, { large: true })
+        const flows = await within(6 * 60_000, 'Following Magnifier advertisers', () => dbxFlows('VX2', c.c!.items.map((i) => i.id), new Map(), undefined, { large: true }))
         const into = new Map<string, { id: string; name: string; parent: boolean }>()
         fromFlows(flows, into)
         for (const i of c.c.items) {
@@ -518,6 +516,9 @@ function item360(r: RawItem, names: Map<string, string>, m: Matcher | null, list
     const g = m.adv.get(adv)!
     gpc = { id: g.id, name: g.name, how: 'Followed by its ads (Taxonomy Comparison)' }
     e = g.parent ? 102 : r.e === 102 ? 102 : 139
+  } else if (r.e === 373) {
+    // Properties carry the same id in Insights Studio as in 360 (Scott, 23 November 2026).
+    gpc = { id: String(r.id), name, how: 'Same property id in Insights Studio' }
   } else if (m && cat && m.cat.get(cat)) {
     const g = m.cat.get(cat)!
     gpc = { id: g.id, name: g.name, how: 'Followed by its ads (Taxonomy Comparison)' }
@@ -546,6 +547,78 @@ function wsName(sets: PlanWorkspace['sets'], fallback: string): string {
   const names = first.items.slice(0, 2).map((i) => i.gpc?.name ?? i.name)
   const rest = first.items.length + first.more - names.length
   return `${names.join(', ')}${rest > 0 ? ` +${rest}` : ''}`.slice(0, 80)
+}
+
+const NAME_BATCH = 40
+const NAME_MAX = 600
+
+/**
+ * Advertisers Taxonomy Comparison could not follow (no recent spend): Insights Studio entities with a similar
+ * name are found as Taxonomy Comparison searches them, and the model picks the one that is the same company
+ * or brand, or none. Every match made this way is marked as a best guess (Scott, 23 November 2026).
+ */
+async function nameMatch(workspaces: PlanWorkspace[], progress: PlanProgress): Promise<{ guessed: number }> {
+  const want = new Map<string, PlanWorkspaceItem[]>()
+  for (const w of workspaces)
+    for (const s of w.sets)
+      if (s.set === 'advertisers')
+        for (const i of s.items) if (!i.gpc && i.name && !i.name.startsWith('#')) (want.get(i.name) ?? want.set(i.name, []).get(i.name)!).push(i)
+  const names = [...want.keys()].slice(0, NAME_MAX)
+  if (!names.length) return { guessed: 0 }
+  await progress(`Finding ${names.length} advertisers by name in Insights Studio`)
+  const cands = new Map<string, Candidate[]>()
+  for (let i = 0; i < names.length; i += 400) for (const [k, v] of await within(4 * 60_000, 'Finding advertisers by name', () => dbxGpcNameMatches(names.slice(i, i + 400)))) cands.set(k, v)
+  let guessed = 0
+  const batches: string[][] = []
+  for (let i = 0; i < names.length; i += NAME_BATCH) batches.push(names.slice(i, i + NAME_BATCH).filter((n) => cands.get(n)?.length))
+  let done = 0
+  // Three at a time: each call is a model round trip of 10–30 seconds.
+  for (let b = 0; b < batches.length; b += 3) {
+    await progress(`Matching advertisers by name (model): ${done} of ${names.length}`)
+    await Promise.all(batches.slice(b, b + 3).map((part) => judge(part)))
+    done += batches.slice(b, b + 3).reduce((s, x) => s + x.length, 0)
+  }
+  return { guessed }
+
+  async function judge(part: string[]) {
+    if (!part.length) return
+    const ask = part
+      .map((n) => ({
+        name: n,
+        type: ENTITY_TYPE[want.get(n)![0]!.entityType] ?? 'Advertiser',
+        candidates: (cands.get(n) ?? []).slice(0, 8).map((c) => ({ id: c.id, name: c.name, level: c.level, under: c.via ?? null, size: c.size })),
+      }))
+      .filter((x) => x.candidates.length)
+    if (!ask.length) return
+    const { text } = await completeJson(
+      `You match advertisers from MediaRadar's legacy taxonomy to entities in the Insights Studio taxonomy by name.
+For each legacy name, pick the candidate that is the same company or brand, or null when none clearly is. A parent company is right for a legacy parent; a brand for a legacy brand or product. Different companies with similar names are not a match. Prefer null to a weak guess.
+Reply with JSON only: {"matches":[{"name":"legacy name as given","id":"candidate id" or null,"confidence":"high"|"medium"|"low"}]}`,
+      JSON.stringify(ask),
+      { maxTokens: 3000 },
+    )
+    const json = parseJson<{ matches?: Array<{ name?: string; id?: string | null; confidence?: string }> }>(text)
+    for (const m of json?.matches ?? []) {
+      const name = String(m.name ?? '')
+      const c = (cands.get(name) ?? []).find((x) => x.id === String(m.id ?? ''))
+      if (!c || m.confidence === 'low') continue
+      for (const item of want.get(name) ?? []) {
+        item.gpc = { id: c.id, name: c.name, how: `Best guess by name (model, ${m.confidence === 'high' ? 'high' : 'medium'} confidence)`, guess: true }
+        item.entityType = c.level === 'Parent' ? 102 : 139
+        guessed++
+      }
+    }
+  }
+}
+
+/** Run something with a time limit: a Databricks statement can wait on the warehouse for a long time. */
+async function within<T>(ms: number, what: string, f: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([f(), new Promise<T>((_, reject) => (timer = setTimeout(() => reject(new Error(`${what} took longer than ${Math.round(ms / 60_000)} minutes`)), ms)))])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 // ------------------------------------------------------------------ the plan
@@ -689,6 +762,31 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
     }
   }
 
+  // Advertisers with no spend to follow: matched by name, the model judging among the candidates.
+  if (opts.depth === 'full' && useModel) {
+    try {
+      const n = await nameMatch(workspaces, progress)
+      if (n.guessed) notes.push(`${n.guessed} workspace items were matched by name as the model's best guess; they are marked.`)
+    } catch (err) {
+      notes.push(`Matching advertisers by name did not run: ${(err as Error).message}`.slice(0, 200))
+    }
+  }
+
+  // Several legacy items can land on one Insights Studio entity (a company's brands): a workspace holds each once.
+  for (const w of workspaces)
+    for (const s of w.sets) {
+      const seen = new Set<string>()
+      const before = s.items.length
+      s.items = s.items.filter((i) => {
+        if (!i.gpc) return true
+        const k = `${i.entityType}:${i.gpc.id}`
+        if (seen.has(k)) return false
+        seen.add(k)
+        return true
+      })
+      if (s.items.length < before) w.why = w.why.replace(/\.?$/, `. ${before - s.items.length} legacy ${s.set === 'advertisers' ? 'advertisers' : 'items'} land on the same Insights Studio entity as another and are merged.`).replace(/\.\. /, '. ')
+    }
+
   // Impact, per platform.
   const media: MigrationPlan['impact']['media'] = []
   const legacyAll = legacyMedia(groups.flatMap((g) => g.members))
@@ -711,7 +809,7 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
     x.change.dropped = gone
     if (gone.length) losses.push(`${PLATFORM_LABEL[x.platform]}: ${gone.join(', ')} not in Insights Studio yet.`)
   }
-  for (const a of accounts) for (const w of a.coverage.withheld) if (w.name === 'Live Streaming Sports' || w.name === 'National Newspapers') notInV1.push(`${a.name}: ${w.name} is premium and not included (they do not have it today).`)
+  for (const a of accounts) for (const w of a.coverage.withheld) notInV1.push(`${a.name}: ${w.name} is premium and not included (they do not have it today).`)
   if (accounts.some((a) => a.packages.some((p) => p.key === 'ratings_us_linear_tv'))) notInV1.push('Ratings access by book and market is not carried by Insights Studio V1: ratings scope is set up separately.')
   if (workspaces.some((w) => w.sets.some((s) => s.set === 'markets'))) notInV1.push('Market lists are kept in workspaces, but Insights Studio does not apply workspace markets yet.')
 
@@ -721,7 +819,9 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   const skipped = users.filter((u) => !u.create.value && u.logins.some((l) => l.active))
   if (skipped.length) checklist.push(`${skipped.length} active ${skipped.length === 1 ? 'user has' : 'users have'} not logged in for ${RECENT_MONTHS} months and ${skipped.length === 1 ? 'is' : 'are'} not proposed; confirm before migrating.`)
   const unmatched = workspaces.reduce((s, w) => s + w.sets.reduce((t, x) => t + x.items.filter((i) => !i.gpc && x.set !== 'markets').length, 0), 0)
-  if (unmatched) checklist.push(`${unmatched} workspace items are not matched to Insights Studio ids yet (properties are not matched; ${opts.depth === 'light' ? 'this is a light plan, so advertisers and categories were not followed' : 'some advertisers and categories had no recent spend to follow'}).`)
+  if (unmatched) checklist.push(`${unmatched} workspace items are not matched to Insights Studio ids yet (${opts.depth === 'light' ? 'this is a light plan, so advertisers and categories were not followed' : 'no recent spend to follow and no convincing match by name'}).`)
+  const guesses = workspaces.reduce((s, w) => s + w.sets.reduce((t, x) => t + x.items.filter((i) => i.gpc?.guess).length, 0), 0)
+  if (guesses) checklist.push(`${guesses} workspace items were matched by name as a best guess (marked); check them.`)
   if (legacy.some((a) => a.platform === 'classic')) checklist.push("Classic users' own lists (properties, competitive sets, categories) are not read yet, so their workspaces are not proposed.")
   if (accounts.some((a) => a.packages.some((p) => p.key === 'ratings_us_linear_tv'))) checklist.push('Set up ratings scope (books and markets) outside Insights Studio V1.')
   const inactive = legacy.filter((a) => !a.active)

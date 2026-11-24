@@ -1122,3 +1122,41 @@ ORDER BY tp.spend DESC`
     firstSeen: r.first_seen,
   }))
 }
+
+// --- Migration Plans: names that could not be followed (Client Evaluation) ----
+
+const COMPANY_SUFFIX = /(incorporated|inc|llc|ltd|plc|corporation|corp|company|co|holdings|group|the)$/
+const sqlText = (s: string) => `'${s.replace(/'/g, "''")}'`
+
+/**
+ * Insights Studio entities whose names closely match legacy advertisers' (Scott, 23 November 2026: match on
+ * name where there is no spend to follow, the model judging): the same compacted name, the same without a
+ * company suffix or a leading "the", or one name starting with the other (5+ characters). One statement for every name, so a
+ * large client is one scan of the entity table, not one per name as dbxGpcCandidates does.
+ */
+export async function dbxGpcNameMatches(names: string[], onWait?: OnWait): Promise<Map<string, Candidate[]>> {
+  const out = new Map<string, Candidate[]>()
+  const rows = names
+    .map((n) => ({ n, k: compactName(n) }))
+    .filter((x) => x.k.length >= 3)
+    .map(({ n, k }) => `(${sqlText(n)}, ${sqlText(k)}, ${sqlText(k.replace(/^the/, '').replace(COMPANY_SUFFIX, ''))})`)
+  if (!rows.length) return out
+  const sql = `
+WITH pats AS (SELECT * FROM VALUES ${rows.join(', ')} AS t(input, k, s)),
+ent AS (SELECT entity_id, coalesce(display_name, legal_name) name, nullif(parent_entity_id, entity_id) par,
+    regexp_replace(lower(coalesce(display_name, legal_name)), '[^a-z0-9]', '') ck,
+    regexp_replace(regexp_replace(regexp_replace(lower(coalesce(display_name, legal_name)), '[^a-z0-9]', ''), '^the', ''), '(incorporated|inc|llc|ltd|plc|corporation|corp|company|co|holdings|group)$', '') cs
+  FROM mrdpp_prod.global_catalog.entity WHERE coalesce(display_name, legal_name) IS NOT NULL),
+m AS (SELECT p.input, p.k, e.entity_id, e.name, e.par, e.ck FROM pats p JOIN ent e
+  ON e.ck = p.k OR (length(p.s) >= 4 AND e.cs = p.s)
+  OR (length(p.k) >= 5 AND startswith(e.ck, p.k)) OR (length(e.ck) >= 5 AND startswith(p.k, e.ck)))
+SELECT m.input, cast(m.entity_id AS string) id, m.name, CASE WHEN m.par IS NULL THEN 'parent company' ELSE pe.name END parent
+FROM m LEFT JOIN (SELECT entity_id, coalesce(display_name, legal_name) name FROM mrdpp_prod.global_catalog.entity) pe ON pe.entity_id = m.par
+QUALIFY row_number() OVER (PARTITION BY m.input ORDER BY CASE WHEN m.ck = m.k THEN 0 ELSE 1 END, abs(length(m.ck) - length(m.k))) <= 8`
+  for (const r of await dbxQuery(config(), sql, [], { onWait })) {
+    const list = out.get(r.input!) ?? []
+    list.push({ id: r.id!, name: r.name ?? '', size: '', weight: 0, level: r.parent === 'parent company' ? 'Parent' : 'Entity', via: r.parent && r.parent !== 'parent company' ? `under "${r.parent}"` : undefined })
+    out.set(r.input!, list)
+  }
+  return out
+}

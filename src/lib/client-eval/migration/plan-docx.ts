@@ -113,7 +113,7 @@ export async function planDocx(plan: MigrationPlan): Promise<Buffer> {
       out.push(
         table(
           ['Today', 'Type', 'In Insights Studio'],
-          s.items.slice(0, MAX_ITEMS_DOC).map((i) => [`${i.name} (${PLATFORM_LABEL[i.legacy.platform]}, ${i.legacy.list})`, ENTITY_TYPE[i.entityType] ?? String(i.entityType), i.gpc ? `${i.gpc.name} (#${i.gpc.id})` : 'Not matched yet']),
+          s.items.slice(0, MAX_ITEMS_DOC).map((i) => [`${i.name} (${PLATFORM_LABEL[i.legacy.platform]}, ${i.legacy.list})`, ENTITY_TYPE[i.entityType] ?? String(i.entityType), i.gpc ? `${i.gpc.name} (#${i.gpc.id})${i.gpc.guess ? ' - best guess by name' : ''}` : 'Not matched yet']),
         ),
       )
       if (s.items.length + s.more > MAX_ITEMS_DOC) out.push(p(`And ${s.items.length + s.more - MAX_ITEMS_DOC} more.`, { italics: true }))

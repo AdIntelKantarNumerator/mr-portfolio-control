@@ -452,6 +452,9 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                               {m.platform === 'magnifier' && m.reports ? ` · ${n(m.reports)} reports` : ''}
                             </span>
                             <span className="ce-member-acts">
+                              <button type="button" className="btn ce-sm" onClick={() => openDeck({ kind: 'account', key: m.key }, m.name)} title="Build a PowerPoint of what changes for this account in Insights Studio">
+                                Impact deck
+                              </button>
                               <button type="button" className="btn ce-sm" onClick={() => push({ kind: 'account', key: m.key })}>
                                 Entitlements
                               </button>
@@ -1128,12 +1131,13 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
                       {w.sets.map((s) => (
                         <div key={s.set}>
                           <span className="ce-sm">
-                            <b>{SET_LABEL[s.set]}</b> <span className="ce-muted">{n(s.items.length + s.more)} · {n(s.items.filter((i) => i.gpc).length)} matched</span>
+                            <b>{SET_LABEL[s.set]}</b> <span className="ce-muted">{n(s.items.length + s.more)} · {n(s.items.filter((i) => i.gpc).length)} matched{s.items.some((i) => i.gpc?.guess) ? ` (${n(s.items.filter((i) => i.gpc?.guess).length)} best guess)` : ''}</span>
                           </span>
                           <div className="ce-names">
                             {s.items.slice(0, 24).map((i) => (
-                              <span key={`${i.entityType}:${i.legacy.id}`} className={`ce-name-chip${i.gpc ? '' : ' ce-unmatched'}`} title={`${ENTITY_TYPE[i.entityType] ?? i.entityType} · from ${PLATFORM_LABEL[i.legacy.platform]} ${i.legacy.list}${i.gpc ? ` · Insights Studio: ${i.gpc.name} #${i.gpc.id}` : ' · not matched yet'}`}>
+                              <span key={`${i.entityType}:${i.legacy.id}`} className={`ce-name-chip${i.gpc ? (i.gpc.guess ? ' ce-guess' : '') : ' ce-unmatched'}`} title={`${ENTITY_TYPE[i.entityType] ?? i.entityType} · from ${PLATFORM_LABEL[i.legacy.platform]} ${i.legacy.list}${i.gpc ? ` · Insights Studio: ${i.gpc.name} #${i.gpc.id} · ${i.gpc.how}` : ' · not matched yet'}`}>
                                 {i.gpc?.name ?? i.name}
+                                {i.gpc?.guess ? ' ?' : ''}
                               </span>
                             ))}
                             {s.items.length + s.more > 24 ? <span className="ce-muted ce-sm">+{n(s.items.length + s.more - 24)}</span> : null}
