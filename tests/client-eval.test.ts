@@ -302,3 +302,46 @@ test('360: a user set is active only when its license group is too', async () =>
   assert.equal(isSetActive({ active_f: 0, grp_active: 1 }), false)
   assert.equal(isSetActive({ active_f: 1, grp_active: null }), true)
 })
+
+test('Migration Plan: premium media are Live Streaming Sports and National Newspapers, both in the catalogue', async () => {
+  const { MEDIA, PREMIUM_MEDIA, packageByKey } = await import('../src/lib/client-eval/migration/catalog')
+  const premium = MEDIA.filter((m) => PREMIUM_MEDIA.has(m.id)).map((m) => m.name)
+  assert.deepEqual(premium.sort(), ['Live Streaming Sports', 'National Newspapers'])
+  assert.equal(packageByKey.get('competitive')?.id, 2)
+  assert.equal(packageByKey.get('ratings_us_linear_tv')?.kind, 'add_on')
+})
+
+test('Migration Plan: the Word document builds from a plan', async () => {
+  const { planDocx } = await import('../src/lib/client-eval/migration/plan-docx')
+  const buf = await planDocx({
+    version: 1,
+    clientId: '360:1',
+    client: 'Test Client',
+    built: '2026-11-23T00:00:00.000Z',
+    depth: 'full',
+    summary: ['One account.'],
+    organization: { name: 'Test Client', why: 'One organization per client.' },
+    accounts: [
+      {
+        key: 'A1',
+        name: 'Test Client',
+        type: { value: 'brand_agency', why: '360 Ad Insights - US - Media Buyer' },
+        from: [{ key: '360:1', platform: '360', name: 'Test', activeUsers: 2 }],
+        why: 'Replaces Test.',
+        contract: { lookbackYears: { value: 3, why: 'Standard.' }, includePreliminary: { value: false, why: 'None today.' } },
+        packages: [{ key: 'competitive', name: 'Competitive', kind: 'base', why: 'Base.' }],
+        coverage: { media: [{ id: 101, name: 'Network TV', type: 'Television', status: 'kept' }], withheld: [{ name: 'Live Streaming Sports', why: 'Premium.' }], countries: [{ code: 'US', name: 'United States', why: 'US.' }], widened: [] },
+        seats: 1,
+      },
+    ],
+    users: [{ key: 'a@b.com', name: 'A B', email: 'a@b.com', account: 'A1', role: { value: 'analyst', why: 'Default.' }, create: { value: true, why: 'Recent.' }, lastSeen: '2026-11-01', logins: [{ platform: '360', account: 'Test', login: 'ab', lastSeen: '2026-11-01', active: true }] }],
+    workspaces: [{ key: 'W1', account: 'A1', name: 'Ford', source: '360 default reporting profile', users: ['a@b.com'], sets: [{ set: 'advertisers', items: [{ entityType: 139, name: 'Ford', legacy: { platform: '360', list: 'My Brands', id: '1' }, gpc: { id: '2150', name: 'Ford', how: 'Followed' } }], more: 0 }], why: 'Their profile.' }],
+    impact: { media: [], gains: ['More media.'], losses: [], notInV1: [] },
+    checklist: ['Confirm.'],
+    review: { verdict: 'ok', issues: [], model: null },
+    deckFocus: [],
+    notes: [],
+  })
+  assert.ok(buf.length > 5000)
+  assert.equal(buf.subarray(0, 2).toString(), 'PK')
+})

@@ -2734,6 +2734,29 @@ export const ceJobChunks = pgTable(
 )
 
 /** Sign-ins from the SSO user pool, by email (drizzle/0057): Magnifier's last logins. lib/client-eval/cognito-signins.ts. */
+/** Client Evaluation's Migration Plans, one per client (drizzle/0059, lib/client-eval/migration). */
+export const cePlans = pgTable('ce_plans', {
+  clientId: text('client_id').primaryKey(),
+  /** queued | building | ready | failed */
+  status: text('status').notNull().default('queued'),
+  /** full: with advertisers followed into Insights Studio; light: without. */
+  depth: text('depth').notNull().default('light'),
+  plan: jsonb('plan'),
+  /** What the plan was built from; a different hash marks it out of date. */
+  inputsHash: text('inputs_hash'),
+  /** Higher builds sooner; asked-for plans jump the queue. */
+  priority: integer('priority').notNull().default(0),
+  requestedAt: timestamp('requested_at', { withTimezone: true }),
+  requestedBy: text('requested_by'),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  builtAt: timestamp('built_at', { withTimezone: true }),
+  /** When the inputs were last compared with the plan's. */
+  checkedAt: timestamp('checked_at', { withTimezone: true }),
+  step: text('step'),
+  error: text('error'),
+  durationMs: integer('duration_ms'),
+})
+
 export const ceSignins = pgTable('ce_signins', {
   email: text('email').primaryKey(),
   username: text('username').notNull(),

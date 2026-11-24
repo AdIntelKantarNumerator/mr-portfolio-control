@@ -12,6 +12,8 @@ import type { ReadableRel } from '@/lib/client-eval/rel'
 import type { ProfileSummary } from '@/lib/client-eval/profiles'
 import type { UsageClient } from '@/lib/client-eval/ratings-usage'
 import type { InactiveAccount } from '@/lib/client-eval/inactive'
+import { ACCOUNT_TYPE_LABEL, ENTITY_TYPE, SET_LABEL } from '@/lib/client-eval/migration/catalog'
+import type { MigrationPlan } from '@/lib/client-eval/migration/types'
 import { csvField } from '@/lib/client-eval/csv'
 import type { ClientRow, PersonRow, SourceInfo } from '@/lib/client-eval/store'
 import { memberKey, PLATFORM_LABEL, PLATFORMS, SNAPSHOT_ONLY, type Ent360, type EntClassic, type EntMagnifier, type Entitlements, type Platform } from '@/lib/client-eval/types'
@@ -42,13 +44,6 @@ function openDeck(scope: DeckScope, title: string) {
   window.open(url, '_blank', 'popup,width=760,height=600')
 }
 
-function DeckButton({ scope, title }: { scope: DeckScope; title: string }) {
-  return (
-    <button type="button" className="btn ce-sm ce-deck-btn" onClick={() => openDeck(scope, title)} title="Build a PowerPoint of what changes for them in Insights Studio">
-      Impact deck
-    </button>
-  )
-}
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—')
 
 function Badge({ p, onClick, title }: { p: Platform; onClick?: () => void; title?: string }) {
@@ -142,7 +137,7 @@ function Sources({ contact, onReady }: { contact: string; onReady: () => void })
                   ) : null}
                   <span>As of {when(s.loadedAt)}</span>
                   {s.status === 'failed' ? <span className="ce-bad">Last refresh failed: {s.error}</span> : null}
-                  <a className="ce-dl" href={`/client-evaluation/users?platform=${s.platform}`} download title={`Every active ${PLATFORM_LABEL[s.platform]} user: name, email, account, username, created, last login (CSV)`}>
+                  <a className="ce-csv" href={`/client-evaluation/users?platform=${s.platform}`} download title={`Every active ${PLATFORM_LABEL[s.platform]} user: name, email, account, username, created, last login (CSV)`}>
                     Active users ↓ CSV
                   </a>
                 </div>
@@ -233,6 +228,7 @@ type Popup =
   | { kind: 'merge'; client: ClientRow }
   | { kind: 'ratings' }
   | { kind: 'inactive' }
+  | { kind: 'plan'; client: ClientRow }
 
 export function ClientEvaluation({ contact }: { contact: string }) {
   const [q, setQ] = useState('')
@@ -389,7 +385,9 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                       {!c.active ? ' · inactive' : ''}
                       {c.internal ? ' · internal' : ''}
                     </div>
-                    <DeckButton scope={{ kind: 'client', clientId: c.id }} title={c.name} />
+                    <button type="button" className="btn ce-sm ce-deck-btn" onClick={() => push({ kind: 'plan', client: c })} title="What this client becomes in Insights Studio: accounts, entitlements, users, workspaces and impact">
+                      Migration Plan
+                    </button>
                   </td>
                   <td>
                     <div className="ce-badges">
@@ -454,7 +452,6 @@ export function ClientEvaluation({ contact }: { contact: string }) {
                               {m.platform === 'magnifier' && m.reports ? ` · ${n(m.reports)} reports` : ''}
                             </span>
                             <span className="ce-member-acts">
-                              <DeckButton scope={{ kind: 'account', key: m.key }} title={m.name} />
                               <button type="button" className="btn ce-sm" onClick={() => push({ kind: 'account', key: m.key })}>
                                 Entitlements
                               </button>
@@ -497,6 +494,7 @@ export function ClientEvaluation({ contact }: { contact: string }) {
 
       {top?.kind === 'account' ? <AccountPopup k={top.key} onClose={pop} /> : null}
       {top?.kind === 'ratings' ? <RatingsUsagePopup onClose={pop} /> : null}
+      {top?.kind === 'plan' ? <MigrationPlanPopup client={top.client} onClose={pop} /> : null}
       {top?.kind === 'inactive' ? <InactivePopup onClose={pop} onAccount={(key) => push({ kind: 'account', key })} /> : null}
       {top?.kind === 'people' ? (
         <PeoplePopup client={top.client} initialPlatform={top.platform} onClose={pop} onReports={(usrId, who) => push({ kind: 'reports', usrId, who })} onMagnifierReports={(accountKey, who) => push({ kind: 'mreports', accountKey, who })} onSearches={(user, account, who) => push({ kind: 'searches', user, account, who })} onProfiles={(usrId, who) => push({ kind: 'profiles', usrId, who })} />
@@ -611,7 +609,6 @@ function PeoplePopup({
                     <b>{p.name}</b>
                     {!p.active ? <span className="ce-muted"> · inactive</span> : null}
                     <div className="ce-sub">{p.email ?? p.accounts[0]?.login ?? ''}</div>
-                    <DeckButton scope={{ kind: 'person', clientId: client.id, person: p.key }} title={`${p.name} (${client.name})`} />
                   </td>
                   <td>
                     <div className="ce-accts">
@@ -841,6 +838,388 @@ function RatingsUsagePopup({ onClose }: { onClose: () => void }) {
             </tbody>
           </table>
         </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ------------------------------------------------------------------ Migration Plan
+
+interface PlanResponse {
+  status: 'none' | 'queued' | 'building' | 'ready' | 'failed'
+  depth: 'full' | 'light' | null
+  plan: MigrationPlan | null
+  builtAt: string | null
+  step: string | null
+  error: string | null
+  ahead: number | null
+  admin: boolean
+  planner: { running: boolean; total: number; ready: number; full: number; queued: number; building: string | null; failed: number } | null
+}
+
+const PLAN_TABS = ['Summary', 'Accounts', 'Users', 'Workspaces', 'Impact', 'Checklist'] as const
+type PlanTab = (typeof PLAN_TABS)[number]
+const VERDICT: Record<MigrationPlan['review']['verdict'], { label: string; cls: string }> = {
+  ok: { label: 'Looks right', cls: 'ce-ok' },
+  check: { label: 'Points to check', cls: 'ce-warn' },
+  problem: { label: 'Problems to resolve', cls: 'ce-bad' },
+}
+
+/** A client's Migration Plan to Insights Studio (Scott, 23 November 2026). */
+function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: () => void }) {
+  const [view, setView] = useState<PlanResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [tab, setTab] = useState<PlanTab>('Summary')
+  const [tick, setTick] = useState(0)
+  const asked = useRef(false)
+  useEffect(() => {
+    let live = true
+    let timer: ReturnType<typeof setTimeout> | null = null
+    get<PlanResponse>({ op: 'plan', client: client.id }).then(
+      async (r) => {
+        if (!live) return
+        setView(r)
+        // No plan yet, or a light one: ask for it in full, once.
+        if (!asked.current && (r.status === 'none' || r.status === 'failed' || (r.status === 'ready' && r.depth === 'light'))) {
+          asked.current = true
+          try {
+            await post({ op: 'plan', client: client.id })
+          } catch (e) {
+            setError((e as Error).message)
+          }
+          timer = setTimeout(() => setTick((t) => t + 1), 1500)
+          return
+        }
+        if (r.status === 'queued' || r.status === 'building') timer = setTimeout(() => setTick((t) => t + 1), 3000)
+      },
+      (e) => live && setError((e as Error).message),
+    )
+    return () => {
+      live = false
+      if (timer) clearTimeout(timer)
+    }
+  }, [client.id, tick])
+
+  async function rebuild() {
+    try {
+      await post({ op: 'plan', client: client.id })
+      setTick((t) => t + 1)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+  async function refreshAll() {
+    if (!window.confirm('Rebuild every Migration Plan in the background? Plans stay readable until each is rebuilt.')) return
+    try {
+      await post({ op: 'plans-refresh' })
+      setTick((t) => t + 1)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  const plan = view?.plan ?? null
+  const working = view?.status === 'queued' || view?.status === 'building' || view?.status === 'none'
+  const accountName = new Map((plan?.accounts ?? []).map((a) => [a.key, a.name]))
+  const userName = new Map((plan?.users ?? []).map((u) => [u.key, u.name]))
+  const created = (plan?.users ?? []).filter((u) => u.create.value)
+
+  return (
+    <Modal title={`Migration Plan: ${client.name}`} onClose={onClose}>
+      <div className="ce-pop ce-plan">
+        <div className="ce-controls">
+          {plan ? (
+            <span className={`ce-verdict ${VERDICT[plan.review.verdict].cls}`}>{VERDICT[plan.review.verdict].label}</span>
+          ) : null}
+          <span className="ce-muted ce-sm">
+            {working
+              ? view?.status === 'building'
+                ? `Building: ${view.step ?? 'starting'}…`
+                : `Queued${view?.ahead ? ` (${n(view.ahead)} ahead)` : ''}…`
+              : view?.status === 'failed'
+                ? 'The last build failed.'
+                : view?.builtAt
+                  ? `Built ${when(view.builtAt)}${view.depth === 'light' ? ' · light' : ''}`
+                  : ''}
+          </span>
+          <span className="ce-count" />
+          <button type="button" className="btn ce-sm" disabled={!plan} onClick={() => openDeck({ kind: 'client', clientId: client.id }, client.name)} title="The Impact Deck, leading with the advertisers this plan found">
+            Impact Deck ↓
+          </button>
+          <a className={`btn btn-primary ce-sm${plan ? '' : ' ce-disabled'}`} href={plan ? `/client-evaluation/api?op=plan-doc&client=${encodeURIComponent(client.id)}` : undefined} download aria-disabled={!plan} title="The plan as a Word document">
+            Migration Plan ↓
+          </a>
+          {view?.admin ? (
+            <button type="button" className="btn ce-sm" disabled={working} onClick={() => void rebuild()} title="Admins: rebuild this client's plan now">
+              Rebuild
+            </button>
+          ) : null}
+        </div>
+        {view?.admin && view.planner ? (
+          <div className="ce-planner ce-sm ce-muted">
+            Planner {view.planner.running ? 'running' : 'stopped'}: {n(view.planner.ready)} of {n(view.planner.total)} plans built ({n(view.planner.full)} full) · {n(view.planner.queued)} queued
+            {view.planner.failed ? ` · ${n(view.planner.failed)} failed` : ''}
+            {view.planner.building ? ` · now: ${view.planner.building}` : ''}
+            <button type="button" className="ce-link" onClick={() => void refreshAll()}>
+              Refresh all plans
+            </button>
+          </div>
+        ) : null}
+        {error ? <p className="mr-said mr-bad">{error}</p> : null}
+        {view?.status === 'failed' && view.error ? <p className="mr-said mr-bad">{view.error}</p> : null}
+        {!plan ? (
+          <p className="ce-muted">{working ? 'Building the plan: a minute or two. You can close this and come back.' : 'No plan yet.'}</p>
+        ) : (
+          <>
+            <div className="ce-seg" role="tablist" aria-label="Plan">
+              {PLAN_TABS.map((t) => (
+                <button key={t} type="button" role="tab" aria-selected={tab === t} className={tab === t ? 'ce-on' : undefined} onClick={() => setTab(t)}>
+                  {t}
+                  {t === 'Users' ? <span className="ce-muted"> {n(created.length)}</span> : null}
+                  {t === 'Workspaces' ? <span className="ce-muted"> {n(plan.workspaces.length)}</span> : null}
+                  {t === 'Accounts' ? <span className="ce-muted"> {n(plan.accounts.length)}</span> : null}
+                </button>
+              ))}
+            </div>
+            <div className="ce-scroll ce-plan-body">
+              {tab === 'Summary' ? (
+                <>
+                  <div className="ce-plan-stats">
+                    <div>
+                      <b>{n(plan.accounts.length)}</b>
+                      <span>Insights Studio {plan.accounts.length === 1 ? 'account' : 'accounts'}</span>
+                    </div>
+                    <div>
+                      <b>{n(created.length)}</b>
+                      <span>users to create</span>
+                    </div>
+                    <div>
+                      <b>{n(plan.workspaces.length)}</b>
+                      <span>workspaces</span>
+                    </div>
+                    <div>
+                      <b>{n(plan.accounts[0]?.coverage.media.filter((m) => m.status === 'added').length ?? 0)}</b>
+                      <span>media added</span>
+                    </div>
+                  </div>
+                  <ul className="ce-plan-list">
+                    {plan.summary.map((s, i) => (
+                      <li key={i}>{s}</li>
+                    ))}
+                  </ul>
+                  {plan.review.issues.length ? (
+                    <>
+                      <h4>Review</h4>
+                      <ul className="ce-plan-list">
+                        {plan.review.issues.map((s, i) => (
+                          <li key={i}>{s}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                  <p className="ce-muted ce-sm">
+                    Organization: <b>{plan.organization.name}</b>. {plan.organization.why}
+                  </p>
+                </>
+              ) : null}
+
+              {tab === 'Accounts'
+                ? plan.accounts.map((a) => (
+                    <div key={a.key} className="ce-report">
+                      <div>
+                        <b>{a.name}</b> <span className="ce-badge ce-360">{ACCOUNT_TYPE_LABEL[a.type.value]}</span> <span className="ce-muted ce-sm">{n(a.seats)} users</span>
+                      </div>
+                      <div className="ce-muted ce-sm">{a.why}</div>
+                      <dl className="ce-dl">
+                        <dt>Replaces</dt>
+                        <dd>{a.from.map((f) => `${PLATFORM_LABEL[f.platform]}: ${f.name}`).join(' · ')}</dd>
+                        <dt>Packages</dt>
+                        <dd>
+                          {a.packages.map((p) => (
+                            <div key={p.key}>
+                              <b>{p.name}</b>
+                              {p.kind === 'add_on' ? <span className="ce-muted"> (add-on)</span> : null} <span className="ce-muted ce-sm">{p.why}</span>
+                            </div>
+                          ))}
+                        </dd>
+                        <dt>History</dt>
+                        <dd>
+                          {a.contract.lookbackYears.value} years <span className="ce-muted ce-sm">{a.contract.lookbackYears.why}</span>
+                        </dd>
+                        <dt>Preliminary</dt>
+                        <dd>
+                          {a.contract.includePreliminary.value ? 'Yes' : 'No'} <span className="ce-muted ce-sm">{a.contract.includePreliminary.why}</span>
+                        </dd>
+                        <dt>Countries</dt>
+                        <dd>{a.coverage.countries.map((c) => c.name).join(', ')}</dd>
+                        <dt>Media</dt>
+                        <dd>
+                          <div className="ce-names">
+                            {a.coverage.media.map((m) => (
+                              <span key={m.id} className={`ce-name-chip ce-m-${m.status}`} title={m.status === 'added' ? 'New to them' : m.status === 'premium' ? 'Premium, kept: they have it today' : 'They have it today'}>
+                                {m.name}
+                              </span>
+                            ))}
+                            {a.coverage.withheld.map((w) => (
+                              <span key={w.name} className="ce-name-chip ce-out" title={w.why}>
+                                {w.name}
+                              </span>
+                            ))}
+                          </div>
+                        </dd>
+                        {a.coverage.widened.length ? (
+                          <>
+                            <dt>Lifted</dt>
+                            <dd className="ce-sm">
+                              {a.coverage.widened.slice(0, 8).map((w, i) => (
+                                <div key={i}>{w}</div>
+                              ))}
+                              {a.coverage.widened.length > 8 ? <div className="ce-muted">and {a.coverage.widened.length - 8} more</div> : null}
+                            </dd>
+                          </>
+                        ) : null}
+                      </dl>
+                    </div>
+                  ))
+                : null}
+
+              {tab === 'Users' ? (
+                <div className="ce-table">
+                  <table className="dtable">
+                    <thead>
+                      <tr>
+                        <th>Person</th>
+                        <th>Account</th>
+                        <th>Last login</th>
+                        <th>Create</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {plan.users.slice(0, 500).map((u) => (
+                        <tr key={u.key} className={u.create.value ? undefined : 'ce-inactive'}>
+                          <td>
+                            <b>{u.name}</b>
+                            <div className="ce-sub">
+                              {u.email ?? ''} · {[...new Set(u.logins.map((l) => PLATFORM_LABEL[l.platform]))].join(', ')}
+                            </div>
+                          </td>
+                          <td>{accountName.get(u.account ?? '') ?? '—'}</td>
+                          <td className="ce-date">{u.lastSeen ?? <span className="ce-muted">None on record</span>}</td>
+                          <td title={u.create.why}>{u.create.value ? <b>Yes</b> : <span className="ce-muted">No: {u.create.why}</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {plan.users.length > 500 ? <p className="ce-muted ce-sm">Showing 500 of {n(plan.users.length)}. The Word document has them all.</p> : null}
+                </div>
+              ) : null}
+
+              {tab === 'Workspaces' ? (
+                plan.workspaces.length ? (
+                  plan.workspaces.map((w) => (
+                    <div key={w.key} className="ce-report">
+                      <div>
+                        <b>{w.name}</b> <span className="ce-muted ce-sm">· {accountName.get(w.account)} · {w.source}</span>
+                      </div>
+                      <div className="ce-muted ce-sm">
+                        For {w.users.slice(0, 6).map((k) => userName.get(k) ?? k).join(', ')}
+                        {w.users.length > 6 ? ` and ${w.users.length - 6} more` : ''}
+                      </div>
+                      {w.sets.map((s) => (
+                        <div key={s.set}>
+                          <span className="ce-sm">
+                            <b>{SET_LABEL[s.set]}</b> <span className="ce-muted">{n(s.items.length + s.more)} · {n(s.items.filter((i) => i.gpc).length)} matched</span>
+                          </span>
+                          <div className="ce-names">
+                            {s.items.slice(0, 24).map((i) => (
+                              <span key={`${i.entityType}:${i.legacy.id}`} className={`ce-name-chip${i.gpc ? '' : ' ce-unmatched'}`} title={`${ENTITY_TYPE[i.entityType] ?? i.entityType} · from ${PLATFORM_LABEL[i.legacy.platform]} ${i.legacy.list}${i.gpc ? ` · Insights Studio: ${i.gpc.name} #${i.gpc.id}` : ' · not matched yet'}`}>
+                                {i.gpc?.name ?? i.name}
+                              </span>
+                            ))}
+                            {s.items.length + s.more > 24 ? <span className="ce-muted ce-sm">+{n(s.items.length + s.more - 24)}</span> : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))
+                ) : (
+                  <p className="ce-muted">No workspaces: none of the users have lists or restrictions to keep.</p>
+                )
+              ) : null}
+
+              {tab === 'Impact' ? (
+                <>
+                  {plan.impact.gains.length ? (
+                    <>
+                      <h4>Gains</h4>
+                      <ul className="ce-plan-list">
+                        {plan.impact.gains.map((s, i) => (
+                          <li key={i}>{s}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                  {plan.impact.losses.length ? (
+                    <>
+                      <h4>Losses</h4>
+                      <ul className="ce-plan-list">
+                        {plan.impact.losses.map((s, i) => (
+                          <li key={i}>{s}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                  {plan.impact.notInV1.length ? (
+                    <>
+                      <h4>Not in Insights Studio V1</h4>
+                      <ul className="ce-plan-list">
+                        {plan.impact.notInV1.map((s, i) => (
+                          <li key={i}>{s}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                  <h4>Media by platform</h4>
+                  {plan.impact.media.map((m) => (
+                    <div key={m.platform} className="ce-report">
+                      <b>{PLATFORM_LABEL[m.platform]}</b>
+                      <div className="ce-names">
+                        {m.change.kept.map((x) => (
+                          <span key={x} className="ce-name-chip ce-m-kept">
+                            {x}
+                          </span>
+                        ))}
+                        {m.change.dropped.map((x) => (
+                          <span key={x} className="ce-name-chip ce-out" title="Not in Insights Studio yet">
+                            {x}
+                          </span>
+                        ))}
+                        {m.change.added.map((x) => (
+                          <span key={x} className="ce-name-chip ce-m-added" title="New to them">
+                            {x}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              ) : null}
+
+              {tab === 'Checklist' ? (
+                <ul className="ce-plan-list">
+                  {plan.checklist.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                  {plan.notes.map((s, i) => (
+                    <li key={`n${i}`} className="ce-muted">
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   )

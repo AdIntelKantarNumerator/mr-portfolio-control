@@ -45,6 +45,14 @@ export async function register() {
     } catch (err) {
       console.error('[report schedules] could not start', err)
     }
+    // Client Evaluation's Migration Plan planner: builds every client's plan in the background
+    // (lib/client-eval/migration/planner.ts). On in production; locally only with CLIENT_EVAL_PLANNER=on.
+    try {
+      const { ensurePlanner } = await import('./lib/client-eval/migration/planner')
+      ensurePlanner()
+    } catch (err) {
+      console.error('[planner] could not start', err)
+    }
   }
 
   const url = process.env.DATABASE_URL?.trim()

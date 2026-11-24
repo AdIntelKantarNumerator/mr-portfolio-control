@@ -14,6 +14,8 @@ import { currentAccess } from '@/lib/auth/access'
 import { buildDeck } from '@/lib/client-eval/deck-pptx'
 import { deckData, type DeckScope } from '@/lib/client-eval/deck-data'
 import { readJob, readJobFile, startJob } from '@/lib/client-eval/jobs'
+import { deckFocusOf } from '@/lib/client-eval/migration/build'
+import { readPlan } from '@/lib/client-eval/migration/planner'
 import { parseMember } from '@/lib/client-eval/types'
 
 export const runtime = 'nodejs'
@@ -44,7 +46,9 @@ export async function POST(req: Request) {
       if (!scope) return bad('Unknown client, account or person.')
       const title = String(body.title ?? 'Client').slice(0, 200)
       const id = await startJob('deck', `Impact Deck: ${title}`, { scope }, by, async (progress, out) => {
-        const data = await deckData(scope, progress)
+        // A client's deck leads with the advertisers its Migration Plan found most followed, when there is a plan.
+        const plan = scope.kind === 'client' ? (await readPlan(scope.clientId)).plan : null
+        const data = await deckData(scope, progress, plan ? { focus: deckFocusOf(plan) } : {})
         await progress('Building the PowerPoint')
         out.write(await buildDeck(data))
         return { fileName: `${fileSafe(data.title)} - Insights Studio impact ${day}.pptx`, fileType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }

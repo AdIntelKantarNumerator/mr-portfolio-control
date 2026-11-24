@@ -90,6 +90,35 @@ function runsSql(db: string, jobq: string, opts: string, start: string, end: str
     GROUP BY j.usrset_id, j.usr_id`
 }
 
+/**
+ * Report runs that used TV ratings (Nielsen 1, VideoAmp 3) since USAGE_FROM, by 360 user set: the
+ * evidence for the Ratings (US Linear TV) add-on in a Migration Plan (Scott, 23 November 2026).
+ */
+export async function ratingsRunsBySet(usrsets: number[], now = new Date()): Promise<Map<number, { nielsen: number; videoamp: number }>> {
+  const out = new Map<number, { nielsen: number; videoamp: number }>()
+  const sets = usrsets.filter((x) => Number.isInteger(x) && x > 0)
+  if (!sets.length) return out
+  const months = usageMonths(now)
+  const { start, end } = monthSpan(USAGE_FROM, months[months.length - 1]!)
+  for (const log of LOGS)
+    for (const [db, jobq, opts] of [
+      [log.live, 'jobq', 'qrptset_rptopt'],
+      [log.archive, 'jobq_hist', 'qrptset_rptopt_hist'],
+    ] as const)
+      for (const r of await q360<{ usrset_id: number; p: number; n: number }>(
+        `SELECT j.usrset_id, o.long_v AS p, COUNT(*) AS n
+         FROM ${db}.dbo.${jobq} j JOIN ${db}.dbo.${opts} o ON o.q_id = j.q_id AND o.rptopt_id = -138 AND o.long_v IN (1, ${VIDEOAMP})
+         WHERE j.start_d >= '${start}' AND j.start_d < '${end}' AND j.usrset_id IN (${sets.join(', ')})
+           AND (j.masterq_id IS NULL OR j.masterq_id = -1) AND j.qstate_id NOT IN (${NOT_RUN.join(', ')})
+         GROUP BY j.usrset_id, o.long_v`,
+      )) {
+        const x = out.get(Number(r.usrset_id)) ?? out.set(Number(r.usrset_id), { nielsen: 0, videoamp: 0 }).get(Number(r.usrset_id))!
+        if (Number(r.p) === 1) x.nielsen += Number(r.n)
+        else x.videoamp += Number(r.n)
+      }
+  return out
+}
+
 /** VideoAmp report runs in these months, by client and user, most first. Internal clients are marked. */
 export async function videoAmpUsage(d: Database, from: string, to: string): Promise<{ clients: UsageClient[]; reports: number; users: number }> {
   const { start, end } = monthSpan(from < USAGE_FROM ? USAGE_FROM : from, to)

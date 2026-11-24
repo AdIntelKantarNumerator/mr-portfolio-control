@@ -7,6 +7,8 @@
  *   GET  ?op=people&client=<id>               a client's people across platforms
  *   GET  ?op=ratings&from=YYYY-MM&to=YYYY-MM  360 reports run with VideoAmp ratings, by client and user, live
  *   GET  ?op=inactive&since=YYYY-MM-DD        active accounts with no login on or after that day
+ *   GET  ?op=plan&client=<id>                 a client's Migration Plan, or where it is in the queue (and, for admins, the planner's progress)
+ *   GET  ?op=plan-doc&client=<id>             the Migration Plan as a Word document
  *   GET  ?op=reports&user=<360 usr id>        a 360 user's reports used in 2026, live
  *   GET  ?op=report&key=<mnemonic:id>         one 360 report's spec, live, described
  *   GET  ?op=profiles&user=<360 usr id>       a 360 user's reporting profiles, live
@@ -15,6 +17,8 @@
  *   POST { op: 'merge', member, withMember }  put an account with another's client
  *   POST { op: 'split', member }              make an account its own client
  *   POST { op: 'export', clients: [ids] }     the ticked clients and their users, as an Excel workbook
+ *   POST { op: 'plan', client }               build (or rebuild) a client's Migration Plan now, in full
+ *   POST { op: 'plans-refresh', client? }     admins: rebuild every plan, or one client's
  *
  * Under /client-evaluation, so the request gate already requires "Sees Client
  * Evaluation"; checked again here because the gate does not enforce roles on
@@ -27,6 +31,8 @@ import { describe } from '@/lib/import360/decode'
 import { live360Configured, liveLookup, liveReport, liveReports } from '@/lib/import360/source'
 import { buildExport, EXPORT_MAX } from '@/lib/client-eval/export'
 import { inactiveAccounts, LOGIN_FROM, validSince } from '@/lib/client-eval/inactive'
+import { planDocx } from '@/lib/client-eval/migration/plan-docx'
+import { ensurePlanner, plannerStats, readPlan, refreshPlans, requestPlan } from '@/lib/client-eval/migration/planner'
 import { liveProfiles } from '@/lib/client-eval/profiles'
 import { USAGE_FROM, usageMonths, videoAmpUsage } from '@/lib/client-eval/ratings-usage'
 import { liveSearches, mongoUrl } from '@/lib/client-eval/saved-searches'
@@ -45,7 +51,8 @@ async function allowed() {
 }
 
 export async function GET(req: Request) {
-  if (!(await allowed())) return bad('Client Evaluation is not switched on for you.', 403)
+  const who = await allowed()
+  if (!who) return bad('Client Evaluation is not switched on for you.', 403)
   const u = new URL(req.url).searchParams
   const op = u.get('op')
   try {
@@ -98,6 +105,25 @@ export async function GET(req: Request) {
       }
       return NextResponse.json({ since, loginFrom: LOGIN_FROM, accounts: await inactiveAccounts(db, since) })
     }
+    if (op === 'plan') {
+      ensurePlanner()
+      const client = (u.get('client') ?? '').slice(0, 300)
+      const view = await readPlan(client)
+      return NextResponse.json({ ...view, admin: who.isAdmin, planner: who.isAdmin ? await plannerStats() : null })
+    }
+    if (op === 'plan-doc') {
+      const view = await readPlan((u.get('client') ?? '').slice(0, 300))
+      if (!view.plan) return bad('That plan is not built yet.', 404)
+      const file = await planDocx(view.plan)
+      const name = `${view.plan.client.replace(/[^A-Za-z0-9 ._-]+/g, '').trim().slice(0, 80) || 'Client'} - Migration Plan ${view.plan.built.slice(0, 10)}.docx`
+      return new Response(new Uint8Array(file), {
+        headers: {
+          'content-type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'content-disposition': `attachment; filename="${name}"`,
+          'cache-control': 'no-store',
+        },
+      })
+    }
     if (op === 'reports') {
       const usr = Number(u.get('user'))
       if (!Number.isInteger(usr) || usr <= 0) return bad('Unknown 360 user.')
@@ -134,7 +160,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const who = await allowed()
   if (!who) return bad('Client Evaluation is not switched on for you.', 403)
-  const body = (await req.json().catch(() => ({}))) as { op?: string; platform?: string; member?: string; withMember?: string; clients?: unknown }
+  const body = (await req.json().catch(() => ({}))) as { op?: string; platform?: string; member?: string; withMember?: string; clients?: unknown; client?: unknown }
   const by = who.email || who.name || null
   try {
     if (body.op === 'export') {
@@ -150,6 +176,16 @@ export async function POST(req: Request) {
           'cache-control': 'no-store',
         },
       })
+    }
+    if (body.op === 'plan') {
+      const client = typeof body.client === 'string' ? body.client.slice(0, 300) : ''
+      await requestPlan(client, by)
+      return NextResponse.json({ ok: true })
+    }
+    if (body.op === 'plans-refresh') {
+      if (!who.isAdmin) return bad('Only Portfolio admins can refresh the plans.', 403)
+      const client = typeof body.client === 'string' && body.client ? body.client.slice(0, 300) : undefined
+      return NextResponse.json({ ok: true, queued: await refreshPlans(by, client) })
     }
     if (body.op === 'refresh') {
       if (!isPlatform(body.platform)) return bad('Unknown platform.')

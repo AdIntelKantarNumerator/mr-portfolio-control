@@ -62,7 +62,7 @@ export interface PlatformSection {
   media: MediaChange
   focus: {
     kind: 'advertiser' | 'category' | null
-    source: 'entitlement' | 'reports' | 'profiles' | 'searches' | null
+    source: 'entitlement' | 'reports' | 'profiles' | 'searches' | 'plan' | null
     taxonomy: 'VX1' | 'VX2' | null
     entities: FocusEntity[]
     note: string | null
@@ -122,18 +122,18 @@ async function resolve(scope: DeckScope): Promise<Target> {
 
 // ------------------------------------------------------------------ which advertisers or categories
 
-interface Candidates {
+export interface Candidates {
   kind: 'advertiser' | 'category'
-  source: 'entitlement' | 'reports' | 'profiles' | 'searches'
+  source: 'entitlement' | 'reports' | 'profiles' | 'searches' | 'plan'
   taxonomy: 'VX1' | 'VX2'
   items: Array<{ id: string; name: string }>
 }
 
 /** 360 entity types, and the id dbxFlows / dbxCategoryFlows take for each. */
-const ADV_360: Record<number, (id: number) => string> = { 118: (i) => String(i), 102: (i) => `P${i}`, 139: (i) => `B${i}`, 100: (i) => `V${i}` }
-const CAT_360 = [103, 135, 104]
+export const ADV_360: Record<number, (id: number) => string> = { 118: (i) => String(i), 102: (i) => `P${i}`, 139: (i) => `B${i}`, 100: (i) => `V${i}` }
+export const CAT_360 = [103, 135, 104]
 
-async function names360(want: Map<number, Set<number>>): Promise<Map<string, string>> {
+export async function names360(want: Map<number, Set<number>>): Promise<Map<string, string>> {
   const where = new Map((await q360<{ entmaj_id: number; table_n: string; id_field: string; name_field: string }>(NAME_FIELDS_SQL)).map((f) => [Number(f.entmaj_id), f]))
   const out = new Map<string, string>()
   for (const [e, ids] of want) {
@@ -214,7 +214,7 @@ async function candidates360(usrsets: number[], usrIds: number[] | null): Promis
   return pick360(prof.map((r) => ({ e: Number(r.e), id: Number(r.id), w: Number(r.n) })), 'profiles')
 }
 
-async function candidatesMagnifier(accountIds: string[]): Promise<{ c: Candidates | null; note: string | null }> {
+export async function candidatesMagnifier(accountIds: string[]): Promise<{ c: Candidates | null; note: string | null }> {
   const cfg = magnifierConfig()
   if (!cfg) return { c: null, note: 'Magnifier is not configured on this server.' }
   const conn = await connectMagnifier(cfg)
@@ -374,7 +374,11 @@ async function follow(c: Candidates, progress: Progress, label: string): Promise
 
 // ------------------------------------------------------------------ the whole deck
 
-export async function deckData(scope: DeckScope, progress: Progress): Promise<DeckData> {
+/**
+ * focus: advertisers to lead with per platform, from the client's Migration Plan (Scott, 23 November
+ * 2026: the deck uses what the plan learned). Used in place of the deck's own pick where given.
+ */
+export async function deckData(scope: DeckScope, progress: Progress, opts: { focus?: Partial<Record<Platform, Candidates>> } = {}): Promise<DeckData> {
   await progress('Reading the client and its entitlements')
   const t = await resolve(scope)
   const sections: PlatformSection[] = []
@@ -401,8 +405,10 @@ export async function deckData(scope: DeckScope, progress: Progress): Promise<De
       focus: { kind: null, source: null, taxonomy: null, entities: [], note: null },
     }
     try {
-      let c: Candidates | null = null
-      if (p === '360') c = await within(4 * 60_000, 'Reading 360 selections', () => candidates360(ints(ids), t.usrIds))
+      let c: Candidates | null = opts.focus?.[p] ?? null
+      if (c) {
+        // From the Migration Plan.
+      } else if (p === '360') c = await within(4 * 60_000, 'Reading 360 selections', () => candidates360(ints(ids), t.usrIds))
       else if (p === 'magnifier') {
         const m = await within(3 * 60_000, "Reading Magnifier's report criteria", () => candidatesMagnifier(ids))
         c = m.c
