@@ -865,7 +865,7 @@ interface PlanResponse {
   planner: { running: boolean; total: number; ready: number; full: number; queued: number; building: string | null; failed: number } | null
 }
 
-const PLAN_TABS = ['Summary', 'Accounts', 'Users', 'Workspaces', 'Saved views', 'Impact', 'Checklist'] as const
+const PLAN_TABS = ['Summary', 'Accounts', 'Users', 'Workspaces', 'Saved views', 'Reports', 'Impact', 'Checklist'] as const
 type PlanTab = (typeof PLAN_TABS)[number]
 const VERDICT: Record<MigrationPlan['review']['verdict'], { label: string; cls: string }> = {
   ok: { label: 'Looks right', cls: 'ce-ok' },
@@ -999,6 +999,7 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
                   {t === 'Users' ? <span className="ce-muted"> {n(created.length)}</span> : null}
                   {t === 'Workspaces' ? <span className="ce-muted"> {n(plan.workspaces.length)}</span> : null}
                   {t === 'Saved views' ? <span className="ce-muted"> {n(plan.savedViews?.length ?? 0)}</span> : null}
+                  {t === 'Reports' ? <span className="ce-muted"> {n(plan.reports?.length ?? 0)}</span> : null}
                   {t === 'Accounts' ? <span className="ce-muted"> {n(plan.accounts.length)}</span> : null}
                 </button>
               ))}
@@ -1192,6 +1193,39 @@ function MigrationPlanPopup({ client, onClose }: { client: ClientRow; onClose: (
                   </>
                 ) : (
                   <p className="ce-muted">{plan.savedViews ? 'No Magnifier saved searches from 2026 for the users created.' : 'Rebuild the plan to see saved searches.'}</p>
+                )
+              ) : null}
+
+              {tab === 'Reports' ? (
+                plan.reports?.length ? (
+                  <>
+                    <p className="ce-muted ce-sm">360 reports used in 2026. They migrate once Insights Studio has its report builder, which does not exist yet.</p>
+                    <div className="ce-table">
+                      <table className="dtable">
+                        <thead>
+                          <tr>
+                            <th>Report</th>
+                            <th>Type</th>
+                            <th>Person</th>
+                            <th>Last used</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {plan.reports.slice(0, 500).map((r) => (
+                            <tr key={r.key}>
+                              <td>{r.name}</td>
+                              <td className="ce-muted">{r.type}</td>
+                              <td>{userName.get(r.user) ?? r.user}</td>
+                              <td className="ce-date">{r.lastUsed ?? ''}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {plan.reports.length > 500 ? <p className="ce-muted ce-sm">Showing 500 of {n(plan.reports.length)}. The Word document has them all.</p> : null}
+                  </>
+                ) : (
+                  <p className="ce-muted">{plan.reports ? 'No 360 reports used in 2026 by the users created.' : 'Rebuild the plan to see 360 reports.'}</p>
                 )
               ) : null}
 

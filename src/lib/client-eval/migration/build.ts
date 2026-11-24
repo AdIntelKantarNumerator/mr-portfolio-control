@@ -19,10 +19,10 @@
  * built, one account per type, and says the review did not run.
  */
 import { createHash } from 'node:crypto'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, gte, inArray } from 'drizzle-orm'
 import type { Database } from '@/db/client'
-import { ceAccounts, ceClients, ceUsers } from '@/db/schema'
-import { chunks, q360 } from '@/lib/import360/source'
+import { ceAccounts, ceClients, ceOfflineReports, ceUsers } from '@/db/schema'
+import { chunks, q360, reportsForUsers } from '@/lib/import360/source'
 import { completeJson } from '@/lib/llm'
 import { dbxAdvertiserSummary, dbxCategorySummary, dbxGpcNameMatches, dbxMergedEntities, dbxTaxonomyTree } from '@/lib/taxonomy-dbx'
 import type { Candidate } from '@/lib/taxonomy-rules'
@@ -35,7 +35,7 @@ import { clientPeople, type PersonRow } from '../store'
 import { parseMember, PLATFORM_LABEL, PLATFORMS, type Ent360, type EntClassic, type EntMagnifier, type Entitlements, type Platform } from '../types'
 import { readMatches, saveMatches } from './matches'
 import { ACCOUNT_TYPE_LABEL, COUNTRIES, ENTITY_TYPE, MEDIA, packageByKey, PREMIUM_MEDIA, SET_LABEL, type AccountType, type CountryCode, type SetKey } from './catalog'
-import { PLAN_VERSION, type MigrationPlan, type PlanAccount, type PlanSavedView, type PlanUser, type PlanWorkspace, type PlanWorkspaceItem } from './types'
+import { PLAN_VERSION, type MigrationPlan, type PlanAccount, type PlanReport, type PlanSavedView, type PlanUser, type PlanWorkspace, type PlanWorkspaceItem } from './types'
 
 export type PlanProgress = (step: string) => Promise<void> | void
 
@@ -244,7 +244,48 @@ function features(members: Legacy[]): string[] {
   return [...out]
 }
 
-function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number; videoamp: number }> | null): PlanAccount {
+/** Offline reports since this day count (Scott, 24 November 2026: someone downloaded one in 2026). */
+const OFFLINE_SINCE = '2026-01-01'
+const OUR_DOMAINS = /@(mediaradar|vivvix|kantar|competitrack)\./i
+
+interface OfflineEvidence {
+  people: number
+  example: string | null
+  last: string
+}
+
+/**
+ * Per account group: its people who downloaded a Magnifier offline report since OFFLINE_SINCE, matched by email
+ * (ce_offline_reports, loaded from a laptop). Our own staff, who download on clients' behalf, do not count.
+ */
+async function offlineByAccount(d: Database, groups: Group[], people: PersonRow[], notes: string[]): Promise<Map<number, OfflineEvidence>> {
+  const out = new Map<number, OfflineEvidence>()
+  const emails = [...new Set(people.map((p) => p.email?.toLowerCase()).filter((e): e is string => !!e && !OUR_DOMAINS.test(e)))]
+  if (!emails.length) return out
+  try {
+    const rows = await d.select().from(ceOfflineReports).where(and(inArray(ceOfflineReports.email, emails), gte(ceOfflineReports.lastDownload, OFFLINE_SINCE)))
+    const byEmail = new Map(rows.map((r) => [r.email, r]))
+    const groupOf = new Map<string, number>()
+    groups.forEach((g, i) => g.members.forEach((m) => groupOf.set(m.key, i)))
+    for (const p of people) {
+      const r = p.email ? byEmail.get(p.email.toLowerCase()) : undefined
+      if (!r) continue
+      for (const i of new Set(p.accounts.map((a) => groupOf.get(`${a.platform}:${a.accountId}`)).filter((x): x is number => x !== undefined))) {
+        const e = out.get(i) ?? out.set(i, { people: 0, example: null, last: '' }).get(i)!
+        e.people++
+        if ((r.lastDownload ?? '') > e.last) {
+          e.last = r.lastDownload ?? ''
+          e.example = r.example?.trim() || e.example
+        }
+      }
+    }
+  } catch (err) {
+    notes.push(`Offline reports could not be read: ${(err as Error).message}`.slice(0, 200))
+  }
+  return out
+}
+
+function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number; videoamp: number }> | null, offline: OfflineEvidence | null): PlanAccount {
   const feats = features(g.members)
   const has = (re: RegExp) => feats.find((f) => re.test(f))
   const packages: PlanAccount['packages'] = []
@@ -257,6 +298,13 @@ function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number
   const from = new Set(g.members.map((a) => a.platform))
   if (from.has('360') || from.has('classic')) add('competitive', `The base package for ${[from.has('360') ? '360' : '', from.has('classic') ? 'Classic' : ''].filter(Boolean).join(' and ')} users: spend, units, impressions and creative.`, true)
   if (from.has('magnifier')) add('creative', 'Magnifier is a creative application: its users have creative access today.', true)
+  // Offline reports are spend reports: a client that receives them gets Competitive too (Scott, 24 November 2026).
+  if (offline)
+    add(
+      'competitive',
+      `Receives Magnifier offline reports: ${offline.people} ${offline.people === 1 ? 'person' : 'people'} downloaded one in 2026${offline.example ? ` ("${offline.example}")` : ''}, last on ${offline.last}.`,
+      from.has('360') || from.has('classic'),
+    )
   const contactFeat = has(/contact|sales opportunit|agency module/i)
   if (g.type === 'publisher') add('commercial', 'Publisher account: sales opportunities, contacts and agency data are what sellers use.')
   else if (contactFeat) add('commercial', `Uses ${contactFeat} today.`)
@@ -739,10 +787,11 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
       notes.push(`360 ratings use could not be read: ${(err as Error).message}`.slice(0, 200))
     }
   }
-  const accounts = groups.map((g, i) => accountPlan(g, i, ratings))
-
   await progress('Reading the people')
   const people = (await clientPeople(d, clientId))?.people ?? []
+  const offline = await offlineByAccount(d, groups, people, notes)
+  const accounts = groups.map((g, i) => accountPlan(g, i, ratings, offline.get(i) ?? null))
+
   const users = usersPlan(people, accounts, now)
   for (const a of accounts) a.seats = users.filter((u) => u.create.value && u.account === a.key).length
 
@@ -885,6 +934,23 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
     }
   }
 
+  // 360 reports used in 2026, proposed for migration once Insights Studio has a report builder (Scott, 24 November 2026).
+  const reports: PlanReport[] = []
+  if (usrOf.size) {
+    await progress('Reading 360 reports used in 2026')
+    try {
+      const mine = await within(FOLLOW_LIMIT, 'Reading 360 reports', () => reportsForUsers([...usrOf.keys()]))
+      for (const [usr, list] of mine) {
+        const u = usrOf.get(usr)
+        if (!u) continue
+        for (const r of list) reports.push({ key: `R${reports.length + 1}`, user: u.key, account: u.account, name: r.name, type: r.type, lastUsed: r.lastUsed })
+      }
+      reports.sort((x, y) => (y.lastUsed ?? '').localeCompare(x.lastUsed ?? ''))
+    } catch (err) {
+      notes.push(`360 reports could not be read: ${(err as Error).message}`.slice(0, 200))
+    }
+  }
+
   // Advertisers with no spend to follow: matched by name, the model judging among the candidates.
   if (opts.depth === 'full' && useModel) {
     try {
@@ -968,6 +1034,7 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   if (legacy.some((a) => a.platform === 'classic')) checklist.push("Classic users' own lists (properties, competitive sets, categories) are not read yet, so their workspaces are not proposed.")
   if (accounts.some((a) => a.packages.some((p) => p.key === 'ratings_us_linear_tv'))) checklist.push('Set up ratings scope (books and markets) outside Insights Studio V1.')
   if (savedViews.length) checklist.push(`Recreate ${savedViews.length} Magnifier saved ${savedViews.length === 1 ? 'search' : 'searches'} from 2026 as Insights Studio saved views; their filters need Insights Studio ids.`)
+  if (reports.length) checklist.push(`${reports.length} 360 ${reports.length === 1 ? 'report' : 'reports'} used in 2026 to migrate once Insights Studio's report builder exists.`)
   const inactive = legacy.filter((a) => !a.active)
   if (inactive.length) checklist.push(`${inactive.length} inactive legacy ${inactive.length === 1 ? 'account is' : 'accounts are'} not migrated.`)
 
@@ -994,6 +1061,7 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
     users,
     workspaces,
     savedViews,
+    reports,
     impact: { media, gains, losses, notInV1 },
     checklist,
     review: { verdict: 'check', issues: [], model: splitModel },

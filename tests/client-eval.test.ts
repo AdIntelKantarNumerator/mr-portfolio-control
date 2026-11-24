@@ -374,6 +374,12 @@ test('Canada: an account is Canadian only when all its data is', () => {
   assert.equal(isCanadian(s360(['Canadian TV', 'Canadian Newspapers'])), true)
   assert.equal(isCanadian(s360(['Canadian TV', 'Network TV'])), false)
   assert.equal(isCanadian(s360([])), false)
+  // Named for Canada, with nothing in the data either way: left out (Scott). US data in it wins over the name.
+  assert.equal(isCanadian(mag([]), 'General Mills Canada'), true)
+  assert.equal(isCanadian(mag(['US']), 'Air Canada'), false)
+  assert.equal(isCanadian(s360([]), 'Omnicom Canada MB - AI'), true)
+  assert.equal(isCanadian(null, 'Yahoo! Sports Canada'), true)
+  assert.equal(isCanadian(mag([]), 'Canadaigua Wine'), false)
 })
 
 test('Migration Plan: the premium note says what they keep and what is not included', async () => {

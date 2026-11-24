@@ -435,6 +435,13 @@
       "when": 1795786700000,
       "tag": "0061_client_eval_canada",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795786800000,
+      "tag": "0062_client_eval_offline_reports",
+      "breakpoints": true
     }
   ]
 }

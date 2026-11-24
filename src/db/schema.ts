@@ -16,6 +16,7 @@ import { relations } from 'drizzle-orm'
 import {
   boolean,
   customType,
+  date,
   doublePrecision,
   index,
   integer,
@@ -2676,6 +2677,22 @@ export const ceClients = pgTable('ce_clients', {
   company: text('company'),
   /** Why the accounts were put together: lib/client-eval/match.ts Link[]. */
   how: jsonb('how').notNull(),
+})
+
+/**
+ * People who receive Magnifier's offline reports (Oracle CUSTOMER.CRM_REPORTS / CRM_REPORT_CONFIG / CRM_PEOPLE), by
+ * email: a client with one who downloaded a report in 2026 gets the Competitive package in its Migration Plan (Scott,
+ * 24 November 2026). Loaded from a laptop (scripts/load-offline-reports.ts): the app is not on Oracle's network.
+ */
+export const ceOfflineReports = pgTable('ce_offline_reports', {
+  email: text('email').primaryKey(),
+  /** Latest download of any of their reports; null when none is on record. */
+  lastDownload: date('last_download'),
+  /** Live subscriptions. */
+  reports: integer('reports').notNull().default(0),
+  /** One of their reports' names, for the plan's reason. */
+  example: text('example'),
+  loadedAt: timestamp('loaded_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 /** Merges and splits made by hand. Keyed by member, so they survive a refresh. */

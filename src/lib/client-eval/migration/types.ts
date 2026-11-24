@@ -95,6 +95,19 @@ export interface PlanSavedView {
   media: string[]
 }
 
+/**
+ * A 360 report used in 2026, proposed for migration (Scott, 24 November 2026). It can move only once Insights
+ * Studio has its report builder, which does not exist yet: the tab is the list to migrate then.
+ */
+export interface PlanReport {
+  key: string
+  user: string
+  account: string | null
+  name: string
+  type: string
+  lastUsed: string | null
+}
+
 export interface PlanImpact {
   media: Array<{ platform: Platform; change: MediaChange }>
   gains: string[]
@@ -122,6 +135,8 @@ export interface MigrationPlan {
   workspaces: PlanWorkspace[]
   /** Absent on plans built before 24 November 2026. */
   savedViews?: PlanSavedView[]
+  /** 360 reports used in 2026; absent on plans built before 24 November 2026. */
+  reports?: PlanReport[]
   impact: PlanImpact
   checklist: string[]
   review: PlanReview

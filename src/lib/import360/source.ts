@@ -273,6 +273,31 @@ export async function liveReports(usrId: number): Promise<Array<{ key: string; n
   }))
 }
 
+/**
+ * Several users' reports used since SINCE, by user, newest first: liveReports for a whole client at once (a
+ * Migration Plan's Reports tab), one statement per client table rather than one per user.
+ */
+export async function reportsForUsers(usrIds: number[]): Promise<Map<number, Array<{ key: string; name: string; type: string; lastUsed: string | null }>>> {
+  const ix = await clientIndex()
+  const byPrefix = new Map<string, number[]>()
+  for (const u of new Set(usrIds)) {
+    const p = ix.prefixOf.get(u)
+    if (p) (byPrefix.get(p) ?? byPrefix.set(p, []).get(p)!).push(u)
+  }
+  const names = await metaNames()
+  const out = new Map<number, Array<{ key: string; name: string; type: string; lastUsed: string | null }>>()
+  for (const [p, users] of byPrefix)
+    for (const part of chunks(users, 500))
+      for (const h of await q360<Row>(`${headSql(p, `r.usr_id IN (${ints(part)}) AND r.lastused_d >= '${SINCE}'`)} ORDER BY r.lastused_d DESC`))
+        (out.get(Number(h.usr_id)) ?? out.set(Number(h.usr_id), []).get(Number(h.usr_id))!).push({
+          key: `${p.toLowerCase()}:${Number(h.reportset_id)}`,
+          name: String(h.reportset_n ?? '').trim() || `Report ${h.reportset_id}`,
+          type: (h.rpttype_id == null ? undefined : names.get(`-2:${Number(h.rpttype_id)}`)) ?? 'Report',
+          lastUsed: h.lastused_d instanceof Date ? h.lastused_d.toISOString().slice(0, 10) : null,
+        })
+  return out
+}
+
 /** One report, read live: its head, owner and spec. The key is "mnemonic:reportset_id", as the snapshot keys it. */
 export async function liveReport(key: string): Promise<{ name: string; client: string; user: string; mnemonic: string; usrId: number; lastUsed: Date | null; spec: Raw360Spec }> {
   const m = /^([A-Za-z0-9_]+):(\d{1,12})$/.exec(key)

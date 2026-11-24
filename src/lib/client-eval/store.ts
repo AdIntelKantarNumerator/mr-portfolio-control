@@ -145,7 +145,7 @@ export async function buildClients(d: Database, opts: { useModel?: boolean; prog
   const internal = new Set(match.filter(isInternal).map((m) => m.key))
   // Canadian accounts join only each other too (Scott, 24 November 2026): a client is Canadian or not, so leaving
   // Canada out of the analysis leaves no Canadian account inside another client's counts or plan.
-  const canadian = new Set(accts.filter((a) => isCanadian(a.entitlements as Entitlements | null)).map((a) => memberKey(a.platform as Platform, a.accountId)))
+  const canadian = new Set(accts.filter((a) => isCanadian(a.entitlements as Entitlements | null, a.name)).map((a) => memberKey(a.platform as Platform, a.accountId)))
   const apart = (l: { a: string; b: string }) => internal.has(l.a) !== internal.has(l.b) || canadian.has(l.a) !== canadian.has(l.b)
   found.links = found.links.filter((l) => !apart(l))
   found.ask = found.ask.filter((l) => !apart(l))

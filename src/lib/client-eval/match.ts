@@ -291,18 +291,21 @@ export function displayName(name: string): string {
 }
 
 /**
- * A Canadian account (Scott, 24 November 2026: Canada is left out of the analysis by default): Magnifier's
- * reports, or when it has none its saved searches, run on Canadian data only; a 360 user set limited to Canadian
- * media. An account with US data too is not Canadian. Classic has no Canadian data restriction.
+ * A Canadian account (Scott, 24 November 2026: Canada is left out of the analysis by default). Its data decides
+ * first: Magnifier's reports, or when it has none its saved searches, on Canadian data only; a 360 user set limited
+ * to Canadian media. Data with the US in it means it is not. With nothing in the data either way, an account
+ * named for Canada ("General Mills Canada", "Omnicom Canada MB") is Canadian too (Scott: "leave it out").
  */
-export function isCanadian(e: Entitlements | null | undefined): boolean {
-  if (!e) return false
+export function isCanadian(e: Entitlements | null | undefined, name = ''): boolean {
+  const named = /\bcanad(a|ian)\b/i.test(name)
+  if (!e) return named
   if (e.kind === 'magnifier') {
     const cs = e.countries.length ? e.countries : (e.searchCountries ?? [])
-    return cs.length > 0 && cs.every((c) => /canad/i.test(c))
+    if (cs.length) return cs.every((c) => /canad/i.test(c))
+    return named
   }
-  if (e.kind === '360') return !!e.media && e.media.include.length > 0 && e.media.include.every((m) => /canad/i.test(m))
-  return false
+  if (e.kind === '360' && e.media && e.media.include.length && e.media.include.every((m) => /canad/i.test(m))) return true
+  return named
 }
 
 const NAME_SKIP = new Set(['the', 'a', 'an'])

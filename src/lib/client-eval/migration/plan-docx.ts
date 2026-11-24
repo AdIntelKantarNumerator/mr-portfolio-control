@@ -137,6 +137,13 @@ export async function planDocx(plan: MigrationPlan): Promise<Buffer> {
     )
   }
 
+  const reports = plan.reports ?? []
+  if (reports.length) {
+    out.push(h(`Reports (${reports.length})`, HeadingLevel.HEADING_1))
+    out.push(p("360 reports used in 2026. They migrate once Insights Studio has its report builder, which does not exist yet."))
+    out.push(table(['Report', 'Type', 'Person', 'Last used'], reports.map((r) => [r.name, r.type, userName.get(r.user) ?? r.user, r.lastUsed ?? ''])))
+  }
+
   out.push(h('Checklist', HeadingLevel.HEADING_1))
   for (const c of plan.checklist) out.push(bullet(c))
   if (plan.notes.length) {
