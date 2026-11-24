@@ -2,21 +2,25 @@ import type { Entitlements } from '../types'
 import type { AccountType } from './catalog'
 
 /**
- * Agency holding companies (Scott, 24 November 2026): planned account by account, each keeping what it may see
- * today. A user on one brand team must not see another's data ("a Publicis user on Lexus Texas should not see
- * Verizon"), which matters most with Creative Intel. Known by name, with several accounts.
+ * The big ad agency holding companies and their media networks (Scott, 24 November 2026: "just big ad agencies with
+ * many accounts"). The largest agency companies (Ad Age Agency Report 2026; COMvergence's network ranking): Omnicom,
+ * which took in Interpublic in November 2025 (OMD, PHD, Hearts & Science, Initiative, UM, Mediabrands, FCB, McCann),
+ * Publicis (Zenith, Starcom, Spark Foundry, Digitas), WPP (WPP Media, formerly GroupM: Mindshare, Wavemaker,
+ * EssenceMediacom), Dentsu (Carat, iProspect), Havas and Horizon Media. Matched on the client's own name only: a
+ * brand whose 360 license group names its agency ("Nissan North America", group "OMD/Nissan") is a brand client.
  */
-const HOLDING = /\b(publicis|omnicom|omg|horizon media|groupm|group m|wpp|interpublic|ipg|mediabrands|dentsu|havas|spark ?foundry|starcom|zenith|mindshare|wavemaker|essence ?mediacom|mediacom|omd|phd|hearts ?(&|and) ?science|initiative|universal mccann|carat|iprospect|digitas)\b/i
+const AGENCY = /\b(omnicom|omg|interpublic|ipg|publicis|wpp|groupm|group m|dentsu|dentsux|havas|horizon media|omd|phd|hearts ?(&|and) ?science|initiative|universal mccann|mediabrands|zenith|starcom|spark ?foundry|digitas|mindshare|wavemaker|essence ?mediacom|mediacom|carat|iprospect)\b/i
 
-/** How the client's accounts are planned: one per legacy account, one with market workspaces, or the model's split. */
+/** Many accounts: below this a big agency's client is planned as one. Three keeps Horizon Media (4 active), which Scott named. */
+const MANY = 3
+
+/** How a client's accounts are planned: one with market workspaces, the model's split, or (an account's own plan) on its own. */
 export type PlanMode = 'holding' | 'markets' | 'standard'
 
 const hasMarkets = (a: { ent: Entitlements }) => (a.ent.kind === '360' ? a.ent.filters.some((f) => /market/i.test(f.type) && f.include.length) : a.ent.kind === 'magnifier' ? a.ent.access.some((x) => /market/i.test(x.label)) : false)
 
-export function planMode(client: string, company: string | null, pool: Array<{ type: AccountType; ent: Entitlements }>): { mode: PlanMode; why: string } {
-  const agencies = pool.filter((a) => a.type === 'brand_agency')
-  if (agencies.length >= 3 && (HOLDING.test(client) || HOLDING.test(company ?? '')))
-    return { mode: 'holding', why: `An agency holding company: each of its ${agencies.length} agency accounts becomes its own Insights Studio account and keeps the advertisers and categories it may see today.` }
+/** A client plan's mode. Big agencies never reach here: theirs are account plans (isHoldingClient), always 'holding'. */
+export function planMode(_client: string, _company: string | null, pool: Array<{ type: AccountType; ent: Entitlements }>): { mode: PlanMode; why: string } {
   const marketed = pool.filter(hasMarkets)
   if (pool.length >= 3 && marketed.length * 2 >= pool.length)
     return { mode: 'markets', why: `${marketed.length} of its ${pool.length} accounts are each limited to a market: one account with every market, and a workspace per market for that market's users.` }
@@ -24,11 +28,18 @@ export function planMode(client: string, company: string | null, pool: Array<{ t
 }
 
 /**
- * A holding company's client, known from the list alone (name or 360 license group, three or more accounts): its
- * Migration Plans are made account by account, each from its own account's row, not one for the client (Scott,
- * 24 November 2026).
+ * A big ad agency, planned account by account (each from its own row), not as one client: its name names a big
+ * agency company or network, it has MANY (three) active accounts or more, and it buys media: no more than a quarter of its
+ * accounts are 360 Media Owner (publisher) user sets. Media companies with many accounts, such as NBC or Sinclair,
+ * are planned at the client level and will likely be one Insights Studio account (Scott, 24 November 2026).
  */
-export const isHoldingClient = (name: string, company: string | null, accounts: number) => accounts >= 3 && (HOLDING.test(name) || HOLDING.test(company ?? ''))
+export function isHoldingClient(name: string, accounts: Array<{ active: boolean; summary: string | null }>): boolean {
+  if (!AGENCY.test(name)) return false
+  const live = accounts.filter((a) => a.active)
+  if (live.length < MANY) return false
+  const owners = live.filter((a) => /^media owner/i.test(a.summary ?? '')).length
+  return owners * 4 <= live.length
+}
 
 /** A plan for one legacy account, not a client: "acct|360:12345". */
 export const ACCOUNT_PLAN = 'acct|'

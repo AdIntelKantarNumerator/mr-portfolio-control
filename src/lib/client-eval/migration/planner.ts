@@ -171,12 +171,17 @@ async function seed() {
     .select({ id: ceClients.clientId, name: ceClients.name, company: ceClients.company, members: ceClients.members, platforms: ceClients.platforms, activeUsers: ceClients.activeUsers, logins30: ceClients.logins30 })
     .from(ceClients)
     .where(and(eq(ceClients.active, true), eq(ceClients.internal, false), eq(ceClients.canada, false)))
-  // Holding companies are planned account by account (Scott, 24 November 2026): a full plan for each of their
-  // active accounts with users, none for the client; a client plan left from before is dropped.
-  const holding = rows.filter((c) => isHoldingClient(c.name, c.company, (c.members as string[]).length))
+  // Big ad agencies are planned account by account (Scott, 24 November 2026): a full plan for each of their
+  // active accounts with users, none for the client; a client plan left from before is dropped, and so is an account
+  // plan whose client is no longer one.
+  const accts = new Map((await db.select({ platform: ceAccounts.platform, id: ceAccounts.accountId, active: ceAccounts.active, activeUsers: ceAccounts.activeUsers, summary: ceAccounts.summary }).from(ceAccounts)).map((a) => [`${a.platform}:${a.id}`, a]))
+  const holding = rows.filter((c) => isHoldingClient(c.name, (c.members as string[]).map((m) => accts.get(m)).filter((a) => !!a)))
   const holdingIds = holding.map((c) => c.id)
   for (let i = 0; i < holdingIds.length; i += 500) await db.delete(cePlans).where(inArray(cePlans.clientId, holdingIds.slice(i, i + 500)))
-  const live = new Map((await db.select({ platform: ceAccounts.platform, id: ceAccounts.accountId, activeUsers: ceAccounts.activeUsers }).from(ceAccounts).where(eq(ceAccounts.active, true))).map((a) => [`${a.platform}:${a.id}`, a.activeUsers]))
+  const holdingMembers = new Set(holding.flatMap((c) => (c.members as string[]).map(accountPlanId)))
+  const stray = [...have].filter((id) => id.startsWith('acct|') && !holdingMembers.has(id))
+  for (let i = 0; i < stray.length; i += 500) await db.delete(cePlans).where(inArray(cePlans.clientId, stray.slice(i, i + 500)))
+  const live = new Map([...accts].filter(([, a]) => a.active).map(([k, a]) => [k, a.activeUsers]))
   const add = rows
     .filter((c) => !holdingIds.includes(c.id) && !have.has(c.id))
     .map((c) => {

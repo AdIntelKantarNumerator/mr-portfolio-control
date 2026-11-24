@@ -390,13 +390,10 @@ test('Migration Plan: the premium note says what they keep and what is not inclu
   assert.match(premiumNote([acct(['Social', 'AVOD', 'Live Streaming Sports'])])!, /keep all three/)
 })
 
-test('Migration Plan: holding companies go account by account; market-split clients get one account', async () => {
+test('Migration Plan: market-split clients get one account; the rest the model split', async () => {
   const { planMode } = await import('../src/lib/client-eval/migration/mode')
   const s360 = (filters: Array<{ type: string; include: string[] }>) => ({ type: 'brand_agency' as const, ent: { kind: '360' as const, application: 'Media Buyer', years: 3, media: null, features: [], filters: filters.map((f) => ({ ...f, exclude: [], count: f.include.length })) } })
   const three = [s360([]), s360([]), s360([])]
-  assert.equal(planMode('Publicis Zenith Media', null, three).mode, 'holding')
-  assert.equal(planMode('Zenith Solar', 'Publicis Groupe', three).mode, 'holding', 'by its license group')
-  assert.equal(planMode('Publicis Zenith Media', null, three.slice(0, 2)).mode, 'standard', 'two accounts are not a holding company')
   const pub = (m: string) => ({ ...s360([{ type: 'Markets', include: [m, '* TOTAL US'] }]), type: 'publisher' as const })
   assert.equal(planMode('Sinclair Broadcasting Corporate', null, [pub('MACON,GA'), pub('TULSA,OK'), pub('ALBANY,GA')]).mode, 'markets')
   assert.equal(planMode('Acme', null, [s360([]), s360([]), s360([])]).mode, 'standard')
@@ -412,11 +409,16 @@ test('Migration Plan: TV, magazines and newspapers are shown as one each', async
 
 test('Migration Plan: holding companies are planned per account', async () => {
   const { accountOfPlan, accountPlanId, isHoldingClient } = await import('../src/lib/client-eval/migration/mode')
-  assert.equal(isHoldingClient('Publicis Zenith Media', null, 46), true)
-  assert.equal(isHoldingClient('GroupM Mindshare', null, 292), true)
-  assert.equal(isHoldingClient('Horizon Media', 'Horizon Media', 8), true)
-  assert.equal(isHoldingClient('Publicis Digitas', null, 2), false, 'fewer than three accounts')
-  assert.equal(isHoldingClient('Hearst', null, 54), false)
+  const accts = (n: number, owners = 0) => Array.from({ length: n }, (_, i) => ({ active: true, summary: i < owners ? 'Media Owner · 3 yr' : 'Media Buyer · 3 yr' }))
+  assert.equal(isHoldingClient('Publicis Zenith Media', accts(46)), true)
+  assert.equal(isHoldingClient('GroupM Mindshare', accts(150, 24)), true, 'a few media-owner sets among many')
+  assert.equal(isHoldingClient('Horizon Media', accts(8)), true)
+  assert.equal(isHoldingClient('Omnicom Rapp Organic', accts(2)), false, 'fewer than three active accounts')
+  assert.equal(isHoldingClient('Horizon Media', accts(4)), true)
+  assert.equal(isHoldingClient('Nissan North America', accts(5)), false, 'a brand, though its license group names OMD')
+  assert.equal(isHoldingClient('NBC Universal', accts(60, 50)), false, 'a media company')
+  assert.equal(isHoldingClient('Sinclair Broadcasting Corporate', accts(37, 30)), false)
+  assert.equal(isHoldingClient('Zenith Media Sales', accts(10, 8)), false, 'an agency word, but sells media')
   assert.equal(accountPlanId('360:41314'), 'acct|360:41314')
   assert.equal(accountOfPlan('acct|360:41314'), '360:41314')
   assert.equal(accountOfPlan('360:32730'), null)

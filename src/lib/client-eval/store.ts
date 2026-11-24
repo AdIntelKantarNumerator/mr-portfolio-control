@@ -325,7 +325,7 @@ export async function listClients(
       active: c.active,
       internal: c.internal,
       canada: c.canada,
-      holding: isHoldingClient(c.name, c.company, (c.members as string[]).length),
+      holding: isHoldingClient(c.name, (c.members as string[]).map((k) => acct.get(k)).filter((a) => !!a)),
       company: c.company,
       how: c.how as Link[],
       members: (c.members as string[])
