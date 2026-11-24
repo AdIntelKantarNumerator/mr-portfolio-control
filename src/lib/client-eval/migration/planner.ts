@@ -2,8 +2,8 @@
  * The Migration Plan planner (Scott, 23 November 2026): builds every active
  * client's plan in the background, over hours or days, one at a time.
  *
- * The app runs on one small server (B1: one core), so the planner never runs
- * two plans at once, pauses between them, and waits while an Impact Deck or an
+ * The app runs on one small server (B1: one core), so the planner builds one
+ * full plan at a time (two light ones, which read no Databricks), pauses between them, and waits while an Impact Deck or an
  * export is being built. Its queue is ce_plans, so a restart picks up where it
  * stopped.
  *
@@ -31,6 +31,7 @@ const BUSY_MS = 30_000
 const ASKED = 100_000
 const CHECK_BATCH = 50
 const STUCK_MS = 30 * 60_000
+const LIGHT_AT_ONCE = 2
 
 export interface PlanView {
   status: 'none' | 'queued' | 'building' | 'ready' | 'failed'
@@ -89,7 +90,11 @@ async function loop() {
       }
       const next = await nextQueued()
       if (next) {
-        await runOne(next.clientId, next.depth as 'full' | 'light')
+        if (next.depth === 'light') {
+          // Light plans read no Databricks and little memory: two side by side (Scott, 24 November 2026).
+          const pair = await nextLight(LIGHT_AT_ONCE)
+          await Promise.all(pair.map((p) => runOne(p.clientId, 'light')))
+        } else await runOne(next.clientId, next.depth as 'full' | 'light')
         await sleep(PAUSE_MS)
         continue
       }
@@ -115,6 +120,16 @@ async function jobRunning(): Promise<boolean> {
     .from(ceJobs)
     .where(and(eq(ceJobs.status, 'running'), sql`${ceJobs.updatedAt} > now() - interval '10 minutes'`))
   return (r?.n ?? 0) > 0
+}
+
+/** The next light plans in queue order. Called when the next plan of all is light, so none jumps a full one. */
+async function nextLight(n: number) {
+  return db
+    .select({ clientId: cePlans.clientId })
+    .from(cePlans)
+    .where(and(eq(cePlans.status, 'queued'), eq(cePlans.depth, 'light')))
+    .orderBy(desc(cePlans.priority), asc(cePlans.requestedAt))
+    .limit(n)
 }
 
 async function nextQueued() {

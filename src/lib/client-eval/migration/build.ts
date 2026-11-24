@@ -31,6 +31,7 @@ import { currentMedia, mediaChange, type MediaChange } from '../media-map'
 import { ratingsRunsBySet } from '../ratings-usage'
 import { clientPeople, type PersonRow } from '../store'
 import { parseMember, PLATFORM_LABEL, PLATFORMS, type Ent360, type EntClassic, type EntMagnifier, type Entitlements, type Platform } from '../types'
+import { readMatches, saveMatches } from './matches'
 import { ACCOUNT_TYPE_LABEL, COUNTRIES, ENTITY_TYPE, MEDIA, packageByKey, PREMIUM_MEDIA, SET_LABEL, type AccountType, type CountryCode, type SetKey } from './catalog'
 import { PLAN_VERSION, type MigrationPlan, type PlanAccount, type PlanUser, type PlanWorkspace, type PlanWorkspaceItem } from './types'
 
@@ -41,7 +42,7 @@ const MAX_ITEMS = 200
 const MAP_ADVERTISERS = 2000
 const MAP_CATEGORIES = 100
 /** dbxFlows takes this many at a time: one statement stays a reasonable size. */
-const FOLLOW_BATCH = 100
+const FOLLOW_BATCH = 250
 /**
  * Categories a statement: a category's flows are every product in it, far more rows than an advertiser's,
  * and 300 at once ran the server (1.75 GB) out of memory (24 November 2026).
@@ -446,7 +447,7 @@ function topBy<T>(rows: T[], key: (r: T) => string | null, spend: (r: T) => numb
 }
 
 /** Follow the legacy advertisers and categories into Insights Studio, as Taxonomy Comparison does. */
-async function buildMatcher(advIds: string[], catIds: string[], magnifierAccounts: string[], progress: PlanProgress): Promise<{ m: Matcher; magnifierFocus: Candidates | null; notes: string[] }> {
+async function buildMatcher(d: Database, advIds: string[], catIds: string[], magnifierAccounts: string[], progress: PlanProgress): Promise<{ m: Matcher; magnifierFocus: Candidates | null; notes: string[] }> {
   const m: Matcher = { adv: new Map(), cat: new Map(), magnifier: new Map() }
   const notes: string[] = []
   const fromFlows = (flows: Map<string, FlowRaw[]>, into: Map<string, { id: string; name: string; parent: boolean }>) => {
@@ -457,19 +458,28 @@ async function buildMatcher(advIds: string[], catIds: string[], magnifierAccount
       into.set(id, { id: top, name: f.gpcName ?? top, parent: f.gpcParentId === top })
     }
   }
-  if (advIds.length) {
-    await progress(`Following ${advIds.length} advertisers into Insights Studio (a minute or two)`)
+  // Matches other plans already found are reused; only the rest are followed, and what that finds is kept.
+  const knownAdv = await readMatches<{ id: string; name: string; parent: boolean }>(d, 'adv', advIds)
+  for (const [id, g] of knownAdv) if (g) m.adv.set(id, g)
+  const followAdv = advIds.filter((id) => !knownAdv.has(id))
+  if (followAdv.length) {
+    await progress(`Following ${followAdv.length} advertisers into Insights Studio (${knownAdv.size} already known)`)
     try {
-      for (let i = 0; i < advIds.length; i += FOLLOW_BATCH) {
-        if (i) await progress(`Following advertisers into Insights Studio (${i} of ${advIds.length})`)
-        fromFlows(await within(6 * 60_000, 'Following advertisers', () => dbxFlows('VX1', advIds.slice(i, i + FOLLOW_BATCH), new Map(), undefined, { large: true })), m.adv)
+      for (let i = 0; i < followAdv.length; i += FOLLOW_BATCH) {
+        if (i) await progress(`Following advertisers into Insights Studio (${i} of ${followAdv.length})`)
+        const part = followAdv.slice(i, i + FOLLOW_BATCH)
+        fromFlows(await within(6 * 60_000, 'Following advertisers', () => dbxFlows('VX1', part, new Map(), undefined, { large: true })), m.adv)
+        await saveMatches(d, 'adv', part.map((id) => [id, m.adv.get(id) ?? null]))
       }
     } catch (err) {
       notes.push(`360 advertisers could not be followed into Insights Studio: ${(err as Error).message}`.slice(0, 200))
     }
   }
+  const knownCat = await readMatches<{ id: string; name: string; e: number }>(d, 'cat', catIds)
+  for (const [id, g] of knownCat) if (g) m.cat.set(id, g)
+  catIds = catIds.filter((id) => !knownCat.has(id))
   if (catIds.length) {
-    await progress(`Following ${catIds.length} categories into Insights Studio`)
+    await progress(`Following ${catIds.length} categories into Insights Studio (${knownCat.size} already known)`)
     try {
       const tree = await within(4 * 60_000, 'Reading the taxonomy', () => dbxTaxonomyTree())
       const byName = new Map<string, { id: string; e: number }>()
@@ -480,7 +490,8 @@ async function buildMatcher(advIds: string[], catIds: string[], magnifierAccount
       // A few at a time, each batch reduced to its answer before the next is read: the rows are many.
       for (let i = 0; i < catIds.length; i += CATEGORY_BATCH) {
         if (i) await progress(`Following categories into Insights Studio (${i} of ${catIds.length})`)
-        const flows = await within(6 * 60_000, 'Following categories', () => dbxCategoryFlows('VX1', catIds.slice(i, i + CATEGORY_BATCH)))
+        const part = catIds.slice(i, i + CATEGORY_BATCH)
+        const flows = await within(6 * 60_000, 'Following categories', () => dbxCategoryFlows('VX1', part))
         for (const [id, fl] of flows) {
           const sub = topBy(fl, (f) => f.subcategory, (f) => f.spend)
           const cat = topBy(fl, (f) => f.category, (f) => f.spend)
@@ -488,6 +499,7 @@ async function buildMatcher(advIds: string[], catIds: string[], magnifierAccount
           if (hit) m.cat.set(id, { id: hit.id, name: (hit.e === 135 ? sub : cat)!, e: hit.e })
         }
         flows.clear()
+        await saveMatches(d, 'cat', part.map((id) => [id, m.cat.get(id) ?? null]))
       }
     } catch (err) {
       notes.push(`360 categories could not be followed into Insights Studio: ${(err as Error).message}`.slice(0, 200))
@@ -500,9 +512,15 @@ async function buildMatcher(advIds: string[], catIds: string[], magnifierAccount
       const c = await within(3 * 60_000, "Reading Magnifier's report criteria", () => candidatesMagnifier(magnifierAccounts))
       if (c.c?.kind === 'advertiser' && c.c.items.length) {
         magnifierFocus = c.c
-        const flows = await within(6 * 60_000, 'Following Magnifier advertisers', () => dbxFlows('VX2', c.c!.items.map((i) => i.id), new Map(), undefined, { large: true }))
+        const ids = c.c.items.map((i) => i.id)
         const into = new Map<string, { id: string; name: string; parent: boolean }>()
-        fromFlows(flows, into)
+        const known = await readMatches<{ id: string; name: string; parent: boolean }>(d, 'mag', ids)
+        for (const [id, g] of known) if (g) into.set(id, g)
+        const follow = ids.filter((id) => !known.has(id))
+        if (follow.length) {
+          fromFlows(await within(6 * 60_000, 'Following Magnifier advertisers', () => dbxFlows('VX2', follow, new Map(), undefined, { large: true })), into)
+          await saveMatches(d, 'mag', follow.map((id) => [id, into.get(id) ?? null]))
+        }
         for (const i of c.c.items) {
           const g = into.get(i.id)
           if (g) m.magnifier.set(i.name.toLowerCase(), { id: g.id, name: g.name })
@@ -566,18 +584,41 @@ const NAME_MAX = 600
  * name are found as Taxonomy Comparison searches them, and the model picks the one that is the same company
  * or brand, or none. Every match made this way is marked as a best guess (Scott, 23 November 2026).
  */
-async function nameMatch(workspaces: PlanWorkspace[], progress: PlanProgress): Promise<{ guessed: number }> {
+interface NameGuess {
+  id: string
+  name: string
+  level: string
+  confidence: 'high' | 'medium'
+}
+
+async function nameMatch(d: Database, workspaces: PlanWorkspace[], progress: PlanProgress): Promise<{ guessed: number }> {
   const want = new Map<string, PlanWorkspaceItem[]>()
   for (const w of workspaces)
     for (const s of w.sets)
       if (s.set === 'advertisers')
         for (const i of s.items) if (!i.gpc && i.name && !i.name.startsWith('#')) (want.get(i.name) ?? want.set(i.name, []).get(i.name)!).push(i)
-  const names = [...want.keys()].slice(0, NAME_MAX)
-  if (!names.length) return { guessed: 0 }
+  let guessed = 0
+  const apply = (name: string, g: NameGuess) => {
+    for (const item of want.get(name) ?? []) {
+      item.gpc = { id: g.id, name: g.name, how: `Best guess by name (model, ${g.confidence} confidence)`, guess: true }
+      item.entityType = g.level === 'Parent' ? 102 : 139
+      guessed++
+    }
+  }
+  // Names another plan already had judged: reused, whatever the answer was.
+  const keyOf = (n: string) => n.trim().toLowerCase()
+  const known = await readMatches<NameGuess>(d, 'name', [...want.keys()].map(keyOf))
+  for (const n of want.keys()) {
+    const g = known.get(keyOf(n))
+    if (g) apply(n, g)
+  }
+  const names = [...want.keys()].filter((n) => !known.has(keyOf(n))).slice(0, NAME_MAX)
+  if (!names.length) return { guessed }
   await progress(`Finding ${names.length} advertisers by name in Insights Studio`)
   const cands = new Map<string, Candidate[]>()
   for (let i = 0; i < names.length; i += 400) for (const [k, v] of await within(4 * 60_000, 'Finding advertisers by name', () => dbxGpcNameMatches(names.slice(i, i + 400)))) cands.set(k, v)
-  let guessed = 0
+  // Names with nothing similar in Insights Studio: kept as no match.
+  await saveMatches<NameGuess>(d, 'name', names.filter((n) => !cands.get(n)?.length).map((n) => [keyOf(n), null]))
   const batches: string[][] = []
   for (let i = 0; i < names.length; i += NAME_BATCH) batches.push(names.slice(i, i + NAME_BATCH).filter((n) => cands.get(n)?.length))
   let done = 0
@@ -607,16 +648,22 @@ Reply with JSON only: {"matches":[{"name":"legacy name as given","id":"candidate
       { maxTokens: 3000 },
     )
     const json = parseJson<{ matches?: Array<{ name?: string; id?: string | null; confidence?: string }> }>(text)
-    for (const m of json?.matches ?? []) {
+    if (!json) {
+      console.error('[migration] name match: unreadable answer', text.length, text.slice(0, 300), '…', text.slice(-200))
+      return
+    }
+    if (process.env.PLAN_DEBUG) console.error('[migration] name match', ask.length, 'asked', (json.matches ?? []).length, 'answered', (json.matches ?? []).filter((m) => m.id).length, 'with an id')
+    const judged = new Map<string, NameGuess | null>(ask.map((a) => [a.name, null]))
+    for (const m of json.matches ?? []) {
       const name = String(m.name ?? '')
+      if (!judged.has(name)) continue
       const c = (cands.get(name) ?? []).find((x) => x.id === String(m.id ?? ''))
       if (!c || m.confidence === 'low') continue
-      for (const item of want.get(name) ?? []) {
-        item.gpc = { id: c.id, name: c.name, how: `Best guess by name (model, ${m.confidence === 'high' ? 'high' : 'medium'} confidence)`, guess: true }
-        item.entityType = c.level === 'Parent' ? 102 : 139
-        guessed++
-      }
+      const g: NameGuess = { id: c.id, name: c.name, level: c.level ?? 'Entity', confidence: m.confidence === 'high' ? 'high' : 'medium' }
+      judged.set(name, g)
+      apply(name, g)
     }
+    await saveMatches(d, 'name', [...judged].map(([n, g]) => [keyOf(n), g]))
   }
 }
 
@@ -702,7 +749,7 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   let matcher: Matcher | null = null
   let magnifierFocus: Candidates | null = null
   if (opts.depth === 'full') {
-    const r = await buildMatcher(topAdv, topCat, magAccounts.slice(0, 50), progress)
+    const r = await buildMatcher(d, topAdv, topCat, magAccounts.slice(0, 50), progress)
     matcher = r.m
     magnifierFocus = r.magnifierFocus
     notes.push(...r.notes)
@@ -774,7 +821,7 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   // Advertisers with no spend to follow: matched by name, the model judging among the candidates.
   if (opts.depth === 'full' && useModel) {
     try {
-      const n = await nameMatch(workspaces, progress)
+      const n = await nameMatch(d, workspaces, progress)
       if (n.guessed) notes.push(`${n.guessed} workspace items were matched by name as the model's best guess; they are marked.`)
     } catch (err) {
       notes.push(`Matching advertisers by name did not run: ${(err as Error).message}`.slice(0, 200))

@@ -345,3 +345,8 @@ test('Migration Plan: the Word document builds from a plan', async () => {
   assert.ok(buf.length > 5000)
   assert.equal(buf.subarray(0, 2).toString(), 'PK')
 })
+
+test('Migration Plan: one cache row per key, the last answer kept', () => {
+  const list: Array<[string, number | null]> = [['san benedetto', 1], ['ford', 2], ['san benedetto', 3]]
+  assert.deepEqual([...new Map(list)], [['san benedetto', 3], ['ford', 2]])
+})

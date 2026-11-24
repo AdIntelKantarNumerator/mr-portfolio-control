@@ -2734,6 +2734,22 @@ export const ceJobChunks = pgTable(
 )
 
 /** Sign-ins from the SSO user pool, by email (drizzle/0057): Magnifier's last logins. lib/client-eval/cognito-signins.ts. */
+/**
+ * Legacy items already matched to Insights Studio (drizzle/0060), shared by every Migration Plan.
+ * kind: adv (360 advertiser, dbxFlows id), cat (360 category), mag (Magnifier advertiser), name (a name the model judged).
+ * gpc null: looked for, nothing found.
+ */
+export const ceGpcMatches = pgTable(
+  'ce_gpc_matches',
+  {
+    kind: text('kind').notNull(),
+    legacyId: text('legacy_id').notNull(),
+    gpc: jsonb('gpc'),
+    checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ name: 'ce_gpc_matches_pk', columns: [t.kind, t.legacyId] })],
+)
+
 /** Client Evaluation's Migration Plans, one per client (drizzle/0059, lib/client-eval/migration). */
 export const cePlans = pgTable('ce_plans', {
   clientId: text('client_id').primaryKey(),
