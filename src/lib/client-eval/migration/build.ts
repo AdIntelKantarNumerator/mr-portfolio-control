@@ -24,7 +24,7 @@ import type { Database } from '@/db/client'
 import { ceAccounts, ceClients, ceUsers } from '@/db/schema'
 import { chunks, q360 } from '@/lib/import360/source'
 import { completeJson } from '@/lib/llm'
-import { dbxAdvertiserSummary, dbxCategorySummary, dbxGpcNameMatches, dbxTaxonomyTree } from '@/lib/taxonomy-dbx'
+import { dbxAdvertiserSummary, dbxCategorySummary, dbxGpcNameMatches, dbxMergedEntities, dbxTaxonomyTree } from '@/lib/taxonomy-dbx'
 import type { Candidate } from '@/lib/taxonomy-rules'
 import { ADV_360, candidatesMagnifier, names360, plainTerms, type Candidates } from '../deck-data'
 import { currentMedia, mediaChange, type MediaChange } from '../media-map'
@@ -49,6 +49,8 @@ const FOLLOW_BATCH = 1000
  * and names to the old 4-6 minute limits while waiting, not running.
  */
 const FOLLOW_LIMIT = 12 * 60_000
+/** Item types whose Insights Studio id is a GPC entity (subsidiary, parent, advertiser, brand): those GPC can merge. */
+const GPC_ENTITY_TYPES = new Set([101, 102, 118, 139])
 /**
  * Categories a statement. Full flow rows for 300 categories ran the server (1.75 GB) out of memory (24 November
  * 2026); the summary dbxCategorySummary returns is one row per category and GPC category/subcategory, so 100
@@ -833,6 +835,25 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
       if (n.guessed) notes.push(`${n.guessed} workspace items were matched by name as the model's best guess; they are marked.`)
     } catch (err) {
       notes.push(`Matching advertisers by name did not run: ${(err as Error).message}`.slice(0, 200))
+    }
+  }
+
+  // Merged entities: a match that names one is moved to the entity it went into, or dropped if there is none.
+  // Spend never leads to one; a name search or an old cached match can (24 November 2026: 321 cached name matches).
+  if (opts.depth === 'full') {
+    const entityItems = workspaces.flatMap((w) => w.sets.flatMap((s) => s.items)).filter((i) => i.gpc && GPC_ENTITY_TYPES.has(i.entityType))
+    try {
+      const merged = await within(FOLLOW_LIMIT, 'Checking for merged entities', () => dbxMergedEntities(entityItems.map((i) => i.gpc!.id)))
+      let moved = 0
+      for (const i of entityItems) {
+        if (!merged.has(i.gpc!.id)) continue
+        const to = merged.get(i.gpc!.id)
+        moved++
+        i.gpc = to ? { ...i.gpc!, id: to.id, name: to.name, how: `${i.gpc!.how}; merged in GPC into this entity` } : null
+      }
+      if (moved) notes.push(`${moved} matches named an entity merged into another in GPC; they now name the one it went into.`)
+    } catch (err) {
+      notes.push(`Merged entities could not be checked: ${(err as Error).message}`.slice(0, 200))
     }
   }
 

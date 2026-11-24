@@ -74,6 +74,29 @@ chain AS (SELECT e0.entity_id, array(e0.entity_id, e0.par${Array.from({ length: 
   FROM ent e0${Array.from({ length: ANCESTRY_DEPTH - 1 }, (_, i) => ` LEFT JOIN ent e${i + 1} ON e${i + 1}.entity_id = e${i}.par`).join('')}),
 anc AS (SELECT entity_id descendant, a ancestor, d distance FROM chain LATERAL VIEW posexplode(up) t AS d, a WHERE a IS NOT NULL),
 root AS (SELECT descendant entity_id, max_by(ancestor, distance) root_id FROM anc GROUP BY 1)`
+/**
+ * Merged entities (Scott, 24 November 2026): a merged entity is Void and current_entity_id names the one it
+ * went into (90,826 on that day, none chained). Creative, product and parent links are moved to the survivor when
+ * GPC merges, so spend never lands on a merged one; only a search of the entity table itself can find one. A
+ * Void entity with no survivor (deleted) has none and is left out.
+ */
+const SURVIVOR = `survivor AS (SELECT entity_id, CASE WHEN status = 'Void' THEN current_entity_id ELSE entity_id END live_id
+  FROM mrdpp_prod.global_catalog.entity WHERE status <> 'Void' OR (current_entity_id IS NOT NULL AND current_entity_id <> entity_id))`
+
+/** For each id that is a merged entity, the entity it went into; null when it was deleted with none. Ids not in the map are live. */
+export async function dbxMergedEntities(ids: string[]): Promise<Map<string, { id: string; name: string } | null>> {
+  const out = new Map<string, { id: string; name: string } | null>()
+  const nums = [...new Set(ids.filter(isInt))]
+  for (let i = 0; i < nums.length; i += 5000) {
+    const sql = `SELECT cast(e.entity_id AS string) id, cast(sv.entity_id AS string) live_id, coalesce(sv.display_name, sv.legal_name) live_name
+FROM mrdpp_prod.global_catalog.entity e
+LEFT JOIN mrdpp_prod.global_catalog.entity sv ON sv.entity_id = e.current_entity_id AND e.current_entity_id <> e.entity_id AND sv.status <> 'Void'
+WHERE e.status = 'Void' AND e.entity_id IN (${inList(nums.slice(i, i + 5000))})`
+    for (const r of await dbxQuery(config(), sql, [], {})) out.set(r.id!, r.live_id ? { id: r.live_id, name: r.live_name ?? r.live_id } : null)
+  }
+  return out
+}
+
 /** The creative_entity rows that pay: the Advertiser role only; co-op roles get no spend. */
 const PAYER_ROLE = "entity_role = 'Advertiser'"
 const ATTRIBUTION = `
@@ -577,9 +600,11 @@ export async function dbxGpcCandidates(names: string[], onWait?: OnWait): Promis
   const { params, values } = patternValues(names)
   const sql = `
 WITH pats AS (${values}),
-e AS (SELECT pt.input, pt.k, e.entity_id, coalesce(e.display_name, e.legal_name) name, nullif(e.parent_entity_id, e.entity_id) par
-  FROM pats pt JOIN mrdpp_prod.global_catalog.entity e
-    ON regexp_replace(lower(coalesce(e.display_name, e.legal_name)), '[^a-z0-9]', '') LIKE pt.pat),
+${SURVIVOR},
+e AS (SELECT DISTINCT pt.input, pt.k, sv.entity_id, coalesce(sv.display_name, sv.legal_name) name, nullif(sv.parent_entity_id, sv.entity_id) par
+  FROM pats pt JOIN mrdpp_prod.global_catalog.entity m
+    ON regexp_replace(lower(coalesce(m.display_name, m.legal_name)), '[^a-z0-9]', '') LIKE pt.pat
+  JOIN survivor s ON s.entity_id = m.entity_id JOIN mrdpp_prod.global_catalog.entity sv ON sv.entity_id = s.live_id),
 pc AS (SELECT entity_id, count(*) n FROM mrdpp_prod.global_catalog.product WHERE entity_id IN (SELECT entity_id FROM e) GROUP BY 1),
 u AS (SELECT e.input, e.k, cast(e.entity_id AS string) id, max(e.name) name, max(coalesce(pc.n, 0)) size,
     max(CASE WHEN e.par IS NULL THEN 'parent company' ELSE p.name END) parent
@@ -1198,13 +1223,17 @@ export async function dbxGpcNameMatches(names: string[], onWait?: OnWait): Promi
   if (!rows.length) return out
   const sql = `
 WITH pats AS (SELECT * FROM VALUES ${rows.join(', ')} AS t(input, k, s)),
-ent AS (SELECT entity_id, coalesce(display_name, legal_name) name, nullif(parent_entity_id, entity_id) par,
-    regexp_replace(lower(coalesce(display_name, legal_name)), '[^a-z0-9]', '') ck,
-    regexp_replace(regexp_replace(regexp_replace(lower(coalesce(display_name, legal_name)), '[^a-z0-9]', ''), '^the', ''), '(incorporated|inc|llc|ltd|plc|corporation|corp|company|co|holdings|group)$', '') cs
-  FROM mrdpp_prod.global_catalog.entity WHERE coalesce(display_name, legal_name) IS NOT NULL),
+${SURVIVOR},
+ent AS (SELECT sv.entity_id, coalesce(sv.display_name, sv.legal_name) name, nullif(sv.parent_entity_id, sv.entity_id) par,
+    regexp_replace(lower(coalesce(e.display_name, e.legal_name)), '[^a-z0-9]', '') ck,
+    regexp_replace(regexp_replace(regexp_replace(lower(coalesce(e.display_name, e.legal_name)), '[^a-z0-9]', ''), '^the', ''), '(incorporated|inc|llc|ltd|plc|corporation|corp|company|co|holdings|group)$', '') cs
+  FROM mrdpp_prod.global_catalog.entity e JOIN survivor s ON s.entity_id = e.entity_id JOIN mrdpp_prod.global_catalog.entity sv ON sv.entity_id = s.live_id
+  WHERE coalesce(e.display_name, e.legal_name) IS NOT NULL),
 m AS (SELECT p.input, p.k, e.entity_id, e.name, e.par, e.ck FROM pats p JOIN ent e
   ON e.ck = p.k OR (length(p.s) >= 4 AND e.cs = p.s)
-  OR (length(p.k) >= 5 AND startswith(e.ck, p.k)) OR (length(e.ck) >= 5 AND startswith(p.k, e.ck)))
+  OR (length(p.k) >= 5 AND startswith(e.ck, p.k)) OR (length(e.ck) >= 5 AND startswith(p.k, e.ck))
+  -- A survivor reached by its own name and a merged one's is one candidate, by its closest name.
+  QUALIFY row_number() OVER (PARTITION BY p.input, e.entity_id ORDER BY CASE WHEN e.ck = p.k THEN 0 ELSE 1 END, abs(length(e.ck) - length(p.k))) = 1)
 SELECT m.input, cast(m.entity_id AS string) id, m.name, CASE WHEN m.par IS NULL THEN 'parent company' ELSE pe.name END parent
 FROM m LEFT JOIN (SELECT entity_id, coalesce(display_name, legal_name) name FROM mrdpp_prod.global_catalog.entity) pe ON pe.entity_id = m.par
 QUALIFY row_number() OVER (PARTITION BY m.input ORDER BY CASE WHEN m.ck = m.k THEN 0 ELSE 1 END, abs(length(m.ck) - length(m.k))) <= 8`
