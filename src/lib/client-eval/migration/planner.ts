@@ -2,8 +2,8 @@
  * The Migration Plan planner (Scott, 23 November 2026): builds every active
  * client's plan in the background, over hours or days, one at a time.
  *
- * The app runs on one small server (B1: one core), so the planner builds one
- * full plan at a time, with light ones (which read no Databricks) two at a time beside it, pauses between them, and waits while an Impact Deck or an
+ * The app runs on one small server (B1: one core), so the planner builds two
+ * full plans at a time, with light ones (which read no Databricks) two at a time beside it, pauses between them, and waits while an Impact Deck or an
  * export is being built. Its queue is ce_plans, so a restart picks up where it
  * stopped.
  *
@@ -33,6 +33,7 @@ const ASKED = 100_000
 const CHECK_BATCH = 50
 const STUCK_MS = 30 * 60_000
 const LIGHT_AT_ONCE = 2
+const FULL_AT_ONCE = 2
 
 export interface PlanView {
   status: 'none' | 'queued' | 'building' | 'ready' | 'failed'
@@ -93,9 +94,12 @@ async function loop() {
       }
       // Two lanes (Scott, 24 November 2026): one full plan at a time, and beside it light plans, two at a time, which
       // read no Databricks and little memory. Light plans no longer wait days behind every full one.
-      const full = await nextFull()
+      // Two full plans side by side (24 November 2026): with Databricks summing the follows, a full plan peaks
+      // near 60 MB, and the queue held some 2,400 of them.
+      const fulls = await nextFull(FULL_AT_ONCE)
+      const full = fulls.length > 0
       let fullDone = !full
-      const fullRun = full ? runOne(full.clientId, 'full').finally(() => (fullDone = true)) : Promise.resolve()
+      const fullRun = full ? Promise.all(fulls.map((f) => runOne(f.clientId, 'full'))).finally(() => (fullDone = true)) : Promise.resolve()
       let light = 0
       do {
         if (await jobRunning()) break
@@ -144,14 +148,13 @@ async function nextLight(n: number) {
     .limit(n)
 }
 
-async function nextFull() {
-  const [r] = await db
+async function nextFull(n: number) {
+  return db
     .select({ clientId: cePlans.clientId })
     .from(cePlans)
     .where(and(eq(cePlans.status, 'queued'), eq(cePlans.depth, 'full')))
     .orderBy(desc(cePlans.priority), asc(cePlans.requestedAt))
-    .limit(1)
-  return r ?? null
+    .limit(n)
 }
 
 /** Canadian clients' plans still waiting in the queue are dropped: no plan is built for them. */
