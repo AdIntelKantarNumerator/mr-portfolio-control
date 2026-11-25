@@ -62,6 +62,8 @@ export interface EntMagnifier {
   /** Product switches on the account. */
   flags: string[]
   countries: string[]
+  /** The latest end date among its reports' RELs; null when none has one (load-magnifier.ts expireMagnifier). */
+  relEnd?: string | null
   /** Countries of the data its saved searches since 2025 run on: the account's country when it has no reports. */
   searchCountries?: string[]
   /** Media its RELs let in, rolled up (TV, Print, Digital...). */

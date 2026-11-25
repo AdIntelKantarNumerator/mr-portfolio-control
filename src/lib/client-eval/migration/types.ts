@@ -46,6 +46,8 @@ export interface PlanAccount {
      * and categories in Insights Studio, Creative Intel included.
      */
     limits?: Array<{ label: string; items: string[]; total: number }>
+    /** Why the account is limited, when it is for a reason beyond keeping today's restrictions. */
+    limitsWhy?: string
   }
   seats: number
 }

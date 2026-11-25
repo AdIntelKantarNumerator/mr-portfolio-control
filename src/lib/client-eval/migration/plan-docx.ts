@@ -70,7 +70,8 @@ export async function planDocx(plan: MigrationPlan): Promise<Buffer> {
       for (const w of a.coverage.widened) out.push(bullet(w))
     }
     if (a.coverage.limits?.length) {
-      out.push(p('Access limited to (kept on the account)', { bold: true }))
+      out.push(p('Access limited to', { bold: true }))
+      if (a.coverage.limitsWhy) out.push(p(a.coverage.limitsWhy))
       for (const l of a.coverage.limits) out.push(bullet(`${l.label}: ${l.items.slice(0, 30).join(', ')}${l.total > 30 ? ` and ${l.total - 30} more` : ''}`))
     }
   }

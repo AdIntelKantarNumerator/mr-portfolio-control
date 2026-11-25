@@ -24,7 +24,10 @@ import type { Database } from '@/db/client'
 import { ceAccounts, ceClients, ceOfflineReports, ceUsers } from '@/db/schema'
 import { chunks, q360, reportsForUsers } from '@/lib/import360/source'
 import { completeJson } from '@/lib/llm'
-import { dbxAdvertiserSummary, dbxCategorySummary, dbxGpcNameMatches, dbxMergedEntities, dbxTaxonomyTree } from '@/lib/taxonomy-dbx'
+import { dbxAdvertiserSummary, dbxCategorySummary, dbxGpcNameMatches, dbxMergedEntities, dbxTaxonomyTree, dbxVx2CategoryShares } from '@/lib/taxonomy-dbx'
+import { MONTHS } from '@/lib/taxonomy-rules'
+import { connectMagnifier, magnifierConfig } from '../load-magnifier'
+import { parseRel } from '../rel'
 import type { Candidate } from '@/lib/taxonomy-rules'
 import { ADV_360, candidatesMagnifier, names360, plainTerms, type Candidates } from '../deck-data'
 import { accountSearches, mongoUrl } from '../saved-searches'
@@ -315,6 +318,83 @@ function features(members: Legacy[]): string[] {
   return [...out]
 }
 
+/**
+ * Magnifier's category-based grant (Scott, 16 November 2026, "the intent is for the new entitlements to be GPC
+ * category based", applied to Migration Plans 25 November 2026): each advertiser or category a Magnifier account's
+ * RELs name grants the GPC categories holding at least a quarter of its spend, if it spent enough to judge. The rule
+ * was $25K over May-October; the spend read here covers MONTHS, so the bar is scaled to them.
+ */
+const GRANT_SHARE = 0.25
+const GRANT_MIN_SPEND = Math.round((25_000 * MONTHS.length) / 6)
+
+interface MagnifierGrant {
+  categories: string[]
+  /** REL advertisers and categories it was drawn from. */
+  items: number
+  /** Of those, how many spent too little to grant anything. */
+  weak: number
+}
+
+/** Each Magnifier account's REL advertisers and categories, by account code: its client RELs, not the default ones. */
+async function relItems(accountIds: string[]): Promise<Map<string, Set<string>>> {
+  const out = new Map<string, Set<string>>()
+  const cfg = magnifierConfig()
+  if (!cfg || !accountIds.length) return out
+  const conn = await connectMagnifier(cfg)
+  try {
+    const [rows] = await conn.query({
+      sql: `SELECT DISTINCT r.USER_ACCOUNT_CODE a, c.RULE_RAW raw FROM (SELECT DISTINCT USER_ACCOUNT_CODE, REPORT_ID FROM USER_ACCOUNT_REPORTING) r
+       JOIN REPORT_CONFIGURATION rc ON rc.REPORT_ID = r.REPORT_ID AND rc.IS_ENABLED = 1
+       JOIN CRITERIA c ON c.ID = rc.CRITERIA_ID
+       WHERE r.USER_ACCOUNT_CODE IN (?)`,
+      values: [accountIds],
+      timeout: 60_000,
+    })
+    for (const r of rows as Array<{ a: string; raw: string | null }>) {
+      const set = out.get(String(r.a).trim()) ?? out.set(String(r.a).trim(), new Set()).get(String(r.a).trim())!
+      for (const f of parseRel(String(r.raw ?? '')).fields)
+        for (const code of f.codes) {
+          if (/^\d+$/.test(code)) continue // Canadian ids: Canada is left out
+          if (f.field === 'advertiser_code' || f.field === 'parent_advertiser_code') set.add(code)
+          else if (f.field === 'category_code' || f.field === 'category_t1_code') set.add(`C${code}`)
+          else if (f.field === 'subcategory_code' || f.field === 'category_t2_code') set.add(`S${code}`)
+        }
+    }
+  } finally {
+    await conn.end().catch(() => {})
+  }
+  return out
+}
+
+/** The GPC categories each Magnifier account's REL items grant, by legacy key ("magnifier:CODE"). */
+async function magnifierGrants(members: Legacy[], progress: PlanProgress, notes: string[]): Promise<Map<string, MagnifierGrant>> {
+  const out = new Map<string, MagnifierGrant>()
+  const mag = members.filter((a) => a.platform === 'magnifier')
+  if (!mag.length) return out
+  await progress("Granting GPC categories for Magnifier's advertisers")
+  try {
+    const items = await within(3 * 60_000, "Reading Magnifier's RELs", () => relItems(mag.map((a) => a.id)))
+    const all = [...new Set([...items.values()].flatMap((s) => [...s]))]
+    if (!all.length) return out
+    const shares = await within(FOLLOW_LIMIT, "Following Magnifier's advertisers into GPC categories", () => dbxVx2CategoryShares(all))
+    const grants = new Map<string, string[]>()
+    for (const id of all) {
+      const rows = shares.get(id) ?? []
+      const total = rows.reduce((s, r) => s + r.spend, 0)
+      grants.set(id, total >= GRANT_MIN_SPEND ? rows.filter((r) => r.spend / total >= GRANT_SHARE).map((r) => r.category) : [])
+    }
+    for (const a of mag) {
+      const mine = [...(items.get(a.id.trim()) ?? [])]
+      if (!mine.length) continue
+      const cats = new Set(mine.flatMap((id) => grants.get(id) ?? []))
+      out.set(a.key, { categories: [...cats].sort(), items: mine.length, weak: mine.filter((id) => !(grants.get(id) ?? []).length).length })
+    }
+  } catch (err) {
+    notes.push(`Magnifier's GPC categories could not be granted: ${(err as Error).message}`.slice(0, 200))
+  }
+  return out
+}
+
 /** Offline reports since this day count (Scott, 24 November 2026: someone downloaded one in 2026). */
 const OFFLINE_SINCE = '2026-01-01'
 const OUR_DOMAINS = /@(mediaradar|vivvix|kantar|competitrack)\./i
@@ -356,7 +436,7 @@ async function offlineByAccount(d: Database, groups: Group[], people: PersonRow[
   return out
 }
 
-function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number; videoamp: number }> | null, offline: OfflineEvidence | null): PlanAccount {
+function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number; videoamp: number }> | null, offline: OfflineEvidence | null, grants: Map<string, MagnifierGrant>): PlanAccount {
   const feats = features(g.members)
   const has = (re: RegExp) => feats.find((f) => re.test(f))
   const packages: PlanAccount['packages'] = []
@@ -439,14 +519,36 @@ function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number
   }
   // Holding companies keep their restrictions on the account itself: nothing is lifted.
   let limits: PlanAccount['coverage']['limits']
+  let limitsWhy: string | undefined
   if (g.keepLimits) {
     limits = []
     for (const a of g.members) {
       const e = a.ent
       if (e.kind === '360') for (const f of e.filters.filter((x) => !/submedia|^media|time|data tables/i.test(x.type) && x.include.length)) limits.push({ label: f.type, items: f.include.slice(0, 60), total: f.count })
-      if (e.kind === 'magnifier') for (const x of e.access.filter((y) => !/countr|flag/i.test(y.label))) limits.push({ label: x.label, items: x.items.slice(0, 60), total: x.total })
+      if (e.kind === 'magnifier') {
+        // Magnifier's advertisers and categories become the GPC categories they grant, as everywhere else.
+        const grant = grants.get(a.key)
+        if (grant?.categories.length) limits.push({ label: 'GPC categories', items: grant.categories.slice(0, 60), total: grant.categories.length })
+        else for (const x of e.access.filter((y) => !/countr|flag/i.test(y.label))) limits.push({ label: x.label, items: x.items.slice(0, 60), total: x.total })
+      }
     }
     widened.length = 0
+  } else {
+    // A Magnifier account limited to advertisers or categories is entitled to the GPC categories they grant; its
+    // users get workspaces limited to the advertisers themselves. Unless the account also has a 360 user set limited
+    // to no advertisers or categories: then it gets every category, and the Magnifier workspaces still (Scott,
+    // 25 November 2026).
+    const open360 = g.members.some((a) => a.ent.kind === '360' && !a.ent.filters.some((f) => /advertiser|brand|product|parent|subsidiar|categor|industr|major/i.test(f.type) && f.include.length))
+    const granted = g.members.filter((a) => a.platform === 'magnifier').map((a) => grants.get(a.key)).filter((x): x is MagnifierGrant => !!x)
+    const cats = [...new Set(granted.flatMap((x) => x.categories))].sort()
+    if (!open360 && cats.length) {
+      limits = [{ label: 'GPC categories', items: cats.slice(0, 60), total: cats.length }]
+      // What Magnifier limited is now a category entitlement, not a lifted restriction.
+      for (let k = widened.length - 1; k >= 0; k--) if (widened[k]!.includes('(Magnifier):')) widened.splice(k, 1)
+      const items = granted.reduce((s, x) => s + x.items, 0)
+      const weak = granted.reduce((s, x) => s + x.weak, 0)
+      limitsWhy = `The GPC categories covering its ${items} Magnifier advertisers and categories: each grants the categories holding a quarter of its spend${weak ? `; ${weak} spent too little to grant one and stay in the users' workspaces` : ''}.`
+    }
   }
 
   return {
@@ -457,7 +559,7 @@ function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number
     why: g.why,
     contract: { lookbackYears: lookback, includePreliminary },
     packages,
-    coverage: { media, withheld, countries, widened: widened.slice(0, 40), ...(limits ? { limits } : {}) },
+    coverage: { media, withheld, countries, widened: widened.slice(0, 40), ...(limits ? { limits } : {}), ...(limitsWhy ? { limitsWhy } : {}) },
     seats: 0,
   }
 }
@@ -886,7 +988,9 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
     }
   }
   const offline = await offlineByAccount(d, groups, people, notes)
-  const accounts = groups.map((g, i) => accountPlan(g, i, ratings, offline.get(i) ?? null))
+  // Magnifier's RELs become GPC categories (full plans: it reads Databricks).
+  const grants = opts.depth === 'full' ? await magnifierGrants(groups.flatMap((g) => g.members), progress, notes) : new Map<string, MagnifierGrant>()
+  const accounts = groups.map((g, i) => accountPlan(g, i, ratings, offline.get(i) ?? null, grants))
 
   const users = usersPlan(people, accounts, now)
   for (const a of accounts) a.seats = users.filter((u) => u.create.value && u.account === a.key).length

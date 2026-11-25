@@ -8,9 +8,9 @@
  */
 import { db } from '@/db/client'
 import { live360Configured } from '@/lib/import360/source'
-import { applySignins } from './cognito-signins'
+import { applySignins, cognitoConfig } from './cognito-signins'
 import { load360 } from './load-360'
-import { connectMagnifier, loadMagnifier, magnifierConfig } from './load-magnifier'
+import { connectMagnifier, expireMagnifier, loadMagnifier, magnifierConfig } from './load-magnifier'
 import { buildClients, markFailed, markReady, markRunning, progressWriter, saveSnapshot } from './store'
 import { PLATFORM_LABEL, REFRESH_CONTACT, SNAPSHOT_ONLY, type Platform } from './types'
 
@@ -41,6 +41,9 @@ async function run(p: Platform, by: string | null) {
         snap = await loadMagnifier(conn, progress)
         // Last logins from the SSO pool, by email (cognito-signins.ts).
         await applySignins(db, snap.users, progress).catch((err) => console.error('[client-eval] SSO sign-ins', err))
+        // Every REL ended and nobody ever signed in: inactive (Scott, 25 November 2026).
+        // Only with sign-ins read: without them nobody would have one, and every ended REL would read as inactive.
+        if (cognitoConfig()) expireMagnifier(snap)
       } finally {
         await conn.end().catch(() => {})
       }

@@ -191,6 +191,8 @@ export async function loadMagnifier(conn: Connection, progress: Progress): Promi
         access: [...access].map(([label, x]) => ({ label, items: [...x.items].sort((p, q) => p.localeCompare(q)), total: x.total })),
         reports: mine.length,
         namesNote: mine.length ? namesError : null,
+        // The latest end date among its reports' RELs (CRITERIA.CONTRACT_END_DATE): see expireMagnifier.
+        relEnd: mine.map((r) => (r.detail as { rel: { end: string | null } }).rel.end).filter((e): e is string => !!e && !e.startsWith('0000')).sort().at(-1) ?? null,
       }
       return {
         accountId: id,
@@ -206,6 +208,24 @@ export async function loadMagnifier(conn: Connection, progress: Progress): Promi
   const kept = new Set(accounts.map((a) => a.accountId))
   await progress('Magnifier read', 5, 5)
   return { accounts, users: outUsers.filter((u) => kept.has(u.accountId)), reports: outReports.filter((r) => kept.has(r.accountId)) }
+}
+
+/**
+ * An account whose every REL has ended and none of whose users has ever signed in through SSO is inactive (Scott,
+ * 25 November 2026), whatever its users' flags say. Run after the users' SSO sign-ins are known (applySignins).
+ * Returns how many accounts it turned inactive.
+ */
+export function expireMagnifier(snap: Snapshot, today = new Date().toISOString().slice(0, 10)): number {
+  const signedIn = new Set(snap.users.filter((u) => u.lastSeen).map((u) => u.accountId))
+  let n = 0
+  for (const a of snap.accounts) {
+    const e = a.entitlements as EntMagnifier
+    if (!a.active || e.kind !== 'magnifier' || !e.relEnd || e.relEnd >= today || signedIn.has(a.accountId)) continue
+    a.active = false
+    a.info = { ...(a.info as Record<string, unknown>), inactiveWhy: `Every REL ended (latest ${e.relEnd}) and no SSO sign-in on record.` }
+    n++
+  }
+  return n
 }
 
 export function summaryMagnifier(e: EntMagnifier): string {

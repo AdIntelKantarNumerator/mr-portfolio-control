@@ -481,6 +481,41 @@ export async function dbxAdvertiserSummary(from: 'VX1' | 'VX2', ids: string[]): 
 }
 
 /**
+ * Magnifier's REL items by GPC category: for each VX2 advertiser code, or category ("C<code>") or subcategory
+ * ("S<code>") code, its spend in each GPC category. What the category-based grant reads (Scott, 16 November 2026:
+ * an item grants the GPC categories holding a quarter of its spend; migration/build.ts relCategories).
+ */
+export async function dbxVx2CategoryShares(ids: string[]): Promise<Map<string, Array<{ category: string; spend: number }>>> {
+  const out = new Map<string, Array<{ category: string; spend: number }>>()
+  const adv = ids.filter((id) => !/^[CS]/.test(id) && isCode(id))
+  const cats = ids.filter((id) => id.startsWith('C') && isCode(id.slice(1))).map((id) => `'${id.slice(1)}'`)
+  const subs = ids.filter((id) => id.startsWith('S') && isCode(id.slice(1))).map((id) => `'${id.slice(1)}'`)
+  const read = async (fromCte: string) => {
+    for (const r of await dbxQuery(config(), summarised(flowsSql(fromCte, 'VX2'), 'from_id, category'), [], {})) {
+      const spend = Number(r.spend ?? 0)
+      if (!spend || !r.category) continue
+      ;(out.get(r.from_id!) ?? out.set(r.from_id!, []).get(r.from_id!)!).push({ category: r.category, spend })
+    }
+  }
+  // REL advertiser codes are d_product.PRINST codes ("WALMRT"), not d_advertiser ids.
+  if (adv.length)
+    await read(`
+from_crtv AS (
+  SELECT DISTINCT p.PRINST from_id, c.creative_id FROM mrdpp_prod.gold.creative c
+    JOIN mrdpp_prod.vx2_taxonomy.d_product p ON p.PRSEQ = c.vx2_product_id
+  WHERE p.PRINST IN (${adv.map((a) => `'${a}'`).join(', ')}))`)
+  if (cats.length || subs.length)
+    await read(`
+from_crtv AS (
+  SELECT DISTINCT concat('C', p.PRCATGY) from_id, c.creative_id FROM mrdpp_prod.gold.creative c
+    JOIN mrdpp_prod.vx2_taxonomy.d_product p ON p.PRSEQ = c.vx2_product_id WHERE p.PRCATGY IN (${cats.join(', ') || 'NULL'})
+  UNION
+  SELECT DISTINCT concat('S', p.PRSBCAT) from_id, c.creative_id FROM mrdpp_prod.gold.creative c
+    JOIN mrdpp_prod.vx2_taxonomy.d_product p ON p.PRSEQ = c.vx2_product_id WHERE p.PRSBCAT IN (${subs.join(', ') || 'NULL'}))`)
+  return out
+}
+
+/**
  * Where each legacy category's dollars land, summed by GPC category and subcategory only: one small row per pair,
  * not one per month, medium and entity as dbxCategoryFlows returns. The Migration Plan needs only the top category
  * and subcategory, and the full rows made it read 10 categories at a time (24 November 2026: memory), each query

@@ -446,3 +446,13 @@ test('Migration Plan: a legacy medium the catalogue offers by name or alias is k
   assert.equal(catalogName('Outdoor'), null, 'not in Insights Studio V1')
   assert.equal(catalogName('Network Radio'), null)
 })
+
+test('Magnifier: every REL ended and no SSO sign-in makes an account inactive', async () => {
+  const { expireMagnifier } = await import('../src/lib/client-eval/load-magnifier')
+  const ent = (relEnd: string | null) => ({ kind: 'magnifier' as const, contract: { start: null, end: null }, flags: [], countries: [], media: [], access: [], namesNote: null, reports: 1, relEnd })
+  const acct = (id: string, relEnd: string | null) => ({ accountId: id, name: id, company: null, active: true, reports: 1, summary: '', entitlements: ent(relEnd), info: {} })
+  const user = (accountId: string, lastSeen: string | null) => ({ accountId, userId: `${accountId}u`, name: 'x', login: null, email: null, active: true, lastSeen, reports: 0, created: null })
+  const snap = { accounts: [acct('ENDED', '2025-12-31'), acct('SIGNED', '2025-12-31'), acct('LIVE', '2026-12-31'), acct('NOREL', null)], users: [user('ENDED', null), user('SIGNED', '2026-11-01')], reports: [] }
+  assert.equal(expireMagnifier(snap as never, '2026-11-25'), 1)
+  assert.deepEqual(snap.accounts.map((a) => [a.accountId, a.active]), [['ENDED', false], ['SIGNED', true], ['LIVE', true], ['NOREL', true]])
+})

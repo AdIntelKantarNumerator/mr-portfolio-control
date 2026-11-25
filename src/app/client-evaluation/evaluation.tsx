@@ -1111,7 +1111,7 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
                     {a.coverage.limits?.length ? (
                       <>
                         <dt>Access</dt>
-                        <dd title={a.coverage.limits.map((l) => `${l.label}: ${l.items.join(', ')}${l.total > l.items.length ? ` and ${l.total - l.items.length} more` : ''}`).join('\n')}>
+                        <dd title={[a.coverage.limitsWhy ?? '', ...a.coverage.limits.map((l) => `${l.label}: ${l.items.join(', ')}${l.total > l.items.length ? ` and ${l.total - l.items.length} more` : ''}`)].filter(Boolean).join('\n')}>
                           🔒 Limited to {a.coverage.limits.map((l) => `${n(l.total)} ${l.label.toLowerCase()}`).join(', ')}
                         </dd>
                       </>
