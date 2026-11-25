@@ -87,6 +87,29 @@ export const MEDIA: IsMedia[] = [
 export const PREMIUM_MEDIA = new Set([407, 501, 502])
 
 /**
+ * Legacy media names that mean an Insights Studio medium under another name. CTV is AVOD and BiS Paid Social is
+ * Social (Scott, 25 November 2026).
+ */
+const ALIAS: Record<string, string> = {
+  'natl newspapers': 'National Newspapers',
+  'national newspaper': 'National Newspapers',
+  'span lang net tv': 'Spanish Language Network TV',
+  'local cable': 'Local Cable TV',
+  'mm local cable': 'Local Cable TV',
+  ctv: 'AVOD',
+  'bis paid social': 'Social',
+  'paid social': 'Social',
+}
+const activeByName = new Map(MEDIA.filter((m) => m.active).map((m) => [m.name.toLowerCase(), m.name]))
+
+/** The Insights Studio medium a legacy medium is, by its name or a known alias; null when the catalogue has none. */
+export function catalogName(legacy: string): string | null {
+  const k = legacy.trim().toLowerCase()
+  const n = ALIAS[k] ?? activeByName.get(k)
+  return n && activeByName.has(n.toLowerCase()) ? n : null
+}
+
+/**
  * Media shown as one (Scott, 24 November 2026): every TV medium is "Linear TV", every magazine one (Medical Journals
  * too) "Magazines", every newspaper one "Newspapers". A client with any medium in a group has the group. The
  * entitlement still names each medium; this is how a plan reads.

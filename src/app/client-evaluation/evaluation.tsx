@@ -1362,7 +1362,9 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
         <div className="ce-tiles">
           {plan.impact.media.map((m) => {
             const kept = rollupNames(m.change.kept)
-            const added = rollupNames(m.change.added).filter((x) => !kept.includes(x))
+            // Premium media they do not get are never "added", in plans built before that was fixed too.
+            const withheld = new Set(plan.accounts.flatMap((a) => a.coverage.withheld.map((w) => w.name)))
+            const added = rollupNames(m.change.added).filter((x) => !kept.includes(x) && !withheld.has(x))
             return (
               <div key={m.platform} className="ce-tile">
                 <h5>

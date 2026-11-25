@@ -435,3 +435,14 @@ test('Migration Plan: the bundle follows the commercial team’s platform rule',
   assert.equal(keys('classic', 'magnifier'), 'creative', 'Classic with Magnifier: Creative only')
   assert.equal(keys('360', 'classic', 'magnifier'), 'commercial + competitive + creative')
 })
+
+test('Migration Plan: a legacy medium the catalogue offers by name or alias is kept', async () => {
+  const { catalogName } = await import('../src/lib/client-eval/migration/catalog')
+  assert.equal(catalogName('Search'), 'Search')
+  assert.equal(catalogName('Medical Journals'), 'Medical Journals')
+  assert.equal(catalogName('Natl Newspapers'), 'National Newspapers')
+  assert.equal(catalogName('CTV'), 'AVOD')
+  assert.equal(catalogName('BiS Paid Social'), 'Social')
+  assert.equal(catalogName('Outdoor'), null, 'not in Insights Studio V1')
+  assert.equal(catalogName('Network Radio'), null)
+})

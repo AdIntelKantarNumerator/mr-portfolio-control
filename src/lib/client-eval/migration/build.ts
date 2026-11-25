@@ -36,7 +36,7 @@ import { ratingsRunsBySet } from '../ratings-usage'
 import { clientPeople, type PersonRow } from '../store'
 import { parseMember, PLATFORM_LABEL, PLATFORMS, type Ent360, type EntClassic, type EntMagnifier, type Entitlements, type Platform } from '../types'
 import { readMatches, saveMatches } from './matches'
-import { ACCOUNT_TYPE_LABEL, COUNTRIES, ENTITY_TYPE, MEDIA, packageByKey, PREMIUM_MEDIA, rollupMedia, rollupNames, SET_LABEL, type AccountType, type CountryCode, type SetKey } from './catalog'
+import { ACCOUNT_TYPE_LABEL, catalogName, COUNTRIES, ENTITY_TYPE, MEDIA, packageByKey, PREMIUM_MEDIA, rollupMedia, rollupNames, SET_LABEL, type AccountType, type CountryCode, type SetKey } from './catalog'
 import { PLAN_VERSION, type MigrationPlan, type PlanAccount, type PlanReport, type PlanSavedView, type PlanUser, type PlanWorkspace, type PlanWorkspaceItem } from './types'
 
 export type PlanProgress = (step: string) => Promise<void> | void
@@ -402,7 +402,15 @@ function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number
   // Coverage: every medium except premium ones they lack; no country beyond the US unless they have it.
   const legacy = legacyMedia(g.members)
   const keptNames = new Set<string>()
-  for (const [p, m] of legacy) for (const k of mediaChange(p, [...m.media], m.restricted).kept) keptNames.add(k)
+  for (const [p, m] of legacy) {
+    for (const k of mediaChange(p, [...m.media], m.restricted).kept) keptNames.add(k)
+    // A medium Insights Studio offers under its own name is kept too, though the Impact Deck's GPC media list lacks it
+    // (Search, Medical Journals...): what a client has today it keeps (Scott, 24 November 2026).
+    for (const n of m.media) {
+      const c = catalogName(n)
+      if (c) keptNames.add(c)
+    }
+  }
   const premiumHeld = new Set(MEDIA.filter((m) => PREMIUM_MEDIA.has(m.id) && keptNames.has(m.name)).map((m) => m.id))
   const media: PlanAccount['coverage']['media'] = []
   const withheld: PlanAccount['coverage']['withheld'] = []
@@ -1109,15 +1117,18 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   if (addedPackages.length) gains.push(`${addedPackages.length === 1 ? 'Package' : 'Packages'} added: ${addedPackages.join(', ')}.`)
   if (accounts.some((a) => a.coverage.widened.length)) gains.push('Restrictions on advertisers and categories are lifted: the whole account sees all brands and categories, with workspaces keeping each user’s focus.')
   // Lost: legacy media with nowhere to go, unless Insights Studio's catalogue has it under the same name (Search).
-  const offered = new Set(MEDIA.filter((x) => x.active).map((x) => x.name.toLowerCase()))
+  const withheldAll = new Set(accounts.flatMap((a) => a.coverage.withheld.map((w) => w.name)))
   for (const x of media as Array<{ platform: Platform; change: MediaChange }>) {
-    const gone = x.change.dropped.filter((d) => !offered.has(d.toLowerCase()))
+    // What the catalogue offers under its own name is kept (Search), not dropped.
+    const offeredToo = x.change.dropped.map(catalogName).filter((n): n is string => !!n)
+    const gone = x.change.dropped.filter((d) => !catalogName(d))
     x.change.dropped = gone
     if (gone.length) losses.push(`${PLATFORM_LABEL[x.platform]}: ${gone.join(', ')} not in Insights Studio yet.`)
-    // Shown rolled up: Linear TV, Magazines, Newspapers. A group they keep is not also "added".
+    // Shown rolled up: Linear TV, Magazines, Newspapers. A group they keep is not also "added", and a premium medium
+    // they do not get is never "added" (Tinuiti, 25 November 2026: AVOD and Social showed as added here).
     type Names = typeof x.change.kept
-    x.change.kept = rollupNames(x.change.kept) as Names
-    x.change.added = rollupNames(x.change.added).filter((n) => !(x.change.kept as string[]).includes(n)) as Names
+    x.change.kept = rollupNames([...x.change.kept, ...offeredToo]) as Names
+    x.change.added = rollupNames(x.change.added).filter((n) => !(x.change.kept as string[]).includes(n) && !withheldAll.has(n)) as Names
   }
   // Premium media they lack are neither gained nor lost, so they are not impact; the plan notes the rule instead.
   if (accounts.some((a) => a.packages.some((p) => p.key === 'ratings_us_linear_tv'))) notInV1.push('Ratings access by book and market is not carried by Insights Studio V1: ratings scope is set up separately.')
