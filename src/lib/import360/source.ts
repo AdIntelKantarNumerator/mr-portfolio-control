@@ -312,8 +312,14 @@ export async function profileUsage(since: string): Promise<Map<number, string[]>
 }
 
 /**
- * Several users' reports used since SINCE, by user, newest first: liveReports for a whole client at once (a
- * Migration Plan's Reports tab), one statement per client table rather than one per user.
+ * Several users' reports created and used since SINCE, by user, newest first: a Migration Plan's Reports tab, one
+ * statement per client table rather than one per user (Scott, 25 November 2026: "only reports created AND run within
+ * 2026").
+ *
+ * 360 keeps no creation date (no column, no log), so "created since SINCE" is read from what must be true of such a
+ * report: it was saved since SINCE (modify_d, which a new report gets), and its id is above that of every report in
+ * its table last saved before SINCE (ids only grow, so anything at or below one existed then). A report created
+ * before SINCE could pass only if edited since and newer than every report left untouched.
  */
 export async function reportsForUsers(usrIds: number[]): Promise<Map<number, Array<{ key: string; name: string; type: string; lastUsed: string | null }>>> {
   const ix = await clientIndex()
@@ -326,7 +332,9 @@ export async function reportsForUsers(usrIds: number[]): Promise<Map<number, Arr
   const out = new Map<number, Array<{ key: string; name: string; type: string; lastUsed: string | null }>>()
   for (const [p, users] of byPrefix)
     for (const part of chunks(users, 500))
-      for (const h of await q360<Row>(`${headSql(p, `r.usr_id IN (${ints(part)}) AND r.lastused_d >= '${SINCE}'`)} ORDER BY r.lastused_d DESC`))
+      for (const h of await q360<Row>(
+        `${headSql(p, `r.usr_id IN (${ints(part)}) AND r.lastused_d >= '${SINCE}' AND r.modify_d >= '${SINCE}' AND r.reportset_id > (SELECT COALESCE(MAX(o.reportset_id), 0) FROM [${safePrefix(p)}_reportset] o WHERE o.modify_d < '${SINCE}')`)} ORDER BY r.lastused_d DESC`,
+      ))
         (out.get(Number(h.usr_id)) ?? out.set(Number(h.usr_id), []).get(Number(h.usr_id))!).push({
           key: `${p.toLowerCase()}:${Number(h.reportset_id)}`,
           name: String(h.reportset_n ?? '').trim() || `Report ${h.reportset_id}`,

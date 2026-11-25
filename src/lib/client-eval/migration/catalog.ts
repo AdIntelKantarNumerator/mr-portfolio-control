@@ -59,7 +59,8 @@ export const MEDIA: IsMedia[] = [
   { id: 403, type: 'Digital', name: 'Mobile Web', active: true },
   { id: 404, type: 'Digital', name: 'Mobile Web Video', active: true },
   { id: 405, type: 'Digital', name: 'Mobile App', active: true },
-  { id: 406, type: 'Digital', name: 'Search', active: true },
+  // Not in GPC or Insights Studio yet (Scott, 25 November 2026): never added, and a drop for clients who have it.
+  { id: 406, type: 'Digital', name: 'Search', active: false },
   { id: 407, type: 'Digital', name: 'Social', active: true },
   { id: 408, type: 'Digital', name: 'Native', active: true },
   { id: 501, type: 'CTV', name: 'AVOD', active: true },

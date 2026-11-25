@@ -438,7 +438,7 @@ test('Migration Plan: the bundle follows the commercial team’s platform rule',
 
 test('Migration Plan: a legacy medium the catalogue offers by name or alias is kept', async () => {
   const { catalogName } = await import('../src/lib/client-eval/migration/catalog')
-  assert.equal(catalogName('Search'), 'Search')
+  assert.equal(catalogName('Search'), null, 'Search is not in Insights Studio yet')
   assert.equal(catalogName('Medical Journals'), 'Medical Journals')
   assert.equal(catalogName('Natl Newspapers'), 'National Newspapers')
   assert.equal(catalogName('CTV'), 'AVOD')
