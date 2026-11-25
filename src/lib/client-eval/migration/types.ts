@@ -144,6 +144,8 @@ export interface MigrationPlan {
   mode?: { kind: 'holding' | 'markets' | 'standard'; why: string }
   /** Legacy accounts left out: inactive, or dormant (no login in 12 months and nothing run in 2026). */
   notMigrated?: Array<{ name: string; platform: Platform; why: string }>
+  /** Why the legacy accounts are one client: the grouping's links between them (Client Evaluation's matching). */
+  grouping?: Array<{ a: string; b: string; why: string }>
   /** Absent on plans built before 24 November 2026. */
   savedViews?: PlanSavedView[]
   /** 360 reports used in 2026; absent on plans built before 24 November 2026. */

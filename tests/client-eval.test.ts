@@ -476,3 +476,20 @@ test('Client name: an agency’s teams with the brands they serve are named for 
   assert.equal(clientName(members[0]!, members), 'Carat')
   assert.equal(clientName(m('Publicis Zenith Media - AI', 700), [m('Publicis Zenith Media - AI', 700), m('Publicis FKA', 10), m('Lexus Texas', 15)]), 'Publicis Zenith Media', 'an agency’s own client keeps its name')
 })
+
+test('Grouping: a Magnifier account named for a brand and an agency joins the brand', async () => {
+  const { splitTeam, withoutAgency } = await import('../src/lib/client-eval/match')
+  assert.deepEqual(splitTeam('Home Depot- DDB'), { brand: 'Home Depot', agency: 'DDB' })
+  assert.deepEqual(splitTeam('JWT Inside - Home Depot'), { brand: 'Home Depot', agency: 'JWT Inside' })
+  assert.equal(splitTeam('Carat New Business'), null)
+  assert.equal(withoutAgency('Grey - Volvo'), 'Volvo')
+  const a = [
+    acct('magnifier:HOMED', 'Home Depot', { 'homedepot.com': 10 }),
+    acct('magnifier:HDDDB', 'Home Depot- DDB', { 'ddb.com': 3 }),
+    acct('magnifier:JWTCH', 'JWT-Chicago', { 'jwt.com': 3 }),
+    acct('magnifier:CHI', 'Brand Chicago', { 'brandchicago.com': 3 }),
+  ]
+  const c = cluster(a.map((x) => x.key), links(a).links, new Map(), [], [])
+  assert.ok(c.find((x) => x.members.includes('magnifier:HOMED'))!.members.includes('magnifier:HDDDB'))
+  assert.ok(!c.find((x) => x.members.includes('magnifier:CHI'))!.members.includes('magnifier:JWTCH'), 'a place is not a brand')
+})

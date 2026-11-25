@@ -183,6 +183,41 @@ function describe(a: Legacy): string {
   return parts.join(' | ')
 }
 
+/** What an account may see today, as a key: its advertiser, category, market and property restrictions, if any. */
+function accessKey(a: Legacy): string {
+  const e = a.ent
+  if (e.kind === '360') return e.filters.filter((f) => !/submedia|^media|time|data tables/i.test(f.type) && f.include.length).map((f) => `${f.type}:${[...f.include].sort().join(',')}`).sort().join('|')
+  if (e.kind === 'magnifier') return e.access.filter((x) => !/countr|flag/i.test(x.label)).map((x) => `${x.label}:${[...x.items].sort().join(',')}`).sort().join('|')
+  return ''
+}
+
+/**
+ * Accounts of one type with the same access are one account: a split gains nothing when every user would see the
+ * same data (Scott, 25 November 2026: General Motors' Market Research and Corporate Magnifier accounts, set up alike,
+ * came out as their own accounts because the model read purposes into their names).
+ */
+function mergeAlike(groups: Group[], label: (t: AccountType) => string): Group[] {
+  const keyOf = (g: Group) => `${g.type}#${[...new Set(g.members.map(accessKey))].sort().join('||')}`
+  const byKey = new Map<string, Group[]>()
+  for (const g of groups) (byKey.get(keyOf(g)) ?? byKey.set(keyOf(g), []).get(keyOf(g))!).push(g)
+  const out: Group[] = []
+  for (const same of byKey.values()) {
+    if (same.length === 1 || same.some((g) => g.keepLimits)) {
+      out.push(...same)
+      continue
+    }
+    const members = same.flatMap((g) => g.members)
+    const t = same[0]!.type
+    out.push({
+      name: groups.filter((g) => g.type === t).length === same.length ? label(t) : same.sort((a, b) => b.members.length - a.members.length)[0]!.name,
+      type: t,
+      members,
+      why: `One account: ${members.length} legacy accounts with the same access, so separate accounts would gain nothing (the model had proposed ${same.length}: ${same.map((g) => g.name).join(', ')}).`,
+    })
+  }
+  return out
+}
+
 /** One account per type, or the model's split where a type has several legacy accounts. */
 async function groupAccounts(client: string, pool: Legacy[], mode: PlanMode, useModel: boolean, progress: PlanProgress): Promise<{ groups: Group[]; org: { name: string; why: string }; model: string | null }> {
   const types = [...new Set(pool.map((a) => a.type))]
@@ -248,7 +283,7 @@ Reply with JSON only: {"organization":"name","organizationWhy":"one sentence","a
       used.add(a.key)
     }
     return {
-      groups,
+      groups: mergeAlike(groups, label),
       org: { name: String(json.organization ?? '').trim().slice(0, 120) || client, why: plainTerms(String(json.organizationWhy ?? '').trim()).slice(0, 400) || org.why },
       model,
     }
@@ -966,6 +1001,14 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
   const c = await planSubject(d, clientId)
   if (!c) throw new Error('That client or account is not in the list. It may have changed with a refresh.')
   const legacy = await legacyAccounts(d, c.members)
+  // Why these accounts are one client, in the grouping's words (Scott, 25 November 2026: "the plan should explain
+  // the consolidation").
+  const grouping: NonNullable<MigrationPlan['grouping']> = []
+  if (!c.account) {
+    const [row] = await d.select({ how: ceClients.how }).from(ceClients).where(eq(ceClients.clientId, c.clientId)).limit(1)
+    const nameOf = new Map(legacy.map((a) => [a.key, a.name]))
+    for (const l of (row?.how ?? []) as Array<{ a: string; b: string; why: string }>) if (nameOf.has(l.a) && nameOf.has(l.b)) grouping.push({ a: nameOf.get(l.a)!, b: nameOf.get(l.b)!, why: l.why })
+  }
   if (!legacy.length) throw new Error('The client has no accounts in the snapshot.')
 
   await progress('Reading the people')
@@ -1292,6 +1335,7 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
     accounts,
     users,
     mode: { kind: mode, why: modeWhy },
+    grouping,
     notMigrated,
     workspaces,
     savedViews,

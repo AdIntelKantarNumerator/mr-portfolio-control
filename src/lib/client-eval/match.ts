@@ -42,7 +42,7 @@ export interface MatchAccount {
   users: number
 }
 
-export type LinkKind = 'company' | 'name' | 'domain' | 'similar' | 'model' | 'merge'
+export type LinkKind = 'company' | 'name' | 'domain' | 'similar' | 'team' | 'model' | 'merge'
 export interface Link {
   a: string
   b: string
@@ -215,8 +215,63 @@ export function links(accounts: MatchAccount[]): { links: Link[]; ask: Ask[] } {
         else if (score >= MAYBE) maybe(A.key, B.key, `Names are close (${Math.round(score * 100)}%)`)
       }
   }
-  return { links: out, ask: [...ask.values()] }
+  // brand + agency team: a Magnifier account named for a brand and an agency ("Home Depot- DDB", "JWT Inside - Home
+  // Depot", "Merck - Publicis") joins the brand's account (Scott, 25 November 2026). Magnifier gives each agency team
+  // its own account, with the agency's people, so neither domains nor whole names tie it to the brand. Only the brand
+  // side links, never the agency's own account, so nothing chains through an agency.
+  const byNameKey = new Map<string, string>()
+  for (const a of accounts) {
+    const k = words.get(a.key)!.join(' ')
+    if (k && !byNameKey.has(k)) byNameKey.set(k, a.key)
+  }
+  // A team account belongs with its brand: its other ties (to the agency's other teams, by the agency's domain or
+  // name) are dropped, or it would carry the brand into the agency ("Kimberly Clark - Mindshare" took Kimberly-Clark
+  // into GroupM Mindshare). Ties to accounts that name the same brand stay.
+  const brandOfTeam = new Map<string, string>()
+  for (const b of accounts) {
+    if (b.platform !== 'magnifier') continue
+    const split = splitTeam(b.name)
+    if (!split) continue
+    const brand = nameWords(split.brand).join(' ')
+    const a = byNameKey.get(brand)
+    if (!a || a === b.key || brand.replace(/\s/g, '').length < 4 || NOT_A_BRAND.has(brand)) continue
+    brandOfTeam.set(b.key, brand)
+    add(a, b.key, 'team', `"${b.name}" is ${split.agency}'s team for ${byKey.get(a)!.name}`)
+  }
+  const namesBrand = (key: string, brand: string) => ` ${words.get(key)!.join(' ')} `.includes(` ${brand} `)
+  const keep = (l: { a: string; b: string; kind?: LinkKind }) =>
+    l.kind === 'team' || [l.a, l.b].every((k, i) => { const brand = brandOfTeam.get(k); return !brand || namesBrand(i ? l.a : l.b, brand) })
+  return { links: out.filter(keep), ask: [...ask.values()].filter(keep) }
 }
+
+/** Places and words an agency's office or unit is named for, not a brand ("JWT-Chicago", "Leo Burnett - Chicago"). */
+const NOT_A_BRAND = new Set(['chicago', 'new york', 'ny', 'nyc', 'los angeles', 'la', 'san francisco', 'sf', 'detroit', 'atlanta', 'dallas', 'boston', 'miami', 'seattle', 'minneapolis', 'st louis', 'philadelphia', 'toronto', 'london', 'new business', 'health', 'healthcare', 'creative', 'media', 'digital', 'research', 'corporate', 'national', 'hispanic', 'multicultural'])
+
+/** A name made of a brand and one agency ("Home Depot- DDB", "JWT Inside - Home Depot"): the two parts; null otherwise. */
+export function splitTeam(name: string): { brand: string; agency: string } | null {
+  const parts = name.split(/\s*[-–/|@:]\s*|\s+at\s+|\s*\(\s*|\s*\)\s*/i).map((p) => p.trim()).filter(Boolean)
+  if (parts.length < 2) return null
+  const agency = parts.filter((p) => TEAM_AGENCY.test(p))
+  const brand = parts.filter((p) => !TEAM_AGENCY.test(p) && !/^inactivated?$/i.test(p))
+  if (agency.length !== 1 || brand.length !== 1) return null
+  // "Horizon Media - New York NY AI" is the agency's office, not its team for a brand called New York.
+  const key = nameWords(brand[0]!).join(' ')
+  const plain = brand[0]!.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!key || NOT_A_BRAND.has(key) || [...NOT_A_BRAND].some((w) => plain === w || plain.startsWith(`${w} `))) return null
+  return { brand: brand[0]!, agency: agency[0]! }
+}
+
+/** A name without its agency part, for naming a client ("Grey - Volvo" reads "Volvo"). */
+export const withoutAgency = (name: string) => splitTeam(name)?.brand ?? name
+
+/**
+ * Agencies whose teams have their own Magnifier accounts, named with the brand they serve: the big media agencies
+ * (AGENCY) and the creative and specialist ones seen in Magnifier's account names. A whole name part must be one.
+ */
+const TEAM_AGENCY = new RegExp(
+  `^(?:${AGENCY.source.replace(/^\b\(|\)\b$/g, '')}|ddb|tribal ?ddb|spike ?ddb|chi ?ddb|jwt|jwt inside|wunderman|ogilvy|ogilvy (?:&|and) mather|bbdo|mccann|mccann-erickson|deutsch|tracy ?locke|grey|lowe|vml|cpb|crispin porter(?: \+ bogusky)?|fallon|arnold|hill holiday|mcgarry ?bowen|richards|the richards group|richards group|schawk|big red rooster|olson|uniworld(?: group)?|dieste|lopez negrete|leo burnett|saatchi(?: & saatchi)?|droga5|wieden(?: \\+ kennedy)?|w\\+k|goodby|tbwa(?:\\chiat\\day)?|bbh|72andsunny|anomaly|mullen|mullenlowe|gsd&m|the martin agency|martin agency|r\/ga|razorfish|sapient|isobar|edelman|draftfcb|fcb|y&r|young (?:&|and) rubicam|bromley|tg madison|northlich|source communications|david (?:&|and) goliath|mediavest|starcom mediavest|powerpact(?: llc)?|ecomm)$`,
+  'i',
+)
 
 export interface Override {
   kind: 'merge' | 'split'
@@ -324,10 +379,12 @@ const NAME_SKIP = new Set(['the', 'a', 'an'])
  * Hearst's, and the Dallas paper's own was only the biggest of them (Scott, 24 November 2026).
  */
 export function clientName(named: { name: string; users: number }, members: { name: string; users: number }[]): string {
-  const own = displayName(named.name)
+  // A brand's agency team is named for the brand ("Grey - Volvo" reads "Volvo").
+  const own = displayName(withoutAgency(named.name))
   // An agency's teams with the brands they serve: named for the agency (Scott, 25 November 2026: "the client name
   // should reflect the agency"). Two or more accounts named for one agency, among accounts that are not.
-  const agencyOf = (n: string) => AGENCY.exec(n)?.[0] ?? null
+  // An agency's own accounts only: a brand's agency team ("Merck - Publicis") is the brand's.
+  const agencyOf = (n: string) => (splitTeam(n) ? null : (AGENCY.exec(n)?.[0] ?? null))
   const agencies = new Map<string, { n: number; spell: string }>()
   for (const m of members) {
     const a = agencyOf(m.name)
@@ -346,7 +403,7 @@ export function clientName(named: { name: string; users: number }, members: { na
     while (w.length && NAME_SKIP.has(w[0]!.toLowerCase())) w.shift()
     return w
   }
-  const lists = members.map((m) => words(m.name))
+  const lists = members.map((m) => words(withoutAgency(m.name)))
   // The longest run of leading words more than half the accounts share: "Weight Watchers", not "Weight". A word is
   // added only while nearly all who share the shorter name share it too: Hearst's papers are not "Hearst TV".
   let best: string[] | null = null
@@ -368,7 +425,7 @@ export function clientName(named: { name: string; users: number }, members: { na
   const flat = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
   if (!best || flat(best.join('')).length < 3) return own
   // No change worth making when one name begins the other ("Lamar", "Lamar Advertising"; "Yahoo", "Yahoo!").
-  const mine = flat(words(named.name).join(''))
+  const mine = flat(words(withoutAgency(named.name)).join(''))
   if (mine.startsWith(flat(best.join(''))) || flat(best.join('')).startsWith(mine)) return own
   return best.join(' ')
 }

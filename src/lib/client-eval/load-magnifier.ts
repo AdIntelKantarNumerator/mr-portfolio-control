@@ -198,7 +198,8 @@ export async function loadMagnifier(conn: Connection, progress: Progress): Promi
         accountId: id,
         name: str(a.ACCOUNT_NAME) || id,
         company: null,
-        active: activeBy.has(id),
+        // An account its name calls inactivated is inactive, whatever its users' flags say (Scott, 25 November 2026).
+        active: activeBy.has(id) && !/\binactivated?\b/i.test(str(a.ACCOUNT_NAME)),
         reports: mine.length,
         summary: summaryMagnifier(ent),
         entitlements: ent,

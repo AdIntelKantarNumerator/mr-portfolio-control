@@ -1008,6 +1008,21 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
             </ul>
           </div>
         ) : null}
+        {plan.grouping?.length ? (
+          <div className="ce-tile">
+            <h5>
+              <TileIcon kind="account" /> Why these accounts are one client <span className="ce-muted">{n(plan.grouping.length)}</span>
+            </h5>
+            <ul className="ce-tile-list">
+              {plan.grouping.slice(0, 40).map((g, i) => (
+                <li key={i}>
+                  <b>{g.a}</b> and <b>{g.b}</b>: <span className="ce-muted">{g.why}</span>
+                </li>
+              ))}
+            </ul>
+            {plan.grouping.length > 40 ? <div className="ce-muted ce-sm">and {n(plan.grouping.length - 40)} more</div> : null}
+          </div>
+        ) : null}
         {plan.notMigrated?.length ? (
           <div className="ce-tile">
             <h5>

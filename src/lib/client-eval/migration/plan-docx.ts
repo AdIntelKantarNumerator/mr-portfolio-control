@@ -35,6 +35,10 @@ export async function planDocx(plan: MigrationPlan): Promise<Buffer> {
   out.push(h('Summary', HeadingLevel.HEADING_1))
   for (const s of plan.summary) out.push(bullet(s))
   if (plan.mode?.why) out.push(bullet(plan.mode.why))
+  if (plan.grouping?.length) {
+    out.push(p('Why these accounts are one client', { bold: true }))
+    for (const g of plan.grouping) out.push(bullet(`${g.a} and ${g.b}: ${g.why}`))
+  }
   if (plan.notMigrated?.length) {
     out.push(p(`Not migrated (${plan.notMigrated.length})`, { bold: true }))
     for (const x of plan.notMigrated) out.push(bullet(`${x.name} (${PLATFORM_LABEL[x.platform]}): ${x.why}`))
