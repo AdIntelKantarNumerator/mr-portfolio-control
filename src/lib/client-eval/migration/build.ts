@@ -324,6 +324,8 @@ function features(members: Legacy[]): string[] {
  * RELs name grants the GPC categories holding at least a quarter of its spend, if it spent enough to judge. The rule
  * was $25K over May-October; the spend read here covers MONTHS, so the bar is scaled to them.
  */
+/** The most history Insights Studio holds (Scott, 25 November 2026). */
+const MAX_HISTORY = 5
 const GRANT_SHARE = 0.25
 const GRANT_MIN_SPEND = Math.round((25_000 * MONTHS.length) / 6)
 
@@ -475,7 +477,14 @@ function accountPlan(g: Group, i: number, ratings: Map<number, { nielsen: number
 
   // Contract.
   const years = g.members.map((a) => (a.ent.kind === '360' ? a.ent.years : null)).filter((y): y is number => typeof y === 'number' && y > 0)
-  const lookback = years.length ? { value: Math.max(...years), why: `The most history any of its 360 user sets has today (${Math.max(...years)} years).` } : { value: 3, why: 'No history setting today; 3 complete years plus the current year is the standard.' }
+  // Insights Studio keeps at most MAX_HISTORY years (Scott, 25 November 2026): more than that today is a loss.
+  const most = years.length ? Math.max(...years) : null
+  const lookback =
+    most === null
+      ? { value: 3, why: 'No history setting today; 3 complete years plus the current year is the standard.' }
+      : most > MAX_HISTORY
+        ? { value: MAX_HISTORY, why: `They have ${most} years in 360 today; Insights Studio keeps at most ${MAX_HISTORY}, so the years beyond are lost.`, lost: most - MAX_HISTORY }
+        : { value: most, why: `The most history any of its 360 user sets has today (${most} years).` }
   const prelim = has(PRELIM)
   const includePreliminary = prelim ? { value: true, why: `Has ${prelim} today.` } : { value: false, why: 'No preliminary data today.' }
 
@@ -1233,6 +1242,10 @@ export async function buildPlan(d: Database, clientId: string, opts: { depth: 'f
     type Names = typeof x.change.kept
     x.change.kept = rollupNames([...x.change.kept, ...offeredToo]) as Names
     x.change.added = rollupNames(x.change.added).filter((n) => !(x.change.kept as string[]).includes(n) && !withheldAll.has(n)) as Names
+  }
+  for (const a of accounts) {
+    const l = a.contract.lookbackYears as { value: number; lost?: number }
+    if (l.lost) losses.push(`${a.name}: ${l.value + l.lost} years of history today; Insights Studio keeps ${MAX_HISTORY}, so ${l.lost} ${l.lost === 1 ? 'year is' : 'years are'} lost.`)
   }
   // Premium media they lack are neither gained nor lost, so they are not impact; the plan notes the rule instead.
   if (accounts.some((a) => a.packages.some((p) => p.key === 'ratings_us_linear_tv'))) notInV1.push('Ratings access by book and market is not carried by Insights Studio V1: ratings scope is set up separately.')

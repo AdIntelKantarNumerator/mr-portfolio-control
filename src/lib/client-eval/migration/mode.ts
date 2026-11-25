@@ -9,7 +9,7 @@ import type { AccountType } from './catalog'
  * EssenceMediacom), Dentsu (Carat, iProspect), Havas and Horizon Media. Matched on the client's own name only: a
  * brand whose 360 license group names its agency ("Nissan North America", group "OMD/Nissan") is a brand client.
  */
-const AGENCY = /\b(omnicom|omg|interpublic|ipg|publicis|wpp|groupm|group m|dentsu|dentsux|havas|horizon media|omd|phd|hearts ?(&|and) ?science|initiative|universal mccann|mediabrands|zenith|starcom|spark ?foundry|digitas|mindshare|wavemaker|essence ?mediacom|mediacom|carat|iprospect)\b/i
+export const AGENCY = /\b(omnicom|omg|interpublic|ipg|publicis|wpp|groupm|group m|dentsu|dentsux|havas|horizon media|omd|phd|hearts ?(&|and) ?science|initiative|universal mccann|mediabrands|zenith|starcom|spark ?foundry|digitas|mindshare|wavemaker|essence ?mediacom|mediacom|carat|iprospect)\b/i
 
 /** Many accounts: below this a big agency's client is planned as one. Three keeps Horizon Media (4 active), which Scott named. */
 const MANY = 3

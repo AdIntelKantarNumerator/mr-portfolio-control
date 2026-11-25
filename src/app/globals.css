@@ -2894,3 +2894,4 @@ button.ce-badge { cursor: pointer; }
 .ce-ws-grid .ce-tiles { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 .ce-name-chip.ce-withheld { text-decoration: line-through; }
 @media (max-width: 640px) { .ce-ws-grid { grid-template-columns: 1fr; } }
+.ce-bad-text { color: var(--red); font-weight: 600; }

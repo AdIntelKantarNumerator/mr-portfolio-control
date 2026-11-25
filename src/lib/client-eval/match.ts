@@ -26,7 +26,11 @@
  * link to it. Overrides are keyed by "platform:account_id", which a refresh
  * does not change, so they outlive it.
  */
+import { AGENCY } from './migration/mode'
 import type { Entitlements, Platform } from './types'
+
+/** The big agencies' own email domains (their staff, not their clients'). */
+const AGENCY_DOMAIN = /^(carat|dentsu|dentsux|omc|omd|omg|groupm|wpp|wppmedia|publicis|publicismedia|publicisgroupe|starcom|starcomww|sparkfoundry|sparkfoundryww|zenith|zenithmedia|mindshare|mindshareworld|wavemaker|wavemakerglobal|essencemediacom|mediacom|horizonmedia|hearts-science|phd|phdmedia|initiative|umww|havas|havasmedia|iprospect|digitas|ipg|interpublic|mediabrands)\./i
 
 export interface MatchAccount {
   key: string
@@ -184,6 +188,10 @@ export function links(accounts: MatchAccount[]): { links: Link[]; ask: Ask[] } {
         const A = byKey.get(keys[i]!)!
         const B = byKey.get(keys[j]!)!
         if (A.platform === B.platform) continue
+        // A big agency's domain does not tie an account in a brand's 360 license group to anything: its staff serve
+        // many brands. Carat Detroit, in General Motors' group, linked by carat.com to Carat's Home Depot team, which
+        // brought Home Depot's own accounts into General Motors (Scott, 25 November 2026).
+        if (AGENCY_DOMAIN.test(d) && [A, B].some((x) => x.company && !AGENCY.test(x.company))) continue
         const wa = words.get(A.key)!
         const wb = words.get(B.key)!
         const score = nameScore(wa, wb, weight)
@@ -317,6 +325,19 @@ const NAME_SKIP = new Set(['the', 'a', 'an'])
  */
 export function clientName(named: { name: string; users: number }, members: { name: string; users: number }[]): string {
   const own = displayName(named.name)
+  // An agency's teams with the brands they serve: named for the agency (Scott, 25 November 2026: "the client name
+  // should reflect the agency"). Two or more accounts named for one agency, among accounts that are not.
+  const agencyOf = (n: string) => AGENCY.exec(n)?.[0] ?? null
+  const agencies = new Map<string, { n: number; spell: string }>()
+  for (const m of members) {
+    const a = agencyOf(m.name)
+    if (!a) continue
+    const e = agencies.get(a.toLowerCase()) ?? agencies.set(a.toLowerCase(), { n: 0, spell: a }).get(a.toLowerCase())!
+    e.n++
+  }
+  const lead = [...agencies.values()].sort((a, b) => b.n - a.n)[0]
+  if (lead && lead.n >= 2 && members.some((m) => !agencyOf(m.name)) && !agencyOf(own))
+    return lead.spell.length <= 4 ? lead.spell.toUpperCase() : lead.spell.replace(/\b\w/g, (c) => c.toUpperCase())
   const total = members.reduce((n, m) => n + m.users, 0)
   if (members.length < 3 || named.users * 2 >= total) return own
   const words = (name: string) => {

@@ -456,3 +456,23 @@ test('Magnifier: every REL ended and no SSO sign-in makes an account inactive', 
   assert.equal(expireMagnifier(snap as never, '2026-11-25'), 1)
   assert.deepEqual(snap.accounts.map((a) => [a.accountId, a.active]), [['ENDED', false], ['SIGNED', true], ['LIVE', true], ['NOREL', true]])
 })
+
+test('Grouping: an agency domain does not tie a brand license group to the agency’s other teams', () => {
+  const a = [
+    acct('360:1', 'General Motors LLC - Warren MI AI', { 'gm.com': 20 }, 'General Motors LLC'),
+    acct('360:2', 'Carat Detroit - Detroit MI AI', { 'carat.com': 20 }, 'General Motors LLC'),
+    acct('magnifier:CARATHD', 'Carat - Home Depot', { 'homedepot.com': 30, 'carat.com': 20 }),
+    acct('classic:3', 'The Home Depot', { 'homedepot.com': 10 }),
+  ]
+  const c = cluster(a.map((x) => x.key), links(a).links, new Map(), [], [])
+  const gm = c.find((x) => x.members.includes('360:1'))!
+  assert.ok(!gm.members.includes('magnifier:CARATHD'), 'Carat’s Home Depot team stays out of General Motors')
+  assert.ok(!gm.members.includes('classic:3'))
+})
+
+test('Client name: an agency’s teams with the brands they serve are named for the agency', () => {
+  const m = (name: string, users: number) => ({ name, users })
+  const members = [m('Home Depot AI', 4), m('The Home Depot', 39), m('Carat - Home Depot', 196), m('Carat New Business', 6), m('Carat North America', 11)]
+  assert.equal(clientName(members[0]!, members), 'Carat')
+  assert.equal(clientName(m('Publicis Zenith Media - AI', 700), [m('Publicis Zenith Media - AI', 700), m('Publicis FKA', 10), m('Lexus Texas', 15)]), 'Publicis Zenith Media', 'an agency’s own client keeps its name')
+})

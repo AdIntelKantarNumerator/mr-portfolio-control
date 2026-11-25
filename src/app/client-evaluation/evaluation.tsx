@@ -954,6 +954,14 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
   const userName = new Map(plan.users.map((u) => [u.key, u.name]))
   const created = plan.users.filter((u) => u.create.value)
   const addedMedia = rollupMedia(plan.accounts.flatMap((a) => a.coverage.media)).filter((m) => m.status === 'added')
+  // Workspaces: why each was made, for the filter and the order (Magnifier's first: Scott, 25 November 2026).
+  const [wsReason, setWsReason] = useState('all')
+  const [wsAccount, setWsAccount] = useState('all')
+  const reasonOf = (source: string) => (/^magnifier access/i.test(source) ? 'Magnifier access today' : /^360 access/i.test(source) ? '360 access today' : /^market/i.test(source) ? 'Market' : /profile/i.test(source) ? '360 profile' : 'Other')
+  const REASON_ORDER = ['Magnifier access today', '360 access today', 'Market', '360 profile', 'Other']
+  // Workspaces made because access widens (today's restrictions kept as a view), by account.
+  const keepView = new Map<string, number>()
+  for (const w of plan.workspaces) if (reasonOf(w.source) !== '360 profile') keepView.set(w.account, (keepView.get(w.account) ?? 0) + 1)
   const restrictionLabel = (lines: string[]) => {
     const kinds = new Set(lines.map((l) => (/categor|industr|subcat/i.test(l) ? 'Category' : /market/i.test(l) ? 'Market' : /advertiser|brand|product|parent/i.test(l) ? 'Advertiser' : /propert|publisher|media owner/i.test(l) ? 'Property' : 'Other')))
     return kinds.size === 1 && !kinds.has('Other') ? `${[...kinds][0]} restrictions removed` : 'Restrictions removed'
@@ -1096,7 +1104,10 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
                       </>
                     ) : null}
                     <dt>History</dt>
-                    <dd title={a.contract.lookbackYears.why}>{a.contract.lookbackYears.value} years</dd>
+                    <dd title={a.contract.lookbackYears.why}>
+                      {a.contract.lookbackYears.value} years
+                      {(a.contract.lookbackYears as { lost?: number }).lost ? <span className="ce-bad-text"> ({a.contract.lookbackYears.value + (a.contract.lookbackYears as { lost?: number }).lost!} today: {(a.contract.lookbackYears as { lost?: number }).lost} lost)</span> : null}
+                    </dd>
                     <dt>Preliminary</dt>
                     <dd title={a.contract.includePreliminary.why}>{a.contract.includePreliminary.value ? 'Yes' : 'No'}</dd>
                     <dt>Countries</dt>
@@ -1116,8 +1127,29 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
                         </dd>
                       </>
                     ) : null}
+                    {keepView.has(a.key) ? (
+                      <>
+                        <dt>Workspaces</dt>
+                        <dd title="Their access is broader in Insights Studio than today; these workspaces keep each user on what they see now. See the Workspaces tab.">
+                          {n(keepView.get(a.key)!)} created to keep their current view
+                        </dd>
+                      </>
+                    ) : null}
                   </dl>
                 </div>
+                {(a.coverage.limits ?? []).map((l) => (
+                  <div key={l.label} className="ce-tile">
+                    <h5 title={a.coverage.limitsWhy ?? undefined}>
+                      <TileIcon kind={/advertiser|brand|product|parent/i.test(l.label) ? 'advertiser' : /market/i.test(l.label) ? 'market' : /propert|publisher/i.test(l.label) ? 'property' : 'category'} /> {l.label} <span className="ce-muted">{n(l.total)}</span>
+                    </h5>
+                    <ul className="ce-tile-list">
+                      {l.items.map((x) => (
+                        <li key={x}>{x}</li>
+                      ))}
+                    </ul>
+                    {l.total > l.items.length ? <div className="ce-muted ce-sm">and {n(l.total - l.items.length)} more</div> : null}
+                  </div>
+                ))}
               </div>
               {a.coverage.widened.length ? (
                 <details className="ce-box ce-box-amber">
@@ -1176,20 +1208,48 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
       </div>
     )
 
-  if (tab === 'Workspaces')
+  if (tab === 'Workspaces') {
+    const reasons = REASON_ORDER.filter((r) => plan.workspaces.some((w) => reasonOf(w.source) === r))
+    const shown = plan.workspaces
+      .filter((w) => (wsReason === 'all' || reasonOf(w.source) === wsReason) && (wsAccount === 'all' || w.account === wsAccount))
+      .sort((a, b) => REASON_ORDER.indexOf(reasonOf(a.source)) - REASON_ORDER.indexOf(reasonOf(b.source)))
     return plan.workspaces.length ? (
+      <>
+        <div className="ce-controls">
+          <select value={wsReason} onChange={(e) => setWsReason(e.target.value)} aria-label="Why the workspace is made">
+            <option value="all">Every reason ({n(plan.workspaces.length)})</option>
+            {reasons.map((r) => (
+              <option key={r} value={r}>
+                {r} ({n(plan.workspaces.filter((w) => reasonOf(w.source) === r).length)})
+              </option>
+            ))}
+          </select>
+          {plan.accounts.length > 1 ? (
+            <select value={wsAccount} onChange={(e) => setWsAccount(e.target.value)} aria-label="Account">
+              <option value="all">Every account</option>
+              {plan.accounts.map((a) => (
+                <option key={a.key} value={a.key}>
+                  {a.name} ({n(plan.workspaces.filter((w) => w.account === a.key).length)})
+                </option>
+              ))}
+            </select>
+          ) : null}
+          <span className="ce-count">{n(shown.length)} shown</span>
+        </div>
       <div className="ce-ws-grid">
-        {plan.workspaces.map((w) => (
+        {shown.map((w) => (
           <div key={w.key} className="ce-acct">
             <div className="ce-acct-head" title={w.why}>
               <b className="ce-big">{w.name}</b>
-              <span className="ce-pill ce-sm" title={w.source}>
-                {w.source.replace(/^360 reporting profile .*/, '360 profile').replace(/:.*/, '')}
+              <span className={`ce-pill ce-sm${reasonOf(w.source) === '360 profile' ? '' : ' ce-pill-violet'}`} title={w.source}>
+                {reasonOf(w.source)}
               </span>
               <span className="ce-pill" title={w.users.map((k) => userName.get(k) ?? k).join(', ')}>
                 👤 {n(w.users.length)}
               </span>
-              <span className="ce-muted ce-sm">{accountName.get(w.account)}</span>
+            </div>
+            <div className="ce-sm">
+              <TileIcon kind="account" /> <span className="ce-muted">Account:</span> <b>{accountName.get(w.account) ?? '—'}</b>
             </div>
             <div className="ce-tiles">
               {w.sets.map((s) => {
@@ -1217,9 +1277,11 @@ function PlanBody({ plan, tab }: { plan: MigrationPlan; tab: PlanTab }) {
           </div>
         ))}
       </div>
+      </>
     ) : (
       <p className="ce-muted">No workspaces: none of the users have lists or restrictions to keep.</p>
     )
+  }
 
   if (tab === 'Saved views')
     return plan.savedViews?.length ? (
